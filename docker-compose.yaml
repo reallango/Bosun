@@ -3,7 +3,8 @@ version: "3.8"
 
 services:
   bosun:
-    image: ghcr.io/reallango/bosun:latest
+    build: .
+    image: bosun:latest
     container_name: bosun
     restart: unless-stopped
     environment:
