@@ -13,7 +13,7 @@ const MIGRATION_001 = `
 -- Migration 001: Core Tables
 
 CREATE TABLE IF NOT EXISTS ssh_keys (
-  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)) || '-' || lower(hex(randomblob(8)))),
+  id TEXT PRIMARY KEY,,
   name TEXT NOT NULL,
   public_key TEXT NOT NULL,
   private_key_enc TEXT NOT NULL,
@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS ssh_keys (
 );
 
 CREATE TABLE IF NOT EXISTS servers (
-  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)) || '-' || lower(hex(randomblob(8)))),
+  id TEXT PRIMARY KEY,,
   name TEXT NOT NULL UNIQUE,
   hostname TEXT NOT NULL,
   ssh_port INTEGER DEFAULT 22,
@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS servers (
 );
 
 CREATE TABLE IF NOT EXISTS dashboards (
-  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)) || '-' || lower(hex(randomblob(8)))),
+  id TEXT PRIMARY KEY,,
   name TEXT NOT NULL,
   type TEXT NOT NULL CHECK(type IN ('home', 'server', 'custom')),
   server_id TEXT REFERENCES servers(id) ON DELETE CASCADE,
@@ -59,7 +59,7 @@ CREATE TABLE IF NOT EXISTS dashboards (
 );
 
 CREATE TABLE IF NOT EXISTS widgets (
-  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)) || '-' || lower(hex(randomblob(8)))),
+  id TEXT PRIMARY KEY,,
   dashboard_id TEXT NOT NULL REFERENCES dashboards(id) ON DELETE CASCADE,
   widget_type TEXT NOT NULL,
   server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
@@ -83,7 +83,7 @@ CREATE TABLE IF NOT EXISTS app_config (
 );
 
 CREATE TABLE IF NOT EXISTS users (
-  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)) || '-' || lower(hex(randomblob(8)))),
+  id TEXT PRIMARY KEY,,
   username TEXT NOT NULL UNIQUE,
   display_name TEXT,
   email TEXT,
@@ -98,7 +98,7 @@ CREATE TABLE IF NOT EXISTS users (
 );
 
 CREATE TABLE IF NOT EXISTS audit_log (
-  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)) || '-' || lower(hex(randomblob(8)))),
+  id TEXT PRIMARY KEY,,
   user_id TEXT REFERENCES users(id),
   server_id TEXT REFERENCES servers(id),
   action TEXT NOT NULL,
@@ -111,7 +111,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 
 CREATE TABLE IF NOT EXISTS alert_rules (
-  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)) || '-' || lower(hex(randomblob(8)))),
+  id TEXT PRIMARY KEY,,
   name TEXT NOT NULL,
   description TEXT,
   server_id TEXT REFERENCES servers(id),
@@ -129,7 +129,7 @@ CREATE TABLE IF NOT EXISTS alert_rules (
 );
 
 CREATE TABLE IF NOT EXISTS notifications (
-  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)) || '-' || lower(hex(randomblob(8)))),
+  id TEXT PRIMARY KEY,,
   alert_rule_id TEXT REFERENCES alert_rules(id) ON DELETE SET NULL,
   server_id TEXT REFERENCES servers(id),
   severity TEXT CHECK(severity IN ('info', 'warning', 'critical')),
@@ -142,7 +142,7 @@ CREATE TABLE IF NOT EXISTS notifications (
 );
 
 CREATE TABLE IF NOT EXISTS notification_channels (
-  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)) || '-' || lower(hex(randomblob(8)))),
+  id TEXT PRIMARY KEY,,
   name TEXT NOT NULL,
   type TEXT NOT NULL CHECK(type IN ('in_app', 'email', 'webhook')),
   config TEXT NOT NULL DEFAULT '{}',
@@ -154,7 +154,7 @@ CREATE TABLE IF NOT EXISTS notification_channels (
 );
 
 CREATE TABLE IF NOT EXISTS sessions (
-  id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(8)) || '-' || lower(hex(randomblob(8)))),
+  id TEXT PRIMARY KEY,,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   token_hash TEXT NOT NULL,
   ip_address TEXT,
