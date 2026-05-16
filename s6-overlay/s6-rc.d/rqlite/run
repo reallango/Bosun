@@ -1,6 +1,17 @@
 #!/bin/sh
 
 
+# Inherit container environment from s6
+ENV_DIR=""
+[ -d /run/s6/container_environment ] && ENV_DIR="/run/s6/container_environment"
+[ -d /var/run/s6/container_environment ] && ENV_DIR="/var/run/s6/container_environment"
+if [ -n "$ENV_DIR" ]; then
+    for f in "$ENV_DIR"/*; do
+        [ -f "$f" ] && export "$(basename "$f")=$(cat "$f")"
+    done
+fi
+
+
 NODE_NAME="${NODE_NAME:-node1}"
 RQLITE_HTTP_PORT="${RQLITE_HTTP_PORT:-4001}"
 RQLITE_RAFT_PORT="${RQLITE_RAFT_PORT:-4002}"
