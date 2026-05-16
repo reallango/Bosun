@@ -1,12 +1,14 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import GridLayout from 'react-grid-layout';
+import { Responsive, WidthProvider } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 import { Widget } from '@/types/widget';
 import { WidgetFrame } from './WidgetFrame';
 import { EmptyState } from '@/components/shared/EmptyState';
+
+const GridLayout = WidthProvider(Responsive);
 
 interface DashboardGridProps {
   dashboardId: string;
@@ -28,8 +30,8 @@ export function DashboardGrid({ dashboardId, widgets, onLayoutChange, editable =
     }))
   );
 
-  const handleLayoutChange = useCallback((currentLayout: any[]) => {
-    setLayouts(currentLayout);
+  const handleLayoutChange = useCallback((currentLayout: readonly any[]) => {
+    setLayouts([...currentLayout]);
     if (onLayoutChange) {
       onLayoutChange(currentLayout.map((l: any, idx: number) => ({
         widgetId: widgets[idx]?.id || '',
@@ -53,11 +55,12 @@ export function DashboardGrid({ dashboardId, widgets, onLayoutChange, editable =
   return (
     <GridLayout
       className="layout"
-      layout={layouts}
-      cols={12}
+      layouts={{ lg: layouts }}
+      breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
+      cols={{ lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 }}
       rowHeight={80}
       width={1200}
-      onLayoutChange={handleLayoutChange}
+      onLayoutChange={(l) => handleLayoutChange(l as any[])}
       draggableHandle=".drag-handle"
       isDraggable={editable}
       isResizable={editable}

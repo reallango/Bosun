@@ -33,7 +33,7 @@ const apiAttempts = new Map<string, RateLimitEntry>();
 
 function cleanOldAttempts(map: Map<string, RateLimitEntry>, windowMs: number): void {
   const now = Date.now();
-  for (const [key, entry] of map) {
+  for (const [key, entry] of Array.from(map.entries())) {
     entry.attempts = entry.attempts.filter(t => now - t < windowMs);
     if (entry.attempts.length === 0) {
       map.delete(key);

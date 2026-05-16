@@ -185,7 +185,7 @@ export class SSHConnectionPool {
   }
 
   releaseConnection(serverId: string, client: Client): void {
-    for (const pool of this.pools.values()) {
+    for (const pool of Array.from(this.pools.values())) {
       const conn = pool.find(c => c.client === client);
       if (conn) {
         conn.inUse = false;
@@ -207,7 +207,7 @@ export class SSHConnectionPool {
   }
 
   async drainAll(): Promise<void> {
-    for (const pool of this.pools.values()) {
+    for (const pool of Array.from(this.pools.values())) {
       for (const conn of pool) {
         conn.client.end();
       }
@@ -217,7 +217,7 @@ export class SSHConnectionPool {
 
   getStats(): { servers: number; connections: number } {
     let connections = 0;
-    for (const pool of this.pools.values()) {
+    for (const pool of Array.from(this.pools.values())) {
       connections += pool.length;
     }
     return {
