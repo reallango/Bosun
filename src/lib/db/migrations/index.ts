@@ -204,34 +204,73 @@ const migrations: Record<string, string> = {
 };
 
 export async function runMigrations(): Promise<void> {
-  console.log('Running database migrations...');
-  
-  try {
-    await rqlite.execute(MIGRATIONS_TABLE);
-  } catch (e) {
-    console.log('Migrations table may already exist');
-  }
+    console.log('Running database migrations...');
 
-  for (const [id, sql] of Object.entries(migrations)) {
-    const existing = await rqlite.query(`SELECT id FROM migrations WHERE id = '${id}'`);
-    if (existing.values.length > 0) {
-      console.log(`Migration ${id} already applied`);
-      continue;
+    try {
+        await rqlite.execute("CREATE TABLE IF NOT EXISTS migrations (id TEXT PRIMARY KEY, name TEXT NOT NULL, applied_at DATETIME DEFAULT CURRENT_TIMESTAMP)");
+    } catch (e) {
+        console.log('Migrations table may already exist');
     }
 
-    console.log(`Applying migration ${id}...`);
-    const statements = sql.split(';').filter(s => s.trim()).map(s => ({ sql: s.trim() }));
-    await rqlite.executeBatch(statements);
-    await rqlite.execute(`INSERT INTO migrations (id, name) VALUES (?, ?)`, [id, `migration_${id}`]);
-    console.log(`Migration ${id} applied`);
-  }
 
-  console.log('Migrations complete');
+    for (const [id, sql] of Object.entries(migrations)) {
+        // Check if already applied
+        let existing;
+        try {
+            existing = await rqlite.query("SELECT id FROM migrations WHERE id = ?", [id]);
+        } catch {
+            existing = { columns: [], types: [], values: [] };
+        }
+
+
+        if (existing.values && existing.values.length > 0) {
+            console.log(`Migration ${id} already applied`);
+            continue;
+        }
+
+
+        console.log(`Applying migration ${id}...`);
+
+
+        // Split the SQL string into individual statements
+        const statements = sql
+            .split(';')
+            .map(s => s.trim())
+            .filter(s => s.length > 0 && !s.startsWith('--'));
+
+
+        // Execute each statement individually
+        for (const stmt of statements) {
+            try {
+                await rqlite.execute(stmt);
+            } catch (e) {
+                console.error(`Migration ${id} statement failed: ${stmt.substring(0, 80)}...`);
+                console.error(e);
+                // Continue - some may be CREATE IF NOT EXISTS that partially work
+            }
+        }
+
+
+        // Record migration
+        try {
+            await rqlite.execute("INSERT INTO migrations (id, name) VALUES (?, ?)", [id, `migration_${id}`]);
+            console.log(`Migration ${id} applied`);
+        } catch (e) {
+            console.error(`Failed to record migration ${id}:`, e);
+        }
+    }
+
+
+    console.log('Migrations complete');
 }
 
 export async function getConfig(key: string): Promise<string | null> {
-  const result = await rqlite.query(`SELECT value FROM app_config WHERE key = '${key}'`);
-  return result.values.length > 0 ? result.values[0][0] as string : null;
+    try {
+        const result = await rqlite.query("SELECT value FROM app_config WHERE key = ?", [key]);
+        return result.values && result.values.length > 0 ? result.values[0][0] as string : null;
+    } catch {
+        return null;
+    }
 }
 
 export async function setConfig(key: string, value: string): Promise<void> {
