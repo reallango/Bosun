@@ -1,26 +1,24 @@
 'use client';
+import { useWidgetData } from '@/hooks/useWidgetData';
 
-interface NetworkWidgetProps {
-  serverId: string;
-}
-
-export function NetworkWidget({ serverId }: NetworkWidgetProps) {
-  const interfaces = [
-    { name: 'eth0', ipv4: ['192.168.1.100'], mac: '00:11:22:33:44:55', state: 'UP' },
-    { name: 'eth1', ipv4: ['10.0.0.50'], mac: '00:11:22:33:44:56', state: 'UP' },
-  ];
-
-  return (
-    <div className="space-y-1">
-      {interfaces.map(i => (
-        <div key={i.name} className="text-sm">
-          <div className="flex justify-between">
-            <span className="font-medium">{i.name}</span>
-            <span className={`px-1 text-xs ${i.state === 'UP' ? 'text-green-600' : 'text-gray-500'}`}>{i.state}</span>
-          </div>
-          <div className="text-gray-500">{i.ipv4[0]}</div>
+export function NetworkWidget({ widgetId }: { widgetId: string }) {
+    const { data, isLoading, error } = useWidgetData(widgetId, 30);
+    if (isLoading) return <div className="p-4 text-sm text-muted-foreground">Loading...</div>;
+    if (error) return <div className="p-4 text-sm text-red-500">Error: {error}</div>;
+    const interfaces = (Array.isArray(data) ? data : []) as any[];
+    return (
+        <div className="p-4 space-y-3 text-sm">
+            {interfaces.map((iface, i) => (
+                <div key={i} className="border-b border-border pb-2 last:border-0">
+                    <div className="flex justify-between">
+                        <span className="font-medium">{iface.name}</span>
+                        <span className={`text-xs ${iface.state === 'UP' ? 'text-green-600' : 'text-gray-500'}`}>{iface.state}</span>
+                    </div>
+                    {iface.ipv4?.map((ip: string, j: number) => <div key={j} className="text-xs text-muted-foreground">{ip}</div>)}
+                    {iface.macAddress && <div className="text-xs text-muted-foreground">{iface.macAddress}</div>}
+                </div>
+            ))}
+            {interfaces.length === 0 && <div className="text-muted-foreground">No network data</div>}
         </div>
-      ))}
-    </div>
-  );
+    );
 }

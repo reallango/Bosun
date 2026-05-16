@@ -1,34 +1,36 @@
 'use client';
-
 import { useState } from 'react';
+import { useWidgetData } from '@/hooks/useWidgetData';
 
-export function OSInfoWidget({ serverId }: { serverId: string }) {
-  const [loading, setLoading] = useState(false);
-  const [updates, setUpdates] = useState(0);
+export function OSInfoWidget({ widgetId, serverId }: { widgetId: string; serverId: string }) {
+    const { data, isLoading, error } = useWidgetData(widgetId, 60);
+    const [checking, setChecking] = useState(false);
+    const [updates, setUpdates] = useState<number | null>(null);
 
-  const checkUpdates = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/servers/${serverId}/updates/check`, { method: 'POST' });
-      const json = await res.json();
-      setUpdates(json.data?.updatesAvailable || 0);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
-  };
+    const checkUpdates = async () => {
+        setChecking(true);
+        try {
+            const res = await fetch(`/api/servers/${serverId}/updates/check`, { method: 'POST' });
+            const json = await res.json();
+            setUpdates(json.data?.updatesAvailable ?? 0);
+        } catch { setUpdates(null); }
+        finally { setChecking(false); }
+    };
 
-  return (
-    <div className="space-y-2">
-      <div className="text-sm">
-        <div>OS: Ubuntu 22.04</div>
-        <div>Kernel: 5.15.0</div>
-        <div>Hostname: server</div>
-      </div>
-      <button onClick={checkUpdates} disabled={loading} className="text-sm px-2 py-1 border rounded">
-        {loading ? 'Checking...' : `Check Updates${updates > 0 ? ` (${updates})` : ''}`}
-      </button>
-    </div>
-  );
+    if (isLoading) return <div className="p-4 text-sm text-muted-foreground">Loading...</div>;
+    if (error) return <div className="p-4 text-sm text-red-500">Error: {error}</div>;
+    const d = data as any;
+    return (
+        <div className="p-4 space-y-2 text-sm">
+            <div><span className="text-muted-foreground">OS:</span> {d?.prettyName || d?.name || 'Unknown'}</div>
+            <div><span className="text-muted-foreground">Kernel:</span> {d?.kernel || '-'}</div>
+            <div><span className="text-muted-foreground">Arch:</span> {d?.architecture || '-'}</div>
+            <div><span className="text-muted-foreground">Hostname:</span> {d?.hostname || '-'}</div>
+            <div><span className="text-muted-foreground">Uptime:</span> {d?.uptime || '-'}</div>
+            <button onClick={checkUpdates} disabled={checking}
+                className="mt-2 px-2 py-1 text-xs bg-primary/10 rounded hover:bg-primary/20">
+                {checking ? 'Checking...' : `Check Updates${updates !== null ? ` (${updates})` : ''}`}
+            </button>
+        </div>
+    );
 }
