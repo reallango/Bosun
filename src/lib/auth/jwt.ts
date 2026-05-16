@@ -1,8 +1,7 @@
 import { SignJWT, jwtVerify, JWTPayload } from 'jose';
-import { TextEncoder, TextDecoder } from 'util';
+import crypto from 'crypto';
 
 const AUTH_SECRET = process.env.AUTH_SECRET || 'fallback-secret-change-me';
-const encoder = new TextEncoder();
 
 export interface TokenPayload extends JWTPayload {
   userId: string;
@@ -13,7 +12,7 @@ export interface TokenPayload extends JWTPayload {
 export async function createAccessToken(userId: string, username: string, role: string): Promise<string> {
   const key = await crypto.subtle.importKey(
     'raw',
-    encoder.encode(AUTH_SECRET),
+    Buffer.from(AUTH_SECRET),
     { name: 'HMAC', hash: 'SHA256' },
     false,
     ['sign']
@@ -30,7 +29,7 @@ export async function verifyAccessToken(token: string): Promise<TokenPayload | n
   try {
     const key = await crypto.subtle.importKey(
       'raw',
-      encoder.encode(AUTH_SECRET),
+      Buffer.from(AUTH_SECRET),
       { name: 'HMAC', hash: 'SHA256' },
       false,
       ['verify']
@@ -50,8 +49,5 @@ export function generateRefreshToken(): string {
 }
 
 export function hashToken(token: string): string {
-  const encoder = new TextEncoder();
-  return Array.from(new Uint8Array(crypto.subtle.digest('SHA-256', encoder.encode(token))))
-    .map(b => b.toString(16).padStart(2, '0'))
-    .join('');
+  return crypto.createHash('sha256').update(token).digest('hex');
 }

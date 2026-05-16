@@ -95,3 +95,14 @@ export class RqliteClient {
 }
 
 export const rqlite = new RqliteClient();
+
+export function rowsToObjects(result: QueryResult): Record<string, unknown>[] {
+  if (!result.values || result.values.length === 0) return [];
+  return result.values.map((row: unknown[]) => {
+    const obj: Record<string, unknown> = {};
+    result.columns.forEach((col: string, i: number) => {
+      obj[col] = row[i];
+    });
+    return obj;
+  });
+}
