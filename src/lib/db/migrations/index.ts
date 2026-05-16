@@ -232,11 +232,18 @@ export async function runMigrations(): Promise<void> {
         console.log(`Applying migration ${id}...`);
 
 
-        // Split the SQL string into individual statements
-        const statements = sql
+        // Strip SQL comment lines FIRST, then split into statements
+        const cleanedSql = sql
+            .split('\n')
+            .map(line => line.trim())
+            .filter(line => !line.startsWith('--'))
+            .join('\n');
+
+
+        const statements = cleanedSql
             .split(';')
             .map(s => s.trim())
-            .filter(s => s.length > 0 && !s.startsWith('--'));
+            .filter(s => s.length > 0);
 
 
         // Execute each statement individually
