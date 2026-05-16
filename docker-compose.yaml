@@ -1,0 +1,37 @@
+version: "3.8"
+
+
+services:
+  bosun:
+    image: ghcr.io/reallango/bosun:latest
+    container_name: bosun
+    restart: unless-stopped
+    environment:
+      - NODE_NAME=server-a
+      - RQLITE_JOIN=
+      - MASTER_KEY=${MASTER_KEY}
+      - AUTH_SECRET=${AUTH_SECRET}
+    volumes:
+      - bosun-data:/data/rqlite
+    ports:
+      - "3000:3000"
+      - "4001:4001"
+      - "4002:4002"
+    networks:
+      - bosun-net
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+
+volumes:
+  bosun-data:
+    driver: local
+
+
+networks:
+  bosun-net:
+    driver: bridge

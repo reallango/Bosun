@@ -1,0 +1,8 @@
+#!/bin/sh
+RQLITE_URL="http://localhost:${RQLITE_HTTP_PORT:-4001}"
+echo "Waiting for rqlite at ${RQLITE_URL}..."
+until wget -q -O /dev/null "${RQLITE_URL}/readyz" 2>/dev/null; do
+    sleep 1
+done
+echo "rqlite is ready."
+exec node /app/server.js
