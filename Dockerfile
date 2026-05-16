@@ -20,7 +20,17 @@ RUN npm run build
 # ============================================================
 # Stage 2: Production runtime
 # ============================================================
-FROM node:20-alpine AS runtime
+FROM node:20-slim AS runtime
+
+
+# Install required packages
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget xz-utils ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+
+# Create node user if not exists
+RUN useradd -m -s /bin/sh node || true
 
 
 # Install s6-overlay for multi-process supervision
