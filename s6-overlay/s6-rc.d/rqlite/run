@@ -16,6 +16,8 @@ fi
 exec /usr/local/bin/rqlited \
     -node-id="${NODE_NAME}" \
     -http-addr="0.0.0.0:${RQLITE_HTTP_PORT}" \
+    -http-adv-addr="localhost:${RQLITE_HTTP_PORT}" \
     -raft-addr="0.0.0.0:${RQLITE_RAFT_PORT}" \
+    -raft-adv-addr="localhost:${RQLITE_RAFT_PORT}" \
     ${JOIN_FLAG} \
     "${RQLITE_DATA_DIR}"
