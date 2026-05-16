@@ -1,14 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
 
-export default function AuthLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function AuthLayout({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   const router = useRouter();
 
@@ -20,11 +16,19 @@ export default function AuthLayout({
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="flex items-center justify-center min-h-screen">
         <p>Loading...</p>
       </div>
     );
   }
 
-  return <>{children}</>;
+  if (user) return null;
+
+  return (
+    <div className="flex items-center justify-center min-h-screen bg-background">
+      <div className="w-full max-w-md p-6">
+        {children}
+      </div>
+    </div>
+  );
 }

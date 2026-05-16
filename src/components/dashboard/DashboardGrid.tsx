@@ -1,25 +1,23 @@
 'use client';
 
 import { useState, useCallback } from 'react';
-import { Responsive, WidthProvider, Layout } from 'react-grid-layout';
+import GridLayout from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 import { Widget } from '@/types/widget';
 import { WidgetFrame } from './WidgetFrame';
 import { EmptyState } from '@/components/shared/EmptyState';
 
-const ResponsiveGridLayout = WidthProvider(Responsive);
-
 interface DashboardGridProps {
   dashboardId: string;
   widgets: Widget[];
-  onLayoutChange?: (layout: Layout[]) => void;
+  onLayoutChange?: (items: { widgetId: string; x: number; y: number; w: number; h: number }[]) => void;
   editable?: boolean;
 }
 
 export function DashboardGrid({ dashboardId, widgets, onLayoutChange, editable = false }: DashboardGridProps) {
-  const [layouts, setLayouts] = useState<{ lg: Layout[] }>(() => ({
-    lg: widgets.map(w => ({
+  const [layouts, setLayouts] = useState<any[]>(() =>
+    widgets.map(w => ({
       i: w.id,
       x: w.grid_x,
       y: w.grid_y,
@@ -27,15 +25,21 @@ export function DashboardGrid({ dashboardId, widgets, onLayoutChange, editable =
       h: w.grid_h,
       minW: w.grid_min_w,
       minH: w.grid_min_h,
-    })),
-  }));
+    }))
+  );
 
-  const handleLayoutChange = useCallback((currentLayout: Layout[]) => {
-    setLayouts({ lg: currentLayout });
+  const handleLayoutChange = useCallback((currentLayout: any[]) => {
+    setLayouts(currentLayout);
     if (onLayoutChange) {
-      onLayoutChange(currentLayout);
+      onLayoutChange(currentLayout.map((l: any, idx: number) => ({
+        widgetId: widgets[idx]?.id || '',
+        x: l.x,
+        y: l.y,
+        w: l.w,
+        h: l.h,
+      })));
     }
-  }, [onLayoutChange]);
+  }, [onLayoutChange, widgets]);
 
   if (widgets.length === 0) {
     return (
@@ -47,12 +51,12 @@ export function DashboardGrid({ dashboardId, widgets, onLayoutChange, editable =
   }
 
   return (
-    <ResponsiveGridLayout
+    <GridLayout
       className="layout"
-      layouts={layouts}
-      breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
-      cols={{ lg: 12, md: 8, sm: 4, xs: 2, xxs: 1 }}
+      layout={layouts}
+      cols={12}
       rowHeight={80}
+      width={1200}
       onLayoutChange={handleLayoutChange}
       draggableHandle=".drag-handle"
       isDraggable={editable}
@@ -69,6 +73,6 @@ export function DashboardGrid({ dashboardId, widgets, onLayoutChange, editable =
           />
         </div>
       ))}
-    </ResponsiveGridLayout>
+    </GridLayout>
   );
 }
