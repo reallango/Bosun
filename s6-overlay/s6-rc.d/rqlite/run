@@ -1,22 +1,21 @@
-#!/command/execlineb -P
+#!/bin/sh
 
 
-backtick -n RQLITE_JOIN_FLAG {
-    importas -D "" RQLITE_JOIN RQLITE_JOIN
-    if { test -n "${RQLITE_JOIN}" }
-    echo "-join=${RQLITE_JOIN}"
-}
+NODE_NAME="${NODE_NAME:-node1}"
+RQLITE_HTTP_PORT="${RQLITE_HTTP_PORT:-4001}"
+RQLITE_RAFT_PORT="${RQLITE_RAFT_PORT:-4002}"
+RQLITE_DATA_DIR="${RQLITE_DATA_DIR:-/data/rqlite}"
 
 
-importas -D "node1" NODE_NAME NODE_NAME
-importas -D "4001" RQLITE_HTTP_PORT RQLITE_HTTP_PORT
-importas -D "4002" RQLITE_RAFT_PORT RQLITE_RAFT_PORT
-importas -D "/data/rqlite" RQLITE_DATA_DIR RQLITE_DATA_DIR
+JOIN_FLAG=""
+if [ -n "${RQLITE_JOIN}" ]; then
+    JOIN_FLAG="-join=${RQLITE_JOIN}"
+fi
 
 
-exec /usr/local/bin/rqlited
-    -node-id=${NODE_NAME}
-    -http-addr=0.0.0.0:${RQLITE_HTTP_PORT}
-    -raft-addr=0.0.0.0:${RQLITE_RAFT_PORT}
-    ${RQLITE_JOIN_FLAG}
-    ${RQLITE_DATA_DIR}
+exec /usr/local/bin/rqlited \
+    -node-id="${NODE_NAME}" \
+    -http-addr="0.0.0.0:${RQLITE_HTTP_PORT}" \
+    -raft-addr="0.0.0.0:${RQLITE_RAFT_PORT}" \
+    ${JOIN_FLAG} \
+    "${RQLITE_DATA_DIR}"
