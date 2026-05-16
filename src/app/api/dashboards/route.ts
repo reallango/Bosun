@@ -1,40 +1,40 @@
-import { NextResponse } from 'next/server';
-import { rqlite } from '@/lib/db/rqlite-client';
+import { NextRequest, NextResponse } from 'next/server';
+import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { requireAuth } from '@/lib/auth/middleware';
+import crypto from 'crypto';
 
-export async function GET() {
-  const auth = await requireAuth(new NextRequest('http://localhost'));
+export async function GET(request: NextRequest) {
+  const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
-
   try {
-    const result = await rqlite.query('SELECT * FROM dashboards ORDER BY type, sort_order');
-    const dashboards = rqlite.rowsToObjects(result);
-    return NextResponse.json({ data: dashboards });
+    const url = new URL(request.url);
+    const typeFilter = url.searchParams.get('type');
+    let sql = 'SELECT * FROM dashboards ORDER BY type, sort_order';
+    let params: any[] = [];
+    if (typeFilter) { sql = 'SELECT * FROM dashboards WHERE type = ? ORDER BY sort_order'; params = [typeFilter]; }
+    const result = await rqlite.query(sql, params);
+    const dashboards = rowsToObjects(result);
+    return NextResponse.json({ data: { dashboards } });
   } catch (error) {
-    return NextResponse.json({ data: [], error: { message: String(error) } }, { status: 500 });
+    return NextResponse.json({ data: { dashboards: [] }, error: { message: String(error) } }, { status: 500 });
   }
 }
 
-export async function POST(request: Request) {
-  const auth = await requireAuth(request as unknown as NextRequest);
+export async function POST(request: NextRequest) {
+  const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
-
   try {
     const body = await request.json();
     const { name, icon } = body;
+    if (!name) return NextResponse.json({ error: { message: 'Name required' } }, { status: 400 });
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
-
     await rqlite.execute(
-      `INSERT INTO dashboards (id, name, type, server_id, sort_order, icon, is_default, created_at, updated_at)
-       VALUES (?, 'custom', ?, ?, 0, NULL, 0, ?, ?)`,
+      "INSERT INTO dashboards (id, name, type, sort_order, icon, created_at, updated_at) VALUES (?, ?, 'custom', (SELECT COALESCE(MAX(sort_order),0)+1 FROM dashboards WHERE type='custom'), ?, ?, ?)",
       [id, name, icon || null, now, now]
     );
-
-    const result = await rqlite.query('SELECT * FROM dashboards WHERE id = ?', [id]);
-    const dashboards = rqlite.rowsToObjects(result);
-    return NextResponse.json({ data: dashboards[0] });
+    return NextResponse.json({ data: { dashboard: { id, name, type: 'custom', icon: icon||null, created_at: now } } }, { status: 201 });
   } catch (error) {
-    return NextResponse.json({ data: null, error: { message: String(error) } }, { status: 500 });
+    return NextResponse.json({ error: { message: String(error) } }, { status: 500 });
   }
 }

@@ -7,162 +7,76 @@ const pool = new SSHConnectionPool();
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ widgetId: string }> }) {
   const { widgetId } = await params;
-  const url = new URL(request.url);
-  const force = url.searchParams.get('force') === 'true';
-
-  // Simple cache bypass for now - would use Redis in production
   try {
     const widgetRes = await rqlite.query('SELECT * FROM widgets WHERE id = ?', [widgetId]);
-    if (widgetRes.values.length === 0) {
-      return NextResponse.json({ error: { message: 'Widget not found' } }, { status: 404 });
+    if (!widgetRes.values?.length) return NextResponse.json({ error: { message: 'Widget not found' } }, { status: 404 });
+    const widget = rowsToObjects(widgetRes)[0] as any;
+    const wCfg = widget.config ? (typeof widget.config==='string'?JSON.parse(widget.config||'{}'):widget.config) : {};
+    const srvR = await rqlite.query('SELECT * FROM servers WHERE id=?', [widget.server_id]);
+    if (!srvR.values?.length) return NextResponse.json({ error: { message: 'Server not found' } }, { status: 404 });
+    const srv = rowsToObjects(srvR)[0] as any;
+
+    if (widget.widget_type === 'server_summary') {
+      return NextResponse.json({ data: { is_online: !!srv.is_online, hostname: srv.hostname, os_type: srv.os_type, os_version: srv.os_version, name: srv.name } });
     }
 
-    const widget = rowsToObjects(widgetRes)[0];
+    if (!srv.ssh_key_id) return NextResponse.json({ error: { message: 'No SSH key' } }, { status: 400 });
+    const kR = await rqlite.query('SELECT private_key_enc FROM ssh_keys WHERE id=?', [srv.ssh_key_id]);
+    if (!kR.values?.length) return NextResponse.json({ error: { message: 'Key not found' } }, { status: 404 });
+    const { decrypt } = await import('@/lib/crypto/keys');
+    const pk = decrypt(kR.values[0][0] as string, process.env.MASTER_KEY||'');
+    const sshCfg = { host: srv.hostname, port: srv.ssh_port||22, username: srv.ssh_user, privateKey: pk };
+    const run = async (cmd: string) => pool.executeCommand(srv.id, sshCfg, cmd);
+    let data: any;
 
-    const serverRes = await rqlite.query('SELECT * FROM servers WHERE id = ?', [widget.server_id]);
-    if (serverRes.values.length === 0) {
-      return NextResponse.json({ error: { message: 'Server not found' } }, { status: 404 });
-    }
-
-    const server = rowsToObjects(serverRes)[0];
-
-    if (!server.ssh_key_id) {
-      return NextResponse.json({ error: { message: 'Server has no SSH key configured' } }, { status: 400 });
-    }
-
-    const keyRes = await rqlite.query('SELECT * FROM ssh_keys WHERE id = ?', [server.ssh_key_id]);
-    if (keyRes.values.length === 0) {
-      return NextResponse.json({ error: { message: 'SSH key not found' } }, { status: 404 });
-    }
-
-    const key = rowsToObjects(keyRes)[0];
-    const { decryptPrivateKey } = await import('@/lib/crypto/keys');
-    const privateKey = decryptPrivateKey(key.private_key_enc);
-
-    const sshConfig = {
-      host: server.hostname,
-      port: server.ssh_port || 22,
-      username: server.ssh_user,
-      privateKey
-    };
-
-    const runCommand = async (cmd: string) => {
-      return pool.executeCommand(server.id, sshConfig, cmd);
-    };
-
-    let data;
     switch (widget.widget_type) {
-      case 'server_summary': {
-        const os = await runCommand('cat /etc/os-release');
-        const info: Record<string, string> = {};
-        os.stdout.split('\n').forEach(line => {
-          const [key, ...rest] = line.split('=');
-          if (key && rest.length) info[key] = rest.join('=').replace(/"/g, '');
-        });
-        data = { is_online: os.exitCode === 0, os_type: info.NAME || 'Unknown', hostname: server.hostname };
-        break;
-      }
-      case 'os_info': {
-        const [osRelease, kernel, hostname] = await Promise.all([
-          runCommand('cat /etc/os-release'),
-          runCommand('uname -r'),
-          runCommand('hostname'),
-        ]);
-        const info: Record<string, string> = {};
-        osRelease.stdout.split('\n').forEach(line => {
-          const [k, ...rest] = line.split('=');
-          if (k && rest.length) info[k] = rest.join('=').replace(/"/g, '');
-        });
-        data = {
-          name: info.NAME || 'Unknown',
-          version: info.VERSION_ID || info.VERSION || '',
-          codename: info.VERSION_CODENAME || '',
-          prettyName: info.PRETTY_NAME || info.NAME || '',
-          kernel: kernel.stdout.trim(),
-          architecture: (await runCommand('uname -m')).stdout.trim(),
-          hostname: hostname.stdout.trim(),
-        };
-        break;
-      }
-      case 'cpu_memory': {
-        const [cpu, mem] = await Promise.all([
-          runCommand('cat /proc/cpuinfo | head -20'),
-          runCommand('cat /proc/meminfo'),
-        ]);
-
-        let model = 'Unknown';
-        let cores = 1;
-        cpu.stdout.split('\n').forEach(line => {
-          if (line.toLowerCase().includes('model name')) model = line.split(':')[1]?.trim() || model;
-          if (line.toLowerCase().includes('processor')) cores++;
-        });
-
-        const memInfo: Record<string, string> = {};
-        mem.stdout.split('\n').forEach(line => {
-          const [k, ...rest] = line.split(':');
-          if (k && rest.length) memInfo[k.trim()] = rest.join(':').replace('kB', '').trim();
-        });
-
-        const totalMB = Math.round(parseInt(memInfo.MemTotal || '0', 10) / 1024);
-        const freeMB = Math.round(parseInt(memInfo.MemAvailable || memInfo.MemFree || '0', 10) / 1024);
-        const usedMB = totalMB - freeMB;
-
-        data = {
-          cpu: { model, cores, usagePercent: 0, loadAvg1: 0, loadAvg5: 0, loadAvg15: 0 },
-          memory: { totalMB, usedMB, freeMB, availableMB: freeMB, usagePercent: Math.round((usedMB / totalMB) * 100) || 0 }
-        };
-        break;
-      }
-      case 'disk_usage': {
-        const df = await runCommand("df -T --block-size=1M --output=source,fstype,size,used,avail,pcent,target | tail -n +2");
-        const disks = df.stdout.split('\n')
-          .filter(line => line.trim())
-          .filter(line => !line.match(/^(tmpfs|devtmpfs|squashfs|overlay|snap)/))
-          .map(line => {
-            const [fs, type, size, used, avail, percent, mount] = line.trim().split(/\s+/);
-            return { filesystem: fs, fsType: type, sizeMB: parseInt(size, 10), usedMB: parseInt(used, 10), availableMB: parseInt(avail, 10), mountPoint: mount, usagePercent: parseInt(percent, 10) };
-          });
-        data = disks;
-        break;
-      }
-      case 'network': {
-        const ip = await runCommand('ip -j addr show 2>/dev/null || ip addr show');
-        if (ip.exitCode === 0 && ip.stdout.includes('"')) {
-          try {
-            const ifaces = JSON.parse(ip.stdout);
-            data = ifaces
-              .filter((i: any) => i.ifname !== 'lo')
-              .map((i: any) => ({
-                name: i.ifname,
-                ipv4: i.addr_info?.filter((a: any) => a.family === 'inet').map((a: any) => a.local) || [],
-                ipv6: i.addr_info?.filter((a: any) => a.family === 'inet6').map((a: any) => a.local) || [],
-                macAddress: i.address || '',
-                state: i.operstate || 'UNKNOWN',
-                mtu: i.mtu
-              }));
-          } catch {
-            data = [];
-          }
-        } else {
-          data = [];
+        case 'os_info': {
+            const [osr,kern,arch,hn,up] = await Promise.all([run('cat /etc/os-release'),run('uname -r'),run('uname -m'),run('hostname'),run('cat /proc/uptime')]);
+            const p: Record<string,string> = {};
+            osr.stdout.split('\n').forEach(l => { const [k,...v]=l.split('='); if(k&&v.length) p[k.trim()]=v.join('=').replace(/"/g,'').trim(); });
+            const sec = parseFloat(up.stdout.split(' ')[0]||'0');
+            data = { name: p['NAME']||'Linux', version: p['VERSION_ID']||'', codename: p['VERSION_CODENAME']||'', prettyName: p['PRETTY_NAME']||'Linux', kernel: kern.stdout.trim(), architecture: arch.stdout.trim(), hostname: hn.stdout.trim(), uptime: `${Math.floor(sec/86400)}d ${Math.floor((sec%86400)/3600)}h ${Math.floor((sec%3600)/60)}m`, uptimeSeconds: sec };
+            break;
         }
-        break;
-      }
-      case 'system_services': {
-        const svc = await runCommand('systemctl list-units --type=service --no-pager --plain --no-legend --state=running');
-        const services = svc.stdout.split('\n')
-          .filter(line => line.trim())
-          .map(line => {
-            const [name, ...rest] = line.trim().split(/\s+/);
-            return { name: name.replace('.service', ''), status: 'running' as const, description: rest.join(' ') };
-          });
-        data = services;
-        break;
-      }
-      default:
-        return NextResponse.json({ error: { message: `Unknown widget type: ${widget.widget_type}` } }, { status: 400 });
+        case 'cpu_memory': {
+            const [lscpu,meminfo,loadavg,temp] = await Promise.all([run('lscpu 2>/dev/null||echo none'),run('cat /proc/meminfo'),run('cat /proc/loadavg'),run('cat /sys/class/thermal/thermal_zone0/temp 2>/dev/null||echo 0')]);
+            let cpuModel='Unknown',cores=1,threads=1;
+            lscpu.stdout.split('\n').forEach(l => { if(l.startsWith('Model name:')) cpuModel=l.split(':')[1]?.trim()||cpuModel; if(l.startsWith('CPU(s):')) cores=parseInt(l.split(':')[1]?.trim()||'1',10); if(l.startsWith('Thread(s) per core:')) threads=parseInt(l.split(':')[1]?.trim()||'1',10)*cores; });
+            const s1=await run("head -1 /proc/stat"); await new Promise(r=>setTimeout(r,500)); const s2=await run("head -1 /proc/stat");
+            const ps=(s:string)=>s.trim().split(/\s+/).slice(1).map(Number);
+            const a=ps(s1.stdout), b=ps(s2.stdout);
+            const td=b.reduce((a,b)=>a+b,0)-a.reduce((a,b)=>a+b,0);
+            const id2=(b[3]+(b[4]||0))-(a[3]+(a[4]||0));
+            const cpuPct=td>0?((td-id2)/td)*100:0;
+            const ml: Record<string,number>={};
+            meminfo.stdout.split('\n').forEach(l=>{ const m=l.match(/^(\w+):\s+(\d+)/); if(m) ml[m[1]]=parseInt(m[2],10); });
+            const tMB=Math.round((ml['MemTotal']||0)/1024), aMB=Math.round((ml['MemAvailable']||ml['MemFree']||0)/1024), uMB=tMB-aMB;
+            const [l1,l5,l15]=loadavg.stdout.trim().split(/\s+/).map(Number);
+            const t=parseInt(temp.stdout.trim(),10)/1000;
+            data = { cpu: { model:cpuModel,cores,threads,usagePercent:Math.round(cpuPct*10)/10,loadAvg1:l1,loadAvg5:l5,loadAvg15:l15,temperature:t>0?t:null }, memory: { totalMB:tMB,usedMB:uMB,freeMB:tMB-uMB,availableMB:aMB,usagePercent:tMB>0?Math.round((uMB/tMB)*1000)/10:0,swapTotalMB:Math.round((ml['SwapTotal']||0)/1024),swapUsedMB:Math.round(((ml['SwapTotal']||0)-(ml['SwapFree']||0))/1024) } };
+            break;
+        }
+        case 'disk_usage': {
+            const df=await run("df -T --block-size=1M --output=source,fstype,size,used,avail,pcent,target 2>/dev/null|tail -n +2");
+            data=df.stdout.trim().split('\n').filter(Boolean).map(l=>{const p=l.trim().split(/\s+/);return{filesystem:p[0],fsType:p[1],sizeMB:+p[2],usedMB:+p[3],availableMB:+p[4],usagePercent:parseInt((p[5]||'0').replace('%',''),10),mountPoint:p.slice(6).join(' ')};}).filter(d=>!['tmpfs','devtmpfs','squashfs','overlay'].includes(d.fsType)&&!d.mountPoint.startsWith('/snap'));
+            break;
+        }
+        case 'network': {
+            const ip=await run("ip -j addr show 2>/dev/null");
+            if(ip.exitCode===0&&ip.stdout.trim().startsWith('[')) {
+                data=JSON.parse(ip.stdout).filter((i:any)=>i.ifname!=='lo').map((i:any)=>({name:i.ifname,state:i.operstate||'UNKNOWN',mtu:i.mtu,macAddress:i.address||'',ipv4:(i.addr_info||[]).filter((a:any)=>a.family==='inet').map((a:any)=>a.local),ipv6:(i.addr_info||[]).filter((a:any)=>a.family==='inet6').map((a:any)=>a.local)}));
+            } else { data=[]; }
+            break;
+        }
+        case 'system_services': {
+            const f=wCfg.filter||'running';
+            const cmd=f==='running'?"systemctl list-units --type=service --state=running --no-pager --plain --no-legend":"systemctl list-units --type=service --no-pager --plain --no-legend";
+            const r=await run(cmd);
+            data=r.stdout.trim().split('\n').filter(Boolean).map(l=>{const p=l.trim().split(/\s+/);return{name:(p[0]||'').replace('.service',''),status:p[2]==='running'?'running':p[2]==='failed'?'failed':'stopped',description:p.slice(4).join(' '),enabled:p[1]==='loaded'};});
+            break;
+        }
+        default: return NextResponse.json({ error: { message: `Unknown type: ${widget.widget_type}` } }, { status: 400 });
     }
-
     return NextResponse.json({ data });
   } catch (error) {
     console.error('Widget data error:', error);

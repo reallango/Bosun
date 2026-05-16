@@ -7,27 +7,12 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (auth instanceof NextResponse) return auth;
   const roleError = requireRole(auth as any, 'operator');
   if (roleError) return roleError;
-
   const { dashboardId } = await params;
-
   try {
-    const body = await request.json();
-    const { layout } = body;
-
-    if (!layout || !Array.isArray(layout)) {
-      return NextResponse.json({ error: { message: 'Layout array required' } }, { status: 400 });
-    }
-
-    for (const item of layout) {
-      const { widgetId, x, y, w, h } = item;
-      if (!widgetId) continue;
-
-      await rqlite.execute(
-        'UPDATE widgets SET grid_x = ?, grid_y = ?, grid_w = ?, grid_h = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND dashboard_id = ?',
-        [x, y, w, h, widgetId, dashboardId]
-      );
-    }
-
+    const { layout } = await request.json();
+    if (!Array.isArray(layout)) return NextResponse.json({ error: { message: 'layout must be array' } }, { status: 400 });
+    const stmts = layout.map((i:any) => ({ sql: 'UPDATE widgets SET grid_x=?,grid_y=?,grid_w=?,grid_h=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND dashboard_id=?', params: [i.x,i.y,i.w,i.h,i.widgetId,dashboardId] }));
+    if (stmts.length) await rqlite.executeBatch(stmts);
     return NextResponse.json({ data: { success: true } });
   } catch (error) {
     return NextResponse.json({ error: { message: String(error) } }, { status: 500 });

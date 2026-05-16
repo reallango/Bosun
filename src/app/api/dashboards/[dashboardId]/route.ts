@@ -16,7 +16,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const widgetsResult = await rqlite.query('SELECT * FROM widgets WHERE dashboard_id = ? ORDER BY grid_y, grid_x', [dashboardId]);
 
     const dashboard = rowsToObjects(dashResult)[0];
-    const widgets = rowsToObjects(widgetsResult);
+    const widgets = rowsToObjects(widgetsResult).map((w:any) => ({ ...w, config: w.config ? (typeof w.config==='string' ? JSON.parse(w.config||'{}') : w.config) : {} }));
 
     return NextResponse.json({ data: { dashboard, widgets } });
   } catch (error) {
@@ -29,39 +29,22 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (auth instanceof NextResponse) return auth;
   const roleError = requireRole(auth as any, 'operator');
   if (roleError) return roleError;
-
   const { dashboardId } = await params;
-
   try {
     const body = await request.json();
     const { name, icon, sort_order } = body;
-
-    const existing = await rqlite.query('SELECT type FROM dashboards WHERE id = ?', [dashboardId]);
-    if (existing.values.length === 0) {
-      return NextResponse.json({ error: { message: 'Dashboard not found' } }, { status: 404 });
-    }
-
-    const [type] = existing.values[0];
-    if (type !== 'custom' && name) {
-      return NextResponse.json({ error: { message: 'Cannot rename home or server dashboards' } }, { status: 400 });
-    }
-
-    const updates: string[] = [];
-    const values: any[] = [];
-    if (name) { updates.push('name = ?'); values.push(name); }
-    if (icon !== undefined) { updates.push('icon = ?'); values.push(icon); }
-    if (sort_order !== undefined) { updates.push('sort_order = ?'); values.push(sort_order); }
-
-    if (updates.length === 0) {
-      return NextResponse.json({ error: { message: 'No fields to update' } }, { status: 400 });
-    }
-
-    updates.push('updated_at = CURRENT_TIMESTAMP');
-    values.push(dashboardId);
-
-    await rqlite.execute(`UPDATE dashboards SET ${updates.join(', ')} WHERE id = ?`, values);
-
-    return NextResponse.json({ data: { success: true } });
+    const ex = await rqlite.query('SELECT type FROM dashboards WHERE id=?', [dashboardId]);
+    if (!ex.values?.length) return NextResponse.json({ error: { message: 'Not found' } }, { status: 404 });
+    if (['home','server'].includes(ex.values[0][0] as string) && name) return NextResponse.json({ error: { message: 'Cannot rename' } }, { status: 400 });
+    const u: string[]=[]; const v: any[]=[];
+    if (name!==undefined) { u.push('name=?'); v.push(name); }
+    if (icon!==undefined) { u.push('icon=?'); v.push(icon); }
+    if (sort_order!==undefined) { u.push('sort_order=?'); v.push(sort_order); }
+    if (!u.length) return NextResponse.json({ error: { message: 'Nothing to update' } }, { status: 400 });
+    u.push('updated_at=CURRENT_TIMESTAMP'); v.push(dashboardId);
+    await rqlite.execute(`UPDATE dashboards SET ${u.join(',')} WHERE id=?`, v);
+    const r = await rqlite.query('SELECT * FROM dashboards WHERE id=?', [dashboardId]);
+    return NextResponse.json({ data: { dashboard: rowsToObjects(r)[0] } });
   } catch (error) {
     return NextResponse.json({ error: { message: String(error) } }, { status: 500 });
   }
@@ -72,23 +55,12 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   if (auth instanceof NextResponse) return auth;
   const roleError = requireRole(auth as any, 'operator');
   if (roleError) return roleError;
-
   const { dashboardId } = await params;
-
   try {
-    const existing = await rqlite.query('SELECT type FROM dashboards WHERE id = ?', [dashboardId]);
-    if (existing.values.length === 0) {
-      return NextResponse.json({ error: { message: 'Dashboard not found' } }, { status: 404 });
-    }
-
-    const [type] = existing.values[0];
-    if (type !== 'custom') {
-      return NextResponse.json({ error: { message: 'Cannot delete home or server dashboards' } }, { status: 400 });
-    }
-
-    await rqlite.execute('DELETE FROM widgets WHERE dashboard_id = ?', [dashboardId]);
-    await rqlite.execute('DELETE FROM dashboards WHERE id = ?', [dashboardId]);
-
+    const existing = await rqlite.query('SELECT type FROM dashboards WHERE id=?', [dashboardId]);
+    if (!existing.values?.length) return NextResponse.json({ error: { message: 'Not found' } }, { status: 404 });
+    if (['home','server'].includes(existing.values[0][0] as string)) return NextResponse.json({ error: { message: 'Cannot delete home/server dashboards' } }, { status: 400 });
+    await rqlite.execute('DELETE FROM dashboards WHERE id=?', [dashboardId]);
     return NextResponse.json({ data: { success: true } });
   } catch (error) {
     return NextResponse.json({ error: { message: String(error) } }, { status: 500 });
