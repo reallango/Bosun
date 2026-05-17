@@ -1,39 +1,18 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import Header from '@/components/layout/Header';
 import { DashboardGrid } from '@/components/dashboard/DashboardGrid';
-import { EmptyState } from '@/components/shared/EmptyState';
-import { Widget } from '@/types/widget';
-import { Dashboard } from '@/types/dashboard';
+import { DashboardToolbar } from '@/components/dashboard/DashboardToolbar';
+import { AddWidgetModal } from '@/components/dashboard/AddWidgetModal';
+import { useDashboard } from '@/hooks/useDashboard';
 
 export default function HomePage() {
-  const [dashboard, setDashboard] = useState<Dashboard | null>(null);
-  const [widgets, setWidgets] = useState<Widget[]>([]);
-  const [loading, setLoading] = useState(true);
+  const dashboardId = 'home';
+  const { dashboard, widgets, isLoading, addWidget, updateLayout, refresh } = useDashboard(dashboardId);
+  const [modal, setModal] = useState(false);
 
-  useEffect(() => {
-    fetchDashboard();
-  }, []);
-
-  const fetchDashboard = async () => {
-    try {
-      const res = await fetch('/api/dashboards?type=home');
-      const json = await res.json();
-      if (json.data?.dashboards?.length) {
-        setDashboard(json.data.dashboards[0]);
-        const widgetsRes = await fetch(`/api/dashboards/${json.data.dashboards[0].id}/widgets`);
-        const widgetsJson = await widgetsRes.json();
-        setWidgets(widgetsJson.data?.widgets || []);
-      }
-    } catch (error) {
-      console.error('Failed to load dashboard:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  if (loading) {
+  if (isLoading) {
     return (
       <>
         <Header title="Dashboard" />
@@ -44,13 +23,16 @@ export default function HomePage() {
 
   return (
     <>
-      <Header title="Dashboard" />
+      <Header title="Home" />
       <div className="p-8">
+        <DashboardToolbar name="Home" type="home" onAddWidget={() => setModal(true)} />
         <DashboardGrid
-          dashboardId={dashboard?.id || 'home'}
+          dashboardId={dashboardId}
           widgets={widgets}
+          onLayoutChange={updateLayout}
           editable={true}
         />
+        <AddWidgetModal isOpen={modal} onClose={() => setModal(false)} dashboardId={dashboardId} onAdd={addWidget} />
       </div>
     </>
   );
