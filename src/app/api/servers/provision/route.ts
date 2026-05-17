@@ -78,6 +78,11 @@ export async function POST(request: NextRequest) {
         const steps: string[] = [];
         const sshConfig = { host: hostname, port, username: admin_username, password: admin_password };
 
+        // Check if admin is root (doesn't need sudo)
+        const isRoot = admin_username === 'root';
+        // Escape password for shell
+        const escapedPassword = admin_password.replace(/'/g, "'\\''");
+
         // Step 1: Test admin connection
         try {
             await sshExec(sshConfig, 'echo "connected"');
@@ -93,11 +98,15 @@ export async function POST(request: NextRequest) {
         const accountExists = userCheck.stdout.trim().includes('EXISTS');
 
         if (!accountExists) {
-            const createCmd = `sudo useradd -m -s /bin/bash ${service_account} && sudo usermod -aG sudo ${service_account}`;
+            // Build command with or without sudo based on admin user
+            const createCmd = isRoot
+                ? `useradd -m -s /bin/bash ${service_account} && usermod -aG sudo ${service_account}`
+                : `echo '${escapedPassword}' | sudo -S useradd -m -s /bin/bash ${service_account} && echo '${escapedPassword}' | sudo -S usermod -aG sudo ${service_account}`;
             const createResult = await sshExec(sshConfig, createCmd);
-            if (createResult.exitCode !== 0) {
+            // Handle "already exists" or other non-critical errors
+            if (createResult.exitCode !== 0 && !createResult.stderr.includes('already exists')) {
                 return NextResponse.json({
-                    error: { message: `Failed to create account: ${createResult.stderr}`, code: 'ACCOUNT_CREATE_FAILED' },
+                    error: { message: `Failed to create account: ${createResult.stderr.replace(/^\[sudo\]/gm, '').trim()}`, code: 'ACCOUNT_CREATE_FAILED' },
                 }, { status: 400 });
             }
             steps.push(`Created service account: ${service_account}`);
@@ -125,18 +134,26 @@ export async function POST(request: NextRequest) {
         steps.push('Generated ED25519 SSH key');
 
         // Step 4: Install public key on server
-        const installCmd = [
-            `sudo mkdir -p /home/${service_account}/.ssh`,
-            `echo '${publicKey}' | sudo tee -a /home/${service_account}/.ssh/authorized_keys`,
-            `sudo chmod 700 /home/${service_account}/.ssh`,
-            `sudo chmod 600 /home/${service_account}/.ssh/authorized_keys`,
-            `sudo chown -R ${service_account}:${service_account} /home/${service_account}/.ssh`,
-        ].join(' && ');
+        const installCmd = isRoot
+            ? [
+                `mkdir -p /home/${service_account}/.ssh`,
+                `echo '${publicKey}' >> /home/${service_account}/.ssh/authorized_keys`,
+                `chmod 700 /home/${service_account}/.ssh`,
+                `chmod 600 /home/${service_account}/.ssh/authorized_keys`,
+                `chown -R ${service_account}:${service_account} /home/${service_account}/.ssh`,
+            ].join(' && ')
+            : [
+                `echo '${escapedPassword}' | sudo -S mkdir -p /home/${service_account}/.ssh 2>/dev/null`,
+                `echo '${publicKey}' | sudo -S tee -a /home/${service_account}/.ssh/authorized_keys > /dev/null 2>/dev/null`,
+                `echo '${escapedPassword}' | sudo -S chmod 700 /home/${service_account}/.ssh 2>/dev/null`,
+                `echo '${escapedPassword}' | sudo -S chmod 600 /home/${service_account}/.ssh/authorized_keys 2>/dev/null`,
+                `echo '${escapedPassword}' | sudo -S chown -R ${service_account}:${service_account} /home/${service_account}/.ssh 2>/dev/null`,
+            ].join(' && ');
 
         const installResult = await sshExec(sshConfig, installCmd);
         if (installResult.exitCode !== 0) {
             return NextResponse.json({
-                error: { message: `Failed to install key: ${installResult.stderr}`, code: 'KEY_INSTALL_FAILED' },
+                error: { message: `Failed to install key: ${installResult.stderr.replace(/^\[sudo\]/gm, '').trim()}`, code: 'KEY_INSTALL_FAILED' },
             }, { status: 400 });
         }
         steps.push('Public key installed');
