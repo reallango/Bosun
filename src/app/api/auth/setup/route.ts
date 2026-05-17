@@ -32,8 +32,8 @@ export async function POST(request: NextRequest) {
     const expiresAt = new Date(Date.now() + 7*24*60*60*1000).toISOString();
     await rqlite.execute("INSERT INTO sessions (id, user_id, token_hash, expires_at) VALUES (?, ?, ?, ?)", [sessionId, userId, hashToken(refreshToken), expiresAt]);
     const response = NextResponse.json({ data: { user: { id: userId, username, role: 'admin' } } });
-    response.cookies.set('access_token', accessToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', path: '/', maxAge: 15*60 });
-    response.cookies.set('refresh_token', refreshToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', path: '/', maxAge: 7*24*60*60 });
+    response.cookies.set('access_token', accessToken, { httpOnly: true, secure: process.env.COOKIE_SECURE === 'true', sameSite: 'strict', path: '/', maxAge: 15*60 });
+    response.cookies.set('refresh_token', refreshToken, { httpOnly: true, secure: process.env.COOKIE_SECURE === 'true', sameSite: 'strict', path: '/', maxAge: 7*24*60*60 });
     return response;
   } catch (error) {
     console.error('Setup error:', error);
