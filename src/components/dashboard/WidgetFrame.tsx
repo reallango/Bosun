@@ -1,6 +1,11 @@
 'use client';
 
 import { useState } from 'react';
+import { OSInfoWidget } from '@/components/widgets/os-info';
+import { CPUMemoryWidget } from '@/components/widgets/cpu-memory';
+import { DiskUsageWidget } from '@/components/widgets/disk-usage';
+import { NetworkWidget } from '@/components/widgets/network';
+import { SystemServicesWidget } from '@/components/widgets/system-services';
 
 interface WidgetFrameProps {
   widgetId: string;
@@ -8,6 +13,27 @@ interface WidgetFrameProps {
   title: string;
   serverId: string;
   editable?: boolean;
+}
+
+function WidgetContent({ widgetId, widgetType, serverId }: { widgetId: string; widgetType: string; serverId: string }) {
+  switch (widgetType) {
+    case 'os_info':
+    case 'os-info':
+      return <OSInfoWidget widgetId={widgetId} serverId={serverId} />;
+    case 'cpu_memory':
+    case 'cpu-memory':
+      return <CPUMemoryWidget widgetId={widgetId} />;
+    case 'disk_usage':
+    case 'disk-usage':
+      return <DiskUsageWidget widgetId={widgetId} />;
+    case 'network':
+      return <NetworkWidget widgetId={widgetId} />;
+    case 'system_services':
+    case 'system-services':
+      return <SystemServicesWidget widgetId={widgetId} serverId={serverId} />;
+    default:
+      return <div className="text-gray-500 text-sm">Unknown widget: {widgetType}</div>;
+  }
 }
 
 export function WidgetFrame({ widgetId, widgetType, title, serverId, editable = false }: WidgetFrameProps) {
@@ -45,7 +71,7 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, editable = 
         )}
       </div>
       <div className="flex-1 p-3 overflow-auto">
-        {/* Widget content rendered here */}
+        <WidgetContent widgetId={widgetId} widgetType={widgetType} serverId={serverId} />
       </div>
     </div>
   );
