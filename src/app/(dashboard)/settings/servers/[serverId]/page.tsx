@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 
 export default function EditServerPage() {
     const { serverId } = useParams<{ serverId: string }>();
@@ -19,7 +20,7 @@ export default function EditServerPage() {
     });
 
     useEffect(() => {
-        fetch(`/api/servers/${serverId}`)
+        fetchWithAuth(`/api/servers/${serverId}`)
             .then(r => r.json())
             .then(j => {
                 if (j.data) setForm({
@@ -33,16 +34,16 @@ export default function EditServerPage() {
             })
             .finally(() => setLoading(false));
 
-        fetch('/api/ssh-keys')
+        fetchWithAuth('/api/ssh-keys')
             .then(r => r.json())
-            .then(j => { if (j.data) setSSHKeys(Array.isArray(j.data) ? j.data : []); })
+            .then(j => { if (j.data) setSSHKeys(Array.isArray(j.data) ? j.data : j.data.ssh_keys || []); })
             .catch(() => {});
     }, [serverId]);
 
     const save = async () => {
         setSaving(true); setError('');
         try {
-            const r = await fetch(`/api/servers/${serverId}`, {
+            const r = await fetchWithAuth(`/api/servers/${serverId}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(form),
@@ -55,12 +56,12 @@ export default function EditServerPage() {
 
     const del = async () => {
         if (!confirm('Delete this server? This cannot be undone.')) return;
-        await fetch(`/api/servers/${serverId}`, { method: 'DELETE' });
+        await fetchWithAuth(`/api/servers/${serverId}`, { method: 'DELETE' });
         router.push('/settings/servers');
     };
 
     const test = async () => {
-        const r = await fetch(`/api/servers/${serverId}/test`, { method: 'POST' });
+        const r = await fetchWithAuth(`/api/servers/${serverId}/test`, { method: 'POST' });
         const d = await r.json();
         alert(d.data?.success
             ? `✅ Connection OK! Latency: ${d.data.latencyMs}ms`
@@ -68,7 +69,7 @@ export default function EditServerPage() {
     };
 
     const detect = async () => {
-        const r = await fetch(`/api/servers/${serverId}/detect`, { method: 'POST' });
+        const r = await fetchWithAuth(`/api/servers/${serverId}/detect`, { method: 'POST' });
         const d = await r.json();
         alert(d.data
             ? `✅ Detected:\nOS: ${d.data.os_type} ${d.data.os_version}\nKernel: ${d.data.kernel_version}\nCPU: ${d.data.cpu_model} (${d.data.cpu_cores} cores)\nRAM: ${d.data.total_ram_mb} MB`

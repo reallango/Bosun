@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
+import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 
 interface Server {
   id: string;
@@ -25,11 +26,11 @@ export default function Sidebar() {
   const [dashboards, setDashboards] = useState<Dashboard[]>([]);
 
   useEffect(() => {
-    fetch('/api/servers')
+    fetchWithAuth('/api/servers')
       .then(r => r.json())
-      .then(j => setServers(j.data || []))
+      .then(j => setServers(j.data || j.data?.servers || []))
       .catch(() => {});
-    fetch('/api/dashboards')
+    fetchWithAuth('/api/dashboards')
       .then(r => r.json())
       .then(j => setDashboards(j.data?.dashboards || j.data || []))
       .catch(() => {});
