@@ -1,11 +1,15 @@
 'use client';
 import { CircularGauge } from '@/components/shared/CircularGauge';
 import { useWidgetData } from '@/hooks/useWidgetData';
+import { WidgetError } from '@/components/widgets/WidgetError';
+import { WidgetLoading } from '@/components/widgets/WidgetLoading';
+import { WidgetPlaceholder } from '@/components/widgets/WidgetPlaceholder';
 
 export function CPUMemoryWidget({ widgetId }: { widgetId: string }) {
-    const { data, isLoading, error } = useWidgetData(widgetId, 5);
-    if (isLoading) return <div className="p-4 text-sm text-muted-foreground">Loading...</div>;
-    if (error) return <div className="p-4 text-sm text-red-500">Error: {error}</div>;
+    const { data, isLoading, error, refresh } = useWidgetData(widgetId, 5);
+    if (isLoading) return <WidgetLoading />;
+    if (error) return <WidgetError error={error} onRetry={refresh} />;
+    if ((data as any)?.source === 'placeholder') return <WidgetPlaceholder />;
     const d = data as any;
     const cpu = d?.cpu || {};
     const mem = d?.memory || {};

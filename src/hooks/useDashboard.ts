@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Dashboard, LayoutItem } from '@/types/dashboard';
 import { Widget } from '@/types/widget';
+import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 
 export function useDashboard(dashboardId: string) {
     const [dashboard, setDashboard] = useState<Dashboard | null>(null);
@@ -12,7 +13,7 @@ export function useDashboard(dashboardId: string) {
     const fetchDashboard = useCallback(async () => {
         if (!dashboardId) return;
         try {
-            const res = await fetch(`/api/dashboards/${dashboardId}`);
+            const res = await fetchWithAuth(`/api/dashboards/${dashboardId}`);
             const json = await res.json();
             if (json.data) {
                 setDashboard(json.data.dashboard);
@@ -29,7 +30,7 @@ export function useDashboard(dashboardId: string) {
         if (layoutTimer.current) clearTimeout(layoutTimer.current);
         layoutTimer.current = setTimeout(async () => {
             try {
-                await fetch(`/api/dashboards/${dashboardId}/layout`, {
+                await fetchWithAuth(`/api/dashboards/${dashboardId}/layout`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ layout }),
@@ -39,7 +40,7 @@ export function useDashboard(dashboardId: string) {
     }, [dashboardId]);
 
     const addWidget = useCallback(async (widgetType: string, serverId: string) => {
-        await fetch(`/api/dashboards/${dashboardId}/widgets`, {
+        await fetchWithAuth(`/api/dashboards/${dashboardId}/widgets`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ widget_type: widgetType, server_id: serverId }),
@@ -48,7 +49,7 @@ export function useDashboard(dashboardId: string) {
     }, [dashboardId, fetchDashboard]);
 
     const removeWidget = useCallback(async (widgetId: string) => {
-        await fetch(`/api/widgets/${widgetId}`, { method: 'DELETE' });
+        await fetchWithAuth(`/api/widgets/${widgetId}`, { method: 'DELETE' });
         fetchDashboard();
     }, [fetchDashboard]);
 

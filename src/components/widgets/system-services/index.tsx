@@ -1,13 +1,17 @@
 'use client';
 import { useState } from 'react';
 import { useWidgetData } from '@/hooks/useWidgetData';
+import { WidgetError } from '@/components/widgets/WidgetError';
+import { WidgetLoading } from '@/components/widgets/WidgetLoading';
+import { WidgetPlaceholder } from '@/components/widgets/WidgetPlaceholder';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 
 export function SystemServicesWidget({ widgetId, serverId }: { widgetId: string; serverId: string }) {
-    const { data, isLoading, error } = useWidgetData(widgetId, 30);
+    const { data, isLoading, error, refresh } = useWidgetData(widgetId, 30);
     const [filter, setFilter] = useState('');
-    if (isLoading) return <div className="p-4 text-sm text-muted-foreground">Loading...</div>;
-    if (error) return <div className="p-4 text-sm text-red-500">Error: {error}</div>;
+    if (isLoading) return <WidgetLoading />;
+    if (error) return <WidgetError error={error} onRetry={refresh} />;
+    if ((data as any)?.source === 'placeholder') return <WidgetPlaceholder />;
     const svcs = (Array.isArray(data) ? data : []) as any[];
     const filtered = filter ? svcs.filter(s => s.name.toLowerCase().includes(filter.toLowerCase())) : svcs;
     return (

@@ -1,10 +1,14 @@
 'use client';
 import { useWidgetData } from '@/hooks/useWidgetData';
+import { WidgetError } from '@/components/widgets/WidgetError';
+import { WidgetLoading } from '@/components/widgets/WidgetLoading';
+import { WidgetPlaceholder } from '@/components/widgets/WidgetPlaceholder';
 
 export function NetworkWidget({ widgetId }: { widgetId: string }) {
-    const { data, isLoading, error } = useWidgetData(widgetId, 30);
-    if (isLoading) return <div className="p-4 text-sm text-muted-foreground">Loading...</div>;
-    if (error) return <div className="p-4 text-sm text-red-500">Error: {error}</div>;
+    const { data, isLoading, error, refresh } = useWidgetData(widgetId, 30);
+    if (isLoading) return <WidgetLoading />;
+    if (error) return <WidgetError error={error} onRetry={refresh} />;
+    if ((data as any)?.source === 'placeholder') return <WidgetPlaceholder />;
     const interfaces = (Array.isArray(data) ? data : []) as any[];
     return (
         <div className="p-4 space-y-3 text-sm">

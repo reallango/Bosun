@@ -30,12 +30,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const refresh = async () => {
     try {
-      const res = await fetch('/api/auth/me');
+      let res = await fetch('/api/auth/me');
+
+      // If unauthorized, try refreshing the token
+      if (res.status === 401) {
+        const refreshRes = await fetch('/api/auth/refresh', { method: 'POST' });
+
+        if (refreshRes.ok) {
+          // Retry with new access token
+          res = await fetch('/api/auth/me');
+        } else {
+          // Refresh failed - go to login
+          setUser(null);
+          setLoading(false);
+          if (typeof window !== 'undefined' &&
+              !window.location.pathname.startsWith('/login') &&
+              !window.location.pathname.startsWith('/setup')) {
+            router.push('/login');
+          }
+          return;
+        }
+      }
+
       const data = await res.json();
       if (res.ok && data.data?.user) {
         setUser(data.data.user);
       } else {
         setUser(null);
+        // Only redirect if we're not already on login/setup
+        if (typeof window !== 'undefined' &&
+            !window.location.pathname.startsWith('/login') &&
+            !window.location.pathname.startsWith('/setup')) {
+          router.push('/login');
+        }
       }
     } catch {
       setUser(null);
