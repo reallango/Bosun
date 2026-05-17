@@ -6,12 +6,15 @@ import Header from '@/components/layout/Header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 
 interface Server {
   id: string;
   name: string;
   hostname: string;
   ssh_port: number;
+  ssh_user: string | null;
+  ssh_key_id: string | null;
   os_type: string | null;
   is_online: boolean;
 }
@@ -26,9 +29,9 @@ export default function ServersPage() {
 
   const fetchServers = async () => {
     try {
-      const res = await fetch('/api/servers');
+      const res = await fetchWithAuth('/api/servers');
       const data = await res.json();
-      if (data.data) setServers(data.data);
+      if (data.data) setServers(data.data.servers || data.data);
     } catch (err) {
       console.error('Failed to fetch servers:', err);
     } finally {
@@ -61,6 +64,7 @@ export default function ServersPage() {
                   <TableRow>
                     <TableHead>Name</TableHead>
                     <TableHead>Hostname</TableHead>
+                    <TableHead>SSH</TableHead>
                     <TableHead>OS</TableHead>
                     <TableHead>Status</TableHead>
                   </TableRow>
@@ -74,6 +78,13 @@ export default function ServersPage() {
                         </Link>
                       </TableCell>
                       <TableCell>{server.hostname}:{server.ssh_port}</TableCell>
+                      <TableCell>
+                        {server.ssh_key_id ? (
+                          <span className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded">Configured</span>
+                        ) : (
+                          <span className="text-xs px-2 py-1 bg-yellow-100 text-yellow-700 rounded">No SSH Key</span>
+                        )}
+                      </TableCell>
                       <TableCell>{server.os_type || '-'}</TableCell>
                       <TableCell>
                         <span className={`inline-flex items-center ${server.is_online ? 'text-green-600' : 'text-gray-400'}`}>
