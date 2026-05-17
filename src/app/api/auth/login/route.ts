@@ -36,8 +36,8 @@ export async function POST(request: NextRequest) {
     await rqlite.execute("UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?", [userId]);
     await logAudit({ userId, action: AuditActions.LOGIN, status: 'success', ipAddress: ip });
     const response = NextResponse.json({ data: { user: { id: userId, username: uname, role } } });
-    response.cookies.set('access_token', accessToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', path: '/', maxAge: 15 * 60 });
-    response.cookies.set('refresh_token', refreshToken, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', path: '/', maxAge: 7 * 24 * 60 * 60 });
+    response.cookies.set('access_token', accessToken, { httpOnly: true, secure: process.env.COOKIE_SECURE === 'true', sameSite: 'strict', path: '/', maxAge: 15 * 60 });
+    response.cookies.set('refresh_token', refreshToken, { httpOnly: true, secure: process.env.COOKIE_SECURE === 'true', sameSite: 'strict', path: '/', maxAge: 7 * 24 * 60 * 60 });
     return response;
   } catch (error) {
     console.error('Login error:', error);

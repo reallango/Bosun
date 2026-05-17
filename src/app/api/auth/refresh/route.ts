@@ -13,7 +13,7 @@ export async function POST(request: NextRequest) {
     if (new Date(expiresAt) < new Date()) return NextResponse.json({ error: { message: 'Token expired', code: 'TOKEN_EXPIRED' } }, { status: 401 });
     const newAccess = await createAccessToken(userId, username, role);
     const response = NextResponse.json({ data: { success: true } });
-    response.cookies.set('access_token', newAccess, { httpOnly: true, secure: process.env.NODE_ENV === 'production', sameSite: 'strict', path: '/', maxAge: 15 * 60 });
+    response.cookies.set('access_token', newAccess, { httpOnly: true, secure: process.env.COOKIE_SECURE === 'true', sameSite: 'strict', path: '/', maxAge: 15 * 60 });
     return response;
   } catch (error) {
     console.error('Refresh error:', error);
