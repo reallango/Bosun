@@ -10,6 +10,7 @@ services:
     environment:
       - NODE_NAME=server-a
       - RQLITE_JOIN=
+      - NODE_ENV=${NODE_ENV:-"production"}
       - MASTER_KEY=${MASTER_KEY}
       - AUTH_SECRET=${AUTH_SECRET}
     volumes:
