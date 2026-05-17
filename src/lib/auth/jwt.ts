@@ -1,7 +1,7 @@
 import { SignJWT, jwtVerify, JWTPayload } from 'jose';
 import crypto from 'crypto';
 
-const AUTH_SECRET = process.env.AUTH_SECRET || 'fallback-secret-change-me';
+const secret = new TextEncoder().encode(process.env.AUTH_SECRET || 'fallback-secret-change-me');
 
 export interface TokenPayload extends JWTPayload {
   userId: string;
@@ -10,32 +10,16 @@ export interface TokenPayload extends JWTPayload {
 }
 
 export async function createAccessToken(userId: string, username: string, role: string): Promise<string> {
-  const key = await crypto.subtle.importKey(
-    'raw',
-    Buffer.from(AUTH_SECRET),
-    { name: 'HMAC', hash: 'SHA256' },
-    false,
-    ['sign']
-  );
-
   return new SignJWT({ userId, username, role })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime('15m')
-    .sign(key);
+    .sign(secret);
 }
 
 export async function verifyAccessToken(token: string): Promise<TokenPayload | null> {
   try {
-    const key = await crypto.subtle.importKey(
-      'raw',
-      Buffer.from(AUTH_SECRET),
-      { name: 'HMAC', hash: 'SHA256' },
-      false,
-      ['verify']
-    );
-
-    const { payload } = await jwtVerify(token, key);
+    const { payload } = await jwtVerify(token, secret);
     return payload as TokenPayload;
   } catch {
     return null;
