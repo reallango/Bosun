@@ -4,6 +4,24 @@ import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { getWidgetDefinition } from '@/components/widgets/registry';
 import crypto from 'crypto';
 
+export async function GET(request: NextRequest, { params }: { params: Promise<{ dashboardId: string }> }) {
+    const auth = await requireAuth(request);
+    if (auth instanceof NextResponse) return auth;
+    const { dashboardId } = await params;
+    try {
+        const result = await rqlite.query('SELECT * FROM widgets WHERE dashboard_id = ? ORDER BY grid_y, grid_x', [dashboardId]);
+        const widgets = rowsToObjects(result).map((w: any) => ({
+            ...w,
+            config: typeof w.config === 'string' ? JSON.parse(w.config) : w.config || {},
+        }));
+        return NextResponse.json({ data: { widgets } });
+    } catch (error) {
+        console.error('Get dashboard widgets error:', error);
+        return NextResponse.json({ error: { message: 'Internal server error', code: 'INTERNAL_ERROR' } }, { status: 500 });
+    }
+}
+
+
 export async function POST(request: NextRequest, { params }: { params: Promise<{ dashboardId: string }> }) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
