@@ -1,4 +1,4 @@
-import { BaseOSAdapter, AdapterResult, OSInfo, CPUInfo, MemoryInfo } from './base';
+import { BaseOSAdapter, AdapterResult, OSInfo, CPUInfo, MemoryInfo, ContainerInfo, ContainerStats } from './base';
 
 export class DebianAdapter extends BaseOSAdapter {
   async getOSInfo(): Promise<AdapterResult<OSInfo>> {
@@ -54,6 +54,57 @@ export class DebianAdapter extends BaseOSAdapter {
       return { data: { total_mb: Math.round((match ? parseInt(match[1], 10) : 0) / 1024) } };
     } catch (error) {
       return { data: { total_mb: 0 }, error: String(error) };
+    }
+  }
+
+  // Docker methods (same as Ubuntu)
+  async listContainers(): Promise<AdapterResult<ContainerInfo[]>> {
+    try {
+      const result = await this.runCommand('docker ps -a --format "{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}|{{.State}}|{{.CreatedAt}}|{{.Ports}}"');
+      if (!result.stdout.trim()) return { data: [] };
+      const containers = result.stdout.trim().split('\n').map(line => {
+        const [id, name, image, status, state, created, ports] = line.split('|');
+        return { id, name, image, status, state, created, ports };
+      });
+      return { data: containers };
+    } catch (error) {
+      return { data: [], error: String(error) };
+    }
+  }
+  async startContainer(id: string): Promise<AdapterResult<boolean>> {
+    try { await this.runCommand(`docker start ${id}`); return { data: true }; }
+    catch (error) { return { data: false, error: String(error) }; }
+  }
+  async stopContainer(id: string): Promise<AdapterResult<boolean>> {
+    try { await this.runCommand(`docker stop ${id}`); return { data: true }; }
+    catch (error) { return { data: false, error: String(error) }; }
+  }
+  async restartContainer(id: string): Promise<AdapterResult<boolean>> {
+    try { await this.runCommand(`docker restart ${id}`); return { data: true }; }
+    catch (error) { return { data: false, error: String(error) }; }
+  }
+  async getContainerLogs(id: string, tail = 100): Promise<AdapterResult<string>> {
+    try { const result = await this.runCommand(`docker logs --tail ${tail} ${id}`); return { data: result.stdout + result.stderr }; }
+    catch (error) { return { data: '', error: String(error) }; }
+  }
+  async getContainerStats(id: string): Promise<AdapterResult<ContainerStats>> {
+    try {
+      const result = await this.runCommand(`docker stats --no-stream --format "{{.CPUPerc}}|{{.MemUsage}}|{{.MemPerc}}|{{.NetIO}}|{{.BlockIO}}" ${id}`);
+      const line = result.stdout.trim();
+      if (!line) return { data: { id, name: id, cpu_percent: 0, memory_mb: 0, memory_limit_mb: 0, network_rx_mb: 0, network_tx_mb: 0, block_read_mb: 0, block_write_mb: 0 } };
+      const [cpu, memUsage, , netIO, blockIO] = line.split('|');
+      return {
+        data: {
+          id, name: id,
+          cpu_percent: parseFloat(cpu?.replace('%', '') || '0'),
+          memory_mb: parseFloat(memUsage?.match(/([\d.]+)/)?.[1] || '0'),
+          memory_limit_mb: parseFloat(memUsage?.match(/\/\s*([\d.]+)/)?.[1] || '0'),
+          network_rx_mb: 0, network_tx_mb: 0,
+          block_read_mb: 0, block_write_mb: 0,
+        }
+      };
+    } catch (error) {
+      return { data: { id, name: id, cpu_percent: 0, memory_mb: 0, memory_limit_mb: 0, network_rx_mb: 0, network_tx_mb: 0, block_read_mb: 0, block_write_mb: 0 }, error: String(error) };
     }
   }
 }

@@ -144,3 +144,67 @@ class AdapterFactory {
 }
 
 export { AdapterFactory };
+
+export async function getAdapter(serverId: string) {
+  const { rqlite } = await import('@/lib/db/rqlite-client');
+  const { SSHConnectionPool } = await import('../connection-pool');
+  const { decrypt } = await import('../../crypto/keys');
+  
+  const serverResult = await rqlite.query('SELECT * FROM servers WHERE id = ?', [serverId]);
+  if (!serverResult.values.length) return null;
+  const row = serverResult.values[0];
+  const server = {
+    id: row[0] as string, hostname: row[3] as string, ssh_port: row[4] as number,
+    ssh_user: row[5] as string, ssh_key_id: row[6] as string | null
+  };
+  
+  if (!server.ssh_key_id) return null;
+  
+  const keyResult = await rqlite.query('SELECT private_key_enc FROM ssh_keys WHERE id = ?', [server.ssh_key_id]);
+  if (!keyResult.values.length) return null;
+  
+  const masterKey = process.env.MASTER_KEY;
+  if (!masterKey) return null;
+  
+  const privateKey = decrypt(keyResult.values[0][0] as string, masterKey);
+  if (!privateKey) return null;
+  
+  const pool = new SSHConnectionPool();
+  const sshConfig = {
+    host: server.hostname,
+    port: server.ssh_port || 22,
+    username: server.ssh_user,
+    privateKey
+  };
+  
+  const runCommand = async (cmd: string) => pool.executeCommand(server.id, sshConfig, cmd);
+  
+  const osResult = await runCommand('cat /etc/os-release');
+  let osType = 'generic';
+  if (osResult.exitCode === 0) {
+    const lines = osResult.stdout.split('\n');
+    const info: Record<string, string> = {};
+    for (const line of lines) {
+      const [key, ...value] = line.split('=');
+      if (key && value.length) info[key] = value.join('=').replace(/"/g, '');
+    }
+    const id = info.ID?.toLowerCase() || '';
+    if (id.includes('ubuntu') || id.includes('pop') || id.includes('mint')) osType = 'ubuntu';
+    else if (id.includes('debian') || id.includes('raspbian')) osType = 'debian';
+    else if (id.includes('unraid')) osType = 'unraid';
+  }
+  
+  const { UbuntuAdapter } = await import('./ubuntu');
+  const { DebianAdapter } = await import('./debian');
+  
+  switch (osType) {
+    case 'ubuntu': return new UbuntuAdapter(runCommand);
+    case 'debian': return new DebianAdapter(runCommand);
+    case 'unraid':
+      const { UnraidAdapter } = await import('./unraid');
+      return new UnraidAdapter(runCommand);
+    default:
+      const { GenericLinuxAdapter } = await import('./generic-linux');
+      return new GenericLinuxAdapter(runCommand);
+  }
+}
