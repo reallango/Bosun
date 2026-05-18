@@ -28,7 +28,12 @@ export function DockerContainersWidget({ widgetId, serverId }: DockerContainersW
   const { data, isLoading, error } = useWidgetData(widgetId, 15);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
 
-  const containers = (data as Container[]) || [];
+  // Handle both { containers: [] } and direct [] data formats
+  const containers: Container[] = Array.isArray((data as any)?.containers) 
+    ? (data as any).containers 
+    : Array.isArray(data) 
+      ? data 
+      : [];
 
   const handleAction = async (containerId: string, action: 'start' | 'stop' | 'restart') => {
     setActionLoading(containerId);
