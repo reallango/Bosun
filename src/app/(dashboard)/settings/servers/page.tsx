@@ -7,21 +7,31 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
+import { EditServerModal } from '@/components/settings/EditServerModal';
+
+interface SSHKey {
+  id: string;
+  name: string;
+}
 
 interface Server {
   id: string;
   name: string;
-  hostname: string;
+  host: string;
   ssh_port: number;
   ssh_user: string | null;
   ssh_key_id: string | null;
   os_type: string | null;
   is_online: boolean;
+  hostname?: string;
+  notes?: string;
 }
 
 export default function ServersPage() {
   const [servers, setServers] = useState<Server[]>([]);
   const [loading, setLoading] = useState(true);
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [selectedServer, setSelectedServer] = useState<Server | null>(null);
 
   useEffect(() => {
     fetchServers();
@@ -37,6 +47,11 @@ export default function ServersPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleEditServer = (server: Server) => {
+    setSelectedServer(server);
+    setEditModalOpen(true);
   };
 
   return (
@@ -67,6 +82,7 @@ export default function ServersPage() {
                     <TableHead>SSH</TableHead>
                     <TableHead>OS</TableHead>
                     <TableHead>Status</TableHead>
+                    <TableHead>Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -77,7 +93,7 @@ export default function ServersPage() {
                           {server.name}
                         </Link>
                       </TableCell>
-                      <TableCell>{server.hostname}:{server.ssh_port}</TableCell>
+                      <TableCell>{server.host}:{server.ssh_port}</TableCell>
                       <TableCell>
                         {server.ssh_key_id ? (
                           <span className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded">Configured</span>
@@ -92,6 +108,14 @@ export default function ServersPage() {
                           {server.is_online ? 'Online' : 'Offline'}
                         </span>
                       </TableCell>
+                      <TableCell>
+                        <button
+                          onClick={() => handleEditServer(server)}
+                          className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors"
+                        >
+                          Edit
+                        </button>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -100,6 +124,12 @@ export default function ServersPage() {
           </CardContent>
         </Card>
       </div>
+      <EditServerModal
+        isOpen={editModalOpen}
+        onClose={() => setEditModalOpen(false)}
+        server={selectedServer}
+        onSave={fetchServers}
+      />
     </>
   );
 }
