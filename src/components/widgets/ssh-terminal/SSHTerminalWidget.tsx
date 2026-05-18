@@ -229,7 +229,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
 
     if (term && ws?.readyState === WebSocket.OPEN) {
       term.onData((data) => {
-        ws.send(JSON.stringify({ type: 'input', data }));
+        ws.send(data);
       });
     }
   }, [status]);
