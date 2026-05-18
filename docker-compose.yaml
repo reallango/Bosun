@@ -17,9 +17,8 @@ services:
       - APP_URL=${APP_URL:-http://localhost:3042}
     volumes:
       - bosun-data:/data/rqlite
-    expose:
-      - "3000"
-      - "3002"
+    ports:
+      - "3042:3042"
     networks:
       - bosun-net
     healthcheck:
@@ -28,17 +27,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
-
-  bosun-proxy:
-    image: nginx:alpine
-    depends_on:
-      - bosun
-    ports:
-      - "3042:80"
-    volumes:
-      - ./nginx/bosun-proxy.conf:/etc/nginx/conf.d/default.conf:ro
-    networks:
-      - bosun-net
 
 
 volumes:
