@@ -78,6 +78,37 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
             data=r.stdout.trim().split('\n').filter(Boolean).map(l=>{const p=l.trim().split(/\s+/);return{name:(p[0]||'').replace('.service',''),status:p[2]==='running'?'running':p[2]==='failed'?'failed':'stopped',description:p.slice(4).join(' '),enabled:p[1]==='loaded'};});
             break;
         }
+        case 'gpu_monitoring': {
+            const r=await run("nvidia-smi --query-gpu=name,memory.total,memory.used,utilization.gpu,temperature.gpu,power.draw --format=csv,noheader 2>/dev/null");
+            if(r.exitCode===0&&r.stdout.trim()) {
+                const line=r.stdout.trim();
+                const parts=line.split(',').map(p=>p.trim());
+                data={ name:parts[0], vram_total_mb:parseInt(parts[1]||'0',10), vram_used_mb:parseInt(parts[2]||'0',10), utilization_percent:parseInt(parts[3]||'0',10), temperature_c:parseInt(parts[4]||'0',10), power_watts:parseFloat(parts[5]||'0') };
+            } else {
+                data={ name:'No GPU', vram_total_mb:0, vram_used_mb:0, utilization_percent:0, temperature_c:0, power_watts:0 };
+            }
+            break;
+        }
+        case 'ollama_status': {
+            // Check if ollama is running
+            const check=await run("curl -s http://localhost:11434/api/tags 2>/dev/null");
+            if(check.exitCode!==0) {
+                data={ status:'stopped', models:[] };
+                break;
+            }
+            try {
+                const tags=JSON.parse(check.stdout);
+                data={ status:'running', models:tags.models||[] };
+            } catch {
+                data={ status:'error', models:[] };
+            }
+            // Check for active pulls
+            const pgrep=await run("pgrep -a 'ollama pull' 2>/dev/null || true");
+            if(pgrep.exitCode===0&&pgrep.stdout.trim()) {
+                data={ ...data as object, pulling:{ name:'unknown', progress:0 } };
+            }
+            break;
+        }
         default: return NextResponse.json({ error: { message: `Unknown type: ${widget.widget_type}` } }, { status: 400 });
     }
     return NextResponse.json({ data });

@@ -7,6 +7,8 @@ import { DiskUsageWidget } from '@/components/widgets/disk-usage';
 import { NetworkWidget } from '@/components/widgets/network';
 import { SystemServicesWidget } from '@/components/widgets/system-services';
 import { ServerSummaryWidget } from '@/components/widgets/server-summary';
+import { GPUMonitoringWidget } from '@/components/widgets/gpu-monitoring';
+import { OllamaStatusWidget } from '@/components/widgets/ollama-status';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 
@@ -38,6 +40,10 @@ function WidgetContent({ widgetId, widgetType, serverId, serverName }: { widgetI
       return <SystemServicesWidget widgetId={widgetId} serverId={serverId} />;
     case 'server_summary':
       return <ServerSummaryWidget widgetId={widgetId} serverId={serverId} serverName={serverName} />;
+    case 'gpu_monitoring':
+      return <GPUMonitoringWidget widgetId={widgetId} serverId={serverId} />;
+    case 'ollama_status':
+      return <OllamaStatusWidget widgetId={widgetId} serverId={serverId} />;
     default:
       return <div className="text-gray-500 text-sm">Unknown widget: {widgetType}</div>;
   }
