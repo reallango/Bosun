@@ -84,10 +84,10 @@ export function AddWidgetModal({ isOpen, onClose, dashboardId, serverId, onAdd }
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full">
+      <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full max-h-[80vh] overflow-y-auto">
         <h3 className="text-lg font-semibold mb-4">Add Widget</h3>
         
-        <div className="space-y-2 mb-4">
+        <div className="space-y-2 mb-4 max-h-60 overflow-y-auto">
           {widgets.map(w => (
             <button
               key={w.type}
@@ -119,7 +119,7 @@ export function AddWidgetModal({ isOpen, onClose, dashboardId, serverId, onAdd }
               <select
                 value={targetServer}
                 onChange={e => setTargetServer(e.target.value)}
-                className="w-full px-3 py-2 border rounded"
+                className="w-full px-3 py-2 border rounded max-h-24 overflow-y-auto"
               >
                 <option value="">-- Select a Server --</option>
                 {servers.map(s => (
