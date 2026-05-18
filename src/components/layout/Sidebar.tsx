@@ -25,6 +25,7 @@ export default function Sidebar() {
   const pathname = usePathname();
   const [servers, setServers] = useState<Server[]>([]);
   const [dashboards, setDashboards] = useState<Dashboard[]>([]);
+  const [mobileOpen, setMobileOpen] = useState(false);
 
   useEffect(() => {
     fetchWithAuth('/api/servers')
@@ -51,11 +52,39 @@ export default function Sidebar() {
       });
   }, []);
 
+  // Close mobile menu on route change
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [pathname]);
+
   return (
-    <div className="w-64 h-screen bg-gray-900 text-white flex flex-col">
-      <div className="p-4 border-b border-gray-800">
-        <Link href="/" className="text-xl font-bold">Bosun</Link>
-      </div>
+    <>
+      {/* Mobile toggle button */}
+      <button
+        onClick={() => setMobileOpen(!mobileOpen)}
+        className="lg:hidden fixed top-4 left-4 z-50 p-2 bg-gray-900 text-white rounded-md"
+        aria-label="Toggle menu"
+      >
+        {mobileOpen ? '✕' : '☰'}
+      </button>
+
+      {/* Overlay for mobile */}
+      {mobileOpen && (
+        <div 
+          className="lg:hidden fixed inset-0 bg-black/50 z-30" 
+          onClick={() => setMobileOpen(false)}
+        />
+      )}
+
+      <div className={cn(
+        "w-64 h-screen bg-gray-900 text-white flex flex-col fixed lg:relative z-40",
+        "transform transition-transform duration-200",
+        mobileOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0",
+        "max-lg:w-64"
+      )}>
+        <div className="p-4 border-b border-gray-800">
+          <Link href="/" className="text-xl font-bold">Bosun</Link>
+        </div>
       <nav className="flex-1 p-4 space-y-4 overflow-auto">
         {/* Home */}
         <Link
@@ -116,6 +145,7 @@ export default function Sidebar() {
           </Link>
         </div>
       </nav>
-    </div>
-  );
+      </div>
+      </>
+    );
 }
