@@ -4,6 +4,11 @@ import type { NextRequest } from 'next/server';
 export function middleware(request: NextRequest) {
     const { pathname } = request.nextUrl;
 
+    // Allow WebSocket path (Cloudflare-compatible)
+    if (pathname.startsWith('/ws/')) {
+        return NextResponse.next();
+    }
+
     // Allow public routes without auth check
     if (
         pathname.startsWith('/login') ||

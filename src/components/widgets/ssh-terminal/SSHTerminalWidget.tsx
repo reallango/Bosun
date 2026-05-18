@@ -24,8 +24,12 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
   const [error, setError] = useState<string | null>(null);
   const [sessionId] = useState(() => Math.random().toString(36).substring(2, 11));
 
-  // Get WebSocket URL from environment
-  const wsUrl = process.env.NEXT_PUBLIC_WS_URL || 'ws://localhost:3002';
+  // Derive WebSocket URL from current page origin (works with Cloudflare)
+  const getWsUrl = () => {
+    const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const host = window.location.host;
+    return `${proto}://${host}/ws/terminal`;
+  };
 
   // Connect to WebSocket server
   const connect = useCallback(async () => {
@@ -37,7 +41,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       return;
     }
 
-    console.log('[WS] Connecting to:', wsUrl, 'serverId:', serverId);
+    console.log('[WS] Connecting to:', getWsUrl(), 'serverId:', serverId);
 
     setStatus('connecting');
     setError(null);
@@ -54,8 +58,9 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       const wsToken = tokenJson.data.token;
       console.log('[WS] Got token, connecting to WebSocket...');
 
-      // Build WebSocket URL
-      const url = new URL(wsUrl);
+      // Build WebSocket URL using same-host approach
+      const wsBase = getWsUrl();
+      const url = new URL(wsBase);
       url.searchParams.set('sessionId', sessionId);
       url.searchParams.set('serverId', serverId);
       url.searchParams.set('token', wsToken);
@@ -106,7 +111,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       setStatus('error');
       statusRef.current = 'error';
     }
-  }, [sessionId, serverId, wsUrl]); // Removed status from deps
+  }, [sessionId, serverId]); // Removed status from deps
 
   // Disconnect from WebSocket server
   const disconnect = useCallback(() => {
