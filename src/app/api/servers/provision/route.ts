@@ -115,6 +115,13 @@ export async function POST(request: NextRequest) {
             steps.push(`Service account exists: ${service_account}`);
         }
 
+        // Step 2b: Add service account to docker group
+        const dockerGroupCmd = isRoot
+            ? `usermod -aG docker ${service_account} || groupadd docker || true`
+            : `echo '${escapedPassword}' | sudo -S usermod -aG docker ${service_account} 2>/dev/null || echo '${escapedPassword}' | sudo -S groupadd docker 2>/dev/null || true`;
+        const dockerResult = await sshExec(sshConfig, dockerGroupCmd);
+        steps.push('Added service account to docker group');
+
         // Step 3: Generate SSH key pair using ssh-keygen
         const keyName = `${hostname}-${service_account}`;
         const { privateKey, publicKey, fingerprint } = generateSSHKeyPair(keyName, 'ed25519');
