@@ -1,18 +1,17 @@
 'use client';
 
 import { useWidgetData } from '@/hooks/useWidgetData';
-import { WidgetProps } from '@/types/widget';
 import { StatusBadge } from '@/components/shared/StatusBadge';
 
-export function ServerSummaryWidget({ widgetId, serverId, serverName, isLoading, error }: WidgetProps & { serverName?: string }) {
-  const { data, isLoading: loading, error: fetchError, refresh } = useWidgetData(widgetId, 15);
+export function ServerSummaryWidget({ widgetId, serverId, serverName }: { widgetId: string; serverId: string; serverName?: string }) {
+  const { data, isLoading: loading, error: fetchError } = useWidgetData(widgetId, 15);
 
-  if (loading || isLoading) {
+  if (loading) {
     return <div className="flex items-center justify-center h-full">Loading...</div>;
   }
 
-  if (fetchError || error) {
-    return <div className="text-red-500 text-sm">Error: {fetchError || error}</div>;
+  if (fetchError) {
+    return <div className="text-red-500 text-sm">Error: {fetchError}</div>;
   }
 
   const serverData = data as { is_online?: boolean; os_type?: string; hostname?: string } | null;

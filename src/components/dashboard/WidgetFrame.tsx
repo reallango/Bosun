@@ -6,6 +6,7 @@ import { CPUMemoryWidget } from '@/components/widgets/cpu-memory';
 import { DiskUsageWidget } from '@/components/widgets/disk-usage';
 import { NetworkWidget } from '@/components/widgets/network';
 import { SystemServicesWidget } from '@/components/widgets/system-services';
+import { ServerSummaryWidget } from '@/components/widgets/server-summary';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 
@@ -19,7 +20,7 @@ interface WidgetFrameProps {
   onRemoved?: () => void;
 }
 
-function WidgetContent({ widgetId, widgetType, serverId }: { widgetId: string; widgetType: string; serverId: string }) {
+function WidgetContent({ widgetId, widgetType, serverId, serverName }: { widgetId: string; widgetType: string; serverId: string; serverName?: string }) {
   switch (widgetType) {
     case 'os_info':
     case 'os-info':
@@ -35,6 +36,8 @@ function WidgetContent({ widgetId, widgetType, serverId }: { widgetId: string; w
     case 'system_services':
     case 'system-services':
       return <SystemServicesWidget widgetId={widgetId} serverId={serverId} />;
+    case 'server_summary':
+      return <ServerSummaryWidget widgetId={widgetId} serverId={serverId} serverName={serverName} />;
     default:
       return <div className="text-gray-500 text-sm">Unknown widget: {widgetType}</div>;
   }
@@ -97,7 +100,7 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName,
         </div>
       </div>
       <div className="flex-1 p-3 overflow-auto">
-        <WidgetContent widgetId={widgetId} widgetType={widgetType} serverId={serverId} />
+        <WidgetContent widgetId={widgetId} widgetType={widgetType} serverId={serverId} serverName={serverName} />
       </div>
     </div>
   );
