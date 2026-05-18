@@ -103,7 +103,7 @@ export default function Sidebar() {
           {servers.map(s => (
             <Link
               key={s.id}
-              href={`/settings/servers/${s.id}`}
+              href={`/servers/${s.id}`}
               className="flex items-center gap-2 px-3 py-1 text-sm text-gray-400 hover:text-white"
             >
               <span className={`w-2 h-2 rounded-full ${s.is_online ? 'bg-green-500' : 'bg-gray-500'}`} />
