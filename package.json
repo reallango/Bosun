@@ -4,8 +4,10 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
+    "dev:all": "concurrently \"npm run dev\" \"npm run ws\"",
     "build": "next build",
     "start": "next start",
+    "ws": "node ws-server.js",
     "lint": "next lint"
   },
   "dependencies": {
