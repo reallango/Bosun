@@ -2,27 +2,40 @@
 
 Implement all missing features from the detailed design plan (`/workspace/Bosun_Full_Design_Plan.md`) to reach the complete v1.0 specification.
 
-## Current State Analysis:
-The codebase has a solid foundation covering:
-- ✅ Authentication (login, setup, JWT, session management)
-- ✅ Server CRUD & SSH key management
-- ✅ Dashboard system with widget grid layout
-- ✅ Basic OS widgets (CPU, Memory, Network, Disk, OS Info)
-- ✅ rqlite integration & cluster status
-- ✅ SSH adapters (Ubuntu, Debian, Unraid, Generic Linux)
+## Current State Analysis (Updated May 2026):
 
-## Critical Missing Components:
-1. Docker Management (container CRUD, logs, stats, events)
-2. GPU Monitoring
-3. Ollama/Ollama AI Stack Monitoring
-4. WebSocket support for real-time data
-5. Terminal Widget (xterm.js)
-6. Custom Command Widgets
-7. Notification System (in-app, webhook, email)
-8. Alert Rules & Alert Evaluation
-9. Audit Logging API & UI
-10. Portainer Link Widget
-11. Mobile Responsive Polish
+### ✅ Already Implemented:
+- Authentication (login, setup, JWT)
+- Server CRUD & SSH key management
+- Dashboard system with widget grid layout
+- Basic OS widgets (CPU, Memory, Network, Disk, OS Info, Server Summary)
+- **Docker containers** API + widget (list, start/stop/restart, logs)
+- **GPU Monitoring** widget + API
+- **Ollama Status** widget + API
+- **SSH Terminal** widget (xterm.js)
+- Notification API routes (CRUD)
+- Alert Rules API route
+- Notification Channels API
+- Audit Logs API
+- rqlite integration
+- SSH adapters (Ubuntu, Debian, Unraid, Generic Linux)
+- useWebSocket hook
+
+### Critical Missing Components:
+1. ~~Docker Management API~~ ✅ DONE
+2. ~~GPU Monitoring widget~~ ✅ DONE
+3. ~~Ollama Status widget~~ ✅ DONE
+4. ~~SSH Terminal widget~~ ✅ BUT NEEDS WebSocket server
+5. **Docker Containers Widget** - API exists, widget component missing
+6. **Widget Registration Fix** - NEW widgets not showing in Add Widget modal
+7. **Custom Command Widget** - Not implemented
+8. **Portainer Link Widget** - Not implemented
+9. **Notification Delivery** - Webhook/email sending not built
+10. **Alert Evaluator** - Alert evaluation/triggers not built
+11. **WebSocket Server Routes** - Terminal/logs streaming endpoints
+12. **Notification Provider** - In-app notification state management
+13. **Settings Pages** - Alerts, Users, Audit Log UI
+14. **Mobile Responsive** - Touch polish
 
 # 2. CONTEXT SUMMARY
 
@@ -94,162 +107,149 @@ This plan follows a phased implementation approach based on the design document 
 
 # 4. IMPLEMENTATION STEPS
 
-## Phase A: Foundation & Dependencies Setup
-**Goal:** Add required dependencies and prepare database schema
+## Phase 1: Widget Registration Fix ⚠️ CRITICAL
+**Goal:** Fix new widgets not appearing in Add Widget modal
 
-### Step A.1: Add npm dependencies
-- **Method:** Install `xterm`, `xterm-addon-fit`, `ws`, `nodemailer`
-- **Reference:** `package.json`
+### Step 1.1: Update AddWidgetModal widget list
+- **Method:** Add missing widgets to hardcoded list in AddWidgetModal.tsx
+- **Reference:** `src/components/dashboard/AddWidgetModal.tsx`
+- **Widgets to add:** gpu_monitoring, ollama_status, ssh_terminal, docker_containers
 
-### Step A.2: Database migrations for notifications/alerts
-- **Method:** Add schema tables for notifications, alert_rules, notification_channels, audit_log
-- **Reference:** `src/lib/db/schema.ts`, `src/lib/db/migrations/`
+### Step 1.2: Update widget registry.ts
+- **Method:** Add GPU, Ollama, SSH Terminal, Docker Containers to registry.ts
+- **Reference:** `src/components/widgets/registry.ts`
 
----
-
-## Phase B: Docker Management
-**Goal:** Full container lifecycle management via SSH (no Docker socket)
-
-### Step B.1: Add Docker SSH commands to adapters
-- **Method:** Add `listContainers`, `startContainer`, `stopContainer`, `restartContainer`, `getContainerLogs`, `getContainerStats` to OS adapters
-- **Reference:** `src/lib/ssh/adapters/*.ts`
-
-### Step B.2: Create Docker container API routes
-- **Method:** Implement endpoints for listing containers, container actions (start/stop/restart), logs, stats
-- **Reference:** `src/app/api/servers/[serverId]/containers/route.ts`, `.../[containerId]/action/route.ts`, `.../logs/route.ts`
-
-### Step B.3: Create Docker Containers widget
-- **Method:** Build widget showing container list with status, actions
+### Step 1.3: Create Docker Containers widget
+- **Method:** Build widget component showing container list with start/stop/restart actions
 - **Reference:** `src/components/widgets/docker-containers/index.tsx`
 
----
-
-## Phase C: Real-Time Infrastructure (WebSocket)
-**Goal:** Enable live terminal, log streaming, and push notifications
-
-### Step C.1: WebSocket server setup
-- **Method:** Create WebSocket route handlers
-- **Reference:** `src/app/api/ws/terminal/route.ts`, `src/app/api/ws/docker-logs/route.ts`
-
-### Step C.2: useWebSocket hook
-- **Method:** Create React hook for WebSocket management
-- **Reference:** `src/hooks/useWebSocket.ts`
+### Step 1.4: Update WidgetFrame routing
+- **Method:** Add case handler for docker_containers
+- **Reference:** `src/components/dashboard/WidgetFrame.tsx`
 
 ---
 
-## Phase D: Widgets Expansion
-**Goal:** Add GPU, Ollama, Terminal, and Custom Command widgets
+## Phase 2: WebSocket Infrastructure
+**Goal:** Enable real-time terminal, log streaming via WebSocket
 
-### Step D.1: GPU Monitoring Widget
-- **Method:** Create widget parsing nvidia-smi output via SSH
-- **Reference:** `src/components/widgets/gpu-monitoring/index.tsx`
+### Step 2.1: Create Terminal WebSocket route
+- **Method:** Create WebSocket handler connecting to SSH shell
+- **Reference:** `src/app/api/ws/terminal/route.ts`
 
-### Step D.2: Ollama Status Widget
-- **Method:** Create widget querying Ollama API (curl localhost:11434)
-- **Reference:** `src/components/widgets/ollama-status/index.tsx`
+### Step 2.2: Create Docker Logs WebSocket route
+- **Method:** Create WebSocket for streaming container logs
+- **Reference:** `src/app/api/ws/docker-logs/route.ts`
 
-### Step D.3: SSH Terminal Widget
-- **Method:** Integrate xterm.js with WebSocket for live shell
-- **Reference:** `src/components/widgets/ssh-terminal/index.tsx`
+### Step 2.3: Create Docker Events WebSocket route
+- **Method:** Create WebSocket for Docker events stream
+- **Reference:** `src/app/api/ws/docker-events/route.ts`
 
-### Step D.4: Custom Command Widget
+---
+
+## Phase 3: Custom & Portainer Widgets
+**Goal:** Add remaining widget types
+
+### Step 3.1: Create Custom Command Widget
 - **Method:** Allow users to define arbitrary SSH commands and display output
 - **Reference:** `src/components/widgets/custom-command/index.tsx`
 
----
-
-## Phase E: Notifications & Alerts
-**Goal:** Build alert system with multiple notification channels
-
-### Step E.1: Notification types and provider
-- **Method:** Create types, provider, and hook
-- **Reference:** `src/types/notification.ts`, `src/providers/NotificationProvider.tsx`
-
-### Step E.2: Notifications API routes
-- **Method:** CRUD for notifications, marking read/dismissed
-- **Reference:** `src/app/api/notifications/route.ts`
-
-### Step E.3: Alert rules system
-- **Method:** Create alert rule creation, evaluation logic, and triggers
-- **Reference:** `src/app/api/alert-rules/route.ts`, `src/lib/alerts/evaluator.ts`
-
-### Step E.4: Notification channels (webhook/email)
-- **Method:** Implement webhook sender and email sender
-- **Reference:** `src/lib/notifications/webhook.ts`, `src/lib/notifications/email.ts`
-
-### Step E.5: Notification Bell UI
-- **Method:** Add to header with dropdown
-- **Reference:** `src/components/layout/NotificationBell.tsx`
-
----
-
-## Phase F: UI Polish & Advanced Features
-**Goal:** Complete the remaining UI pages and refinements
-
-### Step F.1: Audit Log UI page
-- **Method:** Create settings page to view audit log
-- **Reference:** `src/app/(dashboard)/settings/audit-log/page.tsx`
-
-### Step F.2: Portainer Link Widget
-- **Method:** Create widget storing Portainer URLs and linking to them
+### Step 3.2: Create Portainer Link Widget
+- **Method:** Store and display clickable Portainer URLs
 - **Reference:** `src/components/widgets/portainer-link/index.tsx`
 
-### Step F.3: Mobile responsive refinements
-- **Method:** Add mobile-specific CSS, touch controls for widgets
-- **Reference:** `src/app/globals.css`, `src/components/dashboard/`
+### Step 3.3: Update WidgetFrame routing
+- **Method:** Add case handlers for custom_command, portainer_link
+- **Reference:** `src/components/dashboard/WidgetFrame.tsx`
 
 ---
 
-## Phase G: Docker Events & Advanced Docker
-**Goal:** Real-time Docker event streaming and health monitoring
+## Phase 4: Notifications & Alerts
+**Goal:** Build complete notification system with delivery
 
-### Step G.1: Docker events WebSocket
-- **Method:** Stream Docker events via WebSocket
-- **Reference:** `src/app/api/ws/docker-events/route.ts`
+### Step 4.1: Create Notifications lib
+- **Method:** Implement webhook.ts (Discord/Slack), email.ts (nodemailer), in-app.ts
+- **Reference:** `src/lib/notifications/`
 
-### Step G.2: Docker health checks integration
-- **Method:** Add container health check status to container list
-- **Reference:** `src/lib/ssh/adapters/*.ts`
+### Step 4.2: Create Alert Evaluator lib
+- **Method:** Implement alert rule evaluation, condition checking, trigger firing
+- **Reference:** `src/lib/alerts/evaluator.ts`
+
+### Step 4.3: Create Notification Provider
+- **Method:** React context for in-app notification state
+- **Reference:** `src/providers/NotificationProvider.tsx`
+
+### Step 4.4: Create Notification Bell UI
+- **Method:** Add notification bell to header with dropdown
+- **Reference:** `src/components/layout/NotificationBell.tsx`
+
+### Step 4.5: Add remaining API routes
+- **Method:** Create alert-rules/[ruleId], notification-channels/[channelId] routes
+- **Reference:** `src/app/api/`
+
+---
+
+## Phase 5: Settings Pages
+**Goal:** Complete remaining UI pages
+
+### Step 5.1: Create Alerts Settings page
+- **Method:** UI for creating/editing alert rules
+- **Reference:** `src/app/(dashboard)/settings/alerts/page.tsx`
+
+### Step 5.2: Create Audit Log page
+- **Method:** UI for viewing searchable audit log
+- **Reference:** `src/app/(dashboard)/settings/audit-log/page.tsx`
+
+### Step 5.3: Create Users Settings page
+- **Method:** UI for user management (optional, based on design)
+- **Reference:** `src/app/(dashboard)/settings/users/page.tsx`
+
+---
+
+## Phase 6: Mobile & Polish
+**Goal:** Mobile responsiveness and final touches
+
+### Step 6.1: Mobile responsive improvements
+- **Method:** Add hamburger sidebar, stacked widgets, touch controls
+- **Reference:** `src/components/layout/`, `src/components/dashboard/`
+
+### Step 6.2: Header integration
+- **Method:** Add NotificationBell and UserMenu to Header
+- **Reference:** `src/components/layout/Header.tsx`
 
 # 5. TESTING AND VALIDATION
 
 Each phase has specific acceptance criteria for verification:
 
-## Phase A: Foundation & Dependencies
-- [ ] Dependencies install without errors (`npm install`)
-- [ ] Database migrations run successfully on startup
-- [ ] Application builds without errors (`npm run build`)
+## Phase 1: Widget Registration Fix ⚠️
+- [ ] Add Widget modal shows all available widgets
+- [ ] Can add GPU Monitoring widget to dashboard
+- [ ] Can add Ollama Status widget to dashboard
+- [ ] Can add SSH Terminal widget to dashboard
+- [ ] Can add Docker Containers widget to dashboard
 
-## Phase B: Docker Management
-- [ ] Can list all containers on a server via SSH
-- [ ] Can start/stop/restart containers from UI
-- [ ] Can view container logs in widget
-- [ ] Can view container stats in widget
-
-## Phase C: Real-Time Infrastructure
-- [ ] WebSocket connection establishes for terminal
-- [ ] Terminal input/output flows in real-time
+## Phase 2: WebSocket Infrastructure
+- [ ] Terminal WebSocket connects and provides shell
 - [ ] Docker logs stream in real-time
+- [ ] Docker events stream in real-time
 
-## Phase D: Widgets Expansion
-- [ ] GPU widget shows VRAM usage, temperature, utilization
-- [ ] Ollama widget shows model list and status
-- [ ] Terminal widget allows full shell interaction
-- [ ] Custom Command widget runs saved commands
+## Phase 3: Custom & Portainer Widgets
+- [ ] Custom Command widget executes defined commands
+- [ ] Portainer Link widget displays stored URLs
+- [ ] Both widgets appear in Add Widget modal
 
-## Phase E: Notifications & Alerts
-- [ ] Notification bell shows unread count
-- [ ] Clicking notification navigates to related item
-- [ ] Alert rules can be created with conditions
-- [ ] Alert triggers send webhook notification
-- [ ] Alert triggers send email notification
+## Phase 4: Notifications & Alerts
+- [ ] Notification bell shows unread count in header
+- [ ] Webhook notifications send to Discord/Slack
+- [ ] Email notifications send via SMTP
+- [ ] Alert rules evaluated on schedule
+- [ ] Alerts trigger correct notification channel
 
-## Phase F: UI Polish & Advanced Features
-- [ ] Audit log page shows filterable action history
-- [ ] Portainer Link widget displays clickable links
-- [ ] Mobile: sidebar collapses to hamburger
-- [ ] Mobile: widgets stack in single column
+## Phase 5: Settings Pages
+- [ ] Alerts page allows creating alert rules
+- [ ] Audit Log page shows searchable history
+- [ ] Users page shows user list (if implemented)
 
-## Phase G: Docker Events & Advanced Docker
-- [ ] Docker events stream in real-time via WebSocket
-- [ ] Container health check status displays in container list
+## Phase 6: Mobile & Polish
+- [ ] Sidebar collapses on mobile
+- [ ] Widgets stack on mobile screens
+- [ ] Header shows NotificationBell

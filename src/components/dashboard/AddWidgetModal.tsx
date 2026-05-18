@@ -65,6 +65,12 @@ export function AddWidgetModal({ isOpen, onClose, dashboardId, serverId, onAdd }
     { type: 'disk_usage', name: 'Disk Usage', desc: 'Per-mount usage' },
     { type: 'network', name: 'Network', desc: 'Interfaces' },
     { type: 'system_services', name: 'Services', desc: 'Running services' },
+    { type: 'gpu_monitoring', name: 'GPU Monitoring', desc: 'NVIDIA GPU stats' },
+    { type: 'ollama_status', name: 'Ollama Status', desc: 'LLM runtime status' },
+    { type: 'ssh_terminal', name: 'SSH Terminal', desc: 'Command terminal' },
+    { type: 'docker_containers', name: 'Docker Containers', desc: 'Container management' },
+    { type: 'custom_command', name: 'Custom Command', desc: 'Run custom SSH command' },
+    { type: 'portainer_link', name: 'Portainer Link', desc: 'External Portainer UI' },
   ];
 
   const handleAdd = () => {
