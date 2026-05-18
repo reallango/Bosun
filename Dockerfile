@@ -25,8 +25,9 @@ FROM node:20-slim AS runtime
 
 # Install required packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    wget xz-utils ca-certificates openssh-client procps \
-    && rm -rf /var/lib/apt/lists/*
+    wget xz-utils ca-certificates openssh-client procps nginx \
+    && rm -rf /var/lib/apt/lists/* \
+    && rm /etc/nginx/sites-enabled/default || true
 
 
 # Create node user if not exists
@@ -69,6 +70,7 @@ COPY --from=builder /app/ws-server.js ./ws-server.js
 
 # Copy s6 service definitions
 COPY s6-overlay/ /etc/s6-overlay/
+COPY nginx/ /etc/nginx/
 
 
 # Copy scripts
