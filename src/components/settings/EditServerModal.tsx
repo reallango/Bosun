@@ -12,11 +12,12 @@ interface SSHKey {
 interface Server {
   id: string;
   name: string;
-  hostname: string;
+  hostname?: string;
+  host?: string;
   ssh_port: number;
-  ssh_user: string;
+  ssh_user: string | null;
   ssh_key_id: string | null;
-  notes: string;
+  notes?: string;
 }
 
 interface EditServerModalProps {
@@ -39,7 +40,7 @@ export function EditServerModal({ isOpen, onClose, server, onSave }: EditServerM
     if (server && isOpen) {
       setForm({
         name: server.name || '',
-        hostname: server.hostname || '',
+        hostname: server.hostname || server.host || '',
         ssh_port: server.ssh_port || 22,
         ssh_user: server.ssh_user || '',
         ssh_key_id: server.ssh_key_id || '',
