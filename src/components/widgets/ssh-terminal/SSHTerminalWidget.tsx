@@ -86,7 +86,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       };
 
       ws.onmessage = (event) => {
-        // Use ref to check status to avoid stale closure
+        // Write raw SSH output to terminal
         if (termRef.current && statusRef.current === 'connected') {
           termRef.current.write(event.data);
         }
@@ -186,7 +186,8 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
     // Set up terminal input handler
     term.onData((data) => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({ type: 'input', data }));
+        // Send raw input to SSH shell
+        wsRef.current.send(data);
       }
     });
 

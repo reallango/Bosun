@@ -70,8 +70,9 @@ COPY --from=builder /app/ws-server.js ./ws-server.js
 
 # Copy s6 service definitions
 COPY s6-overlay/ /etc/s6-overlay/
-RUN sed -i 's/\r$//' /etc/s6-overlay/s6-rc.d/nginx/run
-RUN chmod +x /etc/s6-overlay/s6-rc.d/nginx/run
+RUN sed -i 's/\r$//' /etc/s6-overlay/s6-rc.d/*/run 2>/dev/null || true
+RUN sed -i 's|#!/usr/bin/with-contenv|#!/command/with-contenv|g' /etc/s6-overlay/s6-rc.d/*/run 2>/dev/null || true
+RUN chmod +x /etc/s6-overlay/s6-rc.d/*/run 2>/dev/null || true
 COPY nginx/ /etc/nginx/
 
 
