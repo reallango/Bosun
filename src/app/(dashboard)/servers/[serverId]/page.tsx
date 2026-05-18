@@ -28,7 +28,7 @@ export default function ServerDashboardPage() {
             .catch(() => {});
     }, [serverId]);
 
-    const { widgets, isLoading, addWidget, updateLayout } = useDashboard(dashId || '');
+    const { widgets, isLoading, addWidget, updateLayout, refresh } = useDashboard(dashId || '');
 
     if (!dashId || isLoading) {
         return <div><Header title="Server Dashboard" /><div className="p-6 text-muted-foreground">Loading...</div></div>;
@@ -39,7 +39,7 @@ export default function ServerDashboardPage() {
             <Header title={name || 'Server'} />
             <div className="p-6">
                 <DashboardToolbar name={name} serverName={name} type="server" onAddWidget={() => setModal(true)} />
-                <DashboardGrid dashboardId={dashId} widgets={widgets} onLayoutChange={updateLayout} editable />
+                <DashboardGrid dashboardId={dashId} widgets={widgets} onLayoutChange={updateLayout} editable onWidgetRemoved={refresh} />
                 <AddWidgetModal isOpen={modal} onClose={() => setModal(false)} dashboardId={dashId} serverId={serverId} onAdd={addWidget} />
             </div>
         </div>

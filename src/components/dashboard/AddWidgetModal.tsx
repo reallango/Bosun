@@ -33,7 +33,7 @@ export function AddWidgetModal({ isOpen, onClose, dashboardId, serverId, onAdd }
           return res.json();
         })
         .then(data => {
-          setServers(data.servers || []);
+          setServers(data.data?.servers || []);
           setLoadingServers(false);
         })
         .catch(err => {

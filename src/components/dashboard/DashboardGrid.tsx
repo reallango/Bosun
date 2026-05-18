@@ -15,9 +15,10 @@ interface DashboardGridProps {
   widgets: Widget[];
   onLayoutChange?: (items: { widgetId: string; x: number; y: number; w: number; h: number }[]) => void;
   editable?: boolean;
+  onWidgetRemoved?: () => void;
 }
 
-export function DashboardGrid({ dashboardId, widgets, onLayoutChange, editable = false }: DashboardGridProps) {
+export function DashboardGrid({ dashboardId, widgets, onLayoutChange, editable = false, onWidgetRemoved }: DashboardGridProps) {
   const [layouts, setLayouts] = useState<any[]>(() =>
     widgets.map(w => ({
       i: w.id,
@@ -73,6 +74,7 @@ export function DashboardGrid({ dashboardId, widgets, onLayoutChange, editable =
             title={widget.title_override || widget.widget_type}
             serverId={widget.server_id}
             editable={editable}
+            onRemoved={onWidgetRemoved}
           />
         </div>
       ))}

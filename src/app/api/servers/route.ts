@@ -12,7 +12,8 @@ export async function GET(request: NextRequest) {
     if (!payload) return NextResponse.json({ error: { message: 'Invalid token' } }, { status: 401 });
     const result = await rqlite.query('SELECT id, name, hostname FROM servers ORDER BY name');
     const servers = rowsToObjects(result).map(s => ({ id: s.id, name: s.name, host: s.hostname }));
-    return NextResponse.json({ servers });
+    console.log('[API] /api/servers returning', servers.length, 'servers');
+    return NextResponse.json({ data: { servers } });
   } catch (error) {
     console.error('Servers list error:', error);
     return NextResponse.json({ error: { message: 'Internal server error', code: 'INTERNAL_ERROR' } }, { status: 500 });
