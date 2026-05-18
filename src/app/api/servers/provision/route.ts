@@ -1,10 +1,11 @@
 // src/app/api/servers/provision/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireRole } from '@/lib/auth/middleware';
-import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
-import crypto from 'crypto';
+import { rqlite } from '@/lib/db/rqlite-client';
 import { Client } from 'ssh2';
-import { encrypt, generateFingerprint } from '@/lib/crypto/keys';
+import { encrypt } from '@/lib/crypto/keys';
+import { generateSSHKeyPair } from '@/lib/ssh/keygen';
+import crypto from 'crypto';
 
 // Helper to run a command over SSH
 async function sshExec(
@@ -114,14 +115,9 @@ export async function POST(request: NextRequest) {
             steps.push(`Service account exists: ${service_account}`);
         }
 
-        // Step 3: Generate SSH key pair
+        // Step 3: Generate SSH key pair using ssh-keygen
         const keyName = `${hostname}-${service_account}`;
-        const { generateKeyPairSync } = crypto;
-        const { publicKey, privateKey } = generateKeyPairSync('ed25519', {
-            publicKeyEncoding: { type: 'spki', format: 'pem' },
-            privateKeyEncoding: { type: 'pkcs8', format: 'pem' }
-        });
-        const fingerprint = generateFingerprint(publicKey);
+        const { privateKey, publicKey, fingerprint } = generateSSHKeyPair(keyName, 'ed25519');
         const encryptedPrivateKey = encrypt(privateKey, process.env.MASTER_KEY || '');
 
         // Store key
