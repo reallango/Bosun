@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
             port = 22,
             admin_username,
             admin_password,
-            service_account = 'bosun',
+            service_account = 'bosun-svc',
         } = await request.json();
 
         if (!hostname || !admin_username || !admin_password) {
