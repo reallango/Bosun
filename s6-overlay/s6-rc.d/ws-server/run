@@ -11,4 +11,4 @@ done
 echo "[ws-server] rqlite is ready. Starting ws-server..."
 
 cd /app
-exec node /app/ws-server.js
+exec node --input-type=module /app/ws-server.mjs
