@@ -140,10 +140,34 @@ wss.on('connection', async (ws, req) => {
 
   console.log('[WS] Client connected: session=' + sessionId + ', server=' + serverId + ', ip=' + clientIP);
   
-  // Simple echo for now - full SSH in next iteration
+  // Send connection message
+  ws.send('\r\n\x1b[32mConnected to Bosun SSH terminal\x1b[0m\r\n');
+  ws.send('Session: ' + sessionId + ', Server: ' + serverId + '\r\n\r\n');
+  
+  // Handle incoming messages
+  let inputBuffer = '';
   ws.on('message', (data) => {
-    console.log('[WS] Received from session=' + sessionId + ':', data.toString().substring(0, 50));
-    ws.send('Connected to ws-server. SSH backend coming soon.\r\n');
+    const msg = data.toString();
+    
+    // Try to parse as JSON (resize commands from frontend)
+    try {
+      const json = JSON.parse(msg);
+      if (json.type === 'resize') {
+        // Resize would be handled here with SSH PTY
+        return;
+      }
+      if (json.type === 'input') {
+        // Raw input from terminal
+        inputBuffer += json.data;
+        // Echo locally for now (until SSH connected)
+        ws.send(json.data);
+        return;
+      }
+    } catch {
+      // Not JSON - treat as raw input
+      // Echo locally for now
+      ws.send(msg);
+    }
   });
 
   ws.on('close', () => {
