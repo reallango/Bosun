@@ -14,7 +14,7 @@ services:
       - MASTER_KEY=${MASTER_KEY}
       - AUTH_SECRET=${AUTH_SECRET}
       - WS_PORT=3002
-      - NEXT_PUBLIC_WS_URL=ws://bosun:3002
+      - NEXT_PUBLIC_WS_URL=${NEXT_PUBLIC_WS_URL:-ws://localhost:3002}
     volumes:
       - bosun-data:/data/rqlite
     ports:
