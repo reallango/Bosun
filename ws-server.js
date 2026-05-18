@@ -151,7 +151,7 @@ wss.on('connection', async (ws, req) => {
   });
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, '0.0.0.0', () => {
   console.log('[WS] Bosun WebSocket server running on port ' + PORT);
   console.log('[WS] Path: ' + WS_PATH);
   console.log('[WS] Heartbeat: ' + HEARTBEAT_MS + 'ms');
