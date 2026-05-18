@@ -1,0 +1,1 @@
+export { GPUMonitoringWidget } from './GPUMonitoringWidget';
