@@ -10,7 +10,10 @@ interface SSHTerminalWidgetProps {
   serverId: string;
 }
 
-type ConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
+type ConnectionStatus = 'idle' | 'connecting' | 'authenticating' | 'connected' | 'error' | 'disconnected';
+
+// Buffer to collect output during authentication phase
+let authBuffer = '';
 
 export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
@@ -18,11 +21,26 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
   const wsRef = useRef<WebSocket | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
-  const statusRef = useRef<ConnectionStatus>('disconnected'); // Use ref to avoid stale closure
+  const statusRef = useRef<ConnectionStatus>('idle'); // Use ref to avoid stale closure
 
-  const [status, setStatus] = useState<ConnectionStatus>('disconnected');
+  const [status, setStatus] = useState<ConnectionStatus>('idle');
   const [error, setError] = useState<string | null>(null);
+  const [username, setUsername] = useState<string>('');
   const [sessionId] = useState(() => Math.random().toString(36).substring(2, 11));
+
+  // Load persisted username from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem(`bosun-terminal-user-${serverId}`);
+    if (saved) setUsername(saved);
+  }, [serverId]);
+
+  // Save username to localStorage when changed
+  const handleUsernameChange = (value: string) => {
+    setUsername(value);
+    if (value) {
+      localStorage.setItem(`bosun-terminal-user-${serverId}`, value);
+    }
+  };
 
   // Derive WebSocket URL from current page origin (works with Cloudflare)
   const getWsUrl = () => {
@@ -31,20 +49,27 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
     return `${proto}://${host}/ws/terminal`;
   };
 
-  // Connect to WebSocket server
-  const connect = useCallback(async () => {
+  // Connect with authentication flow (su as user)
+  const connect = useCallback(async (targetUsername?: string) => {
+    const userToUse = targetUsername || username;
+    if (!userToUse) {
+      setError('Username required');
+      return;
+    }
+
     // Prevent multiple concurrent connections
     if (wsRef.current?.readyState === WebSocket.OPEN) {
       return;
     }
-    if (statusRef.current === 'connecting') {
+    if (statusRef.current === 'connecting' || statusRef.current === 'authenticating') {
       return;
     }
 
-    console.log('[WS] Connecting to:', getWsUrl(), 'serverId:', serverId);
+    console.log('[WS] Connecting to:', getWsUrl(), 'serverId:', serverId, 'user:', userToUse);
 
     setStatus('connecting');
     setError(null);
+    authBuffer = ''; // Reset buffer
 
     try {
       // Get a short-lived WebSocket token
@@ -70,35 +95,75 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       const ws = new WebSocket(url.toString());
       wsRef.current = ws;
 
-      ws.onopen = () => {
-        console.log('[WS] Connected');
-        setStatus('connected');
-        statusRef.current = 'connected';
-
-        // Send initial resize
-        if (termRef.current && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({
-            type: 'resize',
-            cols: termRef.current.cols,
-            rows: termRef.current.rows
-          }));
+      // Timeout for authentication (15 seconds)
+      const authTimeout = setTimeout(() => {
+        if (statusRef.current === 'authenticating') {
+          console.log('[WS] Auth timeout, disconnecting');
+          setError('Authentication timeout');
+          setStatus('error');
+          statusRef.current = 'error';
+          ws.close();
         }
+      }, 15000);
+
+      ws.onopen = () => {
+        console.log('[WS] Connected, starting authentication as', userToUse);
+        setStatus('authenticating');
+        statusRef.current = 'authenticating';
       };
 
       ws.onmessage = (event) => {
-        // Write raw SSH output to terminal
-        if (termRef.current && statusRef.current === 'connected') {
-          termRef.current.write(event.data);
+        const data = event.data;
+        
+        if (statusRef.current === 'authenticating') {
+          // Buffer output during authentication
+          authBuffer += data;
+          
+          // Check if we have a prompt (typically ends with : or $ or #)
+          if (authBuffer.match(/[#$]:\s*$/m) || authBuffer.match(/[#$]:\s*$/)) {
+            clearTimeout(authTimeout);
+            
+            // Check if it's a password prompt
+            if (authBuffer.toLowerCase().includes('password')) {
+              // It's asking for password - this shouldn't happen with su
+              // Send password (user will need to type it)
+              // For now, we'll display the password prompt to user
+              console.log('[WS] Password prompt detected');
+            }
+            
+            // Check for successful switch
+            if (authBuffer.includes(userToUse) && (authBuffer.includes('#') || authBuffer.match(new RegExp(`^${userToUse}`, 'm')))) {
+              // Successful - clear buffer and show terminal
+              console.log('[WS] Authentication successful');
+              authBuffer = '';
+              setStatus('connected');
+              statusRef.current = 'connected';
+            } else if (authBuffer.includes('incorrect') || authBuffer.includes('failed') || authBuffer.includes('Authentication failed')) {
+              clearTimeout(authTimeout);
+              console.log('[WS] Authentication failed');
+              setError('Invalid credentials');
+              setStatus('error');
+              statusRef.current = 'error';
+              ws.close();
+            }
+          }
+        } else if (statusRef.current === 'connected') {
+          // Normal operation - write to terminal
+          if (termRef.current) {
+            termRef.current.write(data);
+          }
         }
       };
 
       ws.onclose = (event) => {
+        clearTimeout(authTimeout);
         console.log('[WS] Disconnected:', event.code, event.reason);
         setStatus('disconnected');
         statusRef.current = 'disconnected';
       };
 
       ws.onerror = (event) => {
+        clearTimeout(authTimeout);
         console.error('[WS] Error:', event);
         setError('WebSocket connection error');
         setStatus('error');
@@ -111,7 +176,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       setStatus('error');
       statusRef.current = 'error';
     }
-  }, [sessionId, serverId]); // Removed status from deps
+  }, [username, sessionId, serverId]); // Removed status from deps
 
   // Disconnect from WebSocket server
   const disconnect = useCallback(() => {
@@ -119,14 +184,10 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       wsRef.current.close();
       wsRef.current = null;
     }
-    setStatus('disconnected');
+    setStatus('idle');
   }, []);
 
-  // Reconnect handler
-  const reconnect = useCallback(() => {
-    disconnect();
-    setTimeout(() => connect(), 500);
-  }, [connect, disconnect]);
+  // (reconnect removed - now handled by handleReconnect)
 
   // Initialize terminal
   useEffect(() => {
@@ -211,8 +272,8 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       resizeObserverRef.current.observe(terminalRef.current.parentElement);
     }
 
-    // Auto-connect on mount
-    connect();
+    // NO auto-connect - user must explicitly connect
+    // (Step 5.5: Remove auto-connect logic)
 
     // Cleanup on unmount
     return () => {
@@ -224,8 +285,10 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
 
   // Handle control buttons
   const handleConnect = () => {
-    if (status === 'disconnected' || status === 'error') {
-      connect();
+    if (status === 'idle' || status === 'disconnected' || status === 'error') {
+      if (username) {
+        connect(username);
+      }
     }
   };
 
@@ -234,7 +297,10 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
   };
 
   const handleReconnect = () => {
-    reconnect();
+    if (username) {
+      disconnect();
+      setTimeout(() => connect(username), 500);
+    }
   };
 
   return (
@@ -247,26 +313,52 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
           style={{ minHeight: '150px' }}
         />
         
-        {/* Error overlay */}
-        {error && (
-          <div className="absolute inset-0 bg-red-900/80 flex items-center justify-center p-4">
-            <div className="text-center">
-              <p className="text-red-200 text-sm mb-2">Connection Error</p>
-              <p className="text-red-100 text-xs mb-3">{error}</p>
+        {/* Idle state - username input form */}
+        {status === 'idle' && (
+          <div className="absolute inset-0 bg-gray-900/90 flex items-center justify-center p-4">
+            <div className="text-center w-full max-w-xs">
+              <p className="text-gray-300 text-sm mb-4">Enter username to connect as:</p>
+              <input
+                type="text"
+                value={username}
+                onChange={(e) => handleUsernameChange(e.target.value)}
+                placeholder="Username"
+                className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded text-gray-200 text-sm mb-3"
+                onKeyDown={(e) => e.key === 'Enter' && handleConnect()}
+              />
               <button
-                onClick={reconnect}
-                className="px-3 py-1 bg-red-700 hover:bg-red-600 text-white text-xs rounded"
+                onClick={handleConnect}
+                disabled={!username}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded disabled:opacity-50 disabled:cursor-not-allowed w-full"
               >
-                Reconnect
+                Connect
               </button>
             </div>
           </div>
         )}
         
-        {/* Connecting overlay */}
-        {status === 'connecting' && (
+        {/* Error overlay */}
+        {error && status !== 'idle' && (
+          <div className="absolute inset-0 bg-red-900/80 flex items-center justify-center p-4">
+            <div className="text-center">
+              <p className="text-red-200 text-sm mb-2">Connection Error</p>
+              <p className="text-red-100 text-xs mb-3">{error}</p>
+              <button
+                onClick={handleReconnect}
+                className="px-3 py-1 bg-red-700 hover:bg-red-600 text-white text-xs rounded"
+              >
+                Retry
+              </button>
+            </div>
+          </div>
+        )}
+        
+        {/* Connecting/Authenticating overlay */}
+        {(status === 'connecting' || status === 'authenticating') && (
           <div className="absolute inset-0 bg-gray-900/80 flex items-center justify-center">
-            <p className="text-gray-300 text-sm">Connecting...</p>
+            <p className="text-gray-300 text-sm">
+              {status === 'connecting' ? 'Connecting...' : `Authenticating as ${username}...`}
+            </p>
           </div>
         )}
       </div>
@@ -279,10 +371,12 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
             className={`w-2 h-2 rounded-full ${
               status === 'connected'
                 ? 'bg-green-500'
-                : status === 'connecting'
+                : status === 'connecting' || status === 'authenticating'
                 ? 'bg-yellow-500 animate-pulse'
                 : status === 'error'
                 ? 'bg-red-500'
+                : status === 'idle'
+                ? 'bg-blue-500'
                 : 'bg-gray-500'
             }`}
           />
@@ -291,8 +385,12 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
               ? 'Connected'
               : status === 'connecting'
               ? 'Connecting...'
+              : status === 'authenticating'
+              ? `Authenticating as ${username}...`
               : status === 'error'
               ? 'Error'
+              : status === 'idle'
+              ? 'Idle'
               : 'Disconnected'}
           </span>
         </div>
@@ -306,13 +404,13 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
             >
               Disconnect
             </button>
-          ) : (
+          ) : status !== 'idle' && (
             <button
-              onClick={status === 'error' ? handleReconnect : handleConnect}
-              disabled={status === 'connecting'}
+              onClick={handleReconnect}
+              disabled={status === 'connecting' || status === 'authenticating'}
               className="px-2 py-0.5 text-xs bg-blue-700 hover:bg-blue-600 text-white rounded disabled:opacity-50"
             >
-              {status === 'error' ? 'Reconnect' : 'Connect'}
+              Retry
             </button>
           )}
         </div>
