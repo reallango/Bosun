@@ -1,4 +1,4 @@
-import { BaseOSAdapter, AdapterResult, OSInfo, CPUInfo, MemoryInfo } from './base';
+import { BaseOSAdapter, AdapterResult, OSInfo, CPUInfo, MemoryInfo, ContainerInfo, ContainerStats } from './base';
 
 export class UnraidAdapter extends BaseOSAdapter {
   async getOSInfo(): Promise<AdapterResult<OSInfo>> {
@@ -42,5 +42,24 @@ export class UnraidAdapter extends BaseOSAdapter {
     } catch (error) {
       return { data: { total_mb: 0 }, error: String(error) };
     }
+  }
+
+  async listContainers(): Promise<AdapterResult<ContainerInfo[]>> {
+    return { data: [], error: 'Docker not available on Unraid' };
+  }
+  async startContainer(id: string): Promise<AdapterResult<boolean>> {
+    return { data: false, error: 'Docker not available on Unraid' };
+  }
+  async stopContainer(id: string): Promise<AdapterResult<boolean>> {
+    return { data: false, error: 'Docker not available on Unraid' };
+  }
+  async restartContainer(id: string): Promise<AdapterResult<boolean>> {
+    return { data: false, error: 'Docker not available on Unraid' };
+  }
+  async getContainerLogs(id: string, tail = 100): Promise<AdapterResult<string>> {
+    return { data: '', error: 'Docker not available on Unraid' };
+  }
+  async getContainerStats(id: string): Promise<AdapterResult<ContainerStats>> {
+    return { data: { id, name: id, cpu_percent: 0, memory_mb: 0, memory_limit_mb: 0, network_rx_mb: 0, network_tx_mb: 0, block_read_mb: 0, block_write_mb: 0 }, error: 'Docker not available on Unraid' };
   }
 }
