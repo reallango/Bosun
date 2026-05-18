@@ -10,9 +10,9 @@ export async function GET(request: NextRequest) {
     if (!accessToken) return NextResponse.json({ error: { message: 'Not authenticated' } }, { status: 401 });
     const payload = await verifyAccessToken(accessToken);
     if (!payload) return NextResponse.json({ error: { message: 'Invalid token' } }, { status: 401 });
-    const result = await rqlite.query('SELECT * FROM servers ORDER BY name');
-    const servers = rowsToObjects(result);
-    return NextResponse.json({ data: servers });
+    const result = await rqlite.query('SELECT id, name, hostname FROM servers ORDER BY name');
+    const servers = rowsToObjects(result).map(s => ({ id: s.id, name: s.name, host: s.hostname }));
+    return NextResponse.json({ servers });
   } catch (error) {
     console.error('Servers list error:', error);
     return NextResponse.json({ error: { message: 'Internal server error', code: 'INTERNAL_ERROR' } }, { status: 500 });
