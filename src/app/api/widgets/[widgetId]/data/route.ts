@@ -110,14 +110,27 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
             break;
         }
         case 'docker_containers': {
-            const r=await run("docker ps -a --format '{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}|{{.State}}|{{.Ports}}' 2>/dev/null");
-            if(r.exitCode!==0) {
-                data=[];
+            // Try regular docker first, then sudo, then podman
+            const r1 = await run("docker ps -a --format '{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}|{{.State}}|{{.Ports}}' 2>/dev/null || true");
+            let r = r1;
+            if (r1.exitCode !== 0) {
+                // Try sudo docker
+                const r2 = await run("sudo docker ps -a --format '{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}|{{.State}}|{{.Ports}}' 2>/dev/null || true");
+                if (r2.exitCode === 0) r = r2;
+            }
+            if (r.exitCode !== 0) {
+                // Try podman
+                const r3 = await run("podman ps -a --format '{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}|{{.State}}|{{.Ports}}' 2>/dev/null || true");
+                if (r3.exitCode === 0) r = r3;
+            }
+            if (r.exitCode !== 0) {
+                // No docker available - return empty
+                data = [];
                 break;
             }
-            data=r.stdout.trim().split('\n').filter(Boolean).map((line:string)=>{
-                const p=line.split('|');
-                return{ id:p[0], name:p[1], image:p[2], status:p[3], state:p[4], ports:p[5] };
+            data = r.stdout.trim().split('\n').filter(Boolean).map((line: string) => {
+                const p = line.split('|');
+                return { id: p[0], name: p[1], image: p[2], status: p[3], state: p[4], ports: p[5] };
             });
             break;
         }
