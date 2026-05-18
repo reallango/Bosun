@@ -31,7 +31,7 @@ async function queryRqlite(sql) {
     const res = await fetch(`http://${RQLITE_HOST}/db/query`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify([[sql]]),
+      body: JSON.stringify([sql]),
     });
     const json = await res.json();
     const result = json.results?.[0];
@@ -46,15 +46,30 @@ async function queryRqlite(sql) {
 // Decrypt private key using MASTER_KEY
 function decrypt(encryptedData) {
   try {
-    const data = Buffer.from(encryptedData, 'base64');
-    const iv = data.subarray(0, 12);
-    const authTag = data.subarray(12, 28);
-    const ciphertext = data.subarray(28);
-    const key = crypto.createHash('sha256').update(MASTER_KEY).digest();
-    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+    const ALGORITHM = 'aes-256-gcm';
+    const IV_LENGTH = 16;
+    const TAG_LENGTH = 16;
+
+    const key = crypto.pbkdf2Sync(
+      MASTER_KEY,
+      'bosun-ssh-key-encryption',
+      100000,
+      32,
+      'sha256'
+    );
+
+    const combined = Buffer.from(encryptedData, 'base64');
+    const iv = combined.subarray(0, IV_LENGTH);
+    const authTag = combined.subarray(IV_LENGTH, IV_LENGTH + TAG_LENGTH);
+    const encrypted = combined.subarray(IV_LENGTH + TAG_LENGTH);
+
+    const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
     decipher.setAuthTag(authTag);
-    const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-    return decrypted.toString('utf-8');
+
+    let decrypted = decipher.update(encrypted, undefined, 'utf8');
+    decrypted += decipher.final('utf8');
+
+    return decrypted;
   } catch (err) {
     console.error('[WS] Decrypt error:', err.message);
     throw err;
