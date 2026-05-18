@@ -1,22 +1,14 @@
-#!/bin/sh
+#!/usr/bin/with-contenv sh
+set -eu
 
-# Inherit container environment from s6
-ENV_DIR=""
-[ -d /run/s6/container_environment ] && ENV_DIR="/run/s6/container_environment"
-[ -d /var/run/s6/container_environment ] && ENV_DIR="/var/run/s6/container_environment"
-if [ -n "$ENV_DIR" ]; then
-    for f in "$ENV_DIR"/*; do
-        [ -f "$f" ] && export "$(basename "$f")=$(cat "$f")"
-    done
-fi
+RQLITE_HTTP_PORT="${RQLITE_HTTP_PORT:-4001}"
+RQLITE_URL="http://127.0.0.1:${RQLITE_HTTP_PORT}"
 
-# Wait for rqlite to be ready (ws-server needs it for querying server SSH keys)
-RQLITE_URL="http://localhost:${RQLITE_HTTP_PORT:-4001}"
-echo "Waiting for rqlite at ${RQLITE_URL}..."
+echo "[ws-server] Waiting for rqlite at ${RQLITE_URL}/readyz ..."
 until wget -q -O /dev/null "${RQLITE_URL}/readyz" 2>/dev/null; do
     sleep 1
 done
-echo "rqlite is ready."
+echo "[ws-server] rqlite is ready. Starting ws-server..."
 
 cd /app
-exec node ws-server.js
+exec node /app/ws-server.js
