@@ -7,12 +7,14 @@ import { DiskUsageWidget } from '@/components/widgets/disk-usage';
 import { NetworkWidget } from '@/components/widgets/network';
 import { SystemServicesWidget } from '@/components/widgets/system-services';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
+import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 
 interface WidgetFrameProps {
   widgetId: string;
   widgetType: string;
   title: string;
   serverId: string;
+  serverName?: string;
   editable?: boolean;
   onRemoved?: () => void;
 }
@@ -38,8 +40,7 @@ function WidgetContent({ widgetId, widgetType, serverId }: { widgetId: string; w
   }
 }
 
-export function WidgetFrame({ widgetId, widgetType, title, serverId, editable = false, onRemoved }: WidgetFrameProps) {
-  const [menuOpen, setMenuOpen] = useState(false);
+export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName, editable = false, onRemoved }: WidgetFrameProps) {
   const [removing, setRemoving] = useState(false);
 
   const handleRemove = async () => {
@@ -69,21 +70,31 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, editable = 
       <div className={`flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-700 ${editable ? 'cursor-move drag-handle' : ''}`}>
         <span className="font-medium text-sm truncate">{title}</span>
         <div className="flex items-center gap-1">
-          <span className="text-xs text-gray-500 mr-2">{serverId}</span>
-          <button onClick={() => setMenuOpen(!menuOpen)} className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700">
-            <span className="text-lg">⋮</span>
-          </button>
+          {serverName && <span className="text-xs text-gray-500 mr-1">{serverName}</span>}
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger asChild>
+              <button className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700">
+                <span className="text-lg">⋮</span>
+              </button>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Content className="min-w-[120px] bg-white dark:bg-gray-800 border rounded shadow-lg z-10">
+              <DropdownMenu.Item 
+                className="px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer outline-none"
+                onSelect={handleRefresh}
+              >
+                Refresh
+              </DropdownMenu.Item>
+              <DropdownMenu.Separator className="h-px bg-gray-200 dark:bg-gray-700 my-1" />
+              <DropdownMenu.Item 
+                className="px-4 py-2 text-sm text-red-600 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer outline-none disabled:opacity-50"
+                disabled={removing}
+                onSelect={() => handleRemove()}
+              >
+                {removing ? 'Removing...' : 'Remove'}
+              </DropdownMenu.Item>
+            </DropdownMenu.Content>
+          </DropdownMenu.Root>
         </div>
-        {menuOpen && (
-          <div className="absolute right-0 top-8 bg-white dark:bg-gray-800 border rounded shadow-lg z-10">
-            <button onClick={handleRefresh} className="block w-full px-4 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700">
-              Refresh
-            </button>
-            <button onClick={handleRemove} disabled={removing} className="block w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50">
-              {removing ? 'Removing...' : 'Remove'}
-            </button>
-          </div>
-        )}
       </div>
       <div className="flex-1 p-3 overflow-auto">
         <WidgetContent widgetId={widgetId} widgetType={widgetType} serverId={serverId} />

@@ -118,7 +118,7 @@ export function AddWidgetModal({ isOpen, onClose, dashboardId, serverId, onAdd }
                 <option value="">-- Select a Server --</option>
                 {servers.map(s => (
                   <option key={s.id} value={s.id}>
-                    {s.host}
+                    {s.name} ({s.host})
                   </option>
                 ))}
               </select>
