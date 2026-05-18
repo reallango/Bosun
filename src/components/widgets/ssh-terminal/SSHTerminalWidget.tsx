@@ -222,18 +222,6 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
     };
   }, []); // Only run once on mount
 
-  // Update term and ws refs when they change (for reconnect)
-  useEffect(() => {
-    const term = termRef.current;
-    const ws = wsRef.current;
-
-    if (term && ws?.readyState === WebSocket.OPEN) {
-      term.onData((data) => {
-        ws.send(data);
-      });
-    }
-  }, [status]);
-
   // Handle control buttons
   const handleConnect = () => {
     if (status === 'disconnected' || status === 'error') {
