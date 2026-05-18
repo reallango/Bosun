@@ -12,8 +12,12 @@ interface SSHTerminalWidgetProps {
 
 type ConnectionStatus = 'idle' | 'connecting' | 'authenticating' | 'connected' | 'error' | 'disconnected';
 
-// Buffer to collect output during authentication phase
-let authBuffer = '';
+// Auth refs - use refs (not state) to avoid stale closures in onmessage
+const suSentRef = useRef(false);
+const authenticatedRef = useRef(false);
+const authBufferRef = useRef('');
+const authTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+const passwordPromptShownRef = useRef(false);
 
 export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
@@ -21,12 +25,20 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
   const wsRef = useRef<WebSocket | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
-  const statusRef = useRef<ConnectionStatus>('idle'); // Use ref to avoid stale closure
+  const statusRef = useRef<ConnectionStatus>('idle');
+
+  // Login username ref - accessible inside onmessage closure
+  const loginUsernameRef = useRef('');
 
   const [status, setStatus] = useState<ConnectionStatus>('idle');
   const [error, setError] = useState<string | null>(null);
   const [username, setUsername] = useState<string>('');
   const [sessionId] = useState(() => Math.random().toString(36).substring(2, 11));
+
+  // Sync username with ref
+  useEffect(() => {
+    loginUsernameRef.current = username;
+  }, [username]);
 
   // Load persisted username from localStorage
   useEffect(() => {
@@ -51,7 +63,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
 
   // Connect with authentication flow (su as user)
   const connect = useCallback(async (targetUsername?: string) => {
-    const userToUse = targetUsername || username;
+    const userToUse = (targetUsername || username).trim();
     if (!userToUse) {
       setError('Username required');
       return;
@@ -69,7 +81,14 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
 
     setStatus('connecting');
     setError(null);
-    authBuffer = ''; // Reset buffer
+
+    // Reset all auth refs
+    suSentRef.current = false;
+    authenticatedRef.current = false;
+    authBufferRef.current = '';
+    passwordPromptShownRef.current = false;
+    if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
+    loginUsernameRef.current = userToUse;
 
     try {
       // Get a short-lived WebSocket token
@@ -95,75 +114,110 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       const ws = new WebSocket(url.toString());
       wsRef.current = ws;
 
-      // Timeout for authentication (15 seconds)
-      const authTimeout = setTimeout(() => {
-        if (statusRef.current === 'authenticating') {
-          console.log('[WS] Auth timeout, disconnecting');
-          setError('Authentication timeout');
-          setStatus('error');
-          statusRef.current = 'error';
-          ws.close();
-        }
-      }, 15000);
-
       ws.onopen = () => {
-        console.log('[WS] Connected, starting authentication as', userToUse);
+        console.log('[WS] Connected, will authenticate as', userToUse);
         setStatus('authenticating');
         statusRef.current = 'authenticating';
+
+        // Start auth timeout (15 seconds)
+        authTimeoutRef.current = setTimeout(() => {
+          if (!authenticatedRef.current) {
+            console.log('[WS] Auth timeout');
+            setError('Authentication timed out');
+            setStatus('error');
+            statusRef.current = 'error';
+            ws.close();
+          }
+        }, 15000);
       };
 
       ws.onmessage = (event) => {
         const data = event.data;
-        
-        if (statusRef.current === 'authenticating') {
-          // Buffer output during authentication
-          authBuffer += data;
-          
-          // Check if we have a prompt (typically ends with : or $ or #)
-          if (authBuffer.match(/[#$]:\s*$/m) || authBuffer.match(/[#$]:\s*$/)) {
-            clearTimeout(authTimeout);
-            
-            // Check if it's a password prompt
-            if (authBuffer.toLowerCase().includes('password')) {
-              // It's asking for password - this shouldn't happen with su
-              // Send password (user will need to type it)
-              // For now, we'll display the password prompt to user
-              console.log('[WS] Password prompt detected');
+
+        // ========== AUTH PHASE ==========
+        if (!authenticatedRef.current) {
+          authBufferRef.current += data;
+
+          // Phase 2: Send su after first output (bosun-svc shell ready)
+          if (!suSentRef.current) {
+            setTimeout(() => {
+              if (wsRef.current?.readyState === WebSocket.OPEN) {
+                wsRef.current.send(`su - ${userToUse}\r`);
+                suSentRef.current = true;
+                console.log('[WS] Sent su command for', userToUse);
+              }
+            }, 500);
+            return; // Don't display bosun-svc prompt
+          }
+
+          // Phase 3: Detect Password: prompt -> show terminal
+          if (!passwordPromptShownRef.current &&
+              authBufferRef.current.toLowerCase().includes('password')) {
+            passwordPromptShownRef.current = true;
+            setStatus('connected');
+            statusRef.current = 'connected';
+            // Clear the timeout since we got password prompt
+            if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
+            // Write clean password prompt to terminal
+            if (termRef.current) {
+              termRef.current.write('Password: ');
             }
-            
-            // Check for successful switch
-            if (authBuffer.includes(userToUse) && (authBuffer.includes('#') || authBuffer.match(new RegExp(`^${userToUse}`, 'm')))) {
-              // Successful - clear buffer and show terminal
-              console.log('[WS] Authentication successful');
-              authBuffer = '';
-              setStatus('connected');
-              statusRef.current = 'connected';
-            } else if (authBuffer.includes('incorrect') || authBuffer.includes('failed') || authBuffer.includes('Authentication failed')) {
-              clearTimeout(authTimeout);
-              console.log('[WS] Authentication failed');
-              setError('Invalid credentials');
+            return;
+          }
+
+          // After password prompt shown, pass output to terminal
+          if (passwordPromptShownRef.current) {
+            // Check for failure
+            if (authBufferRef.current.includes('Authentication failure') ||
+                authBufferRef.current.includes('su: ') ||
+                authBufferRef.current.includes('incorrect password') ||
+                authBufferRef.current.includes('does not exist')) {
+              if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
+              setError('Login failed - check your username and password');
               setStatus('error');
               statusRef.current = 'error';
               ws.close();
+              return;
+            }
+
+            // Check for success (user's prompt appeared)
+            if (data.includes(userToUse + '@') ||
+                (authBufferRef.current.includes(userToUse + '@'))) {
+              authenticatedRef.current = true;
+              if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
+              authBufferRef.current = '';
+              console.log('[WS] Authentication successful for', userToUse);
+              // Write this data (it contains the user's prompt)
+              if (termRef.current) {
+                termRef.current.write(data);
+              }
+              return;
+            }
+
+            // Normal pass-through during password entry
+            if (termRef.current) {
+              termRef.current.write(data);
             }
           }
-        } else if (statusRef.current === 'connected') {
-          // Normal operation - write to terminal
-          if (termRef.current) {
-            termRef.current.write(data);
-          }
+
+          return;
+        }
+
+        // ========== NORMAL MODE ==========
+        if (termRef.current) {
+          termRef.current.write(data);
         }
       };
 
       ws.onclose = (event) => {
-        clearTimeout(authTimeout);
+        if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
         console.log('[WS] Disconnected:', event.code, event.reason);
-        setStatus('disconnected');
-        statusRef.current = 'disconnected';
+        setStatus('idle');
+        statusRef.current = 'idle';
       };
 
       ws.onerror = (event) => {
-        clearTimeout(authTimeout);
+        if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
         console.error('[WS] Error:', event);
         setError('WebSocket connection error');
         setStatus('error');
