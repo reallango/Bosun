@@ -109,6 +109,30 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
             }
             break;
         }
+        case 'docker_containers': {
+            const r=await run("docker ps -a --format '{{.ID}}|{{.Names}}|{{.Image}}|{{.Status}}|{{.State}}|{{.Ports}}' 2>/dev/null");
+            if(r.exitCode!==0) {
+                data=[];
+                break;
+            }
+            data=r.stdout.trim().split('\n').filter(Boolean).map((line:string)=>{
+                const p=line.split('|');
+                return{ id:p[0], name:p[1], image:p[2], status:p[3], state:p[4], ports:p[5] };
+            });
+            break;
+        }
+        case 'custom_command': {
+            const cfg=wCfg.command||'uptime';
+            const r=await run(cfg);
+            data={ output:r.stdout+r.stderr, exitCode:r.exitCode };
+            break;
+        }
+        case 'portainer_link': {
+            const srvR2=await rqlite.query('SELECT portainer_url FROM servers WHERE id=?', [widget.server_id]);
+            const portainerUrl=srvR2.values?.[0]?.[0] as string|null;
+            data={ url:portainerUrl, name:'Portainer' };
+            break;
+        }
         default: return NextResponse.json({ error: { message: `Unknown type: ${widget.widget_type}` } }, { status: 400 });
     }
     return NextResponse.json({ data });
