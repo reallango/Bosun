@@ -25,7 +25,7 @@ FROM node:20-slim AS runtime
 
 # Install required packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    wget xz-utils ca-certificates openssh-client \
+    wget xz-utils ca-certificates openssh-client procps \
     && rm -rf /var/lib/apt/lists/*
 
 
