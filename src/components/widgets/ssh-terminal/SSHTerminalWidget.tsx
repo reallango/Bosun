@@ -12,14 +12,14 @@ interface SSHTerminalWidgetProps {
 
 type ConnectionStatus = 'idle' | 'connecting' | 'authenticating' | 'connected' | 'error' | 'disconnected';
 
-// Auth refs - use refs (not state) to avoid stale closures in onmessage
-const suSentRef = useRef(false);
-const authenticatedRef = useRef(false);
-const authBufferRef = useRef('');
-const authTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-const passwordPromptShownRef = useRef(false);
-
 export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps) {
+  // Auth refs - use refs inside component (not state) to avoid stale closures in onmessage
+  const suSentRef = useRef(false);
+  const authenticatedRef = useRef(false);
+  const authBufferRef = useRef('');
+  const authTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const passwordPromptShownRef = useRef(false);
+  
   const terminalRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
