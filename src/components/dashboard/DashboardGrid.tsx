@@ -7,6 +7,7 @@ import 'react-resizable/css/styles.css';
 import { Widget } from '@/types/widget';
 import { WidgetFrame } from './WidgetFrame';
 import { EmptyState } from '@/components/shared/EmptyState';
+import { ensureArray } from '@/lib/api/ensureArray';
 
 const GridLayout = WidthProvider(Responsive);
 
@@ -19,13 +20,15 @@ interface DashboardGridProps {
 }
 
 export function DashboardGrid({ dashboardId, widgets, onLayoutChange, editable = false, onWidgetRemoved }: DashboardGridProps) {
+  const safeWidgets = ensureArray<Widget>(widgets);
+
   const [layouts, setLayouts] = useState<any[]>(() =>
-    widgets.map(w => ({
+    safeWidgets.map(w => ({
       i: w.id,
-      x: w.grid_x,
-      y: w.grid_y,
-      w: w.grid_w,
-      h: w.grid_h,
+      x: w.grid_x ?? 0,
+      y: w.grid_y ?? 0,
+      w: w.grid_w ?? 4,
+      h: w.grid_h ?? 3,
       minW: w.grid_min_w,
       minH: w.grid_min_h,
     }))
@@ -35,16 +38,16 @@ export function DashboardGrid({ dashboardId, widgets, onLayoutChange, editable =
     setLayouts([...currentLayout]);
     if (onLayoutChange) {
       onLayoutChange(currentLayout.map((l: any, idx: number) => ({
-        widgetId: widgets[idx]?.id || '',
+        widgetId: safeWidgets[idx]?.id || '',
         x: l.x,
         y: l.y,
         w: l.w,
         h: l.h,
       })));
     }
-  }, [onLayoutChange, widgets]);
+  }, [onLayoutChange, safeWidgets]);
 
-  if (widgets.length === 0) {
+  if (safeWidgets.length === 0) {
     return (
       <EmptyState
         title="No widgets yet"
@@ -66,7 +69,7 @@ export function DashboardGrid({ dashboardId, widgets, onLayoutChange, editable =
       isDraggable={editable}
       isResizable={editable}
     >
-      {widgets.map(widget => (
+      {safeWidgets.map(widget => (
         <div key={widget.id}>
           <WidgetFrame
             widgetId={widget.id}

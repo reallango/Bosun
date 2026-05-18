@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Dashboard, LayoutItem } from '@/types/dashboard';
 import { Widget } from '@/types/widget';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
+import { ensureArray } from '@/lib/api/ensureArray';
 
 export function useDashboard(dashboardId: string) {
     const [dashboard, setDashboard] = useState<Dashboard | null>(null);
@@ -15,12 +16,16 @@ export function useDashboard(dashboardId: string) {
         try {
             const res = await fetchWithAuth(`/api/dashboards/${dashboardId}`);
             const json = await res.json();
-            if (json.data) {
-                setDashboard(json.data.dashboard);
-                setWidgets(json.data.widgets || []);
-            }
+            const dashboard = json?.data?.dashboard ?? json?.dashboard ?? null;
+            const widgets = ensureArray<Widget>(json?.data?.widgets ?? json?.widgets);
+            setDashboard(dashboard);
+            setWidgets(widgets);
             setError(null);
-        } catch (err) { setError(String(err)); }
+        } catch (err) { 
+            setError(String(err)); 
+            setDashboard(null);
+            setWidgets([]);
+        }
         finally { setIsLoading(false); }
     }, [dashboardId]);
 

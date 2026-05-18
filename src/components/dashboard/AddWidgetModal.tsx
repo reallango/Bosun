@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { ensureArray } from '@/lib/api/ensureArray';
 
 interface Server {
   id: string;
@@ -33,7 +34,8 @@ export function AddWidgetModal({ isOpen, onClose, dashboardId, serverId, onAdd }
           return res.json();
         })
         .then(data => {
-          setServers(data.data?.servers || []);
+          const servers = ensureArray<Server>(data?.data?.servers ?? data?.servers);
+          setServers(servers);
           setLoadingServers(false);
         })
         .catch(err => {

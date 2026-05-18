@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
+import { ensureArray } from '@/lib/api/ensureArray';
 
 interface Server {
   id: string;
@@ -28,12 +29,26 @@ export default function Sidebar() {
   useEffect(() => {
     fetchWithAuth('/api/servers')
       .then(r => r.json())
-      .then(j => setServers(j.data || j.data?.servers || []))
-      .catch(() => {});
+      .then(j => {
+        console.log('[Sidebar] servers keys:', Object.keys(j || {}), 'data keys:', Object.keys(j?.data || {}));
+        const servers = ensureArray<Server>(j?.data?.servers ?? j?.servers);
+        setServers(servers);
+      })
+      .catch(err => {
+        console.error('Failed to load servers', err);
+        setServers([]);
+      });
     fetchWithAuth('/api/dashboards')
       .then(r => r.json())
-      .then(j => setDashboards(j.data?.dashboards || j.data || []))
-      .catch(() => {});
+      .then(j => {
+        console.log('[Sidebar] dashboards keys:', Object.keys(j || {}), 'data keys:', Object.keys(j?.data || {}));
+        const dashboards = ensureArray<Dashboard>(j?.data?.dashboards ?? j?.dashboards);
+        setDashboards(dashboards);
+      })
+      .catch(err => {
+        console.error('Failed to load dashboards', err);
+        setDashboards([]);
+      });
   }, []);
 
   return (
