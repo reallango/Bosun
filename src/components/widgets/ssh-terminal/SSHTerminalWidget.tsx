@@ -18,6 +18,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
   const wsRef = useRef<WebSocket | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
+  const statusRef = useRef<ConnectionStatus>('disconnected'); // Use ref to avoid stale closure
 
   const [status, setStatus] = useState<ConnectionStatus>('disconnected');
   const [error, setError] = useState<string | null>(null);
@@ -28,9 +29,15 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
 
   // Connect to WebSocket server
   const connect = useCallback(async () => {
-    if (wsRef.current?.readyState === WebSocket.OPEN || status === 'connecting') {
+    // Prevent multiple concurrent connections
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
       return;
     }
+    if (statusRef.current === 'connecting') {
+      return;
+    }
+
+    console.log('[WS] Connecting to:', wsUrl, 'serverId:', serverId);
 
     setStatus('connecting');
     setError(null);
@@ -45,6 +52,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       }
 
       const wsToken = tokenJson.data.token;
+      console.log('[WS] Got token, connecting to WebSocket...');
 
       // Build WebSocket URL
       const url = new URL(wsUrl);
@@ -52,15 +60,18 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       url.searchParams.set('serverId', serverId);
       url.searchParams.set('token', wsToken);
 
+      console.log('[WS] WebSocket URL:', url.toString());
+
       const ws = new WebSocket(url.toString());
       wsRef.current = ws;
 
       ws.onopen = () => {
-        setStatus('connected');
         console.log('[WS] Connected');
+        setStatus('connected');
+        statusRef.current = 'connected';
 
         // Send initial resize
-        if (termRef.current) {
+        if (termRef.current && ws.readyState === WebSocket.OPEN) {
           ws.send(JSON.stringify({
             type: 'resize',
             cols: termRef.current.cols,
@@ -70,28 +81,32 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       };
 
       ws.onmessage = (event) => {
-        if (termRef.current && status === 'connected') {
+        // Use ref to check status to avoid stale closure
+        if (termRef.current && statusRef.current === 'connected') {
           termRef.current.write(event.data);
         }
       };
 
       ws.onclose = (event) => {
-        setStatus('disconnected');
         console.log('[WS] Disconnected:', event.code, event.reason);
+        setStatus('disconnected');
+        statusRef.current = 'disconnected';
       };
 
       ws.onerror = (event) => {
         console.error('[WS] Error:', event);
         setError('WebSocket connection error');
         setStatus('error');
+        statusRef.current = 'error';
       };
 
     } catch (err: any) {
       console.error('[WS] Connection error:', err);
       setError(err.message || 'Failed to connect');
       setStatus('error');
+      statusRef.current = 'error';
     }
-  }, [sessionId, serverId, wsUrl, status]);
+  }, [sessionId, serverId, wsUrl]); // Removed status from deps
 
   // Disconnect from WebSocket server
   const disconnect = useCallback(() => {
