@@ -4,6 +4,7 @@ const http = require('http');
 const url = require('url');
 const WebSocket = require('ws');
 const crypto = require('crypto');
+const { Client } = require('ssh2');
 
 const PORT = process.env.WS_PORT || 3002;
 const AUTH_SECRET = process.env.AUTH_SECRET || 'fallback-secret-change-me';
@@ -13,6 +14,9 @@ const RQLITE_HOST = process.env.RQLITE_HOST || '127.0.0.1:4001';
 // WebSocket path for terminal (Cloudflare-compatible)
 const WS_PATH = '/ws/terminal';
 
+// SSH sessions map
+const sshSessions = new Map();
+
 // Heartbeat interval to prevent idle disconnects
 const HEARTBEAT_MS = Number(process.env.WS_HEARTBEAT_MS) || 30000;
 
@@ -20,6 +24,91 @@ const HEARTBEAT_MS = Number(process.env.WS_HEARTBEAT_MS) || 30000;
 const rateLimitMap = new Map();
 const RATE_LIMIT_MAX = 10;
 const RATE_LIMIT_WINDOW_MS = 60000;
+
+// Query rqlite database
+async function queryRqlite(sql) {
+  try {
+    const res = await fetch(`http://${RQLITE_HOST}/db/query`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify([[sql]]),
+    });
+    const json = await res.json();
+    const result = json.results?.[0];
+    if (result?.error) throw new Error(result.error);
+    return result?.values || [];
+  } catch (err) {
+    console.error('[WS] Rqlite query error:', err.message);
+    throw err;
+  }
+}
+
+// Decrypt private key using MASTER_KEY
+function decrypt(encryptedData) {
+  try {
+    const data = Buffer.from(encryptedData, 'base64');
+    const iv = data.subarray(0, 12);
+    const authTag = data.subarray(12, 28);
+    const ciphertext = data.subarray(28);
+    const key = crypto.createHash('sha256').update(MASTER_KEY).digest();
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+    decipher.setAuthTag(authTag);
+    const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+    return decrypted.toString('utf-8');
+  } catch (err) {
+    console.error('[WS] Decrypt error:', err.message);
+    throw err;
+  }
+}
+
+// Connect to server via SSH
+async function connectToServer(serverId) {
+  const conn = new Client();
+  
+  // Get server details from rqlite
+  const servers = await queryRqlite(`SELECT id, hostname, ssh_port, ssh_user, ssh_key_id FROM servers WHERE id = '${serverId}'`);
+  if (!servers || servers.length === 0) {
+    throw new Error('Server not found');
+  }
+  
+  const server = servers[0];
+  const serverHostname = server[1];
+  const sshPort = server[2] || 22;
+  const sshUser = server[3];
+  const sshKeyId = server[4];
+  
+  if (!sshKeyId) {
+    throw new Error('No SSH key configured for this server');
+  }
+  
+  // Get private key
+  const keys = await queryRqlite(`SELECT private_key_enc FROM ssh_keys WHERE id = '${sshKeyId}'`);
+  if (!keys || keys.length === 0) {
+    throw new Error('SSH key not found');
+  }
+  
+  const privateKey = decrypt(keys[0][0]);
+  
+  return new Promise((resolve, reject) => {
+    conn.connect({
+      host: serverHostname,
+      port: sshPort,
+      username: sshUser,
+      privateKey: privateKey,
+      readyTimeout: 10000,
+    });
+    
+    conn.on('ready', () => {
+      console.log('[WS] SSH connected to', serverHostname);
+      resolve(conn);
+    });
+    
+    conn.on('error', (err) => {
+      console.error('[WS] SSH error:', err.message);
+      reject(err);
+    });
+  });
+}
 
 // Health check
 const server = http.createServer((req, res) => {
@@ -140,39 +229,72 @@ wss.on('connection', async (ws, req) => {
 
   console.log('[WS] Client connected: session=' + sessionId + ', server=' + serverId + ', ip=' + clientIP);
   
-  // Send connection message
-  ws.send('\r\n\x1b[32mConnected to Bosun SSH terminal\x1b[0m\r\n');
-  ws.send('Session: ' + sessionId + ', Server: ' + serverId + '\r\n\r\n');
+  let sshClient = null;
+  let sshStream = null;
   
-  // Handle incoming messages
-  let inputBuffer = '';
-  ws.on('message', (data) => {
-    const msg = data.toString();
+  try {
+    // Connect to server via SSH
+    sshClient = await connectToServer(serverId);
+    sshSessions.set(sessionId, sshClient);
     
-    // Try to parse as JSON (resize commands from frontend)
-    try {
-      const json = JSON.parse(msg);
-      if (json.type === 'resize') {
-        // Resize would be handled here with SSH PTY
+    // Open PTY shell
+    sshClient.shell({ term: 'xterm-256color', cols: 80, rows: 24 }, (err, stream) => {
+      if (err) {
+        ws.send('\r\n*** SSH shell failed: ' + err.message + ' ***\r\n');
+        ws.close(4002, err.message);
         return;
       }
-      if (json.type === 'input') {
-        // Raw input from terminal
-        inputBuffer += json.data;
-        // Echo locally for now (until SSH connected)
-        ws.send(json.data);
-        return;
-      }
-    } catch {
-      // Not JSON - treat as raw input
-      // Echo locally for now
-      ws.send(msg);
-    }
-  });
-
-  ws.on('close', () => {
-    console.log('[WS] Client disconnected: session=' + sessionId);
-  });
+      
+      sshStream = stream;
+      ws.send('\r\n\x1b[32mConnected to server via SSH\x1b[0m\r\n\r\n');
+      
+      // SSH output -> browser
+      stream.on('data', (data) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(data.toString('utf-8'));
+        }
+      });
+      
+      stream.on('close', () => {
+        ws.send('\r\n*** SSH session closed ***\r\n');
+        ws.close(1000, 'Session closed');
+      });
+      
+      // Browser input -> SSH
+      ws.on('message', (data) => {
+        const msg = data.toString();
+        
+        // Handle resize JSON
+        try {
+          const json = JSON.parse(msg);
+          if (json.type === 'resize' && sshStream) {
+            sshStream.setWindow(json.rows, json.cols);
+            return;
+          }
+        } catch {
+          // Not JSON, write raw
+        }
+        
+        // Write raw input to SSH
+        if (sshStream) {
+          sshStream.write(msg);
+        }
+      });
+    });
+    
+    // Store stream for cleanup
+    ws.on('close', () => {
+      console.log('[WS] Client disconnected: session=' + sessionId);
+      if (sshStream) sshStream.end();
+      if (sshClient) sshClient.end();
+      sshSessions.delete(sessionId);
+    });
+    
+  } catch (err) {
+    console.error('[WS] SSH connection error:', err.message);
+    ws.send('\r\n*** SSH connection failed: ' + err.message + ' ***\r\n');
+    ws.close(4002, err.message);
+  }
 });
 
 server.listen(PORT, '0.0.0.0', () => {
