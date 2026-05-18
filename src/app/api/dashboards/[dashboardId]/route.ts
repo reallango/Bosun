@@ -13,7 +13,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       return NextResponse.json({ error: { message: 'Dashboard not found' } }, { status: 404 });
     }
 
-    const widgetsResult = await rqlite.query('SELECT * FROM widgets WHERE dashboard_id = ? ORDER BY grid_y, grid_x', [dashboardId]);
+    const widgetsResult = await rqlite.query(
+      'SELECT w.*, s.name AS server_name, s.hostname AS server_host FROM widgets w LEFT JOIN servers s ON s.id = w.server_id WHERE w.dashboard_id = ? ORDER BY w.grid_y, w.grid_x',
+      [dashboardId]
+    );
 
     const dashboard = rowsToObjects(dashResult)[0];
     const widgets = rowsToObjects(widgetsResult).map((w:any) => ({ ...w, config: w.config ? (typeof w.config==='string' ? JSON.parse(w.config||'{}') : w.config) : {} }));

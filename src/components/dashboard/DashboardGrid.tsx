@@ -76,6 +76,7 @@ export function DashboardGrid({ dashboardId, widgets, onLayoutChange, editable =
             widgetType={widget.widget_type}
             title={widget.title_override || widget.widget_type}
             serverId={widget.server_id}
+            serverName={widget.server_name}
             editable={editable}
             onRemoved={onWidgetRemoved}
           />

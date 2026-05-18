@@ -18,6 +18,8 @@ export interface Widget {
   dashboard_id: string;
   widget_type: string;
   server_id: string;
+  server_name?: string;
+  server_host?: string;
   title_override: string | null;
   config: Record<string, unknown>;
   grid_x: number;
