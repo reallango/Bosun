@@ -1,6 +1,6 @@
 # 1. OBJECTIVE
 
-Implement the REAL SSH terminal connection in theBosun WebSocket server (ws-server.js), replacing placeholder code with actual ssh2 connections. The goal is to enable users to connect to servers via SSH from the browser-based terminal widget.
+Fix the SSH terminal widget key duplication bug - every keypress and paste is being sent TWICE to the SSH server, causing characters to appear doubled.
 
 ## Current State Analysis (May 2026):
 
@@ -29,32 +29,21 @@ Implement the REAL SSH terminal connection in theBosun WebSocket server (ws-serv
 
 # 2. CONTEXT SUMMARY
 
-## Current System Architecture:
-- **Frontend:** Next.js 14 running on port 3042
-- **WebSocket Server:** Separate Node.js process (ws-server.js) on port 3002
-- **Database:** rqlite on port 4001 (HTTP API)
-- **Frontend ↔ WebSocket:** WebSocket connection to ws-server.js via /ws/terminal
+## Bug Location:
+File: `src/components/widgets/ssh-terminal/SSHTerminalWidget.tsx`
 
-## Key Files:
-- `ws-server.js` - WebSocket server that NEEDS to be updated
-- `src/components/widgets/ssh-terminal/SSHTerminalWidget.tsx` - Frontend ✅ Works
-- `src/lib/db/rqlite-client.ts` - Has RqliteClient class (HTTP-based)
-- `src/lib/crypto/keys.ts` - Has decrypt() function
+## Root Cause:
+The component has **TWO separate term.onData() handlers** that both send data to WebSocket:
 
-## What Opus Instructions Assume vs Reality:
+1. **Handler 1** (lines 186-192): `useEffect` with empty deps `[]` - runs once on mount
+2. **Handler 2** (lines 225-235): `useEffect` with `[status]` - runs when status changes to 'connected'
 
-| Assumption in Opus Instructions | Reality |
-|------------------------------|---------|
-| "queryRqlite() already exists" | ❌ Doesn't exist - must CREATE |
-| "decrypt() already exists" | ❌ Not in ws-server.js - either import or reimplement |
-| "MASTER_KEY already exists" | ✅ Exists as env var |
-| "ssh2 Client import" | ❌ Not imported - must add import |
-| "rqlite accessible" | Need HTTP calls since ws-server.js runs separately |
+When the WebSocket connects and status becomes 'connected', the second useEffect fires and adds a **duplicate** onData handler. Every keypress is then sent TWICE - once from handler 1 and once from handler 2.
 
-## Dependencies:
-- `ssh2` - Already in package.json ✅
-- `ws` - Already in package.json ✅
-- Need: rqlite HTTP client (can reimplement simple fetch-based version)
+## Evidence:
+- `ls` becomes `llss` (key typed twice)
+- `ls`paste becomes `lsls` (paste typed twice)
+- Both handlers call `ws.send(data)` on the same WebSocket
 
 # 3. APPROACH OVERVIEW
 
@@ -85,109 +74,38 @@ This approach is preferred because:
 
 # 4. IMPLEMENTATION STEPS
 
-## Phase 1: Add Missing Imports and Helper Functions
-**Goal:** Create the helper functions that Opus assumes exist
+## Phase 1: Remove Duplicate Handler
+**Goal:** Fix the duplicate keypress bug
 
-### Step 1.1: Import ssh2 Client
-- **Method:** Add import statement at top of ws-server.js
-- **Code:** `import { Client } from 'ssh2';`
-- **Reference:** ws-server.js (line 1)
-
-### Step 1.2: Create queryRqlite() function
-- **Method:** Create simple fetch-based wrapper for rqlite HTTP API
-- **Code:**
+### Step 1.1: Remove duplicate useEffect
+- **Method:** Delete the second useEffect block (lines 225-235) in SSHTerminalWidget.tsx
+- **Reference:** `src/components/widgets/ssh-terminal/SSHTerminalWidget.tsx`
+- The first handler in the initial useEffect (lines 186-192) should be the ONLY handler
+- Delete this block entirely:
 ```javascript
-async function queryRqlite(sql) {
-  const res = await fetch(`http://${RQLITE_HOST}/db/query`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify([[sql]]),
-  });
-  const json = await res.json();
-  const result = json.results?.[0];
-  if (result?.error) throw new Error(result.error);
-  return result?.values || [];
-}
+// Update term and ws refs when they change (for reconnect)
+useEffect(() => {
+  const term = termRef.current;
+  const ws = wsRef.current;
+
+  if (term && ws?.readyState === WebSocket.OPEN) {
+    term.onData((data) => {
+      ws.send(data);
+    });
+  }
+}, [status]);
 ```
-- **Reference:** ws-server.js (add after the constants section)
-
-### Step 1.3: Create decrypt() function
-- **Method:** Implement AES-256-GCM decryption (same logic as keys.ts)
-- **Code:** Reimplement the decrypt() function from keys.ts
-- **Reference:** ws-server.js (add after queryRqlite)
-
----
-
-## Phase 2: Create connectToServer() Function
-**Goal:** Create the SSH connection function
-
-### Step 2.1: Implement connectToServer()
-- **Method:** Create function to connect to server via SSH using ssh2
-- **Code:** Use Opus's exact implementation (verified)
-- **Reference:** Add after the helper functions
-
-### Step 2.2: Add sshSessions Map
-- **Method:** Add Map for tracking open sessions
-- **Code:** `const sshSessions = new Map();`
-- **Reference:** ws-server.js (global section)
-
----
-
-## Phase 3: Replace Connection Handler with Real SSH
-**Goal:** Replace placeholder code with actual SSH connection
-
-### Step 3.1: Update wss.on('connection') handler
-- **Method:** Replace lines 143-175 with Opus's exact implementation
-- **Reference:** ws-server.js
-
-### Step 3.2: Verify resize handling (potential bug)
-- **Method:** The code `setWindow(rows, cols, rows, cols)` may have a bug
-- **Suggested fix:** `setWindow(rows, cols)` (just 2 params) - Let the code agent verify against ssh2 documentation
-- **Reference:** ws-server.js resize handler section
-
----
-
-## Phase 4: Verification
-**Goal:** Verify the implementation works
-
-### Testing Steps:
-- **Build:** `docker compose build --no-cache && docker compose up -d`
-- **Connect:** Open browser to terminal widget
-- **Verify:** Should see real shell prompt (`bosun-svc@hostname:~$`)
-- **Commands:** Test `whoami`, `ls`, arrow keys, Ctrl+C
-- **Check logs:** Should see real connection, not placeholder message
 
 # 5. TESTING AND VALIDATION
 
 ## Acceptance Criteria:
+- Type single character - should appear ONCE
+- Type `ls` - should show as `ls` not `llss`
+- Paste text - should appear once, not duplicated
+- Arrow keys navigate correctly (not doubled)
+- Exit command closes session properly
 
-| Criterion | How to Verify |
-|-----------|---------------|
-| ✅ connectToServer() EXISTS | Search for function definition in ws-server.js |
-| ✅ queryRqlite() EXISTS | Search for function in ws-server.js |
-| ✅ decrypt() EXISTS | Search for function in ws-server.js |
-| ✅ ssh2 Client imported | Look for `import { Client }` in ws-server.js |
-| No placeholder messages | Should NOT see "Connected to Bosun SSH terminal" echo message |
-| No "echo for now" comments | Should NOT see comments about echoes |
-| Real SSH connection | Docker logs should show: `[WS] Client connected: session=...` |
-| Real shell prompt | Browser should show real prompt like `user@host:~$` |
-| Resize works | Terminal resizes when window resizes |
-| Cleanup on close | Docker logs show proper cleanup when tab closed |
-
-## Verification Commands:
-
-```bash
-# Build and start
-docker compose build --no-cache && docker compose up -d
-
-# Check logs for connection
-docker logs bosun 2>&1 | grep -i "ssh\|ws"
-
-# Should see real connection (not placeholder)
-# Expected: [WS] Client connected: session=xxx, server=xxx
-
-# In browser terminal, test:
-whoami   # Should return service account name
-ls      # Should list files
-exit    # Should close session cleanly
-```
+## Verification:
+- Reload the terminal widget
+- Type keys and verify no duplication
+- Check browser console for any errors
