@@ -34,8 +34,13 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   if (roleError) return roleError;
   const { widgetId } = await params;
   try {
+    const existing = await rqlite.query('SELECT id FROM widgets WHERE id=?', [widgetId]);
+    const existingWidgets = rowsToObjects(existing);
+    if (!existingWidgets.length) {
+      return NextResponse.json({ error: { message: 'Widget not found' } }, { status: 404 });
+    }
     await rqlite.execute('DELETE FROM widgets WHERE id=?', [widgetId]);
-    return NextResponse.json({ data: { success: true } });
+    return NextResponse.json({ success: true });
   } catch (error) {
     return NextResponse.json({ error: { message: String(error) } }, { status: 500 });
   }

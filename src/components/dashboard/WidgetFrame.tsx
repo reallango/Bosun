@@ -6,6 +6,7 @@ import { CPUMemoryWidget } from '@/components/widgets/cpu-memory';
 import { DiskUsageWidget } from '@/components/widgets/disk-usage';
 import { NetworkWidget } from '@/components/widgets/network';
 import { SystemServicesWidget } from '@/components/widgets/system-services';
+import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 
 interface WidgetFrameProps {
   widgetId: string;
@@ -13,6 +14,7 @@ interface WidgetFrameProps {
   title: string;
   serverId: string;
   editable?: boolean;
+  onRemoved?: () => void;
 }
 
 function WidgetContent({ widgetId, widgetType, serverId }: { widgetId: string; widgetType: string; serverId: string }) {
@@ -36,13 +38,26 @@ function WidgetContent({ widgetId, widgetType, serverId }: { widgetId: string; w
   }
 }
 
-export function WidgetFrame({ widgetId, widgetType, title, serverId, editable = false }: WidgetFrameProps) {
+export function WidgetFrame({ widgetId, widgetType, title, serverId, editable = false, onRemoved }: WidgetFrameProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [removing, setRemoving] = useState(false);
 
   const handleRemove = async () => {
-    if (!confirm('Remove this widget?')) return;
-    await fetch(`/api/widgets/${widgetId}`, { method: 'DELETE' });
-    window.location.reload();
+    if (!confirm(`Remove widget '${title}'? This cannot be undone.`)) return;
+    setRemoving(true);
+    try {
+      const res = await fetchWithAuth(`/api/widgets/${widgetId}`, { method: 'DELETE' });
+      const json = await res.json();
+      if (json.success && onRemoved) {
+        onRemoved();
+      } else if (json.error) {
+        alert('Failed to remove widget: ' + json.error.message);
+      }
+    } catch (err) {
+      alert('Failed to remove widget');
+    } finally {
+      setRemoving(false);
+    }
   };
 
   const handleRefresh = async () => {
@@ -64,8 +79,8 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, editable = 
             <button onClick={handleRefresh} className="block w-full px-4 py-2 text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700">
               Refresh
             </button>
-            <button onClick={handleRemove} className="block w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-gray-100 dark:hover:bg-gray-700">
-              Remove
+            <button onClick={handleRemove} disabled={removing} className="block w-full px-4 py-2 text-left text-sm text-red-600 hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50">
+              {removing ? 'Removing...' : 'Remove'}
             </button>
           </div>
         )}
