@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 
 export default function NewServerPage() {
   const router = useRouter();
@@ -20,6 +21,13 @@ export default function NewServerPage() {
   const [provisionError, setProvisionError] = useState('');
   const [provisionData, setProvisionData] = useState<any>(null);
 
+  // Store provision form values for saving
+  const [provisionForm, setProvisionForm] = useState({
+    hostname: '',
+    ssh_port: 22,
+    name: '',
+  });
+
   const handleProvision = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setProvisioning(true);
@@ -30,9 +38,13 @@ export default function NewServerPage() {
     const formData = new FormData(e.currentTarget);
     const hostname = formData.get('hostname') as string;
     const port = parseInt(formData.get('ssh_port') as string) || 22;
+    const name = hostname; // Use hostname as default name
     const admin_username = formData.get('admin_username') as string;
     const admin_password = formData.get('admin_password') as string;
     const service_account = formData.get('service_account') as string || 'bosun';
+
+    // Store form values for later save
+    setProvisionForm({ hostname, ssh_port: port, name });
 
     try {
       const res = await fetch('/api/servers/provision', {
@@ -53,6 +65,39 @@ export default function NewServerPage() {
       setProvisionError(String(err));
     } finally {
       setProvisioning(false);
+    }
+  };
+
+  const handleProvisionSave = async () => {
+    if (!provisionData) return;
+    setLoading(true);
+    setError('');
+
+    try {
+      const res = await fetchWithAuth('/api/servers', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: provisionForm.name || provisionForm.hostname,
+          hostname: provisionForm.hostname,
+          ssh_port: provisionForm.ssh_port,
+          ssh_user: provisionData.service_account,
+          ssh_key_id: provisionData.ssh_key_id,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error?.message || 'Failed to create server');
+        return;
+      }
+
+      router.push('/settings/servers');
+    } catch (err) {
+      setError('An error occurred');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -129,6 +174,11 @@ export default function NewServerPage() {
                 {provisionData ? (
                   // Show results after provisioning
                   <div className="space-y-4">
+                    {error && (
+                      <div className="p-3 bg-red-50 border border-red-200 rounded-md text-red-600 text-sm">
+                        {error}
+                      </div>
+                    )}
                     <div className="p-4 bg-green-50 border border-green-200 rounded-md">
                       <div className="font-medium text-green-700 mb-2">Provisioning Successful!</div>
                       <div className="text-sm space-y-1">
@@ -144,18 +194,18 @@ export default function NewServerPage() {
                       <p>Service account: <strong>{provisionData.service_account}</strong></p>
                       <p>SSH Key: <strong>{provisionData.ssh_key_name}</strong></p>
                     </div>
-                    <Button
-                      type="button"
-                      onClick={() => {
-                        setSetupMethod('existing');
-                        // Pre-fill form with provisioned values
-                        const hostname = (document.getElementById('hostname') as HTMLInputElement).value;
-                        (document.getElementById('ssh_user') as HTMLInputElement).value = provisionData.service_account;
-                      }}
-                      variant="outline"
-                    >
-                      Continue to Save
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        onClick={handleProvisionSave}
+                        disabled={loading}
+                      >
+                        {loading ? 'Saving...' : 'Save Server'}
+                      </Button>
+                      <Button type="button" variant="outline" onClick={() => router.back()}>
+                        Cancel
+                      </Button>
+                    </div>
                   </div>
                 ) : (
                   <>
