@@ -66,6 +66,11 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
   const cleanup = useCallback(() => {
     // Close WebSocket
     if (wsRef.current) {
+      // Null out handlers FIRST to prevent old callbacks from firing
+      wsRef.current.onopen = null;
+      wsRef.current.onmessage = null;
+      wsRef.current.onclose = null;
+      wsRef.current.onerror = null;
       wsRef.current.close();
       wsRef.current = null;
     }
