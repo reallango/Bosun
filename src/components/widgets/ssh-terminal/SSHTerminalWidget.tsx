@@ -33,19 +33,15 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
 
   const [status, setStatus] = useState<ConnectionStatus>('idle');
   const [error, setError] = useState<string | null>(null);
-  const [username, setUsername] = useState<string>('');
-  const [sessionId] = useState(() => Math.random().toString(36).substring(2, 11));
+  const [username, setUsername] = useState<string>(() => 
+    localStorage.getItem(`bosun-terminal-user-${serverId}`) || ''
+  );
+  const sessionId = widgetId; // Deterministic based on widgetId
 
   // Sync username with ref
   useEffect(() => {
     loginUsernameRef.current = username;
   }, [username]);
-
-  // Load persisted username from localStorage
-  useEffect(() => {
-    const saved = localStorage.getItem(`bosun-terminal-user-${serverId}`);
-    if (saved) setUsername(saved);
-  }, [serverId]);
 
   // Save username to localStorage when changed
   const handleUsernameChange = (value: string) => {
@@ -256,7 +252,37 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       };
 
       ws.onmessage = (event) => {
-        const data = event.data;
+        const data = typeof event.data === 'string' ? event.data : new TextDecoder().decode(event.data);
+
+        // ========== SESSION RESTORE CHECK ==========
+        if (!authenticatedRef.current && data.includes('[Session restored]')) {
+          console.log('[WS] Session restored - skipping auth');
+          authenticatedRef.current = true;
+          statusRef.current = 'connected';
+          setStatus('connected');
+          if (authTimeoutRef.current) {
+            clearTimeout(authTimeoutRef.current);
+            authTimeoutRef.current = null;
+          }
+          // Write restore marker + buffer replay to terminal
+          if (termRef.current) {
+            termRef.current.write(data);
+          }
+          // Re-fit terminal and send resize
+          setTimeout(() => {
+            if (fitAddonRef.current && termRef.current) {
+              try { fitAddonRef.current.fit(); } catch {}
+              if (wsRef.current?.readyState === WebSocket.OPEN) {
+                wsRef.current.send(JSON.stringify({
+                  type: 'resize',
+                  cols: termRef.current.cols,
+                  rows: termRef.current.rows
+                }));
+              }
+            }
+          }, 100);
+          return;
+        }
 
         // ========== AUTH PHASE ==========
         if (!authenticatedRef.current) {
@@ -425,6 +451,14 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       cleanup();
     };
   }, [cleanup]);
+
+  // Auto-reconnect on mount if username saved
+  useEffect(() => {
+    if (username && status === 'idle') {
+      // Auto-reconnect attempt - will restore session if exists
+      connect(username);
+    }
+  }, []); // Only on mount
 
   // Handle control buttons
   const handleConnect = () => {
