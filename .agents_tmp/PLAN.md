@@ -1,20 +1,33 @@
 # 1. OBJECTIVE
 
-Background Polling Implementation - Fix all 12 critical issues from the implementation corrections.
+Background Polling Implementation - Fix remaining issues after scan.
 
-**CRITICAL FIXES REQUIRED:**
-1. Add leader election check to poller (only leader polls)
-2. Fix ALL registry values to exact spec
-3. Create s6 service for poller
-4. Dockerfile copy poller.js
-5. Settings as DIALOG not page
-6. Complete OS Update Check widget
-7. Add display_name to migration
-8. Render display_name in widget header
-9. Revert ssh2 to ^1.17.0
-10. Change hash to SHA-256
-11. Exclude non-pollable widgets
-12. Widget settings dialog
+**SCAN RESULTS - What's DONE vs NEEDED:**
+
+| Fix | Status | Issue |
+|-----|--------|-------|
+| 1. Leader election | ⚠️ PARTIAL | isLeader() broken - returns true always |
+| 2. Registry values | ❌ WRONG | Values don't match spec |
+| 3. s6 service | ✅ DONE | |
+| 4. Dockerfile copy | ✅ DONE | |
+| 5. Settings dialog | ❌ IS PAGE | Change to modal dialog |
+| 6. OS Update widget | ⚠️ PARTIAL | Incomplete |
+| 7. display_name | ❌ MISSING | Not in migration |
+| 8. display_name render | ❌ MISSING | Need to render |
+| 9. ssh2 version | ✅ DONE | |
+| 10. SHA-256 | ✅ DONE | |
+| 11. Exclude widgets | ✅ DONE | |
+| 12. Settings dialog | ❌ NOT CREATED | |
+
+**REMAINING FIXES:**
+
+1. Fix isLeader() function - check json.store?.raft?.state === 'Leader'
+2. Update registry.ts with EXACT values (see spec)
+3. Delete settings page, create WidgetSettingsDialog.tsx (modal)
+4. Complete OS Update widget UI elements
+5. Add display_name to migration
+6. Render display_name in WidgetFrame header
+7. Add delete custom command warning dialog
 
 # 2. CONTEXT SUMMARY
 

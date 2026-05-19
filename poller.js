@@ -55,10 +55,12 @@ async function isLeader() {
   try {
     const res = await fetch(`http://${RQLITE_HOST}/status`);
     const json = await res.json();
-    const storeAddr = json.store?.addr;
-    if (!storeAddr) return true; // Single node, assume leader
-    // In cluster, check if this node has the store
-    return true;
+    // Check raft state for leadership
+    const raftState = json.store?.raft?.state;
+    if (raftState === 'Leader') return true;
+    // Single node (no raft), assume leader
+    if (!json.store?.raft) return true;
+    return false;
   } catch (err) {
     console.error('[Poller] Leader check error:', err.message);
     return false;

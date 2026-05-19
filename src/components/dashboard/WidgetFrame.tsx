@@ -14,6 +14,7 @@ import { DockerContainersWidget } from '@/components/widgets/docker-containers';
 import { CustomCommandWidget } from '@/components/widgets/custom-command';
 import { PortainerLinkWidget } from '@/components/widgets/portainer-link';
 import { OSUpdateCheckWidget } from '@/components/widgets/os-update-check';
+import { WidgetSettingsDialog } from '@/components/dialogs/WidgetSettingsDialog';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 
@@ -90,6 +91,7 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName,
   };
 
   const [menuOpen, setMenuOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   return (
     <div className="h-full bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 flex flex-col">
@@ -108,7 +110,7 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName,
                 className="px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer outline-none"
                 onSelect={() => {
                   setMenuOpen(false);
-                  window.location.href = `/settings/widgets/${widgetId}`;
+                  setSettingsOpen(true);
                 }}
               >
                 Settings
@@ -140,6 +142,7 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName,
       <div className="flex-1 p-3 overflow-auto">
         <WidgetContent widgetId={widgetId} widgetType={widgetType} serverId={serverId} serverName={serverName} />
       </div>
+      <WidgetSettingsDialog widgetId={widgetId} open={settingsOpen} onOpenChange={setSettingsOpen} />
     </div>
   );
 }
