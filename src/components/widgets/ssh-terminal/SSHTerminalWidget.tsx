@@ -62,6 +62,38 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
     return `${proto}://${host}/ws/terminal`;
   };
 
+  // Full cleanup - destroys all state for a fresh start
+  const cleanup = useCallback(() => {
+    // Close WebSocket
+    if (wsRef.current) {
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    // Destroy terminal instance
+    if (termRef.current) {
+      termRef.current.dispose();
+      termRef.current = null;
+    }
+    // Clear fit addon ref
+    fitAddonRef.current = null;
+    // Disconnect resize observer
+    if (resizeObserverRef.current) {
+      resizeObserverRef.current.disconnect();
+      resizeObserverRef.current = null;
+    }
+    // Clear any pending auth timeouts
+    if (authTimeoutRef.current) {
+      clearTimeout(authTimeoutRef.current);
+      authTimeoutRef.current = null;
+    }
+    // Reset ALL auth state refs
+    suSentRef.current = false;
+    authenticatedRef.current = false;
+    authBufferRef.current = '';
+    passwordPromptShownRef.current = false;
+    servicePromptRef.current = '';
+  }, []);
+
   // Connect with authentication flow (su as user)
   const connect = useCallback(async (targetUsername?: string) => {
     const userToUse = (targetUsername || username).trim();
@@ -80,6 +112,81 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
 
     console.log('[WS] Connecting to:', getWsUrl(), 'serverId:', serverId, 'user:', userToUse);
 
+    // 1) Clean slate - destroy previous terminal + ws
+    cleanup();
+
+    // 2) Create FRESH Terminal instance
+    if (!document.getElementById('xterm-css')) {
+      const link = document.createElement('link');
+      link.id = 'xterm-css';
+      link.rel = 'stylesheet';
+      link.href = '/xterm.css';
+      document.head.appendChild(link);
+    }
+
+    const term = new Terminal({
+      cursorBlink: true,
+      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+      fontSize: 13,
+      theme: {
+        background: '#0b1020',
+        foreground: '#e0e0e0',
+        cursor: '#00ff00',
+        cursorAccent: '#0b1020',
+        selectionBackground: 'rgba(0, 255, 0, 0.3)',
+        black: '#000000',
+        red: '#ff5555',
+        green: '#50fa7b',
+        yellow: '#f1fa8c',
+        blue: '#bd93f9',
+        magenta: '#ff79c6',
+        cyan: '#8be9fd',
+        white: '#bfbfbf',
+        brightBlack: '#4f4f4f',
+        brightRed: '#ff6e67',
+        brightGreen: '#5af78e',
+        brightYellow: '#f4f99c',
+        brightBlue: '#caa9fa',
+        brightMagenta: '#ff92d0',
+        brightCyan: '#9aedfe',
+        brightWhite: '#e6e6e6'
+      },
+      allowProposedApi: true
+    });
+
+    const fitAddon = new FitAddon();
+    term.loadAddon(fitAddon);
+    term.open(terminalRef.current!);
+    fitAddon.fit();
+
+    termRef.current = term;
+    fitAddonRef.current = fitAddon;
+
+    // 3) Set up resize observer
+    const handleResize = () => {
+      if (fitAddonRef.current) {
+        try { fitAddonRef.current.fit(); } catch {}
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({
+            type: 'resize',
+            cols: termRef.current?.cols,
+            rows: termRef.current?.rows
+          }));
+        }
+      }
+    };
+    resizeObserverRef.current = new ResizeObserver(handleResize);
+    if (terminalRef.current?.parentElement) {
+      resizeObserverRef.current.observe(terminalRef.current.parentElement);
+    }
+
+    // 4) Set up terminal input -> WebSocket (on fresh term instance)
+    term.onData((data) => {
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(data);
+      }
+    });
+
     setStatus('connecting');
     setError(null);
 
@@ -89,7 +196,6 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
     authBufferRef.current = '';
     passwordPromptShownRef.current = false;
     servicePromptRef.current = '';
-    if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
     loginUsernameRef.current = userToUse;
 
     try {
@@ -127,7 +233,6 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
             console.log('[WS] Auth timeout');
             setError('Authentication timed out');
             ws.close();
-            setTimeout(() => { termRef.current?.reset(); }, 50);
             setStatus('error');
             statusRef.current = 'error';
           }
@@ -184,9 +289,8 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
                 authBufferRef.current.includes('incorrect password') ||
                 authBufferRef.current.includes('does not exist')) {
               if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
+              cleanup();
               setError('Login failed - check your username and password');
-              ws.close();
-              setTimeout(() => { termRef.current?.reset(); }, 50);
               setStatus('error');
               statusRef.current = 'error';
               return;
@@ -219,12 +323,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
         // Check for service account prompt BEFORE writing to terminal
         if (servicePromptRef.current && data.includes(servicePromptRef.current)) {
           console.log('[WS] Detected return to service account, auto-disconnecting');
-          // Close without writing to terminal
-          if (wsRef.current) {
-            wsRef.current.close();
-            wsRef.current = null;
-          }
-          setTimeout(() => { termRef.current?.reset(); }, 50);
+          cleanup();
           setStatus('idle');
           statusRef.current = 'idle';
           return;
@@ -239,7 +338,6 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       ws.onclose = (event) => {
         if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
         console.log('[WS] Disconnected:', event.code, event.reason);
-        setTimeout(() => { termRef.current?.reset(); }, 50);
         setStatus('idle');
         statusRef.current = 'idle';
       };
@@ -247,7 +345,6 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       ws.onerror = (event) => {
         if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
         console.error('[WS] Error:', event);
-        setTimeout(() => { termRef.current?.reset(); }, 50);
         setError('WebSocket connection error');
         setStatus('error');
         statusRef.current = 'error';
@@ -255,30 +352,24 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
 
     } catch (err: any) {
       console.error('[WS] Connection error:', err);
-      setTimeout(() => { termRef.current?.reset(); }, 50);
       setError(err.message || 'Failed to connect');
       setStatus('error');
       statusRef.current = 'error';
     }
-  }, [username, sessionId, serverId]); // Removed status from deps
+  }, [username, sessionId, serverId, cleanup]); // Removed status from deps
 
   // Disconnect from WebSocket server
   const disconnect = useCallback(() => {
-    if (wsRef.current) {
-      wsRef.current.close();
-      wsRef.current = null;
-    }
-    setTimeout(() => { termRef.current?.reset(); }, 50);
+    cleanup();
     setStatus('idle');
-  }, []);
+    statusRef.current = 'idle';
+  }, [cleanup]);
 
   // (reconnect removed - now handled by handleReconnect)
 
-  // Initialize terminal
+  // Initialize terminal (CSS only - terminal created in connect)
   useEffect(() => {
-    if (!terminalRef.current) return;
-
-    // Inject xterm CSS if not already present
+    // Inject xterm CSS once
     if (!document.getElementById('xterm-css')) {
       const link = document.createElement('link');
       link.id = 'xterm-css';
@@ -287,86 +378,11 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       document.head.appendChild(link);
     }
 
-    // Create terminal
-    const term = new Terminal({
-      cursorBlink: true,
-      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-      fontSize: 13,
-      theme: {
-        background: '#0b1020',
-        foreground: '#e0e0e0',
-        cursor: '#00ff00',
-        cursorAccent: '#0b1020',
-        selectionBackground: 'rgba(0, 255, 0, 0.3)',
-        black: '#000000',
-        red: '#ff5555',
-        green: '#50fa7b',
-        yellow: '#f1fa8c',
-        blue: '#bd93f9',
-        magenta: '#ff79c6',
-        cyan: '#8be9fd',
-        white: '#bfbfbf',
-        brightBlack: '#4f4f4f',
-        brightRed: '#ff6e67',
-        brightGreen: '#5af78e',
-        brightYellow: '#f4f99c',
-        brightBlue: '#caa9fa',
-        brightMagenta: '#ff92d0',
-        brightCyan: '#9aedfe',
-        brightWhite: '#e6e6e6'
-      },
-      allowProposedApi: true
-    });
-
-    // Create fit addon
-    const fitAddon = new FitAddon();
-    term.loadAddon(fitAddon);
-
-    // Open terminal in DOM
-    term.open(terminalRef.current);
-    fitAddon.fit();
-
-    termRef.current = term;
-    fitAddonRef.current = fitAddon;
-
-    // Set up terminal input handler
-    term.onData((data) => {
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        // Send raw input to SSH shell
-        wsRef.current.send(data);
-      }
-    });
-
-    // Handle resize
-    const handleResize = () => {
-      if (fitAddonRef.current) {
-        fitAddonRef.current.fit();
-        if (wsRef.current?.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify({
-            type: 'resize',
-            cols: termRef.current?.cols,
-            rows: termRef.current?.rows
-          }));
-        }
-      }
-    };
-
-    // Set up resize observer on container
-    resizeObserverRef.current = new ResizeObserver(handleResize);
-    if (terminalRef.current?.parentElement) {
-      resizeObserverRef.current.observe(terminalRef.current.parentElement);
-    }
-
-    // NO auto-connect - user must explicitly connect
-    // (Step 5.5: Remove auto-connect logic)
-
     // Cleanup on unmount
     return () => {
-      disconnect();
-      resizeObserverRef.current?.disconnect();
-      term.dispose();
+      cleanup();
     };
-  }, []); // Only run once on mount
+  }, [cleanup]);
 
   // Handle control buttons
   const handleConnect = () => {
@@ -383,8 +399,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
 
   const handleReconnect = () => {
     if (username) {
-      disconnect();
-      setTimeout(() => connect(username), 500);
+      connect(username);
     }
   };
 
