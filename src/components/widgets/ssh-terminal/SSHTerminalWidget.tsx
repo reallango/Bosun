@@ -232,6 +232,17 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
         setStatus('authenticating');
         statusRef.current = 'authenticating';
 
+        // Send initial terminal dimensions
+        setTimeout(() => {
+          if (termRef.current && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({
+              type: 'resize',
+              cols: termRef.current.cols,
+              rows: termRef.current.rows
+            }));
+          }
+        }, 200);
+
         // Start auth timeout (15 seconds)
         authTimeoutRef.current = setTimeout(() => {
           if (!authenticatedRef.current) {
@@ -279,6 +290,19 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
             statusRef.current = 'connected';
             // Clear the timeout since we got password prompt
             if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
+            // Re-fit now that terminal is visible (overlay removed)
+            setTimeout(() => {
+              if (fitAddonRef.current && termRef.current) {
+                try { fitAddonRef.current.fit(); } catch {}
+                if (wsRef.current?.readyState === WebSocket.OPEN) {
+                  wsRef.current.send(JSON.stringify({
+                    type: 'resize',
+                    cols: termRef.current.cols,
+                    rows: termRef.current.rows
+                  }));
+                }
+              }
+            }, 100);
             // Write clean password prompt to terminal
             if (termRef.current) {
               termRef.current.write('Password: ');
@@ -308,6 +332,19 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
               if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
               authBufferRef.current = '';
               console.log('[WS] Authentication successful for', userToUse);
+              // Re-fit now that terminal is fully visible
+              setTimeout(() => {
+                if (fitAddonRef.current && termRef.current) {
+                  try { fitAddonRef.current.fit(); } catch {}
+                  if (wsRef.current?.readyState === WebSocket.OPEN) {
+                    wsRef.current.send(JSON.stringify({
+                      type: 'resize',
+                      cols: termRef.current.cols,
+                      rows: termRef.current.rows
+                    }));
+                  }
+                }
+              }, 100);
               // Write this data (it contains the user's prompt)
               if (termRef.current) {
                 termRef.current.write(data);
