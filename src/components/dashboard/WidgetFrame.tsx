@@ -86,22 +86,36 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName,
     await fetch(`/api/widgets/${widgetId}/data?force=true`);
   };
 
+  const [menuOpen, setMenuOpen] = useState(false);
+
   return (
     <div className="h-full bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 flex flex-col">
       <div className={`flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-700 ${editable ? 'cursor-move drag-handle' : ''}`}>
         <span className="font-medium text-sm truncate">{title}</span>
         <div className="flex items-center gap-1">
           {serverName && <span className="text-xs text-gray-500 mr-1">{serverName}</span>}
-          <DropdownMenu.Root>
+          <DropdownMenu.Root open={menuOpen} onOpenChange={setMenuOpen}>
             <DropdownMenu.Trigger asChild>
               <button className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700">
                 <span className="text-lg">⋮</span>
               </button>
             </DropdownMenu.Trigger>
-            <DropdownMenu.Content className="min-w-[120px] bg-white dark:bg-gray-800 border rounded shadow-lg z-10">
+            <DropdownMenu.Content className="min-w-[140px] bg-white dark:bg-gray-800 border rounded shadow-lg z-10">
               <DropdownMenu.Item 
                 className="px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer outline-none"
-                onSelect={handleRefresh}
+                onSelect={() => {
+                  setMenuOpen(false);
+                  window.location.href = `/settings/widgets/${widgetId}`;
+                }}
+              >
+                Settings
+              </DropdownMenu.Item>
+              <DropdownMenu.Item 
+                className="px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer outline-none"
+                onSelect={() => {
+                  setMenuOpen(false);
+                  handleRefresh();
+                }}
               >
                 Refresh
               </DropdownMenu.Item>
@@ -109,7 +123,10 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName,
               <DropdownMenu.Item 
                 className="px-4 py-2 text-sm text-red-600 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer outline-none disabled:opacity-50"
                 disabled={removing}
-                onSelect={() => handleRemove()}
+                onSelect={() => {
+                  setMenuOpen(false);
+                  handleRemove();
+                }}
               >
                 {removing ? 'Removing...' : 'Remove'}
               </DropdownMenu.Item>
