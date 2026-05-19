@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { OSInfoWidget } from '@/components/widgets/os-info';
 import { CPUMemoryWidget } from '@/components/widgets/cpu-memory';
 import { DiskUsageWidget } from '@/components/widgets/disk-usage';
@@ -68,6 +68,17 @@ function WidgetContent({ widgetId, widgetType, serverId, serverName }: { widgetI
 
 export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName, editable = false, onRemoved }: WidgetFrameProps) {
   const [removing, setRemoving] = useState(false);
+  const [widgetData, setWidgetData] = useState<any>(null);
+  
+  // Fetch widget to get display_name
+  useEffect(() => {
+    fetchWithAuth(`/api/widgets/${widgetId}`)
+      .then(r => r.json())
+      .then(json => { if (json.data) setWidgetData(json.data); })
+      .catch(() => {});
+  }, [widgetId]);
+  
+  const displayTitle = widgetData?.display_name || title;
 
   const handleRemove = async () => {
     setDeleteOpen(true);
@@ -101,7 +112,7 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName,
   return (
     <div className="h-full bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 flex flex-col">
       <div className={`flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-700 ${editable ? 'cursor-move drag-handle' : ''}`}>
-        <span className="font-medium text-sm truncate">{title}</span>
+        <span className="font-medium text-sm truncate">{displayTitle}</span>
         <div className="flex items-center gap-1">
           {serverName && <span className="text-xs text-gray-500 mr-1">{serverName}</span>}
           <DropdownMenu.Root open={menuOpen} onOpenChange={setMenuOpen}>
@@ -148,7 +159,7 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName,
         <WidgetContent widgetId={widgetId} widgetType={widgetType} serverId={serverId} serverName={serverName} />
       </div>
       <WidgetSettingsDialog widgetId={widgetId} open={settingsOpen} onOpenChange={setSettingsOpen} />
-      <DeleteConfirmDialog widgetTitle={title} open={deleteOpen} onOpenChange={setDeleteOpen} onConfirm={doRemove} loading={removing} />
+      <DeleteConfirmDialog widgetTitle={displayTitle} open={deleteOpen} onOpenChange={setDeleteOpen} onConfirm={doRemove} loading={removing} />
     </div>
   );
 }
