@@ -10,6 +10,10 @@ export const widgetRegistry: Record<string, WidgetDefinition> = {
     defaultSize: { w: 3, h: 2 },
     minSize: { w: 2, h: 2 },
     refreshInterval: 15,
+    backgroundPollable: true,
+    defaultPollInterval: 30,
+    defaultTTL: 300,
+    storageMode: 'latest_ttl',
   },
   os_info: {
     type: 'os_info',
@@ -20,6 +24,10 @@ export const widgetRegistry: Record<string, WidgetDefinition> = {
     defaultSize: { w: 4, h: 2 },
     minSize: { w: 2, h: 2 },
     refreshInterval: 60,
+    backgroundPollable: true,
+    defaultPollInterval: 60,
+    defaultTTL: 300,
+    storageMode: 'latest_ttl',
   },
   cpu_memory: {
     type: 'cpu_memory',
@@ -30,6 +38,10 @@ export const widgetRegistry: Record<string, WidgetDefinition> = {
     defaultSize: { w: 4, h: 3 },
     minSize: { w: 2, h: 2 },
     refreshInterval: 5,
+    backgroundPollable: true,
+    defaultPollInterval: 10,
+    defaultTTL: 30,
+    storageMode: 'latest_ttl',
   },
   disk_usage: {
     type: 'disk_usage',
@@ -40,6 +52,10 @@ export const widgetRegistry: Record<string, WidgetDefinition> = {
     defaultSize: { w: 4, h: 3 },
     minSize: { w: 2, h: 2 },
     refreshInterval: 30,
+    backgroundPollable: true,
+    defaultPollInterval: 60,
+    defaultTTL: 3600,
+    storageMode: 'latest_ttl',
   },
   network: {
     type: 'network',
@@ -50,6 +66,10 @@ export const widgetRegistry: Record<string, WidgetDefinition> = {
     defaultSize: { w: 4, h: 3 },
     minSize: { w: 2, h: 2 },
     refreshInterval: 30,
+    backgroundPollable: true,
+    defaultPollInterval: 60,
+    defaultTTL: 3600,
+    storageMode: 'latest_ttl',
   },
   system_services: {
     type: 'system_services',
@@ -60,6 +80,10 @@ export const widgetRegistry: Record<string, WidgetDefinition> = {
     defaultSize: { w: 4, h: 3 },
     minSize: { w: 3, h: 2 },
     refreshInterval: 30,
+    backgroundPollable: true,
+    defaultPollInterval: 30,
+    defaultTTL: 300,
+    storageMode: 'change_only',
   },
   gpu_monitoring: {
     type: 'gpu_monitoring',
@@ -70,6 +94,10 @@ export const widgetRegistry: Record<string, WidgetDefinition> = {
     defaultSize: { w: 4, h: 3 },
     minSize: { w: 3, h: 2 },
     refreshInterval: 10,
+    backgroundPollable: true,
+    defaultPollInterval: 30,
+    defaultTTL: 300,
+    storageMode: 'latest_ttl',
   },
   ollama_status: {
     type: 'ollama_status',
@@ -80,6 +108,10 @@ export const widgetRegistry: Record<string, WidgetDefinition> = {
     defaultSize: { w: 4, h: 3 },
     minSize: { w: 3, h: 2 },
     refreshInterval: 30,
+    backgroundPollable: true,
+    defaultPollInterval: 60,
+    defaultTTL: 300,
+    storageMode: 'latest_ttl',
   },
   ssh_terminal: {
     type: 'ssh_terminal',
@@ -90,6 +122,7 @@ export const widgetRegistry: Record<string, WidgetDefinition> = {
     defaultSize: { w: 6, h: 4 },
     minSize: { w: 4, h: 3 },
     refreshInterval: 0,
+    backgroundPollable: false,
   },
   docker_containers: {
     type: 'docker_containers',
@@ -100,6 +133,10 @@ export const widgetRegistry: Record<string, WidgetDefinition> = {
     defaultSize: { w: 4, h: 3 },
     minSize: { w: 3, h: 2 },
     refreshInterval: 15,
+    backgroundPollable: true,
+    defaultPollInterval: 30,
+    defaultTTL: 300,
+    storageMode: 'change_only',
   },
   custom_command: {
     type: 'custom_command',
@@ -110,6 +147,7 @@ export const widgetRegistry: Record<string, WidgetDefinition> = {
     defaultSize: { w: 4, h: 3 },
     minSize: { w: 3, h: 2 },
     refreshInterval: 30,
+    backgroundPollable: false,  // Don't auto-poll custom commands
   },
   portainer_link: {
     type: 'portainer_link',
@@ -120,6 +158,7 @@ export const widgetRegistry: Record<string, WidgetDefinition> = {
     defaultSize: { w: 3, h: 2 },
     minSize: { w: 2, h: 2 },
     refreshInterval: 0,
+    backgroundPollable: false,
   },
 };
 

@@ -1,4 +1,5 @@
 export type WidgetCategory = 'system' | 'docker' | 'gpu' | 'ai' | 'network' | 'utility' | 'advanced';
+export type WidgetStorageMode = 'latest_ttl' | 'change_only';
 
 export interface WidgetDefinition {
   type: string;
@@ -11,6 +12,11 @@ export interface WidgetDefinition {
   maxSize?: { w: number; h: number };
   refreshInterval: number;
   supportsStream?: boolean;
+  // Background polling options
+  backgroundPollable?: boolean;
+  defaultPollInterval?: number;  // seconds
+  defaultTTL?: number;        // seconds
+  storageMode?: WidgetStorageMode;
 }
 
 export interface Widget {

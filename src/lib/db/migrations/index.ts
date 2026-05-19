@@ -197,10 +197,45 @@ const MIGRATION_002: string[] = [
     `INSERT OR IGNORE INTO dashboards (id, name, type, sort_order, is_default) VALUES ('home', 'Home', 'home', 0, 1)`,
 ];
 
+// ---- Migration 003: Widget Polling ----
+const MIGRATION_003: string[] = [
+    // Widget polling config (per-widget polling settings per server)
+    `CREATE TABLE IF NOT EXISTS widget_polling_config (
+        id TEXT PRIMARY KEY,
+        widget_type TEXT NOT NULL,
+        server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+        poll_interval_sec INTEGER,
+        ttl_sec INTEGER,
+        storage_mode TEXT DEFAULT 'latest_ttl',
+        enabled INTEGER DEFAULT 1,
+        last_polled_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE(widget_type, server_id)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_wpc_server_type ON widget_polling_config(server_id, widget_type)`,
+
+    // Widget data cache
+    `CREATE TABLE IF NOT EXISTS widget_data_cache (
+        id TEXT PRIMARY KEY,
+        widget_type TEXT NOT NULL,
+        server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+        data TEXT NOT NULL,
+        data_hash TEXT,
+        storage_mode TEXT DEFAULT 'latest_ttl',
+        collected_at DATETIME NOT NULL,
+        expires_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_wdc_server_type ON widget_data_cache(server_id, widget_type)`,
+    `CREATE INDEX IF NOT EXISTS idx_wdc_expires ON widget_data_cache(expires_at)`,
+];
+
 // Migration registry
 const migrations: Record<string, string[]> = {
     '001': MIGRATION_001,
     '002': MIGRATION_002,
+    '003': MIGRATION_003,
 };
 
 export async function runMigrations(): Promise<void> {
