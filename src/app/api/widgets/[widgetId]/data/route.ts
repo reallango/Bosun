@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
-import { requireAuth } from '@/lib/auth/middleware';
+import { requireAuth, requireRole } from '@/lib/auth/middleware';
 import { SSHConnectionPool } from '@/lib/ssh/connection-pool';
 import { AdapterFactory } from '@/lib/ssh/adapters/factory';
 
@@ -170,6 +170,36 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
             data={ url:portainerUrl, name:'Portainer' };
             break;
         }
+        case 'os_update_check': {
+            // Check for available updates
+            const srvR2=await rqlite.query('SELECT os_type FROM servers WHERE id=?', [widget.server_id]);
+            const osType = (srvR2.values?.[0]?.[0] as string) || 'ubuntu';
+            
+            let checkCmd = 'apt-get -s upgrade 2>&1 | grep -i "upgraded\\|installed\\|kept back" | wc -l';
+            if (osType.includes('rhel') || osType.includes('centos') || osType.includes('fedora')) {
+              checkCmd = 'yum check-update 2>&1 | wc -l';
+            }
+            
+            const r = await pool.executeCommand(srv.id, sshCfg, checkCmd);
+            const updateLines = r.stdout.trim() || '0';
+            const updateCount = parseInt(updateLines, 10) || 0;
+            
+            // Get list of packages
+            let listCmd = 'apt-get -s upgrade 2>&1 | grep "^Inst" | awk "{print \\$2}" | head -10';
+            if (osType.includes('rhel') || osType.includes('centos') || osType.includes('fedora')) {
+              listCmd = 'yum list updates 2>&1 | tail -n +2 | head -10';
+            }
+            
+            const lr = await pool.executeCommand(srv.id, sshCfg, listCmd);
+            const packages = lr.stdout.trim().split('\n').filter(Boolean);
+            
+            data = {
+              updatesAvailable: updateCount,
+              packages: packages,
+              lastCheck: new Date().toISOString()
+            };
+            break;
+        }
         default: return NextResponse.json({ error: { message: `Unknown type: ${widget.widget_type}` } }, { status: 400 });
     }
     return NextResponse.json({ data });
@@ -177,5 +207,62 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     console.error('Widget data error:', error);
     // Return placeholder data instead of 500 error so dashboard loads
     return NextResponse.json({ data: { source: 'placeholder', error: String(error).substring(0, 100) } });
+  }
+}
+
+// POST handler for os_update_check actions
+export async function POST(request: NextRequest, { params }: { params: Promise<{ widgetId: string }> }) {
+  const auth = await requireAuth(request);
+  if (auth instanceof NextResponse) return auth;
+  const roleError = requireRole(auth as any, 'operator');
+  if (roleError) return roleError;
+  const { widgetId } = await params;
+  
+  try {
+    const widgetRes = await rqlite.query('SELECT * FROM widgets WHERE id = ?', [widgetId]);
+    if (!widgetRes.values?.length) {
+      return NextResponse.json({ error: { message: 'Widget not found' } }, { status: 404 });
+    }
+    const widget = rowsToObjects(widgetRes)[0] as any;
+    
+    if (widget.widget_type !== 'os_update_check') {
+      return NextResponse.json({ error: { message: 'Invalid widget type for POST' } }, { status: 400 });
+    }
+    
+    const { action } = await request.json();
+    
+    if (action === 'install') {
+      const srvR = await rqlite.query('SELECT * FROM servers WHERE id=?', [widget.server_id]);
+      const srv = rowsToObjects(srvR)[0] as any;
+      
+      if (!srv.ssh_key_id) {
+        return NextResponse.json({ error: { message: 'No SSH key' } }, { status: 400 });
+      }
+      
+      const kR = await rqlite.query('SELECT private_key_enc FROM ssh_keys WHERE id=?', [srv.ssh_key_id]);
+      const { decrypt } = await import('@/lib/crypto/keys');
+      const pk = decrypt(kR.values[0][0] as string, process.env.MASTER_KEY || '');
+      const sshCfg = { host: srv.hostname, port: srv.ssh_port || 22, username: srv.ssh_user, privateKey: pk };
+      
+      const osType = srv.os_type || 'ubuntu';
+      let installCmd = 'apt-get update && apt-get upgrade -y';
+      if (osType.includes('rhel') || osType.includes('centos') || osType.includes('fedora')) {
+        installCmd = 'yum update -y';
+      }
+      
+      const r = await pool.executeCommand(srv.id, sshCfg, `(${installCmd} && echo "REBOOT_NEEDED") || echo "FAILED: $?"`);
+      const needsReboot = r.stdout.includes('REBOOT_NEEDED');
+      
+      return NextResponse.json({
+        data: {
+          success: !r.stdout.includes('FAILED'),
+          message: needsReboot ? 'Updates installed. System needs reboot.' : 'Updates installed'
+        }
+      });
+    }
+    
+    return NextResponse.json({ error: { message: 'Invalid action' } }, { status: 400 });
+  } catch (error) {
+    return NextResponse.json({ error: { message: String(error) } }, { status: 500 });
   }
 }
