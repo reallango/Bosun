@@ -25,9 +25,9 @@ export const widgetRegistry: Record<string, WidgetDefinition> = {
     minSize: { w: 2, h: 2 },
     refreshInterval: 60,
     backgroundPollable: true,
-    defaultPollInterval: 60,
-    defaultTTL: 300,
-    storageMode: 'latest_ttl',
+    defaultPollInterval: 86400,
+    defaultTTL: 15552000,
+    storageMode: 'change_only',
   },
   cpu_memory: {
     type: 'cpu_memory',
@@ -169,7 +169,10 @@ export const widgetRegistry: Record<string, WidgetDefinition> = {
     defaultSize: { w: 4, h: 3 },
     minSize: { w: 3, h: 2 },
     refreshInterval: 0,
-    backgroundPollable: false,  // Manual only for security
+    backgroundPollable: true,
+    defaultPollInterval: 86400,
+    defaultTTL: 15552000,
+    storageMode: 'change_only',
   },
 };
 
