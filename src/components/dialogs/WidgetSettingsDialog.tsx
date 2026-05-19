@@ -56,6 +56,15 @@ export function WidgetSettingsDialog({ widgetId, open, onOpenChange }: WidgetSet
         ) : (
           <div className="space-y-4">
             <div>
+              <Label>Display Name</Label>
+              <Input
+                value={data?.display_name || ''}
+                onChange={e => setData({ ...data, display_name: e.target.value })}
+                placeholder="Optional custom name"
+              />
+            </div>
+
+            <div>
               <Label>Poll Interval (seconds)</Label>
               <Input
                 type="number"
@@ -78,7 +87,7 @@ export function WidgetSettingsDialog({ widgetId, open, onOpenChange }: WidgetSet
             <div>
               <Label>Storage Mode</Label>
               <select
-                className="w-full border rounded px-3 py-2"
+                className="w-full border rounded px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white border-gray-300 dark:border-gray-600"
                 value={data?.storage_mode || 'latest_ttl'}
                 onChange={e => setData({ ...data, storage_mode: e.target.value })}
               >

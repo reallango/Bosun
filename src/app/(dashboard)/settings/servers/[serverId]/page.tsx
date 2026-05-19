@@ -16,7 +16,7 @@ export default function EditServerPage() {
     const [error, setError] = useState('');
     const [sshKeys, setSSHKeys] = useState<{ id: string; name: string; fingerprint: string }[]>([]);
     const [form, setForm] = useState({
-        name: '', hostname: '', ssh_port: 22, ssh_user: '', ssh_key_id: '', notes: '',
+        name: '', hostname: '', ssh_port: 22, ssh_user: '', ssh_key_id: '', notes: '', portainer_url: '',
     });
 
     useEffect(() => {
@@ -30,6 +30,7 @@ export default function EditServerPage() {
                     ssh_user: j.data.ssh_user || '',
                     ssh_key_id: j.data.ssh_key_id || '',
                     notes: j.data.notes || '',
+                    portainer_url: j.data.portainer_url || '',
                 });
             })
             .finally(() => setLoading(false));
@@ -130,6 +131,12 @@ export default function EditServerPage() {
                             <Label htmlFor="notes">Notes</Label>
                             <Input id="notes" value={form.notes}
                                 onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+                        </div>
+
+                        <div>
+                            <Label htmlFor="portainer_url">Portainer URL</Label>
+                            <Input id="portainer_url" value={form.portainer_url} placeholder="http://portainer:9000"
+                                onChange={e => setForm(f => ({ ...f, portainer_url: e.target.value }))} />
                         </div>
 
                         <div className="flex gap-2 pt-4 border-t">

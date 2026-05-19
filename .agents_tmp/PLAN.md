@@ -1,52 +1,61 @@
 # 1. OBJECTIVE
 
-Fix remaining 3 issues from all previous plans:
+Fix 6 issues:
 
-1. **Registry values** - Update to exact spec (os_info needs 86400 interval, os_update_check needs backgroundPollable: true)
-2. **display_name column** - Add to widgets table schema  
-3. **display_name rendering** - WidgetFrame uses display_name instead of prop title
+1. **Widget Settings** - No display_name field, popup centers on page not widget
+2. **Server Widget Page** - Missing Portainer URL field in settings, missing ... menu with add widget/edit server
+3. **Dark Mode Dropdowns** - Add widget server dropdown and widget settings storage mode showing white
 
-**Context:** Most items are done. Only 3 minor issues remain.
+**Context:** Earlier 3 fixes still needed plus 6 new issues.
 
 # 2. CONTEXT SUMMARY
 
-### What's Already Done:
-- Theme toggle in Header
-- Server list API with full data
-- EditServerModal exists
-- Sidebar links to server dashboard
-- isLeader() fixed
-- WidgetSettingsDialog exists (modal)
-- s6 poller service exists
-- Dockerfile copies poller.js
+### Earlier Fixes (still needed):
+1. Registry values - os_info needs 86400, os_update_check needs backgroundPollable: true
+2. display_name column - missing from widgets table
+3. display_name rendering - not showing in header
 
-### Remaining Issues:
-1. registry.ts - os_info interval = 60, should be 86400; os_update_check backgroundPollable = false, should be true
-2. widgets table - missing display_name column
-3. WidgetFrame - shows prop title, not display_name
-
-# 3. APPROACH OVERVIEW
-
-Fix 3 targeted issues.
+### New Issues:
+4. WidgetSettingsDialog - missing display_name field, wrong centering
+5. Server widget page - missing Portainer URL in edit, missing ... menu
+6. Dark mode dropdowns - show white bg instead of dark theme
 
 # 4. IMPLEMENTATION STEPS
 
-## Step 1: Fix Registry Values
+## Earlier Fixes (from before):
+
+## Step 1: Fix Registry Values (same)
 - Update os_info: defaultPollInterval: 86400, defaultTTL: 15552000, storageMode: 'change_only'
-- Update os_update_check: backgroundPollable: true, defaultPollInterval: 86400, defaultTTL: 15552000, storageMode: 'change_only'
+- Update os_update_check: backgroundPollable: true
 - Reference: src/components/widgets/registry.ts
 
-## Step 2: Add display_name Column
+## Step 2: Add display_name Column (same)
 - Add to migration: ALTER TABLE widgets ADD COLUMN display_name TEXT DEFAULT NULL
-- Reference: src/lib/db/migrations/index.ts
 
-## Step 3: Render display_name in WidgetFrame
+## Step 3: Render display_name in WidgetFrame (same)
 - Fetch widget data to get display_name
-- Use: const displayTitle = widgetData?.display_name || title
-- Reference: src/components/dashboard/WidgetFrame.tsx
+
+## New Issues:
+
+## Step 4: Fix WidgetSettingsDialog
+- Add display_name input field
+- Fix centering: use fixed position centered, not widget-relative
+- Reference: src/components/dialogs/WidgetSettingsDialog.tsx
+
+## Step 5: Fix Server Settings + Widget Page
+- Add Portainer URL field to edit server page: src/app/(dashboard)/settings/servers/[serverId]/page.tsx
+- Add ... menu to server widget page at: src/app/(dashboard)/servers/[serverId]/page.tsx
+- Menu options: Add Widget, Edit Settings
+
+## Step 6: Fix Dark Mode Dropdowns
+- Add dark theme classes to select elements
+- For add widget server dropdown and storage mode dropdown
+- Use: dark:bg-gray-800 dark:text-white dark:border-gray-600
 
 # 5. TESTING AND VALIDATION
 
-- Registry: os_info shows 86400 interval; os_update_check is backgroundPollable
-- Migration: widgets table has display_name column
-- WidgetFrame: Shows custom display_name when set
+- Registry: os_info shows 86400; os_update_check pollable
+- display_name: column exists, shows in widget header
+- WidgetSettingsDialog: has display_name field, centers on page
+- Server page: Portainer URL field, ... menu works
+- Dark mode: dropdowns show dark theme

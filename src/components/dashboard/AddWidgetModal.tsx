@@ -119,7 +119,7 @@ export function AddWidgetModal({ isOpen, onClose, dashboardId, serverId, onAdd }
               <select
                 value={targetServer}
                 onChange={e => setTargetServer(e.target.value)}
-                className="w-full px-3 py-2 border rounded max-h-24 overflow-y-auto"
+                className="w-full px-3 py-2 border rounded max-h-24 overflow-y-auto bg-white dark:bg-gray-800 text-gray-900 dark:text-white border-gray-300 dark:border-gray-600"
               >
                 <option value="">-- Select a Server --</option>
                 {servers.map(s => (
