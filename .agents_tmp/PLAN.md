@@ -1,11 +1,20 @@
 # 1. OBJECTIVE
 
-Background Polling & OS Update Widget Implementation - Add server-side background polling with caching, widget settings UI, and OS update check widget.
+Background Polling Implementation - Fix all 12 critical issues from the implementation corrections.
 
-**KEY CORRECTIONS:**
-- Added `last_polled_at` tracking for per-job intervals  
-- Excluded `custom_command` from auto-polling
-- SSH pool: REUSE existing `src/lib/ssh/connection-pool.ts`
+**CRITICAL FIXES REQUIRED:**
+1. Add leader election check to poller (only leader polls)
+2. Fix ALL registry values to exact spec
+3. Create s6 service for poller
+4. Dockerfile copy poller.js
+5. Settings as DIALOG not page
+6. Complete OS Update Check widget
+7. Add display_name to migration
+8. Render display_name in widget header
+9. Revert ssh2 to ^1.17.0
+10. Change hash to SHA-256
+11. Exclude non-pollable widgets
+12. Widget settings dialog
 
 # 2. CONTEXT SUMMARY
 
