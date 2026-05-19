@@ -14,6 +14,7 @@ import { DockerContainersWidget } from '@/components/widgets/docker-containers';
 import { CustomCommandWidget } from '@/components/widgets/custom-command';
 import { PortainerLinkWidget } from '@/components/widgets/portainer-link';
 import { OSUpdateCheckWidget } from '@/components/widgets/os-update-check';
+import { WidgetSettingsDialog } from '@/components/dialogs/WidgetSettingsDialog';
 import { DeleteConfirmDialog } from '@/components/dialogs/DeleteConfirmDialog';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
@@ -26,7 +27,6 @@ interface WidgetFrameProps {
   serverName?: string;
   editable?: boolean;
   onRemoved?: () => void;
-  onOpenSettings?: () => void;
 }
 
 function WidgetContent({ widgetId, widgetType, serverId, serverName }: { widgetId: string; widgetType: string; serverId: string; serverName?: string }) {
@@ -66,7 +66,7 @@ function WidgetContent({ widgetId, widgetType, serverId, serverName }: { widgetI
   }
 }
 
-export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName, editable = false, onRemoved, onOpenSettings }: WidgetFrameProps) {
+export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName, editable = false, onRemoved }: WidgetFrameProps) {
   const [removing, setRemoving] = useState(false);
   const [widgetData, setWidgetData] = useState<any>(null);
   
@@ -106,6 +106,7 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName,
   };
 
   const [menuOpen, setMenuOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   return (
@@ -125,7 +126,7 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName,
                 className="px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer outline-none"
                 onSelect={() => {
                   setMenuOpen(false);
-                  if (onOpenSettings) onOpenSettings();
+                  setSettingsOpen(true);
                 }}
               >
                 Settings
@@ -157,6 +158,7 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName,
       <div className="flex-1 p-3 overflow-auto">
         <WidgetContent widgetId={widgetId} widgetType={widgetType} serverId={serverId} serverName={serverName} />
       </div>
+      <WidgetSettingsDialog widgetId={widgetId} open={settingsOpen} onOpenChange={setSettingsOpen} />
       <DeleteConfirmDialog widgetTitle={displayTitle} open={deleteOpen} onOpenChange={setDeleteOpen} onConfirm={doRemove} loading={removing} />
     </div>
   );
