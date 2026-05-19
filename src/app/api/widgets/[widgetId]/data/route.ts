@@ -10,6 +10,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const auth = await requireAuth(request);
     if (auth instanceof NextResponse) return auth;
     const { widgetId } = await params;
+    const searchParams = new URL(request.url).searchParams;
+    const forceRefresh = searchParams.get('force') === 'true';
   try {
     const widgetRes = await rqlite.query('SELECT * FROM widgets WHERE id = ?', [widgetId]);
     if (!widgetRes.values?.length) return NextResponse.json({ error: { message: 'Widget not found' } }, { status: 404 });
@@ -18,6 +20,28 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const srvR = await rqlite.query('SELECT * FROM servers WHERE id=?', [widget.server_id]);
     if (!srvR.values?.length) return NextResponse.json({ error: { message: 'Server not found' } }, { status: 404 });
     const srv = rowsToObjects(srvR)[0] as any;
+
+    // Try cache first (unless forceRefresh)
+    if (!forceRefresh) {
+      const cacheRes = await rqlite.query(`
+        SELECT data, collected_at, expires_at, storage_mode 
+        FROM widget_data_cache 
+        WHERE widget_type = ? AND server_id = ? AND (expires_at IS NULL OR expires_at > datetime('now'))
+        ORDER BY collected_at DESC LIMIT 1
+      `, [widget.widget_type, widget.server_id]);
+      
+      if (cacheRes.values?.length) {
+        const [data, collectedAt, expiresAt, storageMode] = cacheRes.values[0];
+        const isStale = expiresAt && new Date(expiresAt as string) < new Date();
+        return NextResponse.json({ 
+          data: JSON.parse(data as string), 
+          cachedAt: collectedAt,
+          stale: isStale 
+        });
+      }
+    }
+
+    // Fall back to live SSH (original logic continues...)
 
     if (widget.widget_type === 'server_summary') {
       return NextResponse.json({ data: { is_online: !!srv.is_online, hostname: srv.hostname, os_type: srv.os_type, os_version: srv.os_version, name: srv.name } });
