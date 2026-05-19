@@ -221,6 +221,9 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
         // Detect drop back to service account → auto-disconnect
         if (servicePromptRef.current && data.includes(servicePromptRef.current)) {
           console.log('[WS] Detected return to service account, auto-disconnecting');
+          if (termRef.current) {
+            termRef.current.clear();
+          }
           if (wsRef.current) {
             wsRef.current.close();
             wsRef.current = null;
@@ -256,6 +259,9 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
 
   // Disconnect from WebSocket server
   const disconnect = useCallback(() => {
+    if (termRef.current) {
+      termRef.current.clear();
+    }
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
