@@ -230,12 +230,17 @@ const MIGRATION_003: string[] = [
     `CREATE INDEX IF NOT EXISTS idx_wdc_server_type ON widget_data_cache(server_id, widget_type)`,
     `CREATE INDEX IF NOT EXISTS idx_wdc_expires ON widget_data_cache(expires_at)`,
 ];
+const MIGRATION_004: string[] = [
+    // Add display_name to widgets (custom display name for each instance)
+    `ALTER TABLE widgets ADD COLUMN display_name TEXT`,
+];
 
 // Migration registry
 const migrations: Record<string, string[]> = {
     '001': MIGRATION_001,
     '002': MIGRATION_002,
     '003': MIGRATION_003,
+    '004': MIGRATION_004,
 };
 
 export async function runMigrations(): Promise<void> {
