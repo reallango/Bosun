@@ -66,7 +66,7 @@ COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/next.config.js ./next.config.js
 COPY --from=builder /app/ws-server.js ./ws-server.js
-COPY poller.js ./poller.js
+COPY --from=builder /app/poller.js ./poller.js
 
 
 # Copy s6 service definitions

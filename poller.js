@@ -234,6 +234,13 @@ function hashData(data) {
 
 // Main polling loop
 async function pollWidgets() {
+  const leader = await isLeader();
+  if (!leader) {
+    console.log('[Poller] Not leader, skipping cycle');
+    return;
+  }
+  console.log('[Poller] I am leader, polling...');
+  
   console.log('[Poller] Checking for widgets to poll...');
   
   try {
@@ -242,7 +249,7 @@ async function pollWidgets() {
       SELECT w.id, w.widget_type, w.server_id, w.config, wpc.poll_interval_sec, wpc.ttl_sec, wpc.storage_mode, wpc.last_polled_at, wpc.enabled
       FROM widgets w
       LEFT JOIN widget_polling_config wpc ON w.widget_type = wpc.widget_type AND w.server_id = wpc.server_id
-      WHERE w.widget_type NOT IN ('custom_command', 'ssh_terminal', 'portainer_link', 'ollama_status', 'gpu_monitoring', 'os_update_check')
+      WHERE w.widget_type NOT IN ('ssh_terminal', 'portainer_link')
       AND (wpc.enabled IS NULL OR wpc.enabled = 1)
       ORDER BY w.server_id, w.widget_type
     `);
@@ -333,13 +340,7 @@ async function cleanupExpired() {
 
 // Main
 async function main() {
-  if (!(await isLeader())) {
-    console.log('[Poller] Not leader, waiting...');
-    setTimeout(main, 5000);
-    return;
-  }
-  
-  console.log('[Poller] Starting widget poller service...');
+  console.log('[Poller] Widget poller service started');
   console.log('[Poller] RQLITE_HOST:', RQLITE_HOST);
 
   setInterval(pollWidgets, POLL_INTERVAL_MS);

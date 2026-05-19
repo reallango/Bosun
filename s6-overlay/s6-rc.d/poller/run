@@ -1,2 +1,11 @@
-#!/bin/sh
-exec node /app/poller.js
+#!/command/with-contenv sh
+
+RQLITE_URL="http://localhost:${RQLITE_PORT:-4001}"
+echo "Waiting for rqlite at ${RQLITE_URL}..."
+until wget -q -O /dev/null "${RQLITE_URL}/readyz" 2>/dev/null; do
+  sleep 2
+done
+echo "rqlite is ready. Starting poller."
+
+cd /app
+exec node poller.js
