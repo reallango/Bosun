@@ -15,6 +15,7 @@ import { CustomCommandWidget } from '@/components/widgets/custom-command';
 import { PortainerLinkWidget } from '@/components/widgets/portainer-link';
 import { OSUpdateCheckWidget } from '@/components/widgets/os-update-check';
 import { WidgetSettingsDialog } from '@/components/dialogs/WidgetSettingsDialog';
+import { DeleteConfirmDialog } from '@/components/dialogs/DeleteConfirmDialog';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 
@@ -69,7 +70,10 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName,
   const [removing, setRemoving] = useState(false);
 
   const handleRemove = async () => {
-    if (!confirm(`Remove widget '${title}'? This cannot be undone.`)) return;
+    setDeleteOpen(true);
+  };
+
+  const doRemove = async () => {
     setRemoving(true);
     try {
       const res = await fetchWithAuth(`/api/widgets/${widgetId}`, { method: 'DELETE' });
@@ -92,6 +96,7 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName,
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
 
   return (
     <div className="h-full bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 flex flex-col">
@@ -143,6 +148,7 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName,
         <WidgetContent widgetId={widgetId} widgetType={widgetType} serverId={serverId} serverName={serverName} />
       </div>
       <WidgetSettingsDialog widgetId={widgetId} open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <DeleteConfirmDialog widgetTitle={title} open={deleteOpen} onOpenChange={setDeleteOpen} onConfirm={doRemove} loading={removing} />
     </div>
   );
 }
