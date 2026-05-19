@@ -1,111 +1,75 @@
 # 1. OBJECTIVE
 
-Fix the SSH terminal widget key duplication bug - every keypress and paste is being sent TWICE to the SSH server, causing characters to appear doubled.
+Background Polling & OS Update Widget Implementation - Add server-side background polling with caching, widget settings UI, and OS update check widget.
 
-## Current State Analysis (May 2026):
-
-### ✅ What's Already Working:
-- SSH Terminal widget in frontend (xterm.js with WebSocket client)
-- `/api/ws-token` endpoint for authentication
-- Frontend connects successfully to WebSocket
-- **ws-server.js has PLACEHOLDER code** (lines 144-175) that just echoes input:
-  ```
-  ws.send('\r\n\x1b[32mConnected to Bosun SSH terminal\x1b[0m\r\n');
-  ws.send('Session: ' + sessionId + ', Server: ' + serverId + '\r\n\r\n');
-  // Echo locally for now (until SSH connected)
-  ws.send(json.data);
-  ```
-- ssh2 library is in package.json dependencies
-- decrypt() exists in src/lib/crypto/keys.ts
-- MASTER_KEY is configured in environment
-
-### ❌ What's MISSING (Critical):
-1. **`queryRqlite()` function** - Doesn't exist anywhere in ws-server.js
-2. **`Client` import** from ssh2 - Not imported  
-3. **`decrypt()` function** - Not available in ws-server.js
-4. **HTTP client for rqlite** - No way to query database from ws-server.js
-5. **`connectToServer()` function** - Never created
-6. **Real SSH connection** - Never established
+**KEY CORRECTIONS:**
+- Added `last_polled_at` tracking for per-job intervals  
+- Excluded `custom_command` from auto-polling
+- SSH pool: REUSE existing `src/lib/ssh/connection-pool.ts`
 
 # 2. CONTEXT SUMMARY
 
-## Bug Location:
-File: `src/components/widgets/ssh-terminal/SSHTerminalWidget.tsx`
-
-## Root Cause:
-The component has **TWO separate term.onData() handlers** that both send data to WebSocket:
-
-1. **Handler 1** (lines 186-192): `useEffect` with empty deps `[]` - runs once on mount
-2. **Handler 2** (lines 225-235): `useEffect` with `[status]` - runs when status changes to 'connected'
-
-When the WebSocket connects and status becomes 'connected', the second useEffect fires and adds a **duplicate** onData handler. Every keypress is then sent TWICE - once from handler 1 and once from handler 2.
-
-## Evidence:
-- `ls` becomes `llss` (key typed twice)
-- `ls`paste becomes `lsls` (paste typed twice)
-- Both handlers call `ws.send(data)` on the same WebSocket
+### Existing Implementation:
+- SSH Connection Pool already exists at `src/lib/ssh/connection-pool.ts`
+- Widget system in place
+- No background polling - widgets fetch on page load
 
 # 3. APPROACH OVERVIEW
 
-## Corrected Approach:
-
-**Opus's instructions are mostly CORRECT in their logic, but they FAIL to mention that several prerequisite functions don't exist.** We need to:
-
-1. **Create helper functions** that Opus assumes already exist:
-   - `queryRqlite()` - Simple wrapper around rqlite HTTP API
-   - `decrypt()` - Reimplement from keys.ts
-
-2. **Import ssh2 Client** - Add the import statement
-
-3. **Implement connectToServer()** function - Exactly as Opus specifies
-
-4. **Replace connection handler** with real SSH flow - Exactly as Opus specifies
-
-This approach is preferred because:
-- It follows the ssh2 library's documented patterns
-- It uses the same encryption approach already in the codebase
-- It maintains bidirectional streaming architecture already working in the frontend
-
-## Issues with Opus's Instructions:
-
-1. **Missing detail:** Doesn't mention that queryRqlite() doesn't exist
-2. **Missing detail:** Doesn't mention that decrypt() needs to be added
-3. **Potential bug in resize handling:** Opus shows `sshStream.setWindow(parsed.rows, parsed.cols, parsed.rows, parsed.cols)` - the last two parameters appear duplicated (should likely be colOffset, rowOffset or just remove them)
+**Background polling architecture:**
+- Only rqlite leader runs poller (checks every 10s)
+- Polls based on widget existence  
+- Per-job intervals via last_polled_at
+- Cache-first reads for widgets
+- change_only storage for slow metrics
 
 # 4. IMPLEMENTATION STEPS
 
-## Phase 1: Remove Duplicate Handler
-**Goal:** Fix the duplicate keypress bug
+## Phase 1: Database Schema + Registry
+- Create widget_polling_config table (with last_polled_at)
+- Create widget_data_cache table  
+- Add widgets.display_name column
+- Update registry with backgroundPollable, defaultPollInterval, defaultTTL, storageMode
+- Register os_update_check widget
+- Set custom_command: backgroundPollable = false
 
-### Step 1.1: Remove duplicate useEffect
-- **Method:** Delete the second useEffect block (lines 225-235) in SSHTerminalWidget.tsx
-- **Reference:** `src/components/widgets/ssh-terminal/SSHTerminalWidget.tsx`
-- The first handler in the initial useEffect (lines 186-192) should be the ONLY handler
-- Delete this block entirely:
-```javascript
-// Update term and ws refs when they change (for reconnect)
-useEffect(() => {
-  const term = termRef.current;
-  const ws = wsRef.current;
+## Phase 2: Widget Settings UI
+- Create WidgetSettingsDialog.tsx
+- Add Settings to widget menu (⋮)
+- Create settings API route: /api/widgets/[widgetId]/settings
 
-  if (term && ws?.readyState === WebSocket.OPEN) {
-    term.onData((data) => {
-      ws.send(data);
-    });
-  }
-}, [status]);
-```
+## Phase 3: SSH Connection Pool - REUSE
+- Import existing src/lib/ssh/connection-pool.ts
+
+## Phase 4: Background Poller Service
+- Create poller.js
+- Create s6-overlay/s6-rc.d/poller/* files
+- Implement last_polled_at tracking per (server, widget_type)
+- Exclude custom_command from discovery query
+- Implement both storage modes (latest_ttl, change_only)
+
+## Phase 5: Widget API Cache Integration
+- Read from widget_data_cache first
+- Fall back to live SSH if cache empty
+- Return collected_at + stale flag
+
+## Phase 6: OS Update Check Widget
+- Create OSUpdateCheckWidget.tsx
+- Create check-updates API
+- Create install-updates API  
+- Add checkForUpdates(), installUpdates() to adapters
+
+## Phase 7: TTL Cleanup
+- Auto-delete expired latest_ttl rows
+- Change-only: only store when hash changes
+- change_only rows: delete after 6 months
+- Cleanup when widgets/servers removed
 
 # 5. TESTING AND VALIDATION
 
-## Acceptance Criteria:
-- Type single character - should appear ONCE
-- Type `ls` - should show as `ls` not `llss`
-- Paste text - should appear once, not duplicated
-- Arrow keys navigate correctly (not doubled)
-- Exit command closes session properly
-
-## Verification:
-- Reload the terminal widget
-- Type keys and verify no duplication
-- Check browser console for any errors
+- Single instance: poller collects data, widgets show cached
+- Cache miss: falls back to live SSH
+- Poll intervals respected (not polling too often)
+- Display name persists per instance
+- Leadership transition: poller moves to new leader
+- OS Update: check, install, reboot indicator work
