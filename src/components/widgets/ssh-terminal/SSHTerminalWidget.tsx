@@ -19,6 +19,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
   const authBufferRef = useRef('');
   const authTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const passwordPromptShownRef = useRef(false);
+  const servicePromptRef = useRef<string>('');
   
   const terminalRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -87,6 +88,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
     authenticatedRef.current = false;
     authBufferRef.current = '';
     passwordPromptShownRef.current = false;
+    servicePromptRef.current = '';
     if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
     loginUsernameRef.current = userToUse;
 
@@ -140,6 +142,14 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
 
           // Phase 2: Send su after first output (bosun-svc shell ready)
           if (!suSentRef.current) {
+            // Capture the service account prompt from initial shell output
+            // Matches patterns like: bosun-svc@hostname:~$  or  user@host:/path#
+            const promptMatch = authBufferRef.current.match(/\S+@\S+[:#$]\s*$/m);
+            if (promptMatch) {
+              servicePromptRef.current = promptMatch[0].trim();
+              console.log('[WS] Captured service prompt:', servicePromptRef.current);
+            }
+
             setTimeout(() => {
               if (wsRef.current?.readyState === WebSocket.OPEN) {
                 wsRef.current.send(`su - ${userToUse}\r`);
@@ -206,6 +216,18 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
         // ========== NORMAL MODE ==========
         if (termRef.current) {
           termRef.current.write(data);
+        }
+
+        // Detect drop back to service account → auto-disconnect
+        if (servicePromptRef.current && data.includes(servicePromptRef.current)) {
+          console.log('[WS] Detected return to service account, auto-disconnecting');
+          if (wsRef.current) {
+            wsRef.current.close();
+            wsRef.current = null;
+          }
+          setStatus('idle');
+          statusRef.current = 'idle';
+          return;
         }
       };
 
