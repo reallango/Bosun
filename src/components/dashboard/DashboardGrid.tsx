@@ -6,7 +6,6 @@ import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
 import { Widget } from '@/types/widget';
 import { WidgetFrame } from './WidgetFrame';
-import { WidgetSettingsDialog } from '@/components/dialogs/WidgetSettingsDialog';
 import { EmptyState } from '@/components/shared/EmptyState';
 import { ensureArray } from '@/lib/api/ensureArray';
 
@@ -22,9 +21,6 @@ interface DashboardGridProps {
 
 export function DashboardGrid({ dashboardId, widgets, onLayoutChange, editable = false, onWidgetRemoved }: DashboardGridProps) {
   const safeWidgets = ensureArray<Widget>(widgets);
-
-  // Single settings dialog state for entire dashboard
-  const [settingsWidgetId, setSettingsWidgetId] = useState<string | null>(null);
 
   const [layouts, setLayouts] = useState<any[]>(() =>
     safeWidgets.map(w => ({
@@ -83,15 +79,9 @@ export function DashboardGrid({ dashboardId, widgets, onLayoutChange, editable =
             serverName={widget.server_name}
             editable={editable}
             onRemoved={onWidgetRemoved}
-            onOpenSettings={() => setSettingsWidgetId(widget.id)}
           />
         </div>
       ))}
-      <WidgetSettingsDialog
-        widgetId={settingsWidgetId || ''}
-        open={!!settingsWidgetId}
-        onOpenChange={(open) => !open && setSettingsWidgetId(null)}
-      />
     </GridLayout>
   );
 }
