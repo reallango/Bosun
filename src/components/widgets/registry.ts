@@ -160,6 +160,17 @@ export const widgetRegistry: Record<string, WidgetDefinition> = {
     refreshInterval: 0,
     backgroundPollable: false,
   },
+  os_update_check: {
+    type: 'os_update_check',
+    displayName: 'OS Update Check',
+    description: 'Check for and install OS updates',
+    icon: 'refresh-cw',
+    category: 'system',
+    defaultSize: { w: 4, h: 3 },
+    minSize: { w: 3, h: 2 },
+    refreshInterval: 0,
+    backgroundPollable: false,  // Manual only for security
+  },
 };
 
 export function getWidgetDefinition(type: string): WidgetDefinition | undefined {

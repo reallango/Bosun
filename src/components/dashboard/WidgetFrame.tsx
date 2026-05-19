@@ -13,6 +13,7 @@ import { SSHTerminalWidget } from '@/components/widgets/ssh-terminal';
 import { DockerContainersWidget } from '@/components/widgets/docker-containers';
 import { CustomCommandWidget } from '@/components/widgets/custom-command';
 import { PortainerLinkWidget } from '@/components/widgets/portainer-link';
+import { OSUpdateCheckWidget } from '@/components/widgets/os-update-check';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 
@@ -56,6 +57,8 @@ function WidgetContent({ widgetId, widgetType, serverId, serverName }: { widgetI
       return <CustomCommandWidget widgetId={widgetId} serverId={serverId} />;
     case 'portainer_link':
       return <PortainerLinkWidget widgetId={widgetId} serverId={serverId} />;
+    case 'os_update_check':
+      return <OSUpdateCheckWidget widgetId={widgetId} serverId={serverId} />;
     default:
       return <div className="text-gray-500 text-sm">Unknown widget: {widgetType}</div>;
   }
