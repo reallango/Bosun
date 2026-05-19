@@ -244,13 +244,78 @@ wss.on('connection', async (ws, req) => {
 
   console.log('[WS] Client connected: session=' + sessionId + ', server=' + serverId + ', ip=' + clientIP);
   
+  // ========== CHECK FOR EXISTING SESSION (REATTACH) ==========
+  const existingSession = sshSessions.get(sessionId);
+  if (existingSession && existingSession.stream && existingSession.authenticated) {
+    console.log('[WS] Reattaching to existing session: ' + sessionId);
+
+    // Cancel idle timeout
+    if (existingSession.idleTimeout) {
+      clearTimeout(existingSession.idleTimeout);
+      existingSession.idleTimeout = null;
+    }
+
+    // Attach new WebSocket
+    existingSession.ws = ws;
+    existingSession.lastActivity = Date.now();
+
+    // Send session restored marker
+    ws.send('\r\n\x1b[33m[Session restored]\x1b[0m\r\n');
+
+    // Replay buffer so user sees previous output
+    for (const chunk of existingSession.buffer) {
+      ws.send(chunk);
+    }
+
+    // Set up input: WebSocket -> SSH stream
+    ws.on('message', (msg) => {
+      try {
+        const parsed = JSON.parse(msg.toString());
+        if (parsed.type === 'resize' && existingSession.stream) {
+          existingSession.stream.setWindow(parsed.rows, parsed.cols);
+          return;
+        }
+      } catch {}
+      // Raw input
+      if (existingSession.stream) {
+        existingSession.stream.write(msg.toString());
+        existingSession.lastActivity = Date.now();
+      }
+    });
+
+    // Handle WebSocket disconnect (DON'T kill SSH)
+    ws.on('close', () => {
+      console.log('[WS] Client disconnected from session: ' + sessionId + ' (keeping SSH alive)');
+      const session = sshSessions.get(sessionId);
+      if (session) {
+        session.ws = null;
+        // Start idle timeout
+        session.idleTimeout = setTimeout(() => {
+          console.log('[WS] Idle timeout for session: ' + sessionId + ', cleaning up');
+          if (session.client) session.client.end();
+          if (session.stream) session.stream.close();
+          sshSessions.delete(sessionId);
+        }, 15 * 60 * 1000); // 15 minutes
+      }
+    });
+
+    ws.on('error', (err) => {
+      console.error('[WS] Error on reattached session: ' + sessionId, err.message);
+      const session = sshSessions.get(sessionId);
+      if (session) session.ws = null;
+    });
+
+    return; // SKIP creating new SSH connection
+  }
+
+  // ========== NEW SESSION ==========
   let sshClient = null;
   let sshStream = null;
+  const outputBuffer = [];
   
   try {
     // Connect to server via SSH
     sshClient = await connectToServer(serverId);
-    sshSessions.set(sessionId, sshClient);
     
     // Open PTY shell
     sshClient.shell({ term: 'xterm-256color', cols: 80, rows: 24 }, (err, stream) => {
@@ -263,16 +328,37 @@ wss.on('connection', async (ws, req) => {
       sshStream = stream;
       ws.send('\r\n\x1b[32mConnected to server via SSH\x1b[0m\r\n\r\n');
       
-      // SSH output -> browser
+      // SSH output -> browser + buffer
       stream.on('data', (data) => {
+        const str = data.toString('utf-8');
+        
+        // Buffer output (keep last 1000 chunks)
+        outputBuffer.push(str);
+        if (outputBuffer.length > 1000) {
+          outputBuffer.shift();
+        }
+        
+        // Update last activity
+        const session = sshSessions.get(sessionId);
+        if (session) session.lastActivity = Date.now();
+
+        // Send to WebSocket if connected
         if (ws.readyState === WebSocket.OPEN) {
-          ws.send(data.toString('utf-8'));
+          ws.send(str);
         }
       });
       
       stream.on('close', () => {
-        ws.send('\r\n*** SSH session closed ***\r\n');
-        ws.close(1000, 'Session closed');
+        console.log('[WS] SSH stream closed for session: ' + sessionId);
+        const session = sshSessions.get(sessionId);
+        if (session) {
+          if (session.idleTimeout) clearTimeout(session.idleTimeout);
+          if (session.ws && session.ws.readyState === WebSocket.OPEN) {
+            session.ws.close();
+          }
+          if (session.client) session.client.end();
+          sshSessions.delete(sessionId);
+        }
       });
       
       // Browser input -> SSH
@@ -297,18 +383,53 @@ wss.on('connection', async (ws, req) => {
       });
     });
     
-    // Store stream for cleanup
+    // Store expanded session data
+    const sessionData = {
+      client: sshClient,
+      stream: sshStream,
+      ws: ws,
+      buffer: outputBuffer,
+      createdAt: Date.now(),
+      lastActivity: Date.now(),
+      idleTimeout: null,
+      username: '',
+      authenticated: true, // Shell created successfully - server-side auth complete
+      serverId: serverId,
+    };
+    sshSessions.set(sessionId, sessionData);
+
+    // Handle new session WebSocket disconnect
     ws.on('close', () => {
-      console.log('[WS] Client disconnected: session=' + sessionId);
-      if (sshStream) sshStream.end();
-      if (sshClient) sshClient.end();
-      sshSessions.delete(sessionId);
+      console.log('[WS] Client disconnected: session=' + sessionId + ' (keeping SSH alive)');
+      const session = sshSessions.get(sessionId);
+      if (session) {
+        session.ws = null;
+        // Start idle timeout
+        session.idleTimeout = setTimeout(() => {
+          console.log('[WS] Idle timeout for session: ' + sessionId + ', cleaning up');
+          if (session.client) session.client.end();
+          if (session.stream) session.stream.close();
+          sshSessions.delete(sessionId);
+        }, 15 * 60 * 1000); // 15 minutes
+      }
     });
     
+    // WebSocket error for new session
+    ws.on('error', (err) => {
+      console.error('[WS] Error on session: ' + sessionId, err.message);
+      const session = sshSessions.get(sessionId);
+      if (session) {
+        if (session.idleTimeout) clearTimeout(session.idleTimeout);
+        if (session.client) session.client.end();
+        sshSessions.delete(sessionId);
+      }
+    });
+
   } catch (err) {
     console.error('[WS] SSH connection error:', err.message);
     ws.send('\r\n*** SSH connection failed: ' + err.message + ' ***\r\n');
     ws.close(4002, err.message);
+    sshSessions.delete(sessionId);
   }
 });
 
