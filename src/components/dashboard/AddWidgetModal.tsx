@@ -104,15 +104,15 @@ export function AddWidgetModal({ isOpen, onClose, dashboardId, serverId, onAdd }
           <div className="mb-4">
             <label className="block text-sm font-medium mb-1">Server</label>
             {loadingServers ? (
-              <select disabled className="w-full px-3 py-2 border rounded bg-gray-50">
+              <select disabled className="w-full px-3 py-2 border rounded bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400">
                 <option>Loading servers...</option>
               </select>
             ) : serversError ? (
-              <select disabled className="w-full px-3 py-2 border rounded bg-red-50">
+              <select disabled className="w-full px-3 py-2 border rounded bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400">
                 <option>{serversError}</option>
               </select>
             ) : servers.length === 0 ? (
-              <select disabled className="w-full px-3 py-2 border rounded bg-gray-50">
+              <select disabled className="w-full px-3 py-2 border rounded bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400">
                 <option>No servers available. Please add a server first.</option>
               </select>
             ) : (
