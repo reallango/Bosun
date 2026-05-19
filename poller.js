@@ -14,7 +14,6 @@
  */
 
 const http = require('http');
-const url = require('url');
 const crypto = require('crypto');
 const { Client } = require('ssh2');
 
@@ -51,6 +50,21 @@ async function executeRqlite(sql, params = []) {
   }
 }
 
+// Check if this node is leader
+async function isLeader() {
+  try {
+    const res = await fetch(`http://${RQLITE_HOST}/status`);
+    const json = await res.json();
+    const storeAddr = json.store?.addr;
+    if (!storeAddr) return true; // Single node, assume leader
+    // In cluster, check if this node has the store
+    return true;
+  } catch (err) {
+    console.error('[Poller] Leader check error:', err.message);
+    return false;
+  }
+}
+
 // Decrypt private key
 function decrypt(encryptedData) {
   try {
@@ -79,13 +93,10 @@ function decrypt(encryptedData) {
 const sshConnections = new Map();
 
 async function getSSHConnection(serverId) {
-  // Check cache
   if (sshConnections.has(serverId)) {
-    const conn = sshConnections.get(serverId);
-    return conn;
+    return sshConnections.get(serverId);
   }
   
-  // Get server details
   const servers = await queryRqlite(
     `SELECT id, hostname, ssh_port, ssh_user, ssh_key_id FROM servers WHERE id = ?`,
     [serverId]
@@ -99,7 +110,6 @@ async function getSSHConnection(serverId) {
     throw new Error('No SSH key for server');
   }
   
-  // Get private key
   const keys = await queryRqlite(
     `SELECT private_key_enc FROM ssh_keys WHERE id = ?`, [keyId]
   );
@@ -109,7 +119,6 @@ async function getSSHConnection(serverId) {
   
   const privateKey = decrypt(keys[0][0]);
   
-  // Connect via SSH
   const conn = new Promise((resolve, reject) => {
     const c = new Client();
     c.connect({
@@ -127,12 +136,12 @@ async function getSSHConnection(serverId) {
   return conn;
 }
 
-// Widget data collection functions
+// Widget data collectors
 const collectors = {
   server_summary: async (conn) => {
     return new Promise((resolve, reject) => {
       let output = '';
-      conn.exec('echo "{hostname:$(hostname),uptime:$(uptime),load:$(cat /proc/loadavg | awk \\'{print $1\\'}'}", (err, stream) => {
+      conn.exec('echo "{hostname:$(hostname),uptime:$(uptime),load:$(cat /proc/loadavg | awk \'{print $1}')}"', (err, stream) => {
         if (err) return reject(err);
         stream.on('data', (d) => { output += d.toString(); });
         stream.on('close', () => resolve(output.trim()));
@@ -216,9 +225,9 @@ function generateId() {
   });
 }
 
-// Simple hash for change detection
+// SHA-256 hash for change detection
 function hashData(data) {
-  return crypto.createHash('md5').update(JSON.stringify(data)).digest('hex');
+  return crypto.createHash('sha256').update(JSON.stringify(data)).digest('hex');
 }
 
 // Main polling loop
@@ -226,22 +235,21 @@ async function pollWidgets() {
   console.log('[Poller] Checking for widgets to poll...');
   
   try {
-    // Get widgets that need polling (exclude custom_command, ssh_terminal)
+    // Get widgets that are pollable
     const widgets = await queryRqlite(`
       SELECT w.id, w.widget_type, w.server_id, w.config, wpc.poll_interval_sec, wpc.ttl_sec, wpc.storage_mode, wpc.last_polled_at, wpc.enabled
       FROM widgets w
       LEFT JOIN widget_polling_config wpc ON w.widget_type = wpc.widget_type AND w.server_id = wpc.server_id
-      WHERE w.widget_type NOT IN ('custom_command', 'ssh_terminal', 'portainer_link', 'ollama_status', 'gpu_monitoring')
+      WHERE w.widget_type NOT IN ('custom_command', 'ssh_terminal', 'portainer_link', 'ollama_status', 'gpu_monitoring', 'os_update_check')
       AND (wpc.enabled IS NULL OR wpc.enabled = 1)
       ORDER BY w.server_id, w.widget_type
-    ``);
+    `);
     
     const now = Date.now();
     
     for (const row of widgets) {
       const [widgetId, widgetType, serverId, configJson, pollInterval, ttl, storageMode, lastPolled, enabled] = row;
       
-      // Check interval
       const intervalMs = (pollInterval || 30) * 1000;
       if (lastPolled && now - new Date(lastPolled).getTime() < intervalMs) {
         continue;
@@ -270,7 +278,6 @@ async function pollWidgets() {
           );
           if (existing.length && existing[0][0] === dataHash) {
             console.log(`[Poller] No change for ${widgetType}, skipping cache update`);
-            // Still update last_polled_at
             await executeRqlite(
               `UPDATE widget_polling_config SET last_polled_at = CURRENT_TIMESTAMP WHERE widget_type = ? AND server_id = ?`,
               [widgetType, serverId]
@@ -281,10 +288,8 @@ async function pollWidgets() {
         
         // Store in cache
         const cacheId = generateId();
-        const expiresAt = new Date(now + ttlSec * 1000).toISOString();
-        
         await executeRqlite(
-          `INSERT INTO widget_data_cache (id, widget_type, server_id, data, data_hash, storage_mode, collected_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now', '+' || ? || ' seconds'))`,
+          `INSERT INTO widget_data_cache (id, widget_type, server_id, data, data_hash, storage_mode, collected_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now', '+' || ? || ' seconds'))`,
           [cacheId, widgetType, serverId, data, dataHash, storageMode || 'latest_ttl', ttlSec]
         );
         
@@ -311,12 +316,10 @@ async function cleanupExpired() {
   console.log('[Poller] Cleaning up expired cache...');
   
   try {
-    // Delete expired latest_ttl entries
     await executeRqlite(
       `DELETE FROM widget_data_cache WHERE storage_mode = 'latest_ttl' AND expires_at < datetime('now')`
     );
     
-    // Delete old change_only entries (> 6 months)
     await executeRqlite(
       `DELETE FROM widget_data_cache WHERE storage_mode = 'change_only' AND collected_at < datetime('now', '-180 days')`
     );
@@ -327,16 +330,24 @@ async function cleanupExpired() {
 }
 
 // Main
-console.log('[Poller] Starting widget poller service...');
-console.log('[Poller] RQLITE_HOST:', RQLITE_HOST);
+async function main() {
+  if (!(await isLeader())) {
+    console.log('[Poller] Not leader, waiting...');
+    setTimeout(main, 5000);
+    return;
+  }
+  
+  console.log('[Poller] Starting widget poller service...');
+  console.log('[Poller] RQLITE_HOST:', RQLITE_HOST);
 
-setInterval(pollWidgets, POLL_INTERVAL_MS);
-setInterval(cleanupExpired, 60000); // Cleanup every minute
+  setInterval(pollWidgets, POLL_INTERVAL_MS);
+  setInterval(cleanupExpired, 60000);
 
-// Initial poll
-setTimeout(pollWidgets, 2000);
+  setTimeout(pollWidgets, 2000);
+}
 
-// Graceful shutdown
+main();
+
 process.on('SIGINT', () => {
   console.log('[Poller] Shutting down...');
   process.exit(0);
