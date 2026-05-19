@@ -126,9 +126,10 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
           if (!authenticatedRef.current) {
             console.log('[WS] Auth timeout');
             setError('Authentication timed out');
+            ws.close();
+            setTimeout(() => { termRef.current?.reset(); }, 50);
             setStatus('error');
             statusRef.current = 'error';
-            ws.close();
           }
         }, 15000);
       };
@@ -184,9 +185,10 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
                 authBufferRef.current.includes('does not exist')) {
               if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
               setError('Login failed - check your username and password');
+              ws.close();
+              setTimeout(() => { termRef.current?.reset(); }, 50);
               setStatus('error');
               statusRef.current = 'error';
-              ws.close();
               return;
             }
 
@@ -214,29 +216,30 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
         }
 
         // ========== NORMAL MODE ==========
-        if (termRef.current) {
-          termRef.current.write(data);
-        }
-
-        // Detect drop back to service account → auto-disconnect
+        // Check for service account prompt BEFORE writing to terminal
         if (servicePromptRef.current && data.includes(servicePromptRef.current)) {
           console.log('[WS] Detected return to service account, auto-disconnecting');
-          if (termRef.current) {
-            termRef.current.clear();
-          }
+          // Close without writing to terminal
           if (wsRef.current) {
             wsRef.current.close();
             wsRef.current = null;
           }
+          setTimeout(() => { termRef.current?.reset(); }, 50);
           setStatus('idle');
           statusRef.current = 'idle';
           return;
+        }
+
+        // Normal terminal output
+        if (termRef.current) {
+          termRef.current.write(data);
         }
       };
 
       ws.onclose = (event) => {
         if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
         console.log('[WS] Disconnected:', event.code, event.reason);
+        setTimeout(() => { termRef.current?.reset(); }, 50);
         setStatus('idle');
         statusRef.current = 'idle';
       };
@@ -244,6 +247,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       ws.onerror = (event) => {
         if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
         console.error('[WS] Error:', event);
+        setTimeout(() => { termRef.current?.reset(); }, 50);
         setError('WebSocket connection error');
         setStatus('error');
         statusRef.current = 'error';
@@ -251,6 +255,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
 
     } catch (err: any) {
       console.error('[WS] Connection error:', err);
+      setTimeout(() => { termRef.current?.reset(); }, 50);
       setError(err.message || 'Failed to connect');
       setStatus('error');
       statusRef.current = 'error';
@@ -259,13 +264,11 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
 
   // Disconnect from WebSocket server
   const disconnect = useCallback(() => {
-    if (termRef.current) {
-      termRef.current.clear();
-    }
     if (wsRef.current) {
       wsRef.current.close();
       wsRef.current = null;
     }
+    setTimeout(() => { termRef.current?.reset(); }, 50);
     setStatus('idle');
   }, []);
 
