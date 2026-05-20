@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
+import { getTerminalSessionManager } from '@/lib/terminal-session-manager';
 
 interface SSHTerminalWidgetProps {
   widgetId: string;
@@ -59,7 +60,42 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
   };
 
   // Full cleanup - destroys all state for a fresh start
-  const cleanup = useCallback(() => {
+// keepAlive: if true, keep WebSocket session on server but release local terminal
+  const cleanup = useCallback((keepAlive = false) => {
+    const tsm = getTerminalSessionManager();
+    
+    // Notify session manager that we're detaching (keep session alive)
+    if (keepAlive) {
+      tsm.detachFromSession(widgetId);
+      // Only detach terminal, keep WebSocket
+      if (termRef.current) {
+        termRef.current.dispose();
+        termRef.current = null;
+      }
+      fitAddonRef.current = null;
+      // Clear resize observer
+      if (resizeObserverRef.current) {
+        resizeObserverRef.current.disconnect();
+        resizeObserverRef.current = null;
+      }
+      // Clear any pending auth timeouts
+      if (authTimeoutRef.current) {
+        clearTimeout(authTimeoutRef.current);
+        authTimeoutRef.current = null;
+      }
+      // Reset auth state but keep ws
+      suSentRef.current = false;
+      authenticatedRef.current = false;
+      authBufferRef.current = '';
+      passwordPromptShownRef.current = false;
+      servicePromptRef.current = '';
+      tsm.setSessionStatus(widgetId, 'disconnected');
+      return;
+    }
+    
+    // Full destroy - close WebSocket and clean up completely
+    tsm.destroySession(widgetId);
+    
     // Close WebSocket
     if (wsRef.current) {
       // Null out handlers FIRST to prevent old callbacks from firing
@@ -93,9 +129,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
     authBufferRef.current = '';
     passwordPromptShownRef.current = false;
     servicePromptRef.current = '';
-  }, []);
-
-  // Connect with authentication flow (su as user)
+  }, [widgetId]);
   const connect = useCallback(async (targetUsername?: string) => {
     const userToUse = (targetUsername || username).trim();
     if (!userToUse) {
@@ -289,7 +323,10 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
           authBufferRef.current += data;
 
           // Phase 2: Send su after first output (bosun-svc shell ready)
-          if (!suSentRef.current) {
+          if (!suSentRef.current && !authenticatedRef.current) {
+            // Double-check: make absolutely sure we haven't already sent it
+            if (suSentRef.current) return;
+            
             // Capture the service account prompt from initial shell output
             // Matches patterns like: bosun-svc@hostname:~$  or  user@host:/path#
             const promptMatch = authBufferRef.current.match(/\S+@\S+[:#$]\s*$/m);
@@ -298,10 +335,14 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
               console.log('[WS] Captured service prompt:', servicePromptRef.current);
             }
 
+            // Wait for password prompt before sending su - avoids race conditions
+            // The bosun-svc user's initial shell output should indicate readiness
             setTimeout(() => {
+              // Triple-check right before sending to prevent duplicates
+              if (suSentRef.current || authenticatedRef.current) return;
               if (wsRef.current?.readyState === WebSocket.OPEN) {
                 wsRef.current.send(`su - ${userToUse}\r`);
-                suSentRef.current = true;
+                suSentRef.current = true; // Set IMMEDIATELY before logging
                 console.log('[WS] Sent su command for', userToUse);
               }
             }, 500);
@@ -426,9 +467,9 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
     }
   }, [username, sessionId, serverId, cleanup]); // Removed status from deps
 
-  // Disconnect from WebSocket server
+  // Disconnect from WebSocket server - FULL destroy (user clicked disconnect button)
   const disconnect = useCallback(() => {
-    cleanup();
+    cleanup(false); // keepAlive = false - destroy session completely
     setStatus('idle');
     statusRef.current = 'idle';
   }, [cleanup]);
@@ -446,9 +487,10 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       document.head.appendChild(link);
     }
 
-    // Cleanup on unmount
+    // Cleanup on unmount - detach but KEEP session alive on server
+    // This allows session to persist across dashboard switches
     return () => {
-      cleanup();
+      cleanup(true); // keepAlive = true
     };
   }, [cleanup]);
 

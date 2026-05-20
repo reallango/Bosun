@@ -2,6 +2,22 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireRole } from '@/lib/auth/middleware';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 
+export async function GET(request: NextRequest, { params }: { params: Promise<{ widgetId: string }> }) {
+  const auth = await requireAuth(request);
+  if (auth instanceof NextResponse) return auth;
+  const { widgetId } = await params;
+  try {
+    const r = await rqlite.query('SELECT * FROM widgets WHERE id=?', [widgetId]);
+    const widgets = rowsToObjects(r);
+    if (!widgets.length) {
+      return NextResponse.json({ error: { message: 'Widget not found' } }, { status: 404 });
+    }
+    return NextResponse.json({ data: { widget: widgets[0] } });
+  } catch (error) {
+    return NextResponse.json({ error: { message: String(error) } }, { status: 500 });
+  }
+}
+
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ widgetId: string }> }) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
