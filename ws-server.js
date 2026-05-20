@@ -20,6 +20,9 @@ const sshSessions = new Map();
 // Heartbeat interval to prevent idle disconnects
 const HEARTBEAT_MS = Number(process.env.WS_HEARTBEAT_MS) || 30000;
 
+// Grace period for reattach (Gap 5)
+const GRACE_PERIOD_MS = Number(process.env.WS_GRACE_PERIOD_MS) || 30000;
+
 // Rate limiting
 const rateLimitMap = new Map();
 const RATE_LIMIT_MAX = 10;
@@ -249,10 +252,11 @@ wss.on('connection', async (ws, req) => {
   if (existingSession && existingSession.stream && existingSession.authenticated) {
     console.log('[WS] Reattaching to existing session: ' + sessionId);
 
-    // Cancel idle timeout
-    if (existingSession.idleTimeout) {
-      clearTimeout(existingSession.idleTimeout);
-      existingSession.idleTimeout = null;
+    // Cancel grace period timer (Gap 5)
+    if (existingSession.graceTimer) {
+      clearTimeout(existingSession.graceTimer);
+      existingSession.graceTimer = null;
+      console.log('[WS-Server] Grace period cancelled on reattach:', sessionId);
     }
 
     // Attach new WebSocket
@@ -283,19 +287,19 @@ wss.on('connection', async (ws, req) => {
       }
     });
 
-    // Handle WebSocket disconnect (DON'T kill SSH)
+    // Handle WebSocket disconnect (DON'T kill SSH) - Gap 5: grace period
     ws.on('close', () => {
-      console.log('[WS] Client disconnected from session: ' + sessionId + ' (keeping SSH alive)');
+      console.log('[WS-Server] Client disconnected, starting grace period for session:', sessionId);
       const session = sshSessions.get(sessionId);
       if (session) {
         session.ws = null;
-        // Start idle timeout
-        session.idleTimeout = setTimeout(() => {
-          console.log('[WS] Idle timeout for session: ' + sessionId + ', cleaning up');
+        // Start grace period timer
+        session.graceTimer = setTimeout(() => {
+          console.log('[WS-Server] Grace period expired, destroying SSH session:', sessionId);
           if (session.client) session.client.end();
           if (session.stream) session.stream.close();
           sshSessions.delete(sessionId);
-        }, 15 * 60 * 1000); // 15 minutes
+        }, GRACE_PERIOD_MS); // 30 seconds
       }
     });
 

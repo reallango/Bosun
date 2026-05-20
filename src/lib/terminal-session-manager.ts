@@ -19,6 +19,8 @@ export interface TerminalSessionState {
   status: 'connecting' | 'authenticating' | 'connected' | 'idle' | 'error' | 'disconnected';
   ws: WebSocket | null;
   term: Terminal | null;
+  scrollbackBuffer: string[];
+  maxBufferLines: number;
   createdAt: number;
   lastActivity: number;
 }
@@ -53,6 +55,13 @@ class TerminalSessionManager {
   }
   
   /**
+   * Get an existing session (does NOT create)
+   */
+  getSession(widgetId: string): TerminalSessionState | null {
+    return this.sessions.get(widgetId) || null;
+  }
+  
+  /**
    * Register a new session
    */
   registerSession(widgetId: string, serverId: string, username: string): TerminalSessionState {
@@ -69,6 +78,8 @@ class TerminalSessionManager {
       status: 'idle',
       ws: null,
       term: null,
+      scrollbackBuffer: [],
+      maxBufferLines: 10000,
       createdAt: Date.now(),
       lastActivity: Date.now(),
     };
@@ -76,6 +87,27 @@ class TerminalSessionManager {
     this.sessions.set(widgetId, session);
     console.log('[TSM] Created session:', widgetId);
     return session;
+  }
+  
+  /**
+   * Add data to scrollback buffer
+   */
+  appendToBuffer(widgetId: string, data: string): void {
+    const session = this.sessions.get(widgetId);
+    if (!session) return;
+    session.scrollbackBuffer.push(data);
+    // Trim if over limit
+    if (session.scrollbackBuffer.length > session.maxBufferLines) {
+      session.scrollbackBuffer.splice(0, session.scrollbackBuffer.length - session.maxBufferLines);
+    }
+    session.lastActivity = Date.now();
+  }
+  
+  /**
+   * Get scrollback buffer
+   */
+  getBuffer(widgetId: string): string[] {
+    return this.sessions.get(widgetId)?.scrollbackBuffer || [];
   }
   
   /**
@@ -137,6 +169,8 @@ class TerminalSessionManager {
   destroySession(widgetId: string): void {
     const session = this.sessions.get(widgetId);
     if (session) {
+      // Clear scrollback buffer
+      session.scrollbackBuffer = [];
       // Close WebSocket if exists
       if (session.ws) {
         session.ws.close();

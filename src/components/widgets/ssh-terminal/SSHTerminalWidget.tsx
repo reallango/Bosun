@@ -145,6 +145,23 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       return;
     }
 
+    // Gap 3: Close any orphaned WebSocket from a previous session
+    const tsm = getTerminalSessionManager();
+    if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
+      wsRef.current.onclose = null;
+      wsRef.current.onerror = null;
+      wsRef.current.onmessage = null;
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+    // Also check session manager for existing WS
+    const existingSession = tsm.getSession(widgetId);
+    if (existingSession?.ws && existingSession.ws.readyState === WebSocket.OPEN) {
+      console.log('[WS] Closing orphaned WebSocket from previous session');
+      existingSession.ws.close();
+      tsm.setSessionWebSocket(widgetId, null);
+    }
+
     console.log('[WS] Connecting to:', getWsUrl(), 'serverId:', serverId, 'user:', userToUse);
 
     // 1) Clean slate - destroy previous terminal + ws
@@ -196,6 +213,9 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
 
     termRef.current = term;
     fitAddonRef.current = fitAddon;
+
+    // Gap 4: Register terminal with session manager
+    tsm.setSessionTerminal(widgetId, term);
 
     // 3) Set up resize observer
     const handleResize = () => {
@@ -257,6 +277,11 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       const ws = new WebSocket(url.toString());
       wsRef.current = ws;
 
+      // Gap 4: Register session with session manager
+      tsm.registerSession(widgetId, serverId, userToUse);
+      tsm.setSessionWebSocket(widgetId, ws);
+      tsm.setSessionStatus(widgetId, 'connecting');
+
       ws.onopen = () => {
         console.log('[WS] Connected, will authenticate as', userToUse);
         setStatus('authenticating');
@@ -292,8 +317,13 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
         if (!authenticatedRef.current && data.includes('[Session restored]')) {
           console.log('[WS] Session restored - skipping auth');
           authenticatedRef.current = true;
+          suSentRef.current = true; // Gap 3: preserve auth state
           statusRef.current = 'connected';
           setStatus('connected');
+          
+          // Gap 4: Update session status
+          tsm.setSessionStatus(widgetId, 'connected');
+          
           if (authTimeoutRef.current) {
             clearTimeout(authTimeoutRef.current);
             authTimeoutRef.current = null;
@@ -301,6 +331,8 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
           // Write restore marker + buffer replay to terminal
           if (termRef.current) {
             termRef.current.write(data);
+            // Gap 2: Append to scrollback buffer
+            tsm.appendToBuffer(widgetId, data);
           }
           // Re-fit terminal and send resize
           setTimeout(() => {
@@ -396,9 +428,14 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
             if (data.includes(userToUse + '@') ||
                 (authBufferRef.current.includes(userToUse + '@'))) {
               authenticatedRef.current = true;
+              suSentRef.current = true; // Gap 3: preserve auth state
               if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
               authBufferRef.current = '';
               console.log('[WS] Authentication successful for', userToUse);
+              
+              // Gap 4: Update session status
+              tsm.setSessionStatus(widgetId, 'connected');
+              
               // Re-fit now that terminal is fully visible
               setTimeout(() => {
                 if (fitAddonRef.current && termRef.current) {
@@ -415,6 +452,8 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
               // Write this data (it contains the user's prompt)
               if (termRef.current) {
                 termRef.current.write(data);
+                // Gap 2: Append to scrollback buffer
+                tsm.appendToBuffer(widgetId, data);
               }
               return;
             }
@@ -422,6 +461,8 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
             // Normal pass-through during password entry
             if (termRef.current) {
               termRef.current.write(data);
+              // Gap 2: Append to scrollback buffer
+              tsm.appendToBuffer(widgetId, data);
             }
           }
 
@@ -441,6 +482,8 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
         // Normal terminal output
         if (termRef.current) {
           termRef.current.write(data);
+          // Gap 2: Append to scrollback buffer
+          tsm.appendToBuffer(widgetId, data);
         }
       };
 
@@ -449,6 +492,9 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
         console.log('[WS] Disconnected:', event.code, event.reason);
         setStatus('idle');
         statusRef.current = 'idle';
+        
+        // Gap 4: Update session status
+        tsm.setSessionStatus(widgetId, 'disconnected');
       };
 
       ws.onerror = (event) => {
@@ -494,10 +540,117 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
     };
   }, [cleanup]);
 
-  // Auto-reconnect on mount if username saved
+  // Auto-reconnect on mount if username saved - Gap 1: Check for existing session
   useEffect(() => {
+    const tsm = getTerminalSessionManager();
+    const existingSession = tsm.getSession(widgetId);
+    
+    // Gap 1: Reattach if session exists and WebSocket is live
+    if (existingSession?.ws && existingSession.ws.readyState === WebSocket.OPEN) {
+      console.log('[TSM] Found existing session, reattaching:', widgetId);
+      
+      // Create new Terminal
+      if (!document.getElementById('xterm-css')) {
+        const link = document.createElement('link');
+        link.id = 'xterm-css';
+        link.rel = 'stylesheet';
+        link.href = '/xterm.css';
+        document.head.appendChild(link);
+      }
+      
+      const term = new Terminal({
+        cursorBlink: true,
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+        fontSize: 13,
+        theme: {
+          background: '#0b1020',
+          foreground: '#e0e0e0',
+          cursor: '#00ff00',
+          cursorAccent: '#0b1020',
+          selectionBackground: 'rgba(0, 255, 0, 0.3)',
+          black: '#000000',
+          red: '#ff5555',
+          green: '#50fa7b',
+          yellow: '#f1fa8c',
+          blue: '#bd93f9',
+          magenta: '#ff79c6',
+          cyan: '#8be9fd',
+          white: '#bfbfbf',
+          brightBlack: '#4f4f4f',
+          brightRed: '#ff6e67',
+          brightGreen: '#5af78e',
+          brightYellow: '#f4f99c',
+          brightBlue: '#caa9fa',
+          brightMagenta: '#ff92d0',
+          brightCyan: '#9aedfe',
+          brightWhite: '#e6e6e6'
+        },
+        allowProposedApi: true
+      });
+      
+      const fitAddon = new FitAddon();
+      term.loadAddon(fitAddon);
+      term.open(terminalRef.current!);
+      fitAddon.fit();
+      
+      termRef.current = term;
+      fitAddonRef.current = fitAddon;
+      
+      // Gap 1: Replay scrollback buffer
+      const buffer = tsm.getBuffer(widgetId);
+      for (const chunk of buffer) {
+        term.write(chunk);
+      }
+      
+      // Gap 1: Wire up events to existing WebSocket
+      const ws = existingSession.ws;
+      
+      // Set refs
+      wsRef.current = ws;
+      authenticatedRef.current = true;
+      suSentRef.current = true;
+      
+      // Set status
+      setStatus('connected');
+      statusRef.current = 'connected';
+      tsm.setSessionStatus(widgetId, 'connected');
+      tsm.setSessionTerminal(widgetId, term);
+      
+      // Re-wire terminal input -> WebSocket
+      term.onData((data) => {
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          wsRef.current.send(data);
+        }
+      });
+      
+      // Re-wire resize
+      const handleResize = () => {
+        if (fitAddonRef.current) {
+          try { fitAddonRef.current.fit(); } catch {}
+          if (wsRef.current?.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({
+              type: 'resize',
+              cols: termRef.current?.cols,
+              rows: termRef.current?.rows
+            }));
+          }
+        }
+      };
+      resizeObserverRef.current = new ResizeObserver(handleResize);
+      if (terminalRef.current?.parentElement) {
+        resizeObserverRef.current.observe(terminalRef.current.parentElement);
+      }
+      
+      // Re-wire WebSocket -> terminal (need to capture old handler)
+      // Gap 1: Update session ws to ensure consistent
+      tsm.setSessionWebSocket(widgetId, ws);
+      
+      console.log('[TSM] Reattached to session:', widgetId);
+      return; // Skip regular connect
+    }
+    
+    // No existing session - use regular connect
     if (username && status === 'idle') {
-      // Auto-reconnect attempt - will restore session if exists
       connect(username);
     }
   }, []); // Only on mount
