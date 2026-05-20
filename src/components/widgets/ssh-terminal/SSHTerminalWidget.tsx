@@ -28,6 +28,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
   const fitAddonRef = useRef<FitAddon | null>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const statusRef = useRef<ConnectionStatus>('idle');
+  const detachedRef = useRef(false); // Gap: true when terminal disposed but WS kept alive
 
   // Login username ref - accessible inside onmessage closure
   const loginUsernameRef = useRef('');
@@ -66,6 +67,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
     
     // Notify session manager that we're detaching (keep session alive)
     if (keepAlive) {
+      detachedRef.current = true; // Mark as detached, preserve auth state
       tsm.detachFromSession(widgetId);
       // Only detach terminal, keep WebSocket
       if (termRef.current) {
@@ -83,9 +85,8 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
         clearTimeout(authTimeoutRef.current);
         authTimeoutRef.current = null;
       }
-      // Reset auth state but keep ws
-      suSentRef.current = false;
-      authenticatedRef.current = false;
+      // Clear auth buffer but keep auth state (suSentRef, authenticatedRef)
+      // so reattach knows session is already authenticated
       authBufferRef.current = '';
       passwordPromptShownRef.current = false;
       servicePromptRef.current = '';
@@ -124,6 +125,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       authTimeoutRef.current = null;
     }
     // Reset ALL auth state refs
+    detachedRef.current = false;
     suSentRef.current = false;
     authenticatedRef.current = false;
     authBufferRef.current = '';
@@ -312,6 +314,12 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
 
       ws.onmessage = (event) => {
         const data = typeof event.data === 'string' ? event.data : new TextDecoder().decode(event.data);
+
+        // If detached (terminal disposed but WS kept alive), only buffer data
+        if (detachedRef.current) {
+          tsm.appendToBuffer(widgetId, data);
+          return;
+        }
 
         // ========== SESSION RESTORE CHECK ==========
         if (!authenticatedRef.current && data.includes('[Session restored]')) {
@@ -605,6 +613,9 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       // Gap 1: Wire up events to existing WebSocket
       const ws = existingSession.ws;
       
+      // Clear detached flag - we're back
+      detachedRef.current = false;
+      
       // Set refs
       wsRef.current = ws;
       authenticatedRef.current = true;
@@ -642,6 +653,11 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       }
       
       // Re-wire WebSocket -> terminal (need to capture old handler)
+      // NOTE: We do NOT re-wire ws.onmessage here. The original handler from connect()
+      // reads termRef.current, which is a mutable React ref. Since we just set
+      // termRef.current = term above, the old handler now writes to the new terminal.
+      // Do NOT refactor onmessage to close over a local `term` variable or this breaks.
+      
       // Gap 1: Update session ws to ensure consistent
       tsm.setSessionWebSocket(widgetId, ws);
       
