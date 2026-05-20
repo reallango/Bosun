@@ -652,11 +652,49 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
         resizeObserverRef.current.observe(terminalRef.current.parentElement);
       }
       
-      // Re-wire WebSocket -> terminal (need to capture old handler)
-      // NOTE: We do NOT re-wire ws.onmessage here. The original handler from connect()
-      // reads termRef.current, which is a mutable React ref. Since we just set
-      // termRef.current = term above, the old handler now writes to the new terminal.
-      // Do NOT refactor onmessage to close over a local `term` variable or this breaks.
+      // ================================================================
+      // REATTACH: Re-wire WebSocket handlers to NEW component refs
+      // ================================================================
+      // NOTE: We MUST re-wire ws.onmessage here. React creates new ref objects on each
+      // mount, so the old handler from connect() closures over dead refs from the
+      // previous component instance. The new handler uses this component's refs.
+      
+      // Re-wire ws.onmessage — MUST replace old handler which closures over dead refs
+      ws.onmessage = (event) => {
+        const data = typeof event.data === 'string' ? event.data : new TextDecoder().decode(event.data);
+        
+        // If detached again (another unmount happened), only buffer
+        if (detachedRef.current) {
+          tsm.appendToBuffer(widgetId, data);
+          return;
+        }
+        
+        // Normal authenticated output — write to terminal and buffer
+        if (termRef.current) {
+          termRef.current.write(data);
+        }
+        tsm.appendToBuffer(widgetId, data);
+      };
+      
+      // Re-wire ws.onclose
+      ws.onclose = (event) => {
+        console.log('[WS] Disconnected (reattached session):', event.code, event.reason);
+        setStatus('idle');
+        statusRef.current = 'idle';
+        tsm.setSessionStatus(widgetId, 'disconnected');
+      };
+      
+      // Re-wire ws.onerror
+      ws.onerror = (event) => {
+        console.error('[WS] Error (reattached session):', event);
+        setStatus('error');
+        statusRef.current = 'error';
+        tsm.setSessionStatus(widgetId, 'error');
+      };
+      
+      // ================================================================
+      // END REATTACH
+      // ================================================================
       
       // Gap 1: Update session ws to ensure consistent
       tsm.setSessionWebSocket(widgetId, ws);
