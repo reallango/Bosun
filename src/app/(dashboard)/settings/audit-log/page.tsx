@@ -51,7 +51,7 @@ export default function AuditLogPage() {
       <h1 className="text-2xl font-bold mb-6">Audit Log</h1>
 
       <div className="flex gap-4 mb-6">
-        <select value={filterAction} onChange={e => setFilterAction(e.target.value)} className="border rounded px-3 py-2">
+        <select value={filterAction} onChange={e => setFilterAction(e.target.value)} className="border rounded px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white border-gray-300 dark:border-gray-600">
           <option value="">All Actions</option>
           <option value="login">Login</option>
           <option value="logout">Logout</option>
@@ -64,7 +64,7 @@ export default function AuditLogPage() {
           placeholder="Filter by user ID..."
           value={filterUser}
           onChange={e => setFilterUser(e.target.value)}
-          className="border rounded px-3 py-2"
+          className="border rounded px-3 py-2 bg-white dark:bg-gray-800 text-gray-900 dark:text-white border-gray-300 dark:border-gray-600"
         />
       </div>
 
@@ -75,9 +75,9 @@ export default function AuditLogPage() {
       ) : logs.length === 0 ? (
         <div className="text-gray-500 text-center py-8">No audit logs found</div>
       ) : (
-        <div className="bg-white rounded-lg border overflow-hidden">
+        <div className="bg-white dark:bg-gray-800 rounded-lg border overflow-hidden">
           <table className="w-full">
-            <thead className="bg-gray-50 border-b">
+            <thead className="bg-gray-50 dark:bg-gray-700 border-b">
               <tr>
                 <th className="text-left px-4 py-3 text-sm font-medium">Time</th>
                 <th className="text-left px-4 py-3 text-sm font-medium">User</th>

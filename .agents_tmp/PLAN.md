@@ -1,43 +1,50 @@
 # 1. OBJECTIVE
 
-Fix remaining issues:
-
-1. **AddWidgetModal** - Loading/error dropdowns missing dark mode
-2. **Server widget page** - Add ... menu with Add Widget and Edit Settings  
-3. **WidgetSettingsDialog** - Only one editable at a time, center on dashboard not widget
+Fix white background issues in dark mode for dropdown boxes and UI elements. When users enable dark mode, any dropdown boxes or other UI elements that currently show white backgrounds should display the correct dark theme color instead.
 
 # 2. CONTEXT SUMMARY
 
-### Already Done:
-- Registry values (os_info 86400, os_update_check pollable)
-- display_name column in migration
-- WidgetSettingsDialog has display_name field
-- Portainer URL in server settings
-- AddWidgetModal main dropdown has dark mode
+The project is a Next.js application using Tailwind CSS with a dark mode implementation that uses the `dark:` prefix. The theme is set via `ThemeProvider.tsx` which adds `dark` class to the root element when dark mode is active.
 
-### Still Needed:
-1. AddWidgetModal loading/error states need dark:bg-gray-800
-2. Server widget page (/servers/[serverId]) needs ... menu
-3. WidgetSettingsDialog should center on page not widget, only one open at a time
+### Components with white backgrounds that need dark mode fixes:
+
+1. **AddWidgetModal.tsx** - Disabled select dropdowns (loading, error, no servers) are missing dark mode (lines 108, 112, 116)
+2. **audit-log/page.tsx** - Select dropdown, input field, and table container missing dark mode (lines 54, 67, 78)
+3. **alerts/page.tsx** - Form container, select dropdowns, and rule cards missing dark mode (lines 84, 92, 100, 128)
+
+### Already properly fixed:
+- WidgetFrame.tsx dropdown ✅
+- AddWidgetModal main dropdown ✅
+- WidgetSettingsDialog ✅
+- DeleteConfirmDialog ✅
+- NotificationBell ✅
+- Header ✅
+- EditServerModal ✅
+- DashboardToolbar ✅
+- settings/page.tsx ✅
 
 # 4. IMPLEMENTATION STEPS
 
-## Step 1: Fix AddWidgetModal Dark Mode
-- Add dark mode classes to disabled/loading dropdowns at lines 107, 111, 115
-- Reference: src/components/dashboard/AddWidgetModal.tsx
+## Step 1: Fix AddWidgetModal disabled dropdowns
+- File: `src/components/dashboard/AddWidgetModal.tsx`
+- Add `dark:bg-gray-800` to disabled select elements at lines 108, 112, 116
+- Reference: Lines 107-118 use `bg-gray-50 dark:bg-gray-800` in some places but not all
 
-## Step 2: Add ... Menu to Server Widget Page
-- Add to src/app/(dashboard)/servers/[serverId]/page.tsx
-- Use DropdownMenu like WidgetFrame
-- Options: Add Widget, Edit Server Settings
+## Step 2: Fix audit-log/page.tsx dark mode
+- File: `src/app/(dashboard)/settings/audit-log/page.tsx`
+- Add dark mode to select dropdown (line 54)
+- Add dark mode to input field (line 67)
+- Add dark mode to table container bg-white (line 78)
 
-## Step 3: Fix WidgetSettingsDialog
-- Already centered on page (fixed position) ✅
-- Add state to track if dialog is open (only one at a time)
-- Reference: src/components/dialogs/WidgetSettingsDialog.tsx
+## Step 3: Fix alerts/page.tsx dark mode
+- File: `src/app/(dashboard)/settings/alerts/page.tsx`
+- Add dark mode to form container (line 84)
+- Add dark mode to select dropdowns (lines 92, 100)
+- Add dark mode to rule card containers (line 128)
 
 # 5. TESTING AND VALIDATION
 
-- AddWidgetModal: loading shows dark background
-- Server page: ... menu visible and working
-- Widget settings: only one dialog open at a time
+**Success Criteria:**
+1. Navigate to Settings → Audit Log in dark mode - select dropdowns and table should use dark backgrounds
+2. Navigate to Settings → Alerts in dark mode - form and rule cards should use dark backgrounds
+3. Open Add Widget modal in dark mode with no servers - dropdown should be dark

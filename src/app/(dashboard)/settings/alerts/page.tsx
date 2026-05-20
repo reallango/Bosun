@@ -81,15 +81,15 @@ export default function AlertsPage() {
       </div>
 
       {showForm && (
-        <form onSubmit={handleSubmit} className="mb-6 p-4 bg-gray-50 rounded-lg border">
+        <form onSubmit={handleSubmit} className="mb-6 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border">
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-sm font-medium mb-1">Name</label>
-              <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="w-full border rounded px-3 py-2" required />
+              <input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="w-full border rounded px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white border-gray-300 dark:border-gray-600" required />
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">Metric</label>
-              <select value={form.metric} onChange={e => setForm({ ...form, metric: e.target.value })} className="w-full border rounded px-3 py-2">
+              <select value={form.metric} onChange={e => setForm({ ...form, metric: e.target.value })} className="w-full border rounded px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white border-gray-300 dark:border-gray-600">
                 <option value="cpu">CPU Usage</option>
                 <option value="memory">Memory Usage</option>
                 <option value="disk">Disk Usage</option>
@@ -97,7 +97,7 @@ export default function AlertsPage() {
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">Condition</label>
-              <select value={form.condition} onChange={e => setForm({ ...form, condition: e.target.value })} className="w-full border rounded px-3 py-2">
+              <select value={form.condition} onChange={e => setForm({ ...form, condition: e.target.value })} className="w-full border rounded px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white border-gray-300 dark:border-gray-600">
                 <option value="gt">&gt; Greater than</option>
                 <option value="lt">&lt; Less than</option>
                 <option value="gte">≥ Greater or equal</option>
@@ -106,15 +106,15 @@ export default function AlertsPage() {
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">Threshold</label>
-              <input type="number" value={form.threshold} onChange={e => setForm({ ...form, threshold: Number(e.target.value) })} className="w-full border rounded px-3 py-2" />
+              <input type="number" value={form.threshold} onChange={e => setForm({ ...form, threshold: Number(e.target.value) })} className="w-full border rounded px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white border-gray-300 dark:border-gray-600" />
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">Cooldown (seconds)</label>
-              <input type="number" value={form.cooldown_seconds} onChange={e => setForm({ ...form, cooldown_seconds: Number(e.target.value) })} className="w-full border rounded px-3 py-2" />
+              <input type="number" value={form.cooldown_seconds} onChange={e => setForm({ ...form, cooldown_seconds: Number(e.target.value) })} className="w-full border rounded px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white border-gray-300 dark:border-gray-600" />
             </div>
             <div className="flex items-end gap-2">
               <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700">Save</button>
-              <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 border rounded hover:bg-gray-50">Cancel</button>
+              <button type="button" onClick={() => setShowForm(false)} className="px-4 py-2 border rounded hover:bg-gray-50 dark:hover:bg-gray-700">Cancel</button>
             </div>
           </div>
         </form>
@@ -125,7 +125,7 @@ export default function AlertsPage() {
           <div className="text-gray-500 text-center py-8">No alert rules configured</div>
         ) : (
           rules.map(rule => (
-            <div key={rule.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border">
+            <div key={rule.id} className="flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-800 rounded-lg border">
               <div>
                 <div className="font-medium">{rule.name}</div>
                 <div className="text-sm text-gray-500">
@@ -133,7 +133,7 @@ export default function AlertsPage() {
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <button onClick={() => toggleRule(rule.id, !rule.enabled)} className={`px-3 py-1 text-sm rounded ${rule.enabled ? 'bg-green-100 text-green-700' : 'bg-gray-200'}`}>
+                <button onClick={() => toggleRule(rule.id, !rule.enabled)} className={`px-3 py-1 text-sm rounded ${rule.enabled ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300' : 'bg-gray-200 dark:bg-gray-700'}`}>
                   {rule.enabled ? 'Enabled' : 'Disabled'}
                 </button>
                 <button onClick={() => deleteRule(rule.id)} className="px-3 py-1 text-sm text-red-600 hover:underline">Delete</button>
