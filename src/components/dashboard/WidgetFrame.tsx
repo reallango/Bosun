@@ -70,12 +70,28 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName,
   const [removing, setRemoving] = useState(false);
   const [widgetData, setWidgetData] = useState<any>(null);
   
-  // Fetch widget to get display_name
+  // Fetch widget to get display_name - with error handling to avoid infinite retries
   useEffect(() => {
-    fetchWithAuth(`/api/widgets/${widgetId}`)
-      .then(r => r.json())
-      .then(json => { if (json.data) setWidgetData(json.data); })
-      .catch(() => {});
+    let ignore = false;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    
+    fetchWithAuth(`/api/widgets/${widgetId}`, { signal: controller.signal })
+      .then(res => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then(json => {
+        if (!ignore && json.data) setWidgetData(json.data);
+      })
+      .catch(() => {
+        // Silently ignore errors - don't retry infinitely
+      });
+    
+    return () => {
+      ignore = true;
+      clearTimeout(timeoutId);
+    };
   }, [widgetId]);
   
   const displayTitle = widgetData?.display_name || title;
