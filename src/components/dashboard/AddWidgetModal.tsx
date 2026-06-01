@@ -21,7 +21,7 @@ interface AddWidgetModalProps {
 export function AddWidgetModal({ isOpen, onClose, dashboardId, serverId, onAdd }: AddWidgetModalProps) {
   const [selected, setSelected] = useState<string | null>(null);
   const [targetServer, setTargetServer] = useState(serverId || '');
-  const [selectedSize, setSelectedSize] = useState<SizePreset>(SIZE_PRESETS[1]); // Default to Medium
+  const [selectedSize, setSelectedSize] = useState<SizePreset>(SIZE_PRESETS[2]); // Default to Medium (S)
   const [servers, setServers] = useState<Server[]>([]);
   const [loadingServers, setLoadingServers] = useState(true);
   const [serversError, setServersError] = useState<string | null>(null);
@@ -52,7 +52,7 @@ export function AddWidgetModal({ isOpen, onClose, dashboardId, serverId, onAdd }
     if (!isOpen) {
       setSelected(null);
       setTargetServer(serverId || '');
-      setSelectedSize(SIZE_PRESETS[1]); // Reset to Medium
+      setSelectedSize(SIZE_PRESETS[2]); // Reset to Medium (S)
       setServers([]);
       setLoadingServers(true);
       setServersError(null);

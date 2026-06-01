@@ -61,8 +61,8 @@ export function DashboardGrid({ dashboardId, widgets, onLayoutChange, editable =
       className="layout"
       layouts={{ lg: layouts }}
       breakpoints={{ lg: 1200, md: 996, sm: 768, xs: 480, xxs: 0 }}
-      cols={{ lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 }}
-      rowHeight={80}
+      cols={{ lg: 24, md: 20, sm: 12, xs: 8, xxs: 4 }}
+      rowHeight={50}
       width={1200}
       margin={[5, 5]}
       onLayoutChange={(l) => handleLayoutChange(l as any[])}
