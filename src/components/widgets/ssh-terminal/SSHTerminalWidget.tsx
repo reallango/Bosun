@@ -705,10 +705,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       return; // Skip regular connect
     }
     
-    // No existing session - use regular connect
-    if (username && status === 'idle') {
-      connect(username);
-    }
+    // No auto-connect when no existing session - let user manually click Connect
   }, []); // Only on mount
 
   // Handle control buttons
