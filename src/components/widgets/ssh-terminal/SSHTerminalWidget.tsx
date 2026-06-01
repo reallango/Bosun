@@ -553,10 +553,8 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
     const tsm = getTerminalSessionManager();
     const existingSession = tsm.getSession(widgetId);
     
-    // Gap 1: Reattach only if session is fully connected (authenticated) and WebSocket is live
-    if (existingSession?.ws && 
-        existingSession.ws.readyState === WebSocket.OPEN &&
-        existingSession.status === 'connected') {
+    // Gap 1: Reattach if WebSocket is live (status may be 'disconnected' from cleanup, but session might still be alive)
+    if (existingSession?.ws && existingSession.ws.readyState === WebSocket.OPEN) {
       console.log('[TSM] Found existing session, reattaching:', widgetId);
       
       // Create new Terminal
