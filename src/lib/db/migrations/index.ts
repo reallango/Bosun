@@ -235,12 +235,24 @@ const MIGRATION_004: string[] = [
     `ALTER TABLE widgets ADD COLUMN display_name TEXT`,
 ];
 
+// Migration 005: Add widget_id to polling config for per-widget settings
+const MIGRATION_005: string[] = [
+    // Add widget_id column (nullable for backwards compatibility)
+    `ALTER TABLE widget_polling_config ADD COLUMN widget_id TEXT REFERENCES widgets(id) ON DELETE CASCADE`,
+    // Drop old unique constraint
+    `DROP INDEX IF EXISTS idx_wpc_server_type`,
+    // Add unique constraint that allows either widget_id or legacy (widget_type, server_id) combo
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_wpc_widget_id ON widget_polling_config(widget_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_wpc_type_server ON widget_polling_config(widget_type, server_id)`,
+];
+
 // Migration registry
 const migrations: Record<string, string[]> = {
     '001': MIGRATION_001,
     '002': MIGRATION_002,
     '003': MIGRATION_003,
     '004': MIGRATION_004,
+    '005': MIGRATION_005,
 };
 
 export async function runMigrations(): Promise<void> {
