@@ -174,7 +174,7 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName,
       <div className="flex-1 p-3 overflow-auto">
         <WidgetContent widgetId={widgetId} widgetType={widgetType} serverId={serverId} serverName={serverName} />
       </div>
-      <WidgetSettingsDialog widgetId={widgetId} open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <WidgetSettingsDialog widgetId={widgetId} open={settingsOpen} onOpenChange={setSettingsOpen} onSizeChange={onRemoved} />
       <DeleteConfirmDialog widgetTitle={displayTitle} open={deleteOpen} onOpenChange={setDeleteOpen} onConfirm={doRemove} loading={removing} />
     </div>
   );

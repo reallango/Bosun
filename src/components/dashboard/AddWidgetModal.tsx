@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { ensureArray } from '@/lib/api/ensureArray';
+import { SIZE_PRESETS, SizePreset } from '@/lib/widget-sizes';
 
 interface Server {
   id: string;
@@ -14,12 +15,13 @@ interface AddWidgetModalProps {
   onClose: () => void;
   dashboardId: string;
   serverId?: string;
-  onAdd: (widgetType: string, serverId: string) => void;
+  onAdd: (widgetType: string, serverId: string, gridW?: number, gridH?: number) => void;
 }
 
 export function AddWidgetModal({ isOpen, onClose, dashboardId, serverId, onAdd }: AddWidgetModalProps) {
   const [selected, setSelected] = useState<string | null>(null);
   const [targetServer, setTargetServer] = useState(serverId || '');
+  const [selectedSize, setSelectedSize] = useState<SizePreset>(SIZE_PRESETS[1]); // Default to Medium
   const [servers, setServers] = useState<Server[]>([]);
   const [loadingServers, setLoadingServers] = useState(true);
   const [serversError, setServersError] = useState<string | null>(null);
@@ -50,6 +52,7 @@ export function AddWidgetModal({ isOpen, onClose, dashboardId, serverId, onAdd }
     if (!isOpen) {
       setSelected(null);
       setTargetServer(serverId || '');
+      setSelectedSize(SIZE_PRESETS[1]); // Reset to Medium
       setServers([]);
       setLoadingServers(true);
       setServersError(null);
@@ -76,7 +79,7 @@ export function AddWidgetModal({ isOpen, onClose, dashboardId, serverId, onAdd }
 
   const handleAdd = () => {
     if (selected && targetServer) {
-      onAdd(selected, targetServer);
+      onAdd(selected, targetServer, selectedSize.gridW, selectedSize.gridH);
       onClose();
     }
   };
@@ -132,6 +135,24 @@ export function AddWidgetModal({ isOpen, onClose, dashboardId, serverId, onAdd }
             )}
           </div>
         )}
+
+        <div className="mb-4">
+          <label className="block text-sm font-medium mb-1">Size</label>
+          <select
+            value={selectedSize.id}
+            onChange={e => {
+              const preset = SIZE_PRESETS.find(p => p.id === e.target.value);
+              if (preset) setSelectedSize(preset);
+            }}
+            className="w-full px-3 py-2 border rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white border-gray-300 dark:border-gray-600"
+          >
+            {SIZE_PRESETS.map(preset => (
+              <option key={preset.id} value={preset.id}>
+                {preset.name} ({preset.description})
+              </option>
+            ))}
+          </select>
+        </div>
 
         <div className="flex gap-2">
           <button onClick={onClose} className="flex-1 px-4 py-2 border rounded">Cancel</button>

@@ -44,11 +44,11 @@ export function useDashboard(dashboardId: string) {
         }, 300);
     }, [dashboardId]);
 
-    const addWidget = useCallback(async (widgetType: string, serverId: string) => {
+    const addWidget = useCallback(async (widgetType: string, serverId: string, gridW?: number, gridH?: number) => {
         await fetchWithAuth(`/api/dashboards/${dashboardId}/widgets`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ widget_type: widgetType, server_id: serverId }),
+            body: JSON.stringify({ widget_type: widgetType, server_id: serverId, grid_w: gridW, grid_h: gridH }),
         });
         fetchDashboard();
     }, [dashboardId, fetchDashboard]);
