@@ -64,6 +64,7 @@ export function DashboardGrid({ dashboardId, widgets, onLayoutChange, editable =
       cols={{ lg: 12, md: 10, sm: 6, xs: 4, xxs: 2 }}
       rowHeight={80}
       width={1200}
+      margin={[5, 5]}
       onLayoutChange={(l) => handleLayoutChange(l as any[])}
       draggableHandle=".drag-handle"
       isDraggable={editable}
