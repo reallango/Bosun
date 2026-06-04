@@ -17,9 +17,10 @@ interface DashboardGridProps {
   onLayoutChange?: (items: { widgetId: string; x: number; y: number; w: number; h: number }[]) => void;
   editable?: boolean;
   onWidgetRemoved?: () => void;
+  onRefresh?: () => void;
 }
 
-export function DashboardGrid({ dashboardId, widgets, onLayoutChange, editable = false, onWidgetRemoved }: DashboardGridProps) {
+export function DashboardGrid({ dashboardId, widgets, onLayoutChange, editable = false, onWidgetRemoved, onRefresh }: DashboardGridProps) {
   const safeWidgets = ensureArray<Widget>(widgets);
 
   const [layouts, setLayouts] = useState<any[]>(() =>
@@ -80,6 +81,7 @@ export function DashboardGrid({ dashboardId, widgets, onLayoutChange, editable =
             serverName={widget.server_name}
             editable={editable}
             onRemoved={onWidgetRemoved}
+            onRefresh={onRefresh}
           />
         </div>
       ))}

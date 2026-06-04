@@ -11,10 +11,10 @@ interface WidgetSettingsDialogProps {
   widgetId: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSizeChange?: () => void;
+  onSave?: () => void;
 }
 
-export function WidgetSettingsDialog({ widgetId, open, onOpenChange, onSizeChange }: WidgetSettingsDialogProps) {
+export function WidgetSettingsDialog({ widgetId, open, onOpenChange, onSave }: WidgetSettingsDialogProps) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [data, setData] = useState<any>(null);
@@ -52,7 +52,7 @@ export function WidgetSettingsDialog({ widgetId, open, onOpenChange, onSizeChang
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      if (onSizeChange) onSizeChange();
+      if (onSave) onSave();
       onOpenChange(false);
     } finally {
       setSaving(false);

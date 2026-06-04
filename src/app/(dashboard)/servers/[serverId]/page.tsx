@@ -39,7 +39,7 @@ export default function ServerDashboardPage() {
             <Header title={name || 'Server'} />
             <div className="p-6">
                 <DashboardToolbar name={name} serverName={name} type="server" onAddWidget={() => setModal(true)} serverId={serverId} />
-                <DashboardGrid dashboardId={dashId} widgets={widgets} onLayoutChange={updateLayout} editable onWidgetRemoved={refresh} />
+                <DashboardGrid dashboardId={dashId} widgets={widgets} onLayoutChange={updateLayout} editable onWidgetRemoved={refresh} onRefresh={refresh} />
                 <AddWidgetModal isOpen={modal} onClose={() => setModal(false)} dashboardId={dashId} serverId={serverId} onAdd={addWidget} />
             </div>
         </div>
