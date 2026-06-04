@@ -32,6 +32,7 @@ export default function HomePage() {
           onLayoutChange={updateLayout}
           editable={true}
           onWidgetRemoved={refresh}
+          onRefresh={refresh}
         />
         <AddWidgetModal isOpen={modal} onClose={() => setModal(false)} dashboardId={dashboardId} onAdd={addWidget} />
       </div>

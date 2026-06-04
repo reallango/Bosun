@@ -27,6 +27,7 @@ interface WidgetFrameProps {
   serverName?: string;
   editable?: boolean;
   onRemoved?: () => void;
+  onRefresh?: () => void;
 }
 
 function WidgetContent({ widgetId, widgetType, serverId, serverName }: { widgetId: string; widgetType: string; serverId: string; serverName?: string }) {
@@ -66,7 +67,7 @@ function WidgetContent({ widgetId, widgetType, serverId, serverName }: { widgetI
   }
 }
 
-export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName, editable = false, onRemoved }: WidgetFrameProps) {
+export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName, editable = false, onRemoved, onRefresh }: WidgetFrameProps) {
   const [removing, setRemoving] = useState(false);
   const [widgetData, setWidgetData] = useState<any>(null);
   
@@ -174,7 +175,7 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName,
       <div className="flex-1 p-3 overflow-auto">
         <WidgetContent widgetId={widgetId} widgetType={widgetType} serverId={serverId} serverName={serverName} />
       </div>
-      <WidgetSettingsDialog widgetId={widgetId} open={settingsOpen} onOpenChange={setSettingsOpen} onSizeChange={onRemoved} />
+      <WidgetSettingsDialog widgetId={widgetId} open={settingsOpen} onOpenChange={setSettingsOpen} onSave={onRefresh} />
       <DeleteConfirmDialog widgetTitle={displayTitle} open={deleteOpen} onOpenChange={setDeleteOpen} onConfirm={doRemove} loading={removing} />
     </div>
   );

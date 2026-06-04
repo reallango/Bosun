@@ -24,7 +24,7 @@ export default function CustomDashboardPage() {
             <Header title={dashboard.name} />
             <div className="p-6">
                 <DashboardToolbar name={dashboard.name} type="custom" onAddWidget={() => setModal(true)} />
-                <DashboardGrid dashboardId={dashboardId} widgets={widgets} onLayoutChange={updateLayout} editable onWidgetRemoved={refresh} />
+                <DashboardGrid dashboardId={dashboardId} widgets={widgets} onLayoutChange={updateLayout} editable onWidgetRemoved={refresh} onRefresh={refresh} />
                 <AddWidgetModal isOpen={modal} onClose={() => setModal(false)} dashboardId={dashboardId} onAdd={addWidget} />
             </div>
         </div>
