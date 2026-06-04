@@ -35,7 +35,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const wid = crypto.randomUUID();
     let y = grid_y ?? 0;
     if (grid_y===undefined) { const my=await rqlite.query('SELECT COALESCE(MAX(grid_y+grid_h),0) FROM widgets WHERE dashboard_id=?',[dashboardId]); y=(my.values?.[0]?.[0] as number)||0; }
-    const w=grid_w??def?.defaultSize.w??4, h=grid_h??def?.defaultSize.h??3;
+    // Use user-provided grid_w/grid_h if explicitly passed, otherwise use widget definition defaults
+    const hasExplicitW = grid_w !== undefined;
+    const hasExplicitH = grid_h !== undefined;
+    const w = hasExplicitW ? grid_w : (def?.defaultSize?.w ?? 4);
+    const h = hasExplicitH ? grid_h : (def?.defaultSize?.h ?? 3);
     await rqlite.execute("INSERT INTO widgets (id,dashboard_id,widget_type,server_id,title_override,config,grid_x,grid_y,grid_w,grid_h,grid_min_w,grid_min_h) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
         [wid,dashboardId,widget_type,server_id,title_override||null,JSON.stringify(config||{}),grid_x??0,y,w,h,def?.minSize.w??2,def?.minSize.h??2]);
     const r = await rqlite.query('SELECT * FROM widgets WHERE id=?', [wid]);

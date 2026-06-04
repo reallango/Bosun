@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Responsive, WidthProvider } from 'react-grid-layout';
 import 'react-grid-layout/css/styles.css';
 import 'react-resizable/css/styles.css';
@@ -34,6 +34,19 @@ export function DashboardGrid({ dashboardId, widgets, onLayoutChange, editable =
       minH: w.grid_min_h,
     }))
   );
+
+  // Sync layouts when widgets prop changes (e.g., after settings save)
+  useEffect(() => {
+    setLayouts(safeWidgets.map(w => ({
+      i: w.id,
+      x: w.grid_x ?? 0,
+      y: w.grid_y ?? 0,
+      w: w.grid_w ?? 4,
+      h: w.grid_h ?? 3,
+      minW: w.grid_min_w,
+      minH: w.grid_min_h,
+    })));
+  }, [widgets]);
 
   const handleLayoutChange = useCallback((currentLayout: readonly any[]) => {
     setLayouts([...currentLayout]);
