@@ -43,9 +43,14 @@ export function WidgetSettingsDialog({ widgetId, open, onOpenChange, onSave }: W
     setSaving(true);
     try {
       const payload = { ...data };
+      // Always include grid_w and grid_h - use selectedSize if available, otherwise use current values from data
       if (selectedSize) {
         payload.grid_w = selectedSize.gridW;
         payload.grid_h = selectedSize.gridH;
+      } else if (data?.grid_w !== undefined) {
+        // Keep existing grid dimensions if no preset selected
+        payload.grid_w = data.grid_w;
+        payload.grid_h = data.grid_h;
       }
       await fetchWithAuth(`/api/widgets/${widgetId}/settings`, {
         method: 'PUT',
