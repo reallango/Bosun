@@ -74,7 +74,6 @@ export function AddWidgetModal({ isOpen, onClose, dashboardId, serverId, onAdd }
     { type: 'os_update_check', name: 'OS Update Check', desc: 'System updates' },
     { type: 'docker_containers', name: 'Docker Containers', desc: 'Container management' },
     { type: 'custom_command', name: 'Custom Command', desc: 'Run custom SSH command' },
-    { type: 'portainer_link', name: 'Portainer Link', desc: 'External Portainer UI' },
   ];
 
   const handleAdd = () => {

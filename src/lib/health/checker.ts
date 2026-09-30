@@ -1,5 +1,6 @@
 import { rqlite } from '../db/rqlite-client';
 import { sshPool, SSHConnectionConfig } from '../ssh/connection-pool';
+import { isWindows, powershellCommand } from '../ssh/platform';
 import { decrypt } from '../crypto/keys';
 
 let healthCheckInterval: NodeJS.Timeout | null = null;
@@ -11,10 +12,10 @@ export async function startHealthChecker(): Promise<void> {
   
   const checkServers = async () => {
     try {
-      const result = await rqlite.query(`SELECT id, hostname, ssh_port, ssh_user, ssh_key_id FROM servers`);
+      const result = await rqlite.query(`SELECT id, hostname, ssh_port, ssh_user, ssh_key_id, platform FROM servers`);
       
       for (const row of result.values) {
-        const [id, hostname, sshPort, sshUser, sshKeyId] = row;
+        const [id, hostname, sshPort, sshUser, sshKeyId, platform] = row;
         if (!hostname || !sshUser || !sshKeyId) continue;
 
         try {
@@ -35,8 +36,10 @@ export async function startHealthChecker(): Promise<void> {
             privateKey
           };
 
-          // Try a simple command
-          await sshPool.executeCommand(id as string, sshConfig, 'echo test');
+          // Liveness probe. Windows OpenSSH may not run a shell by default for
+          // non-interactive exec, so use a PowerShell command there.
+          const probe = platform === 'windows' ? powershellCommand('Write-Output ok') : 'echo test';
+          await sshPool.executeCommand(id as string, sshConfig, probe);
 
           // Update online status
           await rqlite.execute(

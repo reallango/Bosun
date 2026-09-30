@@ -1,186 +1,299 @@
 # 1. OBJECTIVE
 
-> **STATUS: IMPLEMENTED.** All steps below are complete. Verified with `tsc --noEmit`,
-> `npm run lint`, `npm run build`, and an end-to-end run against a real rqlite v10.4.0
-> node (migrations, health, settings PUT, all three export formats, JSON/SQLite import).
-> The plan is retained as a record of the design.
-
-Add a **Database Health & Settings** page with **export/import** of the database, and
-extend the site's health checks. The page must:
-
-1. Report database health, including whether the **correct migrations** have been applied.
-2. Expose the editable `app_config` settings (currently seeded but unused by any UI/API).
-3. Allow **exporting** the database to a portable backup file and **importing** it back.
-4. Surface broader **site health checks** (app, database, websocket, poller, SSH fleet).
+Let the user add a **Windows** machine to Bosun and manage it through PowerShell remoting
+("PSSession") for both the dashboard widgets and the interactive terminal, alongside the
+existing Linux/SSH servers.
 
 # 2. CONTEXT SUMMARY
 
-- Stack: Next.js 14 (App Router) + TypeScript, Tailwind, shadcn-style UI primitives.
-- Database: **rqlite** (SQLite over Raft), accessed via `src/lib/db/rqlite-client.ts`
-  (`query`, `execute`, `executeBatch`, `getStatus`, `isReady`). No ORM.
-- Migrations: `src/lib/db/migrations/index.ts` — a hard-coded registry `001`..`005`
-  plus a `migrations` table (`id`, `name`, `applied_at`). `runMigrations()` runs at boot
-  from `src/app/api/health/route.ts` via `initializeDatabase()`.
-- Config store: `app_config` table (`key`, `value`, `description`, `updated_at`) with
-  helpers `getConfig()` / `setConfig()`. **No API route and no UI currently read or write it.**
-- Existing health: `src/app/api/health/route.ts` (unauthenticated, returns `{status,timestamp}`,
-  also triggers DB init). `src/lib/health/checker.ts` polls the **SSH server fleet** only.
-- `ws-server.js` already exposes a `/health` endpoint on port 3002; `poller.js` is a
-  separate background process with no health endpoint.
-- Auth: `requireAuth()` / `requireRole()` in `src/lib/auth/middleware.ts`; roles are
-  `admin > operator > viewer`. API responses use `ok()` / `fail()` from `src/lib/api/response.ts`.
-- Settings nav lives in `src/components/layout/Sidebar.tsx` (Servers, SSH Keys, Cluster,
-  Alerts, Audit Log). There is no Database/Health entry yet.
-- Note: `src/app/(dashboard)/settings/page.tsx` ("General Settings") has a **no-op
-  `handleSave` stub** and read-only fields — a natural home for the editable settings.
+Bosun is currently **SSH/Linux-only** end to end. Everything that talks to a server goes
+through `ssh2`:
 
-## Known gaps this plan closes
+- Connection layer: `src/lib/ssh/connection-pool.ts` (`SSHConnectionPool`, `sshPool`) —
+  `getConnection` / `executeCommand` (uses `client.exec`), keyed by `user@host:port`.
+- Server model: `servers` table (`src/lib/db/migrations/index.ts` migration 001) with
+  `hostname`, `ssh_port`, `ssh_user`, `ssh_key_id`, `os_type`, `os_version`, etc. Types in
+  `src/types/server.ts` (`Server`) and `src/lib/db/schema.ts` (`DBServer`).
+- Credentials: only SSH **private keys**, stored encrypted in `ssh_keys.private_key_enc`
+  (`src/lib/crypto/keys.ts`, `MASTER_KEY`). There is **no password/credential storage**.
+- Widget data: `src/app/api/widgets/[widgetId]/data/route.ts` inlines a big
+  `switch (widget.widget_type)` of **bash** commands run via `pool.executeCommand`. It **reads**
+  `widget_data_cache` first (keyed by `widget_type` + `server_id`) and only falls back to live
+  SSH on a miss or `?force=true`.
+- Terminal: `ws-server.js` connects with `ssh2`, calls `client.shell(...)` to open a PTY, and
+  bridges it to the browser over `/ws/terminal`. It has its own rqlite query + decrypt logic.
+- Background poller: `poller.js` is the **only writer** of `widget_data_cache`. It is a
+  standalone CommonJS process with its own raw-text bash collectors and its own ssh2 connection
+  cache, and it is **not started by any npm script** (`dev:all` runs only `next dev` +
+  `ws-server.js`).
+- Health: `src/lib/health/checker.ts` runs `echo test` over SSH to set `is_online`.
+- Detect: `src/app/api/servers/[serverId]/detect/route.ts` runs `cat /etc/os-release`, `lscpu`,
+  `uname`, etc.
+- OS adapters (`src/lib/ssh/adapters/*`) exist but the widget route does **not** use them.
+- Add-server UI: `src/app/(dashboard)/settings/servers/new/page.tsx`,
+  `src/components/settings/ServerForm.tsx`, `EditServerModal.tsx`,
+  `src/app/(dashboard)/settings/servers/[serverId]/page.tsx`.
+- No `windows`/`powershell`/`winrm` references exist anywhere in `src`.
 
-- Migrations that **fail partway** are still recorded as applied (`runMigrations()` records
-  the migration even when `failCount > 0`), and there is no way to detect the drift.
-- No export/import path exists for backup, restore, or migrating between hosts.
-- Health only covers the SSH fleet; the app/DB/ws/poller are not reported.
+# 3. APPROACH OVERVIEW
 
-# 3. DESIGN DECISIONS (defaults chosen — see Section 6 to change)
+**PowerShell remoting over SSH ("SSHTransport"), reusing the existing `ssh2` stack.**
+On Windows, run PowerShell commands over the same SSH channel Bosun already uses:
+non-interactive widgets execute `powershell -NoProfile -NonInteractive -Command "<cmd>"`, and
+the terminal opens an interactive PowerShell PTY. This is how
+`Enter-PSSession -HostName <host> -SSHTransport` works under the hood, and Windows 10 (1809+)
+/ Server 2019+ ship OpenSSH server.
 
-| Decision | Default |
-| --- | --- |
-| Page route | `/settings/database` |
-| Nav label | "Database" |
-| API base | `/api/db/*` |
-| Export formats | `json` (portable), `sqlite` (binary snapshot), `sql` (text dump) |
-| Export options | Modal dialog: format, table scope, secrets, schema/version, large-table toggle |
-| Import mode | **Merge** for JSON; **replace/restore** required for `sqlite`/`sql` |
-| Secrets in export | **Redacted** by default in JSON; `sqlite`/`sql` are always full (cannot redact) |
-| Versioning | Export carries `formatVersion` + `schemaVersion` (migration IDs) + `appVersion`; import blocks newer schema |
-| Public health endpoint | Keep `/api/health` minimal (liveness only); detailed report is authenticated |
-| Editable config keys | `app.*`, `ssh.*`, `alerts.*`, `cleanup.*`, `health.*` (server/SSH-key data is managed elsewhere) |
+- Reuses the connection pool, terminal bridge, poller and health checker — only branching on a
+  `platform` flag — instead of standing up a second transport.
+- **Auth: existing SSH keys (public-key auth), per decision.** No new credential store; the
+  Windows host must have the Bosun public key in
+  `C:\ProgramData\ssh\administrators_authorized_keys` (see Step 8).
+- **Widget scope (confirmed):** Windows v1 supports `server_summary`, `os_info`, `cpu_memory`,
+  `disk_usage`, `network`, `system_services`, `custom_command`, `gpu_monitoring` and
+  `ollama_status`. Unsupported on Windows in v1: `docker_containers`, `os_update_check`
+  (graceful placeholder, not an error).
+- **Data path — same as Linux:** Windows widgets are populated into `widget_data_cache` by
+  `poller.js` (Step 7) and served from there by the widget data route, exactly like Linux. The
+  route's live PowerShell branch (Step 4) only runs on a cache miss or `?force=true`, mirroring
+  the Linux behaviour. The Linux collectors are also unified into a shared module (Step 8) so
+  both platforms cache valid JSON from one implementation.
+- **`portainer_link` is removed entirely** — it does not work today and is unused (Step 0).
 
 # 4. IMPLEMENTATION STEPS
 
-## Step 1: Migration integrity helpers
-- File: `src/lib/db/migrations/index.ts`
-- Export the registry and expected IDs (`EXPECTED_MIGRATIONS = Object.keys(migrations)`).
-- Export `getAppliedMigrations()` returning rows from the `migrations` table.
-- Export `getMigrationStatus()` → `{ applied, expected, missing, pending }`.
-- Fix the "record on partial failure" behaviour so a migration that fails is not silently
-  marked applied (either roll back the record, or record a `failed` state + surface it).
+## Step 0: Remove the unused `portainer_link` widget
+- **Goal:** delete a broken, unused widget end to end.
+- **Method:** the widget is broken because there is **no `portainer_url` column** on `servers`
+  (not in any migration or `DBServer`), so the data route's `SELECT portainer_url FROM servers`
+  fails and the PATCH allow-list drops the field. Remove all references:
+  - delete `src/components/widgets/portainer-link/` (both `index.tsx` and
+    `PortainerLinkWidget.tsx`);
+  - remove the `portainer_link` entry from `src/components/widgets/registry.ts`;
+  - remove the `portainer_link` line from the `widgets` list in
+    `src/components/dashboard/AddWidgetModal.tsx`;
+  - remove the `PortainerLinkWidget` import and the `portainer_link` case from
+    `src/components/dashboard/WidgetFrame.tsx`;
+  - remove the `case 'portainer_link'` block (and its `SELECT portainer_url` query) from
+    `src/app/api/widgets/[widgetId]/data/route.ts`;
+  - remove the `portainer_url` field from `src/types/server.ts`;
+  - remove the Portainer URL input + `portainer_url` form state from
+    `src/app/(dashboard)/settings/servers/[serverId]/page.tsx`.
+  - Note: any pre-existing `portainer_link` widgets will render as "Unknown widget"; they can
+    be deleted by the user. No DB migration is needed (no column exists).
+- **Reference:** `src/components/widgets/portainer-link/`, `src/components/widgets/registry.ts`,
+  `src/components/dashboard/AddWidgetModal.tsx`, `src/components/dashboard/WidgetFrame.tsx`,
+  `src/app/api/widgets/[widgetId]/data/route.ts`, `src/types/server.ts`,
+  `src/app/(dashboard)/settings/servers/[serverId]/page.tsx`.
 
-## Step 2: Database health report
-- New file: `src/lib/health/db-health.ts`
-- `getDatabaseHealth()` returns:
-  - `ready`: `rqlite.isReady()`
-  - `leader` / `raft` summary from `rqlite.getStatus()`
-  - `migrations`: from `getMigrationStatus()` (Step 1)
-  - `tables`: expected vs. present (derive expected from migration statements)
-  - `counts`: row counts per core table (servers, dashboards, widgets, ssh_keys, users, alerts, audit_log)
-  - `configKeys`: missing seeded `app_config` keys
-  - overall `status`: `ok | degraded | error`
+## Step 1: Schema — mark a server as Windows
+- **Goal:** persist the platform so every code path can branch on it.
+- **Method:** add migration `007` to `src/lib/db/migrations/index.ts`:
+  `ALTER TABLE servers ADD COLUMN platform TEXT DEFAULT 'linux'` (values `linux` | `windows`),
+  registered in the `migrations` map. Update `DBServer` (`src/lib/db/schema.ts`) and `Server`
+  (`src/types/server.ts`) with `platform`.
+- **Reference:** `src/lib/db/migrations/index.ts`, `src/lib/db/schema.ts`,
+  `src/types/server.ts`.
 
-## Step 3: Database export/import library
-- New file: `src/lib/db/backup.ts`
+## Step 2: Platform + PowerShell execution helpers
+- **Goal:** one place that turns "run this on server X" into the right transport.
+- **Method:** new module `src/lib/ssh/platform.ts`:
+  - `isWindows(server): boolean` from `server.platform === 'windows'`.
+  - `powershellCommand(script: string): string` — wraps a script as
+    `powershell -NoProfile -NonInteractive -Command "<script>"` with correct quoting/escaping
+    (single-quote the outer arg, escape embedded `"`).
+  - `runOnServer(pool, server, credential, command)` — for Linux runs `command`; for Windows
+    runs `powershellCommand(command)`. This is the single branch point used by the routes.
+- **Reference:** `src/lib/ssh/connection-pool.ts`.
 
-### Export formats
-| Format | How we produce it | Restore path | Notes |
-| --- | --- | --- | --- |
-| `json` | `SELECT *` per allow-listed table | `INSERT OR REPLACE` via `executeBatch` | Portable, inspectable, supports table scope + secret redaction |
-| `sqlite` | `GET /db/backup` (hot SQLite snapshot) | `POST /db/load` (`application/octet-stream`) | rqlite's recommended backup; full fidelity; secrets cannot be redacted |
-| `sql` | schema from `sqlite_master` + rows, emitted as `CREATE`/`INSERT` | `POST /db/load` (`text/plain`) | Text/diffable; generated in Node so no `sqlite3` binary is needed in the image |
+## Step 3: Windows terminal in `ws-server.js`
+- **Goal:** the existing terminal widget gives an interactive PowerShell session on Windows.
+- **Method:** in `connectToServer`, also `SELECT platform` from `servers`. When
+  `platform === 'windows'`, open the PTY with
+  `client.exec('powershell -NoLogo -NoProfile', { pty: { term: 'xterm-256color', cols, rows } }, cb)`
+  instead of `client.shell(...)`, and adjust the banner text ("Connected via PowerShell").
+  Reuse the existing stream/reattach/buffer logic unchanged (it is transport-agnostic once a
+  stream exists). Resize handling already calls `stream.setWindow(...)`, which works the same.
+- **Reference:** `ws-server.js` (`connectToServer`, new-session `client.shell` block).
 
-Table allow-list (FK-safe order): ssh_keys → servers → dashboards → widgets → alert_rules →
-notifications → notification_channels → app_config → users → sessions → audit_log →
-widget_polling_config → widget_data_cache.
+## Step 4: Windows widget data
+- **Goal:** widgets render meaningful data for Windows servers.
+- **Method:** in `src/app/api/widgets/[widgetId]/data/route.ts`, after loading `srv`, branch on
+  `srv.platform === 'windows'` and route each widget type to a PowerShell implementation that
+  returns the **same JSON shape** the existing React widgets expect. Put the PowerShell
+  collectors in a new shared `src/lib/windows/collectors.js`
+  (`getWindowsWidgetData(type, runPS, cfg)`).
+  - Supported (v1): `server_summary`, `os_info`, `cpu_memory`, `disk_usage`, `network`,
+    `system_services`, `custom_command`, `gpu_monitoring`, `ollama_status`.
+  - Mapping sketch: `os_info` → `Get-CimInstance Win32_OperatingSystem` + `$PSVersionTable`;
+    `cpu_memory` → `Get-CimInstance Win32_Processor` / `Win32_OperatingSystem`
+    (`TotalVisibleMemorySize`/`FreePhysicalMemory`) + `Get-Counter '\Processor(_Total)\% Processor Time'`;
+    `disk_usage` → `Get-CimInstance Win32_LogicalDisk`; `network` → `Get-NetIPAddress` /
+    `Get-NetAdapter`; `system_services` → `Get-Service`.
+  - `gpu_monitoring`: run `nvidia-smi --query-gpu=... --format=csv,noheader` exactly as the
+    Linux path does (`nvidia-smi.exe` ships in `C:\Windows\System32` and `%ProgramFiles%\NVIDIA
+    Corporation\NVSMI`); parse the first line into the same single-GPU object
+    `{ name, vram_total_mb, vram_used_mb, utilization_percent, temperature_c, power_watts }`.
+  - `ollama_status`: `Invoke-RestMethod http://localhost:11434/api/tags` → the same
+    `{ status, models[] }` shape as the Linux `curl` path (models from `tags.models`).
+  - Unsupported on Windows in v1 (`docker_containers`, `os_update_check`) return the existing
+    graceful placeholder (`{ source: 'placeholder' }` or an empty list) rather than an error.
+  - **Shared module:** put the collectors in a plain CommonJS file
+    `src/lib/windows/collectors.js` with **no imports** (each collector takes a `runPS` command
+    function), so both this TS route (`import { getWindowsWidgetData } from
+    '@/lib/windows/collectors'`) and `poller.js` (`require('./src/lib/windows/collectors')`) use
+    one implementation. Keep the PowerShell escaping helper there too, so the shared paths use
+    exactly one quoter. `tsconfig.json` already has `allowJs: true`.
+  - **Cache-first (unchanged):** the route still reads `widget_data_cache` first and only falls
+    back to this live PowerShell branch on a miss or `?force=true` — same as Linux. The
+    `server_summary` early-return is unchanged.
+- **Reference:** `src/app/api/widgets/[widgetId]/data/route.ts`,
+  `src/lib/windows/collectors.js`,
+  `src/components/widgets/gpu-monitoring/GPUMonitoringWidget.tsx`,
+  `src/components/widgets/ollama-status/OllamaStatusWidget.tsx`.
 
-### Export options (drive the modal in Step 5)
-- `format`: `json | sqlite | sql` (default `json`)
-- `tables`: allow-list subset (JSON only)
-- `includeSecrets`: redact vs. include encrypted values (JSON only; disabled for `sqlite`/`sql`)
-- `excludeLarge`: skip `widget_data_cache` / `audit_log` (default on for JSON)
-- `schemaVersion`: version tag recorded in `meta` (default = current)
+## Step 5: Windows OS detect
+- **Goal:** "Detect OS" works on Windows and sets `platform`/`os_type`.
+- **Method:** in `src/app/api/servers/[serverId]/detect/route.ts`, branch on platform: for
+  Windows run PowerShell (`Get-CimInstance Win32_OperatingSystem` → Caption/Version,
+  `Get-CimInstance Win32_Processor` → Name/NumberOfCores, memory totals) and store
+  `os_type = 'windows'`.
+- **Reference:** `src/app/api/servers/[serverId]/detect/route.ts`.
 
-### Secret redaction (JSON only)
-- Default: redact `private_key_enc`, `passphrase_enc`, `password_hash`, `totp_secret`
-  (placeholder + `redacted: true` marker).
-- Opt-in: include the **encrypted** values as stored. These are encrypted with `MASTER_KEY`,
-  so a restore only recovers secrets on a host using the **same `MASTER_KEY`**. Plaintext
-  secrets are never emitted.
+## Step 6: Add / Edit server UI for platform
+- **Goal:** the user can create a Windows server from the UI.
+- **Method:** add a **Platform** selector (Linux / Windows) to
+  `src/app/(dashboard)/settings/servers/new/page.tsx`, `src/components/settings/ServerForm.tsx`,
+  `EditServerModal.tsx`, and the edit page
+  `src/app/(dashboard)/settings/servers/[serverId]/page.tsx`. Send `platform` in the create
+  (`POST /api/servers`) and update (`PATCH /api/servers/[serverId]`) payloads; add `platform`
+  to the PATCH allow-list in `src/app/api/servers/[serverId]/route.ts`. For Windows, label the
+  existing SSH-key field clearly (the key goes in `administrators_authorized_keys`).
+- **Reference:** `src/app/(dashboard)/settings/servers/new/page.tsx`,
+  `src/components/settings/ServerForm.tsx`, `src/components/settings/EditServerModal.tsx`,
+  `src/app/api/servers/route.ts`, `src/app/api/servers/[serverId]/route.ts`.
 
-### Meta / versioning
-`meta = { format, formatVersion, schemaVersion, appVersion, exportedAt, nodeId, migrationIds, includesSecrets, tables }`
-- `formatVersion`: Bosun backup schema, starts at `1`.
-- `schemaVersion`: highest applied migration ID at export time (e.g. `005`).
-- `sqlite`/`sql` carry version info only via filename/header comment; JSON stores it in `meta`.
+## Step 7: Health check + poller — cache Windows widget data
+- **Goal:** Windows widgets are polled and cached in `widget_data_cache` just like Linux, so
+  dashboards read from the DB rather than always hitting the host live.
+- **Method:**
+  - `src/lib/health/checker.ts`: select `platform` and use a platform-appropriate liveness
+    command (`echo test` works on Windows OpenSSH; a PowerShell command is more deterministic).
+  - `poller.js`: join `servers` to select `platform` (and the connection fields) per widget. In
+    the poll loop, when the widget's server is Windows, run the **shared Windows collectors**
+    (`require('./src/lib/windows/collectors')`) over a `runPS` helper that executes
+    `powershell -NoProfile -NonInteractive -Command "<script>"` on the cached connection, instead
+    of the bash collectors. The existing cache-write, `change_only` hash comparison,
+    `last_polled_at` update and TTL/`expires_at` logic are unchanged, so Windows data lands in
+    `widget_data_cache` with the same lifecycle as Linux.
+  - Windows collector set = the same v1 widget set as Step 4 (`server_summary`, `os_info`,
+    `cpu_memory`, `disk_usage`, `network`, `system_services`). `gpu_monitoring`, `ollama_status`
+    and `custom_command` are not polled on either platform, so Windows serves those live via the
+    route's Step 4 branch — identical to Linux.
+  - `poller.js` is not started by any npm script (`dev:all` runs only `next dev` + `ws-server.js`);
+    this step does not change how it is launched, only what it does for Windows rows.
+- **Reference:** `src/lib/health/checker.ts`, `poller.js`, `src/lib/linux/collectors.js`,
+  `src/lib/windows/collectors.js`.
 
-### Import
-- Auto-detect format: JSON parse, `.sqlite` magic bytes (`SQLite format 3`), or SQL text.
-- Validate `formatVersion` (reject newer) and `schemaVersion` vs. `EXPECTED_MIGRATIONS`:
-  equal → proceed; older → proceed then run forward migrations; newer → block.
-- `sqlite`/`sql` restore into a populated cluster is **undefined** per rqlite → require an
-  explicit destructive "replace" confirmation.
-- JSON import is FK-ordered and uses `INSERT OR REPLACE` (merge).
+## Step 8: Fix the Linux poller collectors to emit JSON (make Linux caching work)
+- **Goal:** cached Linux widget data is **valid JSON** and byte-identical in shape to the
+  route's live output, so DB caching actually works for Linux. Today `poller.js` stores raw text
+  (e.g. `server_summary` returns a shell string, `cpu_memory` returns raw `/proc/meminfo`) while
+  the route `JSON.parse`s cached rows — so cached Linux data throws and falls back to a
+  placeholder.
+- **Method:** remove the duplicated Linux command+parse logic by extracting it once.
+  - Create `src/lib/linux/collectors.js` — dependency-free **CommonJS** (same constraints as the
+    Windows module), exporting `getLinuxWidgetData(type, run, cfg)`, where `run` is the existing
+    command runner. It returns **exactly** the JSON the React widgets consume:
+    - `server_summary` → `{ is_online, hostname, os_type, os_version, name }`
+    - `os_info` → `{ name, version, codename, prettyName, kernel, architecture, hostname, uptime, uptimeSeconds }`
+    - `cpu_memory` → `{ cpu: { model, cores, threads, usagePercent, loadAvg1, loadAvg5, loadAvg15, temperature }, memory: { totalMB, usedMB, freeMB, availableMB, usagePercent, swapTotalMB, swapUsedMB } }`
+    - `disk_usage` → `[{ filesystem, fsType, sizeMB, usedMB, availableMB, usagePercent, mountPoint }]`
+    - `network` → `[{ name, state, mtu, macAddress, ipv4[], ipv6[] }]`
+    - `system_services` → `[{ name, status, description, enabled }]`
+    - `custom_command` → `{ output, exitCode }`
+    - `gpu_monitoring` → `{ name, vram_total_mb, vram_used_mb, utilization_percent, temperature_c, power_watts }`
+    - `ollama_status` → `{ status, models[] }`
+    - `docker_containers` → `[{ id, name, image, status, state, ports }]`
+    - `os_update_check` → `{ updatesAvailable, packages[], lastCheck }`
+    - Copy the field names verbatim from the route's current `switch` so the widgets keep
+      working unchanged.
+  - **Route:** replace the inline `switch (widget.widget_type)` Linux branches with a delegation
+    to `getLinuxWidgetData(type, run, cfg)`, and the Windows branch with
+    `getWindowsWidgetData(...)`. The cache read, `server_summary` early-return and error handling
+    stay as they are.
+  - **`poller.js`:** delete the raw-text `collectors` object and call
+    `getLinuxWidgetData`/`getWindowsWidgetData` for the polled types, so the poller caches the
+    same JSON the route serves. The `servers` JOIN (Step 7) must also select the fields
+    `server_summary` needs (`name`, `hostname`, `os_type`, `os_version`, `is_online`).
+  - This de-duplicates Linux logic the same way as Windows and prevents the two paths from
+    drifting again.
+- **Reference:** `poller.js`, `src/lib/linux/collectors.js`,
+  `src/app/api/widgets/[widgetId]/data/route.ts`.
 
-## Step 4: API routes (all admin-only unless noted)
-- `src/app/api/db/health/route.ts` — GET → database health report (Step 2).
-- `src/app/api/db/settings/route.ts` — GET list + PUT update editable `app_config` keys.
-- `src/app/api/db/export/options/route.ts` — GET → available formats, table list, current schema version.
-- `src/app/api/db/export/route.ts` — GET (query params from the modal) → file download
-  (`Content-Disposition: attachment`, correct `Content-Type` per format).
-- `src/app/api/db/import/route.ts` — POST (multipart) → auto-detect, validate version, apply,
-  return per-table counts and the detected format.
-- `src/app/api/system/health/route.ts` — GET → full site health (Step 6), authenticated.
+## Step 9: Prerequisites documentation
+- **Goal:** the user knows what to configure on the Windows host.
+- **Method:** add a short section to `README.md`: install/enable OpenSSH Server
+  (`Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0`), start `sshd`, place the
+  Bosun public key in `C:\ProgramData\ssh\administrators_authorized_keys` with the correct ACLs
+  (`icacls ... /inheritance:r /grant "Administrators:F" /grant "SYSTEM:F"`), and optionally set
+  the default shell to PowerShell
+  (`New-ItemProperty -Path "HKLM:\SOFTWARE\OpenSSH" -Name DefaultShell -Value "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" -PropertyType String -Force`).
+- **Reference:** `README.md`.
 
-## Step 5: Database settings UI
-- New page: `src/app/(dashboard)/settings/database/page.tsx` with three cards:
-  1. **Health** — status badge, migration table (applied/pending/missing), table row counts.
-  2. **Settings** — editable inputs for the `app_config` keys (name, theme, timezone,
-     refresh interval, ssh timeout, alerts toggle, cleanup retention).
-  3. **Backup** — "Export" and "Import" buttons that open the options modals below.
-- **Export modal** (`src/components/dialogs/DatabaseExportDialog.tsx`): format radio
-  (JSON / SQLite snapshot / SQL dump), table scope checkboxes, "include encrypted secrets"
-  toggle (JSON only — disabled with an explanatory note for the other formats), "exclude large
-  tables" toggle, and a read-only schema/version line. Shows a secrets warning when enabled.
-- **Import modal** (`src/components/dialogs/DatabaseImportDialog.tsx`): file picker with
-  auto-detected format + version compatibility result, merge-vs-replace choice, and a
-  destructive-action confirm when a full restore is selected.
-- Reuse existing primitives (`Card`, `Table`, `button`, `input`, `label`) and match the
-  existing dark-mode conventions (`bg-white dark:bg-gray-800`, etc.). Follow the existing
-  dialog patterns in `src/components/dialogs/` (e.g. `DeleteConfirmDialog.tsx`).
-- Add a **Database** link to the Settings nav in `src/components/layout/Sidebar.tsx`.
-
-## Step 6: Broader site health checks
-- New file: `src/lib/health/system-health.ts` — aggregates:
-  - **App**: build/version, uptime, node version.
-  - **Database**: reuse `getDatabaseHealth()`.
-  - **WebSocket**: probe `http://localhost:${WS_PORT}/health` (already implemented).
-  - **Poller**: add a `/health` endpoint to `poller.js` and a last-poll timestamp; probe it.
-  - **SSH fleet**: count of online/offline servers from the `servers` table (reuse checker data).
-- Surface the aggregate on the Database page (and optionally a small status indicator in `Header.tsx`).
+## Step 10: Verify build and types
+- **Goal:** no regressions.
+- **Method:** run `npx tsc --noEmit`, `npm run lint`, and `npm run build`.
 
 # 5. TESTING AND VALIDATION
 
 **Success criteria:**
-1. `/settings/database` renders health, settings, and backup cards; nav link appears.
-2. Health correctly reports **all migrations applied** on a fresh DB, and reports
-   **missing/pending** when a `migrations` row is deleted or a new migration is unapplied.
-3. Settings PUT persists to `app_config` and survives a reload.
-4. Export modal produces all three formats; JSON downloads with redacted secrets by default
-   and includes encrypted secrets when opted in; `sqlite`/`sql` downloads are valid and
-   restorable.
-5. JSON export→import round-trips without FK errors; a newer `schemaVersion` is rejected;
-   `sqlite`/`sql` restore requires the destructive confirm.
-6. `/api/system/health` returns per-component status; `/api/health` stays lightweight.
-7. `npm run lint` and `npm run build` pass.
 
-# 6. RISKS / OPEN QUESTIONS
+1. `portainer_link` is gone: it no longer appears in the Add Widget list or the registry, the
+   `portainer-link` component files are deleted, and no `portainer_url` references remain.
+2. A Windows host can be added via the UI with `platform = windows` (using an existing SSH key)
+   and appears in `/settings/servers` like any other server.
+3. "Test Connection" and "Detect OS" succeed against the Windows host and populate
+   `os_type = 'windows'` (plus version/CPU/RAM).
+4. The terminal widget on a Windows server opens an **interactive PowerShell** session
+   (prompt, command execution, resize, reconnect/reattach all work).
+5. The v1 widget set renders real data on the Windows host with the same JSON shapes as their
+   Linux counterparts — including `gpu_monitoring` (via `nvidia-smi`) and `ollama_status` (via
+   the Ollama HTTP API). `docker_containers` and `os_update_check` show the graceful
+   placeholder, not an error.
+6. Windows widgets are served from `widget_data_cache`: after the poller runs a cycle, the
+   route returns cached rows (no live SSH) for the polled types, and `?force=true` refreshes
+   live — the same behaviour as Linux. `gpu_monitoring`/`ollama_status`/`custom_command`
+   remain live-only on both platforms.
+7. **Linux caching is fixed:** after the poller runs a cycle, cached Linux rows are valid JSON
+   and render correctly (no placeholder fallback), and the cached shape matches the route's live
+   output for the same widget type.
+8. Linux live behaviour is unchanged when the cache is empty or `?force=true` is used (the route
+   still returns the same JSON it did before).
+9. `npx tsc --noEmit`, `npm run lint`, and `npm run build` all pass.
 
-- **Restore semantics differ by format**: JSON merges; `sqlite`/`sql` are full replace.
-  rqlite documents loading a dump/snapshot into a populated cluster as undefined behaviour,
-  so those paths are gated behind an explicit confirmation.
-- **Secrets**: default redaction means a re-imported JSON backup loses SSH keys / password
-  hashes unless secrets are included. Even when included, they are `MASTER_KEY`-encrypted, so
-  they only restore on a host with the same `MASTER_KEY`; plaintext is never emitted.
-- **Binary/text exports are unredactable**: the secrets toggle is JSON-only.
-- **`executeBatch` size**: large exports (e.g. `widget_data_cache`, `audit_log`) should be
-  chunked and/or excluded by default to avoid huge payloads.
-- **Schema drift**: if a migration half-applied historically, the migration is recorded as
-  applied today; Step 1's fix only helps going forward.
+# 6. RISKS / NOTES
+
+- **Prerequisite on the host:** OpenSSH server must be installed and the key placed in
+  `administrators_authorized_keys` on the Windows machine; Bosun cannot bootstrap this the way
+  it does for Linux (`src/app/api/servers/provision/route.ts` is Linux-only and stays so).
+- **Escaping:** PowerShell quoting through `exec` is error-prone; the helper in Step 2 must be
+  covered by tests/spot-checks to avoid command-injection and breakage.
+- **GPU/ollama variance:** `gpu_monitoring` needs `nvidia-smi` present on the host (absent →
+  the widget's existing "No GPU" fallback); `ollama_status` needs Ollama listening on
+  `localhost:11434` on the host.
+- **Shared module / runtime:** `poller.js` is CommonJS at the repo root while the widget route
+  is TypeScript, so both collector modules must stay dependency-free CommonJS files (no
+  `import`), with the command runner injected by each caller. `tsconfig.json` has `allowJs: true`,
+  so the route can import them via the `@/` alias.
+- **Linux caching fix is a behaviour change (in scope, per request):** previously the poller's
+  Linux collectors stored raw text and the route could not parse it; after Step 8 the poller
+  stores JSON, so Linux dashboards will start serving cached rows. Verify the cached JSON matches
+  the widgets' expected shapes (especially `cpu_memory`, `disk_usage`, `network`,
+  `system_services`) so nothing regresses, and confirm `change_only` types (`os_info`,
+  `system_services`, `docker_containers`, `ollama_status`) hash-compare correctly.
+- **Poller not auto-started:** no npm script launches `poller.js`, so caching (Linux or Windows)
+  only happens while the poller process is running; otherwise widgets are served live by the
+  route, exactly as before.
+- **Existing portainer widgets:** any already-created `portainer_link` widgets become "Unknown
+  widget" and must be removed by the user; no data migration is performed.

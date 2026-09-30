@@ -251,6 +251,11 @@ const MIGRATION_006: string[] = [
     `INSERT OR IGNORE INTO app_config (key, value, description) VALUES ('health.check_interval_sec', '30', 'Server health check interval in seconds')`,
 ];
 
+// Migration 007: Platform flag so code paths can branch on Linux vs Windows
+const MIGRATION_007: string[] = [
+    `ALTER TABLE servers ADD COLUMN platform TEXT DEFAULT 'linux'`,
+];
+
 // Migration registry
 const migrations: Record<string, string[]> = {
     '001': MIGRATION_001,
@@ -259,6 +264,7 @@ const migrations: Record<string, string[]> = {
     '004': MIGRATION_004,
     '005': MIGRATION_005,
     '006': MIGRATION_006,
+    '007': MIGRATION_007,
 };
 
 // All migration IDs this build expects to be applied, in order.

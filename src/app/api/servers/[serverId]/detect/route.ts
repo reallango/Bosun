@@ -3,6 +3,7 @@ import { verifyAccessToken } from '@/lib/auth/jwt';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { decrypt } from '@/lib/crypto/keys';
 import { sshPool, SSHConnectionConfig } from '@/lib/ssh/connection-pool';
+import { isWindows, powershellCommand } from '@/lib/ssh/platform';
 import { logAudit, AuditActions } from '@/lib/audit/logger';
 
 export async function POST(request: NextRequest, { params }: { params: { serverId: string } }) {
@@ -21,6 +22,21 @@ export async function POST(request: NextRequest, { params }: { params: { serverI
     const pk = decrypt(keyR.values[0][0] as string, process.env.MASTER_KEY || '');
     const cfg: SSHConnectionConfig = { host: s.hostname, port: s.ssh_port||22, username: s.ssh_user, privateKey: pk };
     const run = async (cmd: string) => sshPool.executeCommand(serverId, cfg, cmd);
+
+    if (isWindows(s)) {
+      const runPS = async (script: string) => sshPool.executeCommand(serverId, cfg, powershellCommand(script));
+      const script = "[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; $os = Get-CimInstance Win32_OperatingSystem; $cpu = Get-CimInstance Win32_Processor | Select-Object -First 1; [pscustomobject]@{ caption=$os.Caption; version=$os.Version; arch=$os.OSArchitecture; cpu=$cpu.Name; cores=[int]$cpu.NumberOfCores; ramMB=[math]::Round([double]$os.TotalVisibleMemorySize/1024) } | ConvertTo-Json -Compress";
+      const r = await runPS(script);
+      let d: any = {};
+      try { d = JSON.parse(r.stdout.trim()); } catch {}
+      const osType = 'windows', osVer = d.version || '', osCn = '';
+      const cpuModel = d.cpu || 'Unknown', cores = d.cores || 1, ram = d.ramMB || 0;
+      const kernel = d.version || '';
+      await rqlite.execute("UPDATE servers SET platform='windows',os_type=?,os_version=?,os_codename=?,kernel_version=?,cpu_model=?,cpu_cores=?,total_ram_mb=?,is_online=1,last_seen=CURRENT_TIMESTAMP,updated_at=CURRENT_TIMESTAMP WHERE id=?",
+          [osType, osVer, osCn, kernel, cpuModel, cores, ram, serverId]);
+      await logAudit({ userId: payload.userId, serverId, action: AuditActions.SERVER_DETECT, status: 'success', details: `${osType} ${osVer}` });
+      return NextResponse.json({ data: { os_type:osType, os_version:osVer, os_codename:osCn, kernel_version:kernel, cpu_model:cpuModel, cpu_cores:cores, total_ram_mb:ram } });
+    }
 
     const unraid = await run('cat /etc/unraid-version 2>/dev/null');
     let osType='generic', osVer='', osCn='';

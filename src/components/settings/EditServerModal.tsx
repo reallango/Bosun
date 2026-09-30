@@ -18,6 +18,7 @@ interface Server {
   ssh_user: string | null;
   ssh_key_id: string | null;
   notes?: string;
+  platform?: string;
 }
 
 interface EditServerModalProps {
@@ -29,7 +30,7 @@ interface EditServerModalProps {
 
 export function EditServerModal({ isOpen, onClose, server, onSave }: EditServerModalProps) {
   const [form, setForm] = useState({
-    name: '', hostname: '', ssh_port: 22, ssh_user: '', ssh_key_id: '', notes: '',
+    name: '', hostname: '', ssh_port: 22, ssh_user: '', ssh_key_id: '', notes: '', platform: 'linux',
   });
   const [sshKeys, setSSHKeys] = useState<SSHKey[]>([]);
   const [loading, setLoading] = useState(false);
@@ -45,6 +46,7 @@ export function EditServerModal({ isOpen, onClose, server, onSave }: EditServerM
         ssh_user: server.ssh_user || '',
         ssh_key_id: server.ssh_key_id || '',
         notes: server.notes || '',
+        platform: server.platform || 'linux',
       });
       setError('');
 
@@ -57,7 +59,7 @@ export function EditServerModal({ isOpen, onClose, server, onSave }: EditServerM
 
   useEffect(() => {
     if (!isOpen) {
-      setForm({ name: '', hostname: '', ssh_port: 22, ssh_user: '', ssh_key_id: '', notes: '' });
+      setForm({ name: '', hostname: '', ssh_port: 22, ssh_user: '', ssh_key_id: '', notes: '', platform: 'linux' });
       setError('');
     }
   }, [isOpen]);
@@ -153,6 +155,18 @@ export function EditServerModal({ isOpen, onClose, server, onSave }: EditServerM
                 className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm"
               />
             </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Platform</label>
+            <select
+              value={form.platform}
+              onChange={e => setForm(f => ({ ...f, platform: e.target.value }))}
+              className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm"
+            >
+              <option value="linux">Linux</option>
+              <option value="windows">Windows</option>
+            </select>
           </div>
 
           <div>

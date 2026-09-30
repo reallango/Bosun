@@ -12,7 +12,6 @@ import { OllamaStatusWidget } from '@/components/widgets/ollama-status';
 import { SSHTerminalWidget } from '@/components/widgets/ssh-terminal';
 import { DockerContainersWidget } from '@/components/widgets/docker-containers';
 import { CustomCommandWidget } from '@/components/widgets/custom-command';
-import { PortainerLinkWidget } from '@/components/widgets/portainer-link';
 import { OSUpdateCheckWidget } from '@/components/widgets/os-update-check';
 import { WidgetSettingsDialog } from '@/components/dialogs/WidgetSettingsDialog';
 import { DeleteConfirmDialog } from '@/components/dialogs/DeleteConfirmDialog';
@@ -58,8 +57,6 @@ function WidgetContent({ widgetId, widgetType, serverId, serverName }: { widgetI
       return <DockerContainersWidget widgetId={widgetId} serverId={serverId} />;
     case 'custom_command':
       return <CustomCommandWidget widgetId={widgetId} serverId={serverId} />;
-    case 'portainer_link':
-      return <PortainerLinkWidget widgetId={widgetId} serverId={serverId} />;
     case 'os_update_check':
       return <OSUpdateCheckWidget widgetId={widgetId} serverId={serverId} />;
     default:
