@@ -234,6 +234,7 @@ function hashData(data) {
 
 // Main polling loop
 async function pollWidgets() {
+  lastPollAt = new Date().toISOString();
   const leader = await isLeader();
   if (!leader) {
     console.log('[Poller] Not leader, skipping cycle');
@@ -347,6 +348,30 @@ async function main() {
   setInterval(cleanupExpired, 60000);
 
   setTimeout(pollWidgets, 2000);
+
+  startHealthServer();
+}
+
+const HEALTH_PORT = parseInt(process.env.POLLER_HEALTH_PORT) || 3003;
+let lastPollAt = null;
+
+function startHealthServer() {
+  http.createServer((req, res) => {
+    if (req.url === '/health') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        status: 'ok',
+        service: 'poller',
+        last_poll_at: lastPollAt,
+        poll_interval_ms: POLL_INTERVAL_MS,
+      }));
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('Bosun Poller');
+  }).listen(HEALTH_PORT, '0.0.0.0', () => {
+    console.log('[Poller] Health endpoint on port', HEALTH_PORT);
+  });
 }
 
 main();
