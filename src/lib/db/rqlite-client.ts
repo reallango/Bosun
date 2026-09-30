@@ -115,6 +115,28 @@ export class RqliteClient {
             return false;
         }
     }
+
+
+    // Hot backup of the underlying SQLite database (rqlite's recommended backup).
+    async backup(): Promise<ArrayBuffer> {
+        const res = await fetch(`${this.baseUrl}/db/backup`);
+        if (!res.ok) throw new Error(`rqlite backup failed: ${res.status}`);
+        return res.arrayBuffer();
+    }
+
+
+    // Load a SQLite file (application/octet-stream) or SQL dump (text/plain) into the node.
+    async load(data: Uint8Array | string, contentType: string): Promise<void> {
+        const res = await fetch(`${this.baseUrl}/db/load`, {
+            method: 'POST',
+            headers: { 'Content-Type': contentType },
+            body: data as any,
+        });
+        if (!res.ok) {
+            const body = await res.text().catch(() => '');
+            throw new Error(`rqlite load failed: ${res.status} ${body}`);
+        }
+    }
 }
 
 

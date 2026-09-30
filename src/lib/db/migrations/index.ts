@@ -246,6 +246,11 @@ const MIGRATION_005: string[] = [
     `CREATE INDEX IF NOT EXISTS idx_wpc_type_server ON widget_polling_config(widget_type, server_id)`,
 ];
 
+// Migration 006: Seed the health check interval config read by the health checker
+const MIGRATION_006: string[] = [
+    `INSERT OR IGNORE INTO app_config (key, value, description) VALUES ('health.check_interval_sec', '30', 'Server health check interval in seconds')`,
+];
+
 // Migration registry
 const migrations: Record<string, string[]> = {
     '001': MIGRATION_001,
@@ -253,7 +258,38 @@ const migrations: Record<string, string[]> = {
     '003': MIGRATION_003,
     '004': MIGRATION_004,
     '005': MIGRATION_005,
+    '006': MIGRATION_006,
 };
+
+// All migration IDs this build expects to be applied, in order.
+export const EXPECTED_MIGRATIONS: string[] = Object.keys(migrations).sort();
+
+// The schema version is the highest expected migration ID (e.g. "005").
+export const SCHEMA_VERSION = EXPECTED_MIGRATIONS[EXPECTED_MIGRATIONS.length - 1] ?? '000';
+
+// Tables the application expects to exist after all migrations have run.
+export const CORE_TABLES: string[] = [
+    'ssh_keys',
+    'servers',
+    'dashboards',
+    'widgets',
+    'app_config',
+    'users',
+    'audit_log',
+    'alert_rules',
+    'notifications',
+    'notification_channels',
+    'sessions',
+    'widget_polling_config',
+    'widget_data_cache',
+];
+
+// Errors that mean a statement was already applied on a previous partial run,
+// so retrying is safe and should not be treated as a failure.
+function isAlreadyAppliedError(err: unknown): boolean {
+    const msg = String(err).toLowerCase();
+    return msg.includes('duplicate column name') || msg.includes('already exists');
+}
 
 export async function runMigrations(): Promise<void> {
     console.log('Running database migrations...');
@@ -287,17 +323,24 @@ export async function runMigrations(): Promise<void> {
                 console.log(`  Executing: ${stmt.substring(0, 70).replace(/\n/g, ' ')}...`);
                 await rqlite.execute(stmt);
             } catch (e) {
+                if (isAlreadyAppliedError(e)) {
+                    console.log(`  Already applied, skipping: ${stmt.substring(0, 70).replace(/\n/g, ' ')}...`);
+                    continue;
+                }
                 failCount++;
                 console.error(`  FAILED: ${stmt.substring(0, 70).replace(/\n/g, ' ')}...`);
                 console.error(`  Error: ${e}`);
             }
         }
 
+        // Only record a migration once every statement has succeeded. A partially
+        // applied migration stays unrecorded so it is retried (and reported as
+        // pending) rather than being silently marked as done.
         if (failCount > 0) {
-            console.error(`Migration ${id}: ${failCount}/${statements.length} statements failed`);
+            console.error(`Migration ${id}: ${failCount}/${statements.length} statements failed - NOT recording`);
+            continue;
         }
 
-        // Record migration
         try {
             await rqlite.execute("INSERT INTO migrations (id, name) VALUES (?, ?)", [id, `migration_${id}`]);
             console.log(`Migration ${id} recorded`);
@@ -307,6 +350,39 @@ export async function runMigrations(): Promise<void> {
     }
 
     console.log('Migrations complete');
+}
+
+export interface MigrationStatus {
+    expected: string[];
+    applied: string[];
+    missing: string[];
+    pending: string[];
+    schemaVersion: string;
+    upToDate: boolean;
+}
+
+export async function getAppliedMigrations(): Promise<string[]> {
+    const result = await rqlite.query("SELECT id FROM migrations ORDER BY id");
+    return result.values.map(row => String(row[0]));
+}
+
+export async function getMigrationStatus(): Promise<MigrationStatus> {
+    const applied = await getAppliedMigrations();
+    const appliedSet = new Set(applied);
+    const expectedSet = new Set(EXPECTED_MIGRATIONS);
+
+    const missing = EXPECTED_MIGRATIONS.filter(id => !appliedSet.has(id));
+    const pending = applied.filter(id => !expectedSet.has(id));
+    const upToDate = missing.length === 0;
+
+    return {
+        expected: EXPECTED_MIGRATIONS,
+        applied,
+        missing,
+        pending,
+        schemaVersion: applied.length ? applied[applied.length - 1] : '000',
+        upToDate,
+    };
 }
 
 export async function getConfig(key: string): Promise<string | null> {
