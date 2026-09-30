@@ -13,6 +13,7 @@ interface SSHKey {
   fingerprint: string;
   key_type: string;
   created_at: string;
+  servers?: string[];
 }
 
 export default function SSHKeysPage() {
@@ -84,6 +85,7 @@ export default function SSHKeysPage() {
                     <TableHead>Name</TableHead>
                     <TableHead>Fingerprint</TableHead>
                     <TableHead>Type</TableHead>
+                    <TableHead>Servers</TableHead>
                     <TableHead>Created</TableHead>
                     <TableHead></TableHead>
                   </TableRow>
@@ -94,6 +96,7 @@ export default function SSHKeysPage() {
                       <TableCell>{key.name}</TableCell>
                       <TableCell className="font-mono text-sm">{key.fingerprint}</TableCell>
                       <TableCell>{key.key_type}</TableCell>
+                      <TableCell>{key.servers?.length ? key.servers.join(', ') : '—'}</TableCell>
                       <TableCell>{new Date(key.created_at).toLocaleDateString()}</TableCell>
                       <TableCell>
                         <Button variant="ghost" size="sm" onClick={() => handleDelete(key.id)}>

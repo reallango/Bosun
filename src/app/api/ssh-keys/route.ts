@@ -12,7 +12,20 @@ export async function GET(request: NextRequest) {
     const payload = await verifyAccessToken(accessToken);
     if (!payload) return NextResponse.json({ error: { message: 'Invalid token' } }, { status: 401 });
     const result = await rqlite.query('SELECT id, name, fingerprint, key_type, created_at FROM ssh_keys ORDER BY name');
-    return NextResponse.json({ data: rowsToObjects(result) });
+    const keys = rowsToObjects(result);
+
+    const serversResult = await rqlite.query('SELECT name, ssh_key_id FROM servers WHERE ssh_key_id IS NOT NULL ORDER BY name');
+    const serversByKey = new Map<string, string[]>();
+    for (const server of rowsToObjects(serversResult)) {
+      const keyId = server.ssh_key_id as string;
+      const names = serversByKey.get(keyId) ?? [];
+      names.push(server.name as string);
+      serversByKey.set(keyId, names);
+    }
+
+    return NextResponse.json({
+      data: keys.map(key => ({ ...key, servers: serversByKey.get(key.id as string) ?? [] })),
+    });
   } catch (error) {
     console.error('SSH keys error:', error);
     return NextResponse.json({ error: { message: 'Internal server error', code: 'INTERNAL_ERROR' } }, { status: 500 });

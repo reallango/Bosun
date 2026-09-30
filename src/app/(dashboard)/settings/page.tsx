@@ -1,27 +1,18 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import Header from '@/components/layout/Header';
 import { useAuth } from '@/hooks/useAuth';
+import AppSettingsCard from '@/components/settings/AppSettingsCard';
 
 export default function SettingsPage() {
   const { user } = useAuth();
   const [appName] = useState('Bosun');
-  const [ saving, setSaving] = useState(false);
-
-  const handleSave = async () => {
-    setSaving(true);
-    try {
-      // API call would go here
-    } finally {
-      setSaving(false);
-    }
-  };
 
   return (
     <>
       <Header title="Settings" />
-      <div className="p-8 max-w-2xl">
+      <div className="p-8 space-y-6 max-w-4xl">
         <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
           <h2 className="text-lg font-semibold mb-4">General Settings</h2>
           
@@ -57,6 +48,8 @@ export default function SettingsPage() {
             </div>
           </div>
         </div>
+
+        <AppSettingsCard />
       </div>
     </>
   );
