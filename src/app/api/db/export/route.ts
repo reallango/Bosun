@@ -1,3 +1,9 @@
+/**
+ * Download a database backup as a file attachment.
+ *
+ * Query params: `format` (json|sqlite|sql), `tables` (comma-separated, JSON only),
+ * `includeSecrets` and `excludeLarge`. Admin-only.
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireRole } from '@/lib/auth/middleware';
 import { exportDatabase, BackupFormat } from '@/lib/db/backup';

@@ -8,8 +8,11 @@ export interface SettingDef {
   options?: string[];
 }
 
-// app_config keys that are safe to edit from the Database settings page.
-// Operational/credential data (servers, ssh keys) is managed elsewhere.
+/**
+ * Whitelist of `app_config` keys that may be read and edited from the Database
+ * settings page. Any key not listed here is rejected by the settings API, which
+ * keeps credentials and operational data (servers, SSH keys) out of reach.
+ */
 export const EDITABLE_SETTINGS: SettingDef[] = [
   { key: 'app.theme', label: 'Theme', type: 'string', description: 'Default UI theme', options: ['light', 'dark', 'system'] },
   { key: 'app.timezone', label: 'Timezone', type: 'string', description: 'Default timezone' },

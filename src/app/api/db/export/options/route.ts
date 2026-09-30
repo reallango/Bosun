@@ -1,3 +1,4 @@
+/** Describes the available export formats, tables and version metadata for the UI. */
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireRole } from '@/lib/auth/middleware';
 import { BACKUP_TABLES, LARGE_TABLES, BACKUP_FORMAT_VERSION } from '@/lib/db/backup';

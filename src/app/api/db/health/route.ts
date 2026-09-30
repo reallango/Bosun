@@ -1,3 +1,4 @@
+/** Database health report: readiness, raft status, migrations, tables, config. */
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireRole } from '@/lib/auth/middleware';
 import { getDatabaseHealth } from '@/lib/health/db-health';

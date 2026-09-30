@@ -1,3 +1,10 @@
+/**
+ * Modal for restoring a database backup.
+ *
+ * Uploads the selected file to /api/db/import, which auto-detects the format.
+ * "Replace existing data" is a destructive, irreversible full restore and is
+ * required for the sqlite/sql formats.
+ */
 'use client';
 
 import { useState } from 'react';

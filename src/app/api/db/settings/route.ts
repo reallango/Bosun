@@ -1,3 +1,10 @@
+/**
+ * Read and update the editable `app_config` settings.
+ *
+ * GET is available to any authenticated user; PUT is admin-only and rejects any
+ * key outside `EDITABLE_SETTINGS` so this route cannot be used to write
+ * arbitrary config or credential values.
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireRole } from '@/lib/auth/middleware';
 import { getConfig, setConfig } from '@/lib/db/migrations';

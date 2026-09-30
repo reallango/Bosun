@@ -355,6 +355,8 @@ async function main() {
 const HEALTH_PORT = parseInt(process.env.POLLER_HEALTH_PORT) || 3003;
 let lastPollAt = null;
 
+// Exposes GET /health so the app's system-health check can confirm the poller
+// is running, and reports when the last poll cycle started.
 function startHealthServer() {
   http.createServer((req, res) => {
     if (req.url === '/health') {

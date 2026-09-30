@@ -1,3 +1,4 @@
+/** Aggregate health of the app, database, websocket server, poller and SSH fleet. */
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireRole } from '@/lib/auth/middleware';
 import { getSystemHealth } from '@/lib/health/system-health';

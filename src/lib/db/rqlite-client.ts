@@ -116,14 +116,12 @@ export class RqliteClient {
         }
     }
 
-
     // Hot backup of the underlying SQLite database (rqlite's recommended backup).
     async backup(): Promise<ArrayBuffer> {
         const res = await fetch(`${this.baseUrl}/db/backup`);
         if (!res.ok) throw new Error(`rqlite backup failed: ${res.status}`);
         return res.arrayBuffer();
     }
-
 
     // Load a SQLite file (application/octet-stream) or SQL dump (text/plain) into the node.
     async load(data: Uint8Array | string, contentType: string): Promise<void> {
