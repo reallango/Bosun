@@ -20,6 +20,44 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Managing Windows servers
+
+Bosun talks to Windows hosts over the same SSH transport it uses for Linux: it runs
+PowerShell over the host's OpenSSH server, the same way
+`Enter-PSSession -HostName <host> -SSHTransport` does. To add a Windows machine:
+
+1. Install and enable OpenSSH Server on the host (Windows 10 1809+ / Server 2019+):
+
+   ```powershell
+   Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0
+   Start-Service sshd
+   Set-Service -Name sshd -StartupType Automatic
+   ```
+
+2. Authorize the Bosun public key. For an administrative account the key must go in
+   the administrators file, with the ACLs OpenSSH requires:
+
+   ```powershell
+   # append the Bosun public key to the file, then lock down its ACLs
+   icacls.exe "C:\ProgramData\ssh\administrators_authorized_keys" /inheritance:r /grant "Administrators:F" /grant "SYSTEM:F"
+   ```
+
+3. Optionally make PowerShell the default SSH shell:
+
+   ```powershell
+   New-ItemProperty -Path "HKLM:\SOFTWARE\OpenSSH" -Name DefaultShell `
+     -Value "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" -PropertyType String -Force
+   ```
+
+4. In Bosun, add the server and set **Platform** to **Windows** (Add Server or Edit
+   Server). Use the same SSH key you configured above. "Test Connection" and
+   "Detect OS" then work over PowerShell, and the terminal widget opens an interactive
+   PowerShell session.
+
+`docker_containers` and `os_update_check` are not supported on Windows in this version;
+they render a placeholder instead of an error. `gpu_monitoring` needs `nvidia-smi` on the
+host, and `ollama_status` needs Ollama listening on `localhost:11434`.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

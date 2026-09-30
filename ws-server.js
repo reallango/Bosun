@@ -84,7 +84,7 @@ async function connectToServer(serverId) {
   const conn = new Client();
   
   // Get server details from rqlite
-  const servers = await queryRqlite(`SELECT id, hostname, ssh_port, ssh_user, ssh_key_id FROM servers WHERE id = '${serverId}'`);
+  const servers = await queryRqlite(`SELECT id, hostname, ssh_port, ssh_user, ssh_key_id, platform FROM servers WHERE id = '${serverId}'`);
   if (!servers || servers.length === 0) {
     throw new Error('Server not found');
   }
@@ -94,6 +94,7 @@ async function connectToServer(serverId) {
   const sshPort = server[2] || 22;
   const sshUser = server[3];
   const sshKeyId = server[4];
+  const platform = server[5] || 'linux';
   
   if (!sshKeyId) {
     throw new Error('No SSH key configured for this server');
@@ -118,7 +119,7 @@ async function connectToServer(serverId) {
     
     conn.on('ready', () => {
       console.log('[WS] SSH connected to', serverHostname);
-      resolve(conn);
+      resolve({ client: conn, platform });
     });
     
     conn.on('error', (err) => {
@@ -319,29 +320,34 @@ wss.on('connection', async (ws, req) => {
   
   try {
     // Connect to server via SSH
-    sshClient = await connectToServer(serverId);
-    
-    // Open PTY shell
-    sshClient.shell({ term: 'xterm-256color', cols: 80, rows: 24 }, (err, stream) => {
+    const connected = await connectToServer(serverId);
+    sshClient = connected.client;
+
+    // Open a PTY. Windows hosts get an interactive PowerShell session; Linux
+    // hosts get their login shell. Everything downstream (stream, reattach,
+    // buffer, resize) is transport-agnostic once a stream exists.
+    const openPty = (err, stream) => {
       if (err) {
         ws.send('\r\n*** SSH shell failed: ' + err.message + ' ***\r\n');
         ws.close(4002, err.message);
         return;
       }
-      
+
       sshStream = stream;
-      ws.send('\r\n\x1b[32mConnected to server via SSH\x1b[0m\r\n\r\n');
-      
+      ws.send(connected.platform === 'windows'
+        ? '\r\n\x1b[32mConnected to server via PowerShell\x1b[0m\r\n\r\n'
+        : '\r\n\x1b[32mConnected to server via SSH\x1b[0m\r\n\r\n');
+
       // SSH output -> browser + buffer
       stream.on('data', (data) => {
         const str = data.toString('utf-8');
-        
+
         // Buffer output (keep last 1000 chunks)
         outputBuffer.push(str);
         if (outputBuffer.length > 1000) {
           outputBuffer.shift();
         }
-        
+
         // Update last activity
         const session = sshSessions.get(sessionId);
         if (session) session.lastActivity = Date.now();
@@ -351,7 +357,7 @@ wss.on('connection', async (ws, req) => {
           ws.send(str);
         }
       });
-      
+
       stream.on('close', () => {
         console.log('[WS] SSH stream closed for session: ' + sessionId);
         const session = sshSessions.get(sessionId);
@@ -364,11 +370,11 @@ wss.on('connection', async (ws, req) => {
           sshSessions.delete(sessionId);
         }
       });
-      
+
       // Browser input -> SSH
       ws.on('message', (data) => {
         const msg = data.toString();
-        
+
         // Handle resize JSON
         try {
           const json = JSON.parse(msg);
@@ -379,14 +385,22 @@ wss.on('connection', async (ws, req) => {
         } catch {
           // Not JSON, write raw
         }
-        
+
         // Write raw input to SSH
         if (sshStream) {
           sshStream.write(msg);
         }
       });
-    });
-    
+    };
+
+    if (connected.platform === 'windows') {
+      // exec() gives a stream we can drive directly; with a pty, powershell.exe
+      // renders an interactive prompt (client.shell() would run cmd.exe).
+      sshClient.exec('powershell -NoLogo -NoProfile', { pty: { term: 'xterm-256color', cols: 80, rows: 24 } }, openPty);
+    } else {
+      sshClient.shell({ term: 'xterm-256color', cols: 80, rows: 24 }, openPty);
+    }
+
     // Store expanded session data
     const sessionData = {
       client: sshClient,

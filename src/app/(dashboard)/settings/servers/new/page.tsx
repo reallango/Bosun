@@ -117,7 +117,8 @@ export default function NewServerPage() {
           hostname: formData.get('hostname'),
           ssh_port: parseInt(formData.get('ssh_port') as string) || 22,
           ssh_user: formData.get('ssh_user'),
-          notes: formData.get('notes')
+          notes: formData.get('notes'),
+          platform: formData.get('platform') || 'linux'
         })
       });
 
@@ -264,6 +265,15 @@ export default function NewServerPage() {
                 <div className="space-y-2">
                   <Label htmlFor="ssh_user">SSH User *</Label>
                   <Input id="ssh_user" name="ssh_user" required />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="platform">Platform</Label>
+                  <select id="platform" name="platform" defaultValue="linux"
+                    className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm">
+                    <option value="linux">Linux</option>
+                    <option value="windows">Windows</option>
+                  </select>
+                  <p className="text-xs text-gray-500">Windows hosts use PowerShell over OpenSSH.</p>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="notes">Notes</Label>

@@ -16,6 +16,8 @@
 const http = require('http');
 const crypto = require('crypto');
 const { Client } = require('ssh2');
+const { getLinuxWidgetData } = require('./src/lib/linux/collectors');
+const { getWindowsWidgetData, powershellCommand } = require('./src/lib/windows/collectors');
 
 const RQLITE_HOST = process.env.RQLITE_HOST || '127.0.0.1:4001';
 const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS) || 10000;
@@ -100,14 +102,14 @@ async function getSSHConnection(serverId) {
   }
   
   const servers = await queryRqlite(
-    `SELECT id, hostname, ssh_port, ssh_user, ssh_key_id FROM servers WHERE id = ?`,
+    `SELECT id, name, hostname, ssh_port, ssh_user, ssh_key_id, platform, os_type, os_version, is_online FROM servers WHERE id = ?`,
     [serverId]
   );
   if (!servers.length) {
     throw new Error('Server not found: ' + serverId);
   }
   
-  const [, hostname, port, user, keyId] = servers[0];
+  const [sid, name, hostname, port, user, keyId, platform, osType, osVersion, isOnline] = servers[0];
   if (!keyId) {
     throw new Error('No SSH key for server');
   }
@@ -134,89 +136,19 @@ async function getSSHConnection(serverId) {
     c.on('error', reject);
   });
   
-  sshConnections.set(serverId, conn);
-  return conn;
-}
+  const server = {
+    id: sid,
+    name,
+    hostname,
+    os_type: osType,
+    os_version: osVersion,
+    is_online: isOnline,
+  };
 
-// Widget data collectors
-const collectors = {
-  server_summary: async (conn) => {
-    return new Promise((resolve, reject) => {
-      let output = '';
-      conn.exec('echo "{hostname:$(hostname),uptime:$(uptime),load:$(cat /proc/loadavg | awk \'{print $1}')}"', (err, stream) => {
-        if (err) return reject(err);
-        stream.on('data', (d) => { output += d.toString(); });
-        stream.on('close', () => resolve(output.trim()));
-      });
-    });
-  },
-  
-  cpu_memory: async (conn) => {
-    return new Promise((resolve, reject) => {
-      let output = '';
-      conn.exec("cat /proc/meminfo | head -3; cat /proc/loadavg", (err, stream) => {
-        if (err) return reject(err);
-        stream.on('data', (d) => { output += d.toString(); });
-        stream.on('close', () => resolve(output));
-      });
-    });
-  },
-  
-  disk_usage: async (conn) => {
-    return new Promise((resolve, reject) => {
-      let output = '';
-      conn.exec("df -h | grep -v tmpfs", (err, stream) => {
-        if (err) return reject(err);
-        stream.on('data', (d) => { output += d.toString(); });
-        stream.on('close', () => resolve(output));
-      });
-    });
-  },
-  
-  network: async (conn) => {
-    return new Promise((resolve, reject) => {
-      let output = '';
-      conn.exec("ip addr show; hostname -I", (err, stream) => {
-        if (err) return reject(err);
-        stream.on('data', (d) => { output += d.toString(); });
-        stream.on('close', () => resolve(output));
-      });
-    });
-  },
-  
-  system_services: async (conn) => {
-    return new Promise((resolve, reject) => {
-      let output = '';
-      conn.exec("systemctl list-units --type=service --state=running | head -20", (err, stream) => {
-        if (err) return reject(err);
-        stream.on('data', (d) => { output += d.toString(); });
-        stream.on('close', () => resolve(output));
-      });
-    });
-  },
-  
-  docker_containers: async (conn) => {
-    return new Promise((resolve, reject) => {
-      let output = '';
-      conn.exec("docker ps -a --format '{{.Names}}\t{{.Status}}\t{{.Image}}'", (err, stream) => {
-        if (err) return reject(err);
-        stream.on('data', (d) => { output += d.toString(); });
-        stream.on('close', () => resolve(output));
-      });
-    });
-  },
-  
-  os_info: async (conn) => {
-    return new Promise((resolve, reject) => {
-      let output = '';
-      conn.exec("uname -a; hostname; cat /etc/os-release | head -5", (err, stream) => {
-        if (err) return reject(err);
-        stream.on('data', (d) => { output += d.toString(); });
-        stream.on('close', () => resolve(output));
-      });
-    });
-  },
-};
+  const connection = { client: conn, platform: platform || 'linux', server };
+  sshConnections.set(serverId, connection);
+  return connection;
+}
 
 // Generate ID
 function generateId() {
@@ -250,7 +182,7 @@ async function pollWidgets() {
       SELECT w.id, w.widget_type, w.server_id, w.config, wpc.poll_interval_sec, wpc.ttl_sec, wpc.storage_mode, wpc.last_polled_at, wpc.enabled
       FROM widgets w
       LEFT JOIN widget_polling_config wpc ON w.widget_type = wpc.widget_type AND w.server_id = wpc.server_id
-      WHERE w.widget_type NOT IN ('ssh_terminal', 'portainer_link')
+      WHERE w.widget_type NOT IN ('ssh_terminal')
       AND (wpc.enabled IS NULL OR wpc.enabled = 1)
       ORDER BY w.server_id, w.widget_type
     `);
@@ -268,15 +200,36 @@ async function pollWidgets() {
       console.log(`[Poller] Polling ${widgetType} on ${serverId}...`);
       
       try {
-        const conn = await getSSHConnection(serverId);
-        const collector = collectors[widgetType];
-        
-        if (!collector) {
+        const { client, platform, server } = await getSSHConnection(serverId);
+
+        // Run a command on the cached connection, returning the same
+        // { stdout, stderr, exitCode } shape the shared collectors expect.
+        const runCommand = (cmd) => new Promise((resolve, reject) => {
+          client.exec(cmd, (err, stream) => {
+            if (err) return reject(err);
+            let stdout = '', stderr = '';
+            stream.on('data', (d) => { stdout += d.toString(); });
+            stream.stderr.on('data', (d) => { stderr += d.toString(); });
+            stream.on('close', (code) => resolve({ stdout, stderr, exitCode: code || 0 }));
+          });
+        });
+
+        // gpu_monitoring / ollama_status / custom_command are served live by the
+        // widget route on both platforms, so the poller never handles them.
+        let data;
+        if (platform === 'windows') {
+          data = await getWindowsWidgetData(widgetType, (s) => runCommand(powershellCommand(s)), { server });
+        } else {
+          data = await getLinuxWidgetData(widgetType, runCommand, { server });
+        }
+
+        if (data === undefined) {
           console.log(`[Poller] No collector for ${widgetType}`);
           continue;
         }
-        
-        const data = await collector(conn);
+
+        // The cache column is TEXT; store the same JSON the route parses.
+        data = JSON.stringify(data);
         const dataHash = hashData(data);
         const ttlSec = ttl || 300;
         

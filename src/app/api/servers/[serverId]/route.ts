@@ -29,7 +29,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { server
     if (!payload || payload.role !== 'admin') return NextResponse.json({ error: { message: 'Forbidden' } }, { status: 403 });
     const { serverId } = await params;
     const body = await request.json();
-    const allowed = ['name','hostname','ssh_port','ssh_user','ssh_key_id','notes','tags','os_type','os_version','os_codename','kernel_version'];
+    const allowed = ['name','hostname','ssh_port','ssh_user','ssh_key_id','notes','tags','platform','os_type','os_version','os_codename','kernel_version'];
     const updates: string[] = []; const values: any[] = [];
     for (const [k,v] of Object.entries(body)) { if (allowed.includes(k)) { updates.push(`${k} = ?`); values.push(k==='tags' ? JSON.stringify(v) : v); } }
     if (!updates.length) return NextResponse.json({ error: { message: 'Nothing to update' } }, { status: 400 });

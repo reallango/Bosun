@@ -152,17 +152,6 @@ export const widgetRegistry: Record<string, WidgetDefinition> = {
     defaultTTL: 1800,
     storageMode: 'latest_ttl',
   },
-  portainer_link: {
-    type: 'portainer_link',
-    displayName: 'Portainer Link',
-    description: 'External Portainer UI link',
-    icon: 'external-link',
-    category: 'utility',
-    defaultSize: { w: 6, h: 4 },
-    minSize: { w: 4, h: 3 },
-    refreshInterval: 0,
-    backgroundPollable: false,
-  },
   os_update_check: {
     type: 'os_update_check',
     displayName: 'OS Update Check',

@@ -5,12 +5,12 @@ export interface Server {
   ssh_port: number;
   ssh_user: string;
   ssh_key_id: string | null;
+  platform: string;
   os_type: string | null;
   os_version: string | null;
   os_codename: string | null;
   kernel_version: string | null;
   notes: string | null;
-  portainer_url: string | null;
   is_online: boolean;
   last_seen: string | null;
   cpu_model: string | null;

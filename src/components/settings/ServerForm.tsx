@@ -14,6 +14,7 @@ interface ServerFormData {
   ssh_user: string;
   ssh_key_id: string;
   notes: string;
+  platform: string;
 }
 
 export default function ServerForm() {
@@ -26,7 +27,8 @@ export default function ServerForm() {
     ssh_port: 22,
     ssh_user: 'svc-bosun',
     ssh_key_id: '',
-    notes: ''
+    notes: '',
+    platform: 'linux'
   });
 
   const handleChange = (field: keyof ServerFormData, value: string | number) => {
@@ -107,6 +109,18 @@ export default function ServerForm() {
               onChange={(e) => handleChange('ssh_user', e.target.value)}
               required
             />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="platform">Platform</Label>
+            <select
+              id="platform"
+              value={formData.platform}
+              onChange={(e) => handleChange('platform', e.target.value)}
+              className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm"
+            >
+              <option value="linux">Linux</option>
+              <option value="windows">Windows</option>
+            </select>
           </div>
           <div className="space-y-2">
             <Label htmlFor="notes">Notes</Label>
