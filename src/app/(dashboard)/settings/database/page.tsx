@@ -1,3 +1,8 @@
+/**
+ * Database settings page: health, editable app_config settings and backup.
+ *
+ * Backed by /api/db/health, /api/db/settings and the export/import dialogs.
+ */
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';

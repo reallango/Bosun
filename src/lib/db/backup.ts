@@ -1,3 +1,20 @@
+/**
+ * Database backup, restore and portable export/import.
+ *
+ * Three formats are supported, each with different trade-offs:
+ *
+ *  - `json`   Portable, inspectable document. Supports table scope and secret
+ *             redaction. Import merges row-by-row with INSERT OR REPLACE.
+ *  - `sqlite` Raw SQLite file from rqlite's hot-backup endpoint (`/db/backup`).
+ *             Full fidelity, but secrets cannot be redacted and restore replaces
+ *             the whole database via `/db/load`.
+ *  - `sql`    Text dump of DDL + INSERTs, restored the same way as `sqlite`.
+ *
+ * Secrets (encrypted SSH keys, password hashes, TOTP seeds) are redacted by
+ * default in JSON exports. Opting in emits the *encrypted* ciphertext only -
+ * plaintext is never exported. Redacted rows are skipped on import so a
+ * placeholder can never overwrite a real credential.
+ */
 import { rqlite, rowsToObjects } from './rqlite-client';
 import {
   EXPECTED_MIGRATIONS,
@@ -169,6 +186,11 @@ async function buildSqlDump(): Promise<string> {
   return lines.join('\n');
 }
 
+/**
+ * Build a backup in the requested format. Defaults to a redacted JSON export.
+ * The requested table list is intersected with `BACKUP_TABLES` so callers can
+ * never widen the scope to arbitrary tables.
+ */
 export async function exportDatabase(options: ExportOptions = {}): Promise<ExportResult> {
   const format: BackupFormat = options.format ?? 'json';
   const migrationIds = (await getMigrationStatus()).applied;
@@ -214,6 +236,7 @@ export async function exportDatabase(options: ExportOptions = {}): Promise<Expor
   };
 }
 
+/** Sniff the format of an uploaded backup from its leading bytes. */
 export function detectFormat(data: Uint8Array): BackupFormat {
   // SQLite files begin with the 16-byte magic string "SQLite format 3\0".
   const magic = Buffer.from(data.subarray(0, 16)).toString('binary');
@@ -224,6 +247,13 @@ export function detectFormat(data: Uint8Array): BackupFormat {
   return 'sql';
 }
 
+/**
+ * Restore a backup previously produced by {@link exportDatabase}.
+ *
+ * `sqlite`/`sql` are handed to rqlite's `/db/load`, which replaces the entire
+ * database - the caller is responsible for confirming that with the user.
+ * `json` is merged row-by-row and only touches tables present in the document.
+ */
 export async function importDatabase(
   data: Uint8Array,
   options: ImportOptions = {},

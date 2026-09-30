@@ -1,3 +1,8 @@
+/**
+ * Restore a database backup uploaded as multipart/form-data (`file`, `replace`).
+ * Admin-only. `replace=true` clears each table first and is required for the
+ * sqlite/sql formats, which replace the whole database.
+ */
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireRole } from '@/lib/auth/middleware';
 import { importDatabase } from '@/lib/db/backup';

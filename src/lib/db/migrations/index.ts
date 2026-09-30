@@ -264,7 +264,7 @@ const migrations: Record<string, string[]> = {
 // All migration IDs this build expects to be applied, in order.
 export const EXPECTED_MIGRATIONS: string[] = Object.keys(migrations).sort();
 
-// The schema version is the highest expected migration ID (e.g. "005").
+// The schema version is the highest expected migration ID (e.g. "006").
 export const SCHEMA_VERSION = EXPECTED_MIGRATIONS[EXPECTED_MIGRATIONS.length - 1] ?? '000';
 
 // Tables the application expects to exist after all migrations have run.
@@ -355,17 +355,21 @@ export async function runMigrations(): Promise<void> {
 export interface MigrationStatus {
     expected: string[];
     applied: string[];
+    /** Expected migrations that have not been applied yet. */
     missing: string[];
+    /** Applied migrations this build does not know about (e.g. after a downgrade). */
     pending: string[];
     schemaVersion: string;
     upToDate: boolean;
 }
 
+/** IDs recorded in the `migrations` table, in application order. */
 export async function getAppliedMigrations(): Promise<string[]> {
     const result = await rqlite.query("SELECT id FROM migrations ORDER BY id");
     return result.values.map(row => String(row[0]));
 }
 
+/** Compare applied migrations against what this build expects. */
 export async function getMigrationStatus(): Promise<MigrationStatus> {
     const applied = await getAppliedMigrations();
     const appliedSet = new Set(applied);

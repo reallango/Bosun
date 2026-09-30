@@ -1,3 +1,10 @@
+/**
+ * Application version, node uptime and the health of every external component
+ * the app depends on (database, websocket server, widget poller, SSH fleet).
+ *
+ * The websocket and poller probes hit each service's `/health` endpoint with a
+ * short timeout so a hung service degrades the report instead of hanging it.
+ */
 import { rqlite } from '../db/rqlite-client';
 import { getDatabaseHealth, DatabaseHealth } from './db-health';
 

@@ -1,3 +1,17 @@
+/**
+ * Database health report.
+ *
+ * Aggregates readiness, raft status, migration state, expected tables, row
+ * counts and seeded config keys into a single `ok | degraded | error` verdict:
+ *
+ *  - `error`    the node is not ready (unreachable, no leader, or not writable).
+ *  - `degraded` reachable but incomplete: a check failed, a core table or seeded
+ *               config key is missing, or expected migrations have not been applied.
+ *  - `ok`       ready with every expected migration and table present.
+ *
+ * Never throws: a failing probe is recorded in `errors` so the page can still
+ * render whatever else succeeded.
+ */
 import { rqlite } from '../db/rqlite-client';
 import {
   getMigrationStatus,

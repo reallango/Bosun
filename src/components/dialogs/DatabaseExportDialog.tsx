@@ -1,3 +1,10 @@
+/**
+ * Modal for configuring and downloading a database export.
+ *
+ * Loads the available formats and tables from /api/db/export/options, then
+ * streams the selected backup from /api/db/export as a file download. Secrets
+ * are opt-in; when enabled only the encrypted ciphertext is included.
+ */
 'use client';
 
 import { useEffect, useState } from 'react';
