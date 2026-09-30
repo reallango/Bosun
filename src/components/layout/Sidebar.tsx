@@ -134,6 +134,9 @@ export default function Sidebar() {
         {/* Settings */}
         <div className="pt-2 border-t border-gray-800">
           <div className="px-3 py-1 text-xs text-gray-500 uppercase">Settings</div>
+          <Link href="/settings" className="block px-3 py-1 text-sm text-gray-400 hover:text-white">
+            General
+          </Link>
           <Link href="/settings/servers" className="block px-3 py-1 text-sm text-gray-400 hover:text-white">
             Servers
           </Link>
