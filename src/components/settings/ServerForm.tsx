@@ -1,11 +1,12 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 
 interface ServerFormData {
   name: string;
@@ -17,10 +18,17 @@ interface ServerFormData {
   platform: string;
 }
 
+interface SSHKey {
+  id: string;
+  name: string;
+  fingerprint: string;
+}
+
 export default function ServerForm() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [sshKeys, setSSHKeys] = useState<SSHKey[]>([]);
   const [formData, setFormData] = useState<ServerFormData>({
     name: '',
     hostname: '',
@@ -30,6 +38,13 @@ export default function ServerForm() {
     notes: '',
     platform: 'linux'
   });
+
+  useEffect(() => {
+    fetchWithAuth('/api/ssh-keys')
+      .then(r => r.json())
+      .then(j => { if (j.data) setSSHKeys(Array.isArray(j.data) ? j.data : j.data.ssh_keys || []); })
+      .catch(() => setSSHKeys([]));
+  }, []);
 
   const handleChange = (field: keyof ServerFormData, value: string | number) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -109,6 +124,23 @@ export default function ServerForm() {
               onChange={(e) => handleChange('ssh_user', e.target.value)}
               required
             />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="ssh_key_id">SSH Key</Label>
+            <select
+              id="ssh_key_id"
+              value={formData.ssh_key_id}
+              onChange={(e) => handleChange('ssh_key_id', e.target.value)}
+              className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm"
+            >
+              <option value="">-- No key selected --</option>
+              {sshKeys.map(k => (
+                <option key={k.id} value={k.id}>
+                  {k.name} ({k.fingerprint?.substring(0, 16)}...)
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-gray-500">Required for widgets, Detect OS, and the terminal.</p>
           </div>
           <div className="space-y-2">
             <Label htmlFor="platform">Platform</Label>

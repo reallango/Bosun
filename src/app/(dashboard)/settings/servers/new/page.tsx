@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Header from '@/components/layout/Header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -9,11 +9,18 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 
+interface SSHKey {
+  id: string;
+  name: string;
+  fingerprint: string;
+}
+
 export default function NewServerPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [setupMethod, setSetupMethod] = useState<'existing' | 'auto'>('existing');
+  const [sshKeys, setSSHKeys] = useState<SSHKey[]>([]);
   
   // Auto-provision state
   const [provisioning, setProvisioning] = useState(false);
@@ -27,6 +34,13 @@ export default function NewServerPage() {
     ssh_port: 22,
     name: '',
   });
+
+  useEffect(() => {
+    fetchWithAuth('/api/ssh-keys')
+      .then(r => r.json())
+      .then(j => { if (j.data) setSSHKeys(Array.isArray(j.data) ? j.data : j.data.ssh_keys || []); })
+      .catch(() => setSSHKeys([]));
+  }, []);
 
   const handleProvision = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -117,6 +131,7 @@ export default function NewServerPage() {
           hostname: formData.get('hostname'),
           ssh_port: parseInt(formData.get('ssh_port') as string) || 22,
           ssh_user: formData.get('ssh_user'),
+          ssh_key_id: formData.get('ssh_key_id') || null,
           notes: formData.get('notes'),
           platform: formData.get('platform') || 'linux'
         })
@@ -265,6 +280,19 @@ export default function NewServerPage() {
                 <div className="space-y-2">
                   <Label htmlFor="ssh_user">SSH User *</Label>
                   <Input id="ssh_user" name="ssh_user" required />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="ssh_key_id">SSH Key</Label>
+                  <select id="ssh_key_id" name="ssh_key_id" defaultValue=""
+                    className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm">
+                    <option value="">-- No key selected --</option>
+                    {sshKeys.map(k => (
+                      <option key={k.id} value={k.id}>
+                        {k.name} ({k.fingerprint?.substring(0, 16)}...)
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-gray-500">Required for widgets, Detect OS, and the terminal.</p>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="platform">Platform</Label>
