@@ -16,18 +16,19 @@
  */
 
 /**
- * Escape a string so it survives being passed as a single argument to a native
- * program through cmd.exe. Mirrors the CommandLineToArgvW / CRT rules.
+ * Wrap a PowerShell script for non-interactive execution over SSH.
+ *
+ * The script is UTF-16LE Base64 encoded and passed via `-EncodedCommand` rather
+ * than as a double-quoted `-Command` argument. A Windows host whose default SSH
+ * shell is PowerShell launches `powershell.exe -c '<command>'`, so an outer
+ * PowerShell parses the command first and would interpolate `$vars` inside the
+ * double-quoted script, stripping them before the inner powershell.exe runs.
+ * The encoded form is opaque to cmd.exe and to any outer PowerShell, so `$`,
+ * quotes, `%` and newlines reach the host verbatim.
  */
-function escapeForCommandLine(value) {
-  return value
-    .replace(/(\\*)"/g, '$1$1\\"')
-    .replace(/(\\*)$/, '$1$1');
-}
-
-/** Wrap a PowerShell script for non-interactive execution over SSH. */
 function powershellCommand(script) {
-  return `powershell -NoProfile -NonInteractive -Command "${escapeForCommandLine(script)}"`;
+  const encoded = Buffer.from(script, 'utf16le').toString('base64');
+  return `powershell -NoProfile -NonInteractive -EncodedCommand ${encoded}`;
 }
 
 /**
