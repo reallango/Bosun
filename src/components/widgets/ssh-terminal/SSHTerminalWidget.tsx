@@ -21,6 +21,9 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
   const authTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const passwordPromptShownRef = useRef(false);
   const servicePromptRef = useRef<string>('');
+  // Windows: whether we've injected the identity marker command into the
+  // user's shell (used to confirm we actually switched accounts).
+  const userMarkerSentRef = useRef(false);
   
   const terminalRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -48,7 +51,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
   }, [username]);
 
   // Load the server platform once (cached in a ref). The auth flow differs:
-  // Linux uses `su - <user>`, Windows uses `runas /user:<user>`.
+  // Linux uses `su - <user>`, Windows uses a nested `ssh -t <user>@localhost`.
   const platformLoadedRef = useRef(false);
   const ensurePlatform = useCallback(async () => {
     if (platformLoadedRef.current) return platformRef.current;
@@ -110,6 +113,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       authBufferRef.current = '';
       passwordPromptShownRef.current = false;
       servicePromptRef.current = '';
+      userMarkerSentRef.current = false;
       tsm.setSessionStatus(widgetId, 'disconnected');
       return;
     }
@@ -151,6 +155,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
     authBufferRef.current = '';
     passwordPromptShownRef.current = false;
     servicePromptRef.current = '';
+    userMarkerSentRef.current = false;
   }, [widgetId]);
   const connect = useCallback(async (targetUsername?: string) => {
     const userToUse = (targetUsername || username).trim();
@@ -264,7 +269,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       }
     });
 
-    // Resolve the platform before the WS so the auth flow (su vs runas) is known.
+    // Resolve the platform before the WS so the auth flow (su vs nested ssh) is known.
     await ensurePlatform();
 
     setStatus('connecting');
@@ -276,6 +281,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
     authBufferRef.current = '';
     passwordPromptShownRef.current = false;
     servicePromptRef.current = '';
+    userMarkerSentRef.current = false;
     loginUsernameRef.current = userToUse;
 
     try {
@@ -398,19 +404,20 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
               console.log('[WS] Captured service prompt:', servicePromptRef.current);
             }
 
-            // Wait for password prompt before sending su - avoids race conditions
-            // The bosun-svc user's initial shell output should indicate readiness
+            // Wait for the service shell to be ready before switching accounts
             setTimeout(() => {
               // Triple-check right before sending to prevent duplicates
               if (suSentRef.current || authenticatedRef.current) return;
               if (wsRef.current?.readyState === WebSocket.OPEN) {
                 if (platformRef.current === 'windows') {
-                  // Windows: switch to the user's own account via runas, which
-                  // prompts for that user's password on the console (the Windows
-                  // equivalent of `su -`). Local accounts need `.\user`.
-                  const acct = userToUse.includes('\\') ? userToUse : `.\\${userToUse}`;
-                  wsRef.current.send(`runas /user:${acct} powershell\r`);
-                  console.log('[WS] Sent runas command for', acct);
+                  // Windows has no `su`. `runas` opens a new console that does
+                  // not attach to the SSH PTY (Win32-OpenSSH #1740), so instead
+                  // open a nested SSH login to localhost as the target user.
+                  // -t forces a PTY; password-only auth so it prompts (pubkey
+                  // would otherwise log straight in as the service account).
+                  // Run powershell explicitly so the shell is deterministic.
+                  wsRef.current.send(`ssh -t -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no ${userToUse}@localhost powershell\r`);
+                  console.log('[WS] Sent nested ssh login for', userToUse);
                 } else {
                   wsRef.current.send(`su - ${userToUse}\r`);
                   console.log('[WS] Sent su command for', userToUse);
@@ -418,21 +425,33 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
                 suSentRef.current = true; // Set IMMEDIATELY before logging
               }
             }, 500);
-            return; // Don't display bosun-svc prompt
+            return; // Don't display the service-account prompt
           }
 
           // Phase 3: Detect Password: prompt -> show terminal
           if (!passwordPromptShownRef.current &&
               authBufferRef.current.toLowerCase().includes('password')) {
             passwordPromptShownRef.current = true;
-            // Drop the pre-prompt buffer so the earlier service-account prompt
-            // cannot be mistaken for the user's own shell (notably on Windows,
-            // where both are `PS C:\...>`).
+            // Drop the pre-prompt buffer so the service-account prompt/output
+            // cannot be mistaken for the user's own shell.
             authBufferRef.current = '';
             setStatus('connected');
             statusRef.current = 'connected';
             // Clear the timeout since we got password prompt
             if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
+            // Windows: give the user a bounded window to enter the password and
+            // reach their own shell; otherwise close (never stay on the service
+            // account). Linux keeps its existing behaviour.
+            if (platformRef.current === 'windows') {
+              authTimeoutRef.current = setTimeout(() => {
+                if (!authenticatedRef.current) {
+                  cleanup();
+                  setError('Login failed - could not switch to your account');
+                  setStatus('error');
+                  statusRef.current = 'error';
+                }
+              }, 60000);
+            }
             // Re-fit now that terminal is visible (overlay removed)
             setTimeout(() => {
               if (fitAddonRef.current && termRef.current) {
@@ -446,9 +465,10 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
                 }
               }
             }, 100);
-            // Write clean password prompt to terminal. runas prints its own
-            // "Enter the password for ..." prompt, so only synthesize for Linux.
-            if (termRef.current && platformRef.current !== 'windows') {
+            // Show a clean password prompt. On Windows the nested ssh prints
+            // its own `<user>@<host>'s password:` line; suppress that preamble
+            // and synthesize `Password: ` instead.
+            if (termRef.current) {
               termRef.current.write('Password: ');
             }
             return;
@@ -456,14 +476,92 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
 
           // After password prompt shown, pass output to terminal
           if (passwordPromptShownRef.current) {
-            // Check for failure (Linux su errors + Windows runas errors)
+            // Windows: confirm the account switch with an identity marker, and
+            // tear down on any failure (never fall back to the service account).
+            if (platformRef.current === 'windows') {
+              // Strip the nested-ssh preamble/host-key notices from the display.
+              const clean = data
+                .replace(/\r?\n?[^\r\n]*@[^\r\n]*'s password:\s*/gi, '')
+                .replace(/\r?\n?Warning: Permanently added[^\r\n]*/gi, '')
+                .replace(/\r?\n?The authenticity of host[^\r\n]*/gi, '')
+                .replace(/\r?\n?Are you sure you want to continue connecting[^\r\n]*/gi, '');
+              if (clean) {
+                authBufferRef.current += clean;
+                if (termRef.current) {
+                  termRef.current.write(clean);
+                  tsm.appendToBuffer(widgetId, clean);
+                }
+              }
+
+              // Once a shell is up (user's or service's), ask it to print its
+              // username so we can tell which account we actually got. The
+              // marker line is captured but never written to the terminal.
+              if (!userMarkerSentRef.current &&
+                  /(?:^|\r?\n)\s*(?:PS\s+)?[A-Za-z]:\\[^\r\n>]*>\s*$/.test(authBufferRef.current)) {
+                userMarkerSentRef.current = true;
+                if (wsRef.current?.readyState === WebSocket.OPEN) {
+                  wsRef.current.send('Write-Output ("BOSUN_USER=" + $env:USERNAME)\r');
+                }
+                return;
+              }
+
+              const marker = authBufferRef.current.match(/BOSUN_USER=([^\r\n]+)/);
+              if (marker) {
+                const who = marker[1].trim().toLowerCase();
+                // Show the shell prompt that arrived with the marker, minus the
+                // echoed marker command and its output line.
+                const promptShown = authBufferRef.current
+                  .split(/\r?\n/)
+                  .filter(l => !l.includes('BOSUN_USER=') && !/Write-Output\s*\(\s*"BOSUN_USER=/.test(l))
+                  .join('\n')
+                  .trim();
+                if (promptShown && termRef.current) {
+                  termRef.current.write(promptShown + '\r\n');
+                  tsm.appendToBuffer(widgetId, promptShown + '\r\n');
+                }
+                if (who && who !== userToUse.toLowerCase()) {
+                  // Wrong account (e.g. the service account) - do NOT stay here.
+                  if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
+                  cleanup();
+                  setError('Login failed - could not switch to your account');
+                  setStatus('error');
+                  statusRef.current = 'error';
+                  return;
+                }
+                authenticatedRef.current = true;
+                suSentRef.current = true;
+                if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
+                authBufferRef.current = '';
+                tsm.setSessionStatus(widgetId, 'connected');
+                setTimeout(() => {
+                  if (fitAddonRef.current && termRef.current) {
+                    try { fitAddonRef.current.fit(); } catch {}
+                    if (wsRef.current?.readyState === WebSocket.OPEN) {
+                      wsRef.current.send(JSON.stringify({ type: 'resize', cols: termRef.current.cols, rows: termRef.current.rows }));
+                    }
+                  }
+                }, 100);
+                return;
+              }
+
+              // Failure detection (bad password, denied, etc.).
+              if (/permission denied|access is denied|denied|logon failure|1326|1327/i.test(authBufferRef.current)) {
+                if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
+                cleanup();
+                setError('Login failed - check your username and password');
+                setStatus('error');
+                statusRef.current = 'error';
+                return;
+              }
+              return;
+            }
+
+            // ---- Linux (su) ----
+            // Check for failure
             if (authBufferRef.current.includes('Authentication failure') ||
                 authBufferRef.current.includes('su: ') ||
                 authBufferRef.current.includes('incorrect password') ||
-                authBufferRef.current.includes('does not exist') ||
-                authBufferRef.current.includes('logon failure') ||
-                authBufferRef.current.includes('1326') ||
-                authBufferRef.current.includes('1327')) {
+                authBufferRef.current.includes('does not exist')) {
               if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
               cleanup();
               setError('Login failed - check your username and password');
@@ -472,22 +570,18 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
               return;
             }
 
-            // Check for success (user's prompt appeared). Linux shows
-            // `user@host`; Windows shows a PowerShell/cmd prompt (`PS C:\...>`).
-            const reachedUserShell = platformRef.current === 'windows'
-              ? /(?:^|\r?\n)\s*(?:PS\s+)?[A-Za-z]:\\.*>\s*$/.test(authBufferRef.current) ||
-                /(?:^|\r?\n)PS\s+[^>\r\n]*>\s*$/.test(authBufferRef.current)
-              : data.includes(userToUse + '@') || authBufferRef.current.includes(userToUse + '@');
-            if (reachedUserShell) {
+            // Check for success (user's prompt appeared)
+            if (data.includes(userToUse + '@') ||
+                (authBufferRef.current.includes(userToUse + '@'))) {
               authenticatedRef.current = true;
               suSentRef.current = true; // Gap 3: preserve auth state
               if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
               authBufferRef.current = '';
               console.log('[WS] Authentication successful for', userToUse);
-              
+
               // Gap 4: Update session status
               tsm.setSessionStatus(widgetId, 'connected');
-              
+
               // Re-fit now that terminal is fully visible
               setTimeout(() => {
                 if (fitAddonRef.current && termRef.current) {
@@ -522,12 +616,15 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
         }
 
         // ========== NORMAL MODE ==========
-        // Check for service account prompt BEFORE writing to terminal
+        // Check for service account prompt BEFORE writing to terminal. On
+        // Windows this means the account switch failed and we are back on the
+        // service account - close instead of leaving the user there.
         if (servicePromptRef.current && data.includes(servicePromptRef.current)) {
-          console.log('[WS] Detected return to service account, auto-disconnecting');
+          console.log('[WS] Detected return to service account, closing session');
           cleanup();
-          setStatus('idle');
-          statusRef.current = 'idle';
+          setError('Login failed - could not switch to your account');
+          setStatus('error');
+          statusRef.current = 'error';
           return;
         }
 
