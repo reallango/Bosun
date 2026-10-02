@@ -149,6 +149,9 @@ export default function Sidebar() {
           <Link href="/settings/database" className="block px-3 py-1 text-sm text-gray-400 hover:text-white">
             Database
           </Link>
+          <Link href="/settings/custom-widgets" className="block px-3 py-1 text-sm text-gray-400 hover:text-white">
+            Custom Widgets
+          </Link>
           <Link href="/settings/alerts" className="block px-3 py-1 text-sm text-gray-400 hover:text-white">
             Alerts
           </Link>

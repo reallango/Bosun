@@ -102,7 +102,11 @@ async function getLinuxWidgetData(type, run, cfg = {}) {
     }
 
     case 'disk_usage': {
-      const df = await run("df -T --block-size=1M --output=source,fstype,size,used,avail,pcent,target 2>/dev/null|tail -n +2");
+      // NOTE: `-T` and `--output` are mutually exclusive in coreutils df, so
+      // `fstype` must be requested through `--output` (it is a valid column)
+      // rather than combining the two flags - otherwise df errors and the
+      // widget always renders "No disk data".
+      const df = await run("df --block-size=1M --output=source,fstype,size,used,avail,pcent,target 2>/dev/null|tail -n +2");
       return df.stdout.trim().split('\n').filter(Boolean)
         .map(l => {
           const p = l.trim().split(/\s+/);
@@ -127,7 +131,12 @@ async function getLinuxWidgetData(type, run, cfg = {}) {
           ipv6: (i.addr_info || []).filter(a => a.family === 'inet6').map(a => a.local),
         }));
       }
-      return [];
+      // Fallback for minimal images without iproute2: expose the primary IPv4
+      // addresses via `hostname -I` rather than rendering "No network data".
+      const hi = await run('hostname -I 2>/dev/null');
+      const addrs = hi.stdout.trim().split(/\s+/).filter(a => a && a !== '127.0.0.1');
+      if (!addrs.length) return [];
+      return [{ name: 'primary', state: 'UP', mtu: null, macAddress: '', ipv4: addrs, ipv6: [] }];
     }
 
     case 'system_services': {
@@ -161,23 +170,6 @@ async function getLinuxWidgetData(type, run, cfg = {}) {
         };
       }
       return { name: 'No GPU', vram_total_mb: 0, vram_used_mb: 0, utilization_percent: 0, temperature_c: 0, power_watts: 0 };
-    }
-
-    case 'ollama_status': {
-      const check = await run('curl -s http://localhost:11434/api/tags 2>/dev/null');
-      if (check.exitCode !== 0) return { status: 'stopped', models: [] };
-      let data;
-      try {
-        const tags = JSON.parse(check.stdout);
-        data = { status: 'running', models: tags.models || [] };
-      } catch {
-        data = { status: 'error', models: [] };
-      }
-      const pgrep = await run("pgrep -a 'ollama pull' 2>/dev/null || true");
-      if (pgrep.exitCode === 0 && pgrep.stdout.trim()) {
-        data = { ...data, pulling: { name: 'unknown', progress: 0 } };
-      }
-      return data;
     }
 
     case 'docker_containers': {

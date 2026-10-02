@@ -1,5 +1,18 @@
-export type WidgetCategory = 'system' | 'docker' | 'gpu' | 'ai' | 'network' | 'utility' | 'advanced';
+export type WidgetCategory = 'system' | 'docker' | 'gpu' | 'ai' | 'network' | 'utility' | 'advanced' | 'custom';
 export type WidgetStorageMode = 'latest_ttl' | 'change_only';
+
+/** Field types a custom widget can declare in its `config_schema`. */
+export type WidgetConfigFieldType = 'string' | 'number' | 'boolean' | 'select';
+
+export interface WidgetConfigField {
+  key: string;
+  label: string;
+  type: WidgetConfigFieldType;
+  description?: string;
+  placeholder?: string;
+  default?: string | number | boolean;
+  options?: string[];
+}
 
 export interface WidgetDefinition {
   type: string;
@@ -17,6 +30,14 @@ export interface WidgetDefinition {
   defaultPollInterval?: number;  // seconds
   defaultTTL?: number;        // seconds
   storageMode?: WidgetStorageMode;
+  // Custom (database-defined) widget metadata. Built-ins leave these unset.
+  isCustom?: boolean;
+  /** When false the widget is always served live and never cached in the DB. */
+  useDatabase?: boolean;
+  supportsLinux?: boolean;
+  supportsWindows?: boolean;
+  /** Declarative form fields rendered in the widget settings dialog. */
+  configSchema?: WidgetConfigField[];
 }
 
 export interface Widget {
