@@ -133,6 +133,18 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
     detachedRef.current = false;
   }, [widgetId]);
 
+  // The remote shell ended (e.g. the user typed `exit` or the session was
+  // closed). Tear down the dead session and return to the login prompt rather
+  // than leaving a stale terminal behind.
+  const resetToLogin = useCallback(() => {
+    cleanup(false);
+    setError(null);
+    setPassword('');
+    passwordRef.current = '';
+    setStatus('idle');
+    statusRef.current = 'idle';
+  }, [cleanup]);
+
   const connect = useCallback(async (targetUsername?: string, targetPassword?: string) => {
     const userToUse = (targetUsername ?? username).trim();
     const passToUse = targetPassword ?? passwordRef.current;
@@ -297,16 +309,15 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
         console.log('[WS] Disconnected:', event.code, event.reason);
         // A close while still connecting means the SSH login failed; surface
         // the reason (ssh2 puts e.g. "All configured authentication methods
-        // failed" here). Otherwise it's an ordinary session end.
+        // failed" here). Otherwise the shell ended - drop back to the login
+        // prompt so the user can sign in again.
         if (statusRef.current === 'connecting') {
           setError(event.reason || 'Connection failed');
           setStatus('error');
           statusRef.current = 'error';
           tsm.setSessionStatus(widgetId, 'error');
         } else if (statusRef.current === 'connected') {
-          setStatus('disconnected');
-          statusRef.current = 'disconnected';
-          tsm.setSessionStatus(widgetId, 'disconnected');
+          resetToLogin();
         }
       };
 
@@ -320,7 +331,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       setStatus('error');
       statusRef.current = 'error';
     }
-  }, [username, sessionId, serverId, cleanup, widgetId]);
+  }, [username, sessionId, serverId, cleanup, resetToLogin, widgetId]);
 
   // Disconnect from WebSocket server - FULL destroy (user clicked disconnect)
   const disconnect = useCallback(() => {
@@ -412,9 +423,8 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
         tsm.appendToBuffer(widgetId, data);
       };
       ws.onclose = () => {
-        setStatus('disconnected');
-        statusRef.current = 'disconnected';
-        tsm.setSessionStatus(widgetId, 'disconnected');
+        // Shell ended - return to the login prompt.
+        resetToLogin();
       };
       ws.onerror = () => {
         setStatus('error');
@@ -428,7 +438,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
     }
 
     // No auto-connect when no existing session - let the user sign in.
-  }, [cleanup, widgetId]);
+  }, [cleanup, resetToLogin, widgetId]);
 
   const handleConnect = () => {
     if (status === 'idle' || status === 'disconnected' || status === 'error') {
