@@ -363,6 +363,9 @@ wss.on('connection', async (ws, req) => {
       }
 
       sshStream = stream;
+      // Windows sessions have no MOTD/"Last login" preamble, so only Linux
+      // needs the post-login screen clear.
+      let loginBannerCleared = connected.platform === 'windows';
       ws.send(connected.platform === 'windows'
         ? '\r\n\x1b[32mConnected to server via PowerShell\x1b[0m\r\n\r\n'
         : '\r\n\x1b[32mConnected to server via SSH\x1b[0m\r\n\r\n');
@@ -384,6 +387,17 @@ wss.on('connection', async (ws, req) => {
       // SSH output -> browser + buffer
       stream.on('data', (data) => {
         const str = data.toString('utf-8');
+
+        // Linux login shells print the MOTD and a "Last login: ..." line before
+        // the prompt. Once the shell starts producing output, ask it to clear
+        // the screen (Ctrl+L) so the terminal opens on a clean prompt instead of
+        // that banner. Windows has no equivalent preamble.
+        if (!loginBannerCleared) {
+          loginBannerCleared = true;
+          setTimeout(() => {
+            try { stream.write('\x0c'); } catch {}
+          }, 300);
+        }
 
         // Buffer output (keep last 1000 chunks)
         outputBuffer.push(str);
