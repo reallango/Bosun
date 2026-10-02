@@ -213,22 +213,28 @@ Write-Output 'OK'
     }
     steps.push('Public key installed');
 
-    // Enable Secondary Logon so `runas` (the Windows equivalent of `su -`) works
-    // in the terminal. It is disabled by default on Server SKUs. Idempotent.
-    const seclogonScript = `
-$ErrorActionPreference = 'SilentlyContinue'
-$svc = Get-Service -Name seclogon -ErrorAction SilentlyContinue
-if ($svc) {
-  Set-Service -Name seclogon -StartupType Manual
-  if ($svc.Status -ne 'Running') { Start-Service -Name seclogon }
-  Write-Output 'OK'
+    // The terminal's "log in as yourself" flow uses a nested `ssh -t <user>@localhost`
+    // (runas cannot attach a console over an SSH PTY). That needs sshd to accept
+    // password auth, so ensure PasswordAuthentication yes and reload sshd.
+    // Idempotent. Done last: Restart-Service sshd briefly drops this connection.
+    const passwordAuthScript = `
+$cfg = Join-Path $env:ProgramData 'ssh\\sshd_config'
+$lines = if (Test-Path $cfg) { Get-Content $cfg } else { @() }
+$found = $false
+$out = foreach ($l in $lines) {
+  if ($l -match '^\\s*#?\\s*PasswordAuthentication\\s') { $found = $true; 'PasswordAuthentication yes' }
+  else { $l }
 }
+if (-not $found) { $out += 'PasswordAuthentication yes' }
+Set-Content -Path $cfg -Value $out
+Write-Output 'OK'
+Restart-Service sshd -ErrorAction SilentlyContinue
 `.trim();
-    const seclogonResult = await sshExec(sshConfig, powershellCommand(seclogonScript));
-    if (seclogonResult.stdout.includes('OK')) {
-        steps.push('Enabled Secondary Logon service (runas)');
+    const passwordAuthResult = await sshExec(sshConfig, powershellCommand(passwordAuthScript));
+    if (passwordAuthResult.stdout.includes('OK')) {
+        steps.push('Enabled password authentication for sshd');
     } else {
-        steps.push(`Secondary Logon service not enabled: ${seclogonResult.stderr.trim() || 'service unavailable'}`);
+        steps.push(`sshd password authentication not enabled: ${passwordAuthResult.stderr.trim() || 'config unavailable'}`);
     }
 
     return { steps };
