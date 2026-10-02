@@ -140,7 +140,9 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     }
     if (use_database !== undefined) {
       configUpdates.push('use_database=?');
-      configValues.push(use_database ? 1 : 0);
+      // An explicit null clears the per-instance override so the widget inherits
+      // the type default again; only true/false write a concrete 1/0.
+      configValues.push(use_database === null ? null : (use_database ? 1 : 0));
     }
     
     // Upsert polling config by widget_id

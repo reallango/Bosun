@@ -93,6 +93,8 @@ export function DashboardGrid({ dashboardId, widgets, onLayoutChange, editable =
             serverId={widget.server_id}
             serverName={widget.server_name}
             editable={editable}
+            displayName={widget.display_name}
+            config={widget.config}
             onRemoved={onWidgetRemoved}
             onRefresh={onRefresh}
           />

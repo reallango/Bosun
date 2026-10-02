@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { OSInfoWidget } from '@/components/widgets/os-info';
 import { CPUMemoryWidget } from '@/components/widgets/cpu-memory';
 import { DiskUsageWidget } from '@/components/widgets/disk-usage';
@@ -25,6 +25,9 @@ interface WidgetFrameProps {
   serverId: string;
   serverName?: string;
   editable?: boolean;
+  /** Widget row already loaded by the dashboard (config + display_name). */
+  displayName?: string | null;
+  config?: Record<string, unknown>;
   onRemoved?: () => void;
   onRefresh?: () => void;
 }
@@ -68,43 +71,11 @@ function WidgetContent({ widgetId, widgetType, serverId, serverName, config }: {
   }
 }
 
-export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName, editable = false, onRemoved, onRefresh }: WidgetFrameProps) {
+export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName, editable = false, displayName, config, onRemoved, onRefresh }: WidgetFrameProps) {
   const [removing, setRemoving] = useState(false);
-  const [widgetData, setWidgetData] = useState<any>(null);
-  
-  // Fetch widget to get display_name - with error handling to avoid infinite retries
-  useEffect(() => {
-    let ignore = false;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-    
-    fetchWithAuth(`/api/widgets/${widgetId}`, { signal: controller.signal })
-      .then(res => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-      })
-      .then(json => {
-        if (!ignore && json.data) setWidgetData(json.data);
-      })
-      .catch(() => {
-        // Silently ignore errors - don't retry infinitely
-      });
-    
-    return () => {
-      ignore = true;
-      clearTimeout(timeoutId);
-    };
-  }, [widgetId]);
-  
-  const displayTitle = widgetData?.display_name || title;
-  const widgetConfig: Record<string, unknown> = (() => {
-    const c = widgetData?.config;
-    if (!c) return {};
-    if (typeof c === 'string') {
-      try { return JSON.parse(c); } catch { return {}; }
-    }
-    return c as Record<string, unknown>;
-  })();
+
+  const displayTitle = displayName || title;
+  const widgetConfig: Record<string, unknown> = config || {};
 
   const handleRemove = async () => {
     setDeleteOpen(true);
