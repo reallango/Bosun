@@ -26,13 +26,14 @@ const rateLimitMap = new Map();
 const RATE_LIMIT_MAX = 10;
 const RATE_LIMIT_WINDOW_MS = 60000;
 
-// Query rqlite database
-async function queryRqlite(sql) {
+// Query rqlite database. Values are passed as bound parameters, never
+// interpolated into the SQL string.
+async function queryRqlite(sql, params = []) {
   try {
     const res = await fetch(`http://${RQLITE_HOST}/db/query`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify([sql]),
+      body: JSON.stringify([[sql, ...params]]),
     });
     const json = await res.json();
     const result = json.results?.[0];
@@ -55,7 +56,7 @@ async function connectToServer(serverId, sshUser, sshPassword) {
   const conn = new Client();
   
   // Get server details from rqlite (hostname/port/platform only)
-  const servers = await queryRqlite(`SELECT id, hostname, ssh_port, platform FROM servers WHERE id = '${serverId}'`);
+  const servers = await queryRqlite(`SELECT id, hostname, ssh_port, platform FROM servers WHERE id = ?`, [serverId]);
   if (!servers || servers.length === 0) {
     throw new Error('Server not found');
   }

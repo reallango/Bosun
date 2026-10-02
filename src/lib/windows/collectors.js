@@ -210,14 +210,6 @@ ${where} | ForEach-Object {
       return { name: 'No GPU', vram_total_mb: 0, vram_used_mb: 0, utilization_percent: 0, temperature_c: 0, power_watts: 0 };
     }
 
-    case 'ollama_status': {
-      const r = await runPS(ps(`
-try { Invoke-RestMethod -Uri 'http://localhost:11434/api/tags' -TimeoutSec 5 | ConvertTo-Json -Compress -Depth 6 } catch {}`));
-      const tags = parseJson(r.stdout);
-      if (!tags) return { status: 'stopped', models: [] };
-      return { status: 'running', models: tags.models || [] };
-    }
-
     case 'custom_command': {
       const cmd = cfg.command || 'Get-Date';
       const r = await runPS(cmd);

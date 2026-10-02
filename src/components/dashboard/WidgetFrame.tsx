@@ -8,13 +8,13 @@ import { NetworkWidget } from '@/components/widgets/network';
 import { SystemServicesWidget } from '@/components/widgets/system-services';
 import { ServerSummaryWidget } from '@/components/widgets/server-summary';
 import { GPUMonitoringWidget } from '@/components/widgets/gpu-monitoring';
-import { OllamaStatusWidget } from '@/components/widgets/ollama-status';
 import { SSHTerminalWidget } from '@/components/widgets/ssh-terminal';
 import { DockerContainersWidget } from '@/components/widgets/docker-containers';
 import { CustomCommandWidget } from '@/components/widgets/custom-command';
 import { OSUpdateCheckWidget } from '@/components/widgets/os-update-check';
 import { WidgetSettingsDialog } from '@/components/dialogs/WidgetSettingsDialog';
 import { DeleteConfirmDialog } from '@/components/dialogs/DeleteConfirmDialog';
+import { customWidgetComponents } from '@/components/widgets/custom-registry';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 
@@ -29,7 +29,7 @@ interface WidgetFrameProps {
   onRefresh?: () => void;
 }
 
-function WidgetContent({ widgetId, widgetType, serverId, serverName }: { widgetId: string; widgetType: string; serverId: string; serverName?: string }) {
+function WidgetContent({ widgetId, widgetType, serverId, serverName, config }: { widgetId: string; widgetType: string; serverId: string; serverName?: string; config?: Record<string, unknown> }) {
   switch (widgetType) {
     case 'os_info':
     case 'os-info':
@@ -49,8 +49,6 @@ function WidgetContent({ widgetId, widgetType, serverId, serverName }: { widgetI
       return <ServerSummaryWidget widgetId={widgetId} serverId={serverId} serverName={serverName} />;
     case 'gpu_monitoring':
       return <GPUMonitoringWidget widgetId={widgetId} serverId={serverId} />;
-    case 'ollama_status':
-      return <OllamaStatusWidget widgetId={widgetId} serverId={serverId} />;
     case 'ssh_terminal':
       return <SSHTerminalWidget widgetId={widgetId} serverId={serverId} />;
     case 'docker_containers':
@@ -59,8 +57,14 @@ function WidgetContent({ widgetId, widgetType, serverId, serverName }: { widgetI
       return <CustomCommandWidget widgetId={widgetId} serverId={serverId} />;
     case 'os_update_check':
       return <OSUpdateCheckWidget widgetId={widgetId} serverId={serverId} />;
-    default:
+    default: {
+      // Database-defined custom widgets resolve through the custom registry.
+      const Custom = customWidgetComponents[widgetType];
+      if (Custom) {
+        return <Custom widgetId={widgetId} serverId={serverId} serverName={serverName} config={config} />;
+      }
       return <div className="text-gray-500 text-sm">Unknown widget: {widgetType}</div>;
+    }
   }
 }
 
@@ -93,6 +97,14 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName,
   }, [widgetId]);
   
   const displayTitle = widgetData?.display_name || title;
+  const widgetConfig: Record<string, unknown> = (() => {
+    const c = widgetData?.config;
+    if (!c) return {};
+    if (typeof c === 'string') {
+      try { return JSON.parse(c); } catch { return {}; }
+    }
+    return c as Record<string, unknown>;
+  })();
 
   const handleRemove = async () => {
     setDeleteOpen(true);
@@ -170,9 +182,9 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName,
         </div>
       </div>
       <div className="flex-1 p-3 overflow-auto">
-        <WidgetContent widgetId={widgetId} widgetType={widgetType} serverId={serverId} serverName={serverName} />
+        <WidgetContent widgetId={widgetId} widgetType={widgetType} serverId={serverId} serverName={serverName} config={widgetConfig} />
       </div>
-      <WidgetSettingsDialog widgetId={widgetId} open={settingsOpen} onOpenChange={setSettingsOpen} onSave={onRefresh} />
+      <WidgetSettingsDialog widgetId={widgetId} widgetType={widgetType} open={settingsOpen} onOpenChange={setSettingsOpen} onSave={onRefresh} />
       <DeleteConfirmDialog widgetTitle={displayTitle} open={deleteOpen} onOpenChange={setDeleteOpen} onConfirm={doRemove} loading={removing} />
     </div>
   );

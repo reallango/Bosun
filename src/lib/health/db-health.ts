@@ -48,6 +48,10 @@ export interface DatabaseHealth {
   counts: Record<string, number>;
   missingConfigKeys: string[];
   errors: string[];
+  /** Widgets that will never be background-polled, so they always load live. */
+  widgetsWithoutPollingConfig: number;
+  /** Legacy polling configs not linked to a widget (safe to prune). */
+  orphanPollingConfigs: number;
 }
 
 interface RaftSummary {
@@ -106,6 +110,8 @@ export async function getDatabaseHealth(): Promise<DatabaseHealth> {
     counts: {},
     missingConfigKeys: [],
     errors,
+    widgetsWithoutPollingConfig: 0,
+    orphanPollingConfigs: 0,
   };
 
   try {
@@ -143,6 +149,25 @@ export async function getDatabaseHealth(): Promise<DatabaseHealth> {
     health.missingConfigKeys = SEEDED_CONFIG_KEYS.filter(k => !keys.includes(k));
   } catch (err) {
     errors.push(`config check failed: ${String(err)}`);
+  }
+
+  // Widgets whose polling config is missing never get background-polled, so
+  // every dashboard load pays for a live SSH call. Surface the count so the
+  // operator can see the cause of slow widget reloads.
+  try {
+    const missing = await rqlite.query(
+      `SELECT COUNT(*) FROM widgets w
+       WHERE w.widget_type NOT IN ('ssh_terminal', 'server_summary')
+       AND NOT EXISTS (SELECT 1 FROM widget_polling_config p WHERE p.widget_id = w.id)`
+    );
+    health.widgetsWithoutPollingConfig = Number(missing.values[0]?.[0] ?? 0);
+
+    const orphans = await rqlite.query(
+      `SELECT COUNT(*) FROM widget_polling_config p WHERE p.widget_id IS NULL`
+    );
+    health.orphanPollingConfigs = Number(orphans.values[0]?.[0] ?? 0);
+  } catch (err) {
+    errors.push(`polling config check failed: ${String(err)}`);
   }
 
   if (!health.ready) {

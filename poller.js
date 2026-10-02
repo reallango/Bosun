@@ -18,6 +18,7 @@ const crypto = require('crypto');
 const { Client } = require('ssh2');
 const { getLinuxWidgetData } = require('./src/lib/linux/collectors');
 const { getWindowsWidgetData, powershellCommand } = require('./src/lib/windows/collectors');
+const { getCustomWidgetData } = require('./src/lib/custom-widgets/collectors');
 
 const RQLITE_HOST = process.env.RQLITE_HOST || '127.0.0.1:4001';
 const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS) || 10000;
@@ -26,13 +27,20 @@ const MASTER_KEY = process.env.MASTER_KEY || 'fallback-master-key';
 // Query rqlite
 async function queryRqlite(sql, params = []) {
   try {
+    // rqlite expects POST /db/query with body: [[sql, p1, p2, ...]]
+    const statement = params.length ? [sql, ...params] : [sql];
     const res = await fetch(`http://${RQLITE_HOST}/db/query`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params.length ? [sql, ...params] : [sql]),
+      body: JSON.stringify([statement]),
     });
     const json = await res.json();
-    return json.results?.[0]?.values || [];
+    const result = json.results?.[0];
+    if (result?.error) {
+      console.error('[Poller] Query error:', result.error);
+      return [];
+    }
+    return result?.values || [];
   } catch (err) {
     console.error('[Poller] Query error:', err.message);
     return [];
@@ -42,11 +50,18 @@ async function queryRqlite(sql, params = []) {
 // Execute rqlite
 async function executeRqlite(sql, params = []) {
   try {
-    await fetch(`http://${RQLITE_HOST}/db/execute`, {
+    // rqlite expects POST /db/execute with body: [[sql, p1, p2, ...]]
+    const statement = params.length ? [sql, ...params] : [sql];
+    const res = await fetch(`http://${RQLITE_HOST}/db/execute`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params.length ? [sql, ...params] : [sql]),
+      body: JSON.stringify([statement]),
     });
+    const json = await res.json();
+    const result = json.results?.[0];
+    if (result?.error) {
+      console.error('[Poller] Execute error:', result.error);
+    }
   } catch (err) {
     console.error('[Poller] Execute error:', err.message);
   }
@@ -177,13 +192,24 @@ async function pollWidgets() {
   console.log('[Poller] Checking for widgets to poll...');
   
   try {
-    // Get widgets that are pollable
+    // Get widgets that are pollable. The per-widget config (widget_id) takes
+    // precedence; a legacy config keyed only by (type, server) is used only when
+    // no per-widget row exists, so a widget explicitly disabled cannot be
+    // re-enabled by a stale legacy row.
     const widgets = await queryRqlite(`
-      SELECT w.id, w.widget_type, w.server_id, w.config, wpc.poll_interval_sec, wpc.ttl_sec, wpc.storage_mode, wpc.last_polled_at, wpc.enabled
+      SELECT w.id, w.widget_type, w.server_id, w.config,
+             COALESCE(wpc.poll_interval_sec, legacy.poll_interval_sec) AS poll_interval_sec,
+             COALESCE(wpc.ttl_sec, legacy.ttl_sec) AS ttl_sec,
+             COALESCE(wpc.storage_mode, legacy.storage_mode) AS storage_mode,
+             COALESCE(wpc.last_polled_at, legacy.last_polled_at) AS last_polled_at,
+             COALESCE(wpc.enabled, legacy.enabled, 1) AS enabled
       FROM widgets w
-      LEFT JOIN widget_polling_config wpc ON w.widget_type = wpc.widget_type AND w.server_id = wpc.server_id
+      LEFT JOIN widget_polling_config wpc ON wpc.widget_id = w.id
+      LEFT JOIN widget_polling_config legacy
+        ON legacy.widget_id IS NULL AND legacy.widget_type = w.widget_type AND legacy.server_id = w.server_id
       WHERE w.widget_type NOT IN ('ssh_terminal', 'server_summary')
-      AND (wpc.enabled IS NULL OR wpc.enabled = 1)
+      AND COALESCE(wpc.enabled, legacy.enabled, 1) = 1
+      AND COALESCE(wpc.use_database, legacy.use_database, 1) = 1
       ORDER BY w.server_id, w.widget_type
     `);
     
@@ -214,13 +240,20 @@ async function pollWidgets() {
           });
         });
 
-        // gpu_monitoring / ollama_status / custom_command are served live by the
-        // widget route on both platforms, so the poller never handles them.
+        const runPS = (script) => runCommand(powershellCommand(script));
+        let cfg = { server };
+        try { cfg = { server, ...(configJson ? JSON.parse(configJson) : {}) }; } catch {}
+
+        // Built-in collectors first; a type they do not know (e.g. a custom
+        // widget such as ollama_status) is delegated to the custom collector.
         let data;
         if (platform === 'windows') {
-          data = await getWindowsWidgetData(widgetType, (s) => runCommand(powershellCommand(s)), { server });
+          data = await getWindowsWidgetData(widgetType, runPS, cfg);
         } else {
-          data = await getLinuxWidgetData(widgetType, runCommand, { server });
+          data = await getLinuxWidgetData(widgetType, runCommand, cfg);
+        }
+        if (data === undefined) {
+          data = await getCustomWidgetData(widgetType, { platform, run: runCommand, runPS, cfg });
         }
 
         if (data === undefined) {
@@ -242,8 +275,8 @@ async function pollWidgets() {
           if (existing.length && existing[0][0] === dataHash) {
             console.log(`[Poller] No change for ${widgetType}, skipping cache update`);
             await executeRqlite(
-              `UPDATE widget_polling_config SET last_polled_at = CURRENT_TIMESTAMP WHERE widget_type = ? AND server_id = ?`,
-              [widgetType, serverId]
+              `UPDATE widget_polling_config SET last_polled_at = CURRENT_TIMESTAMP WHERE widget_id = ?`,
+              [widgetId]
             );
             continue;
           }
@@ -255,11 +288,22 @@ async function pollWidgets() {
           `INSERT INTO widget_data_cache (id, widget_type, server_id, data, data_hash, storage_mode, collected_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now', '+' || ? || ' seconds'))`,
           [cacheId, widgetType, serverId, data, dataHash, storageMode || 'latest_ttl', ttlSec]
         );
+
+        // latest_ttl only ever reads the newest row, so keep exactly one row per
+        // (type, server). Without this the table grows by one row per poll until
+        // expiry, slowing the cache read and bloating the database. change_only
+        // is left alone because its rows record distinct historical values.
+        if (storageMode !== 'change_only') {
+          await executeRqlite(
+            `DELETE FROM widget_data_cache WHERE widget_type = ? AND server_id = ? AND id != ?`,
+            [widgetType, serverId, cacheId]
+          );
+        }
         
-        // Update last_polled_at
+        // Update last_polled_at (per-widget config when present)
         await executeRqlite(
-          `UPDATE widget_polling_config SET last_polled_at = CURRENT_TIMESTAMP WHERE widget_type = ? AND server_id = ?`,
-          [widgetType, serverId]
+          `UPDATE widget_polling_config SET last_polled_at = CURRENT_TIMESTAMP WHERE widget_id = ?`,
+          [widgetId]
         );
         
         console.log(`[Poller] Cached ${widgetType} data (${data.length} bytes)`);
@@ -271,6 +315,43 @@ async function pollWidgets() {
     
   } catch (err) {
     console.error('[Poller] Main loop error:', err.message);
+  }
+}
+
+// Read an integer app_config setting, falling back to the given default.
+async function getConfigInt(key, fallback) {
+  const rows = await queryRqlite(`SELECT value FROM app_config WHERE key = ?`, [key]);
+  const n = parseInt(rows[0]?.[0], 10);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+/**
+ * Enforce the retention settings seeded in app_config
+ * (cleanup.audit_log_days / cleanup.notification_days / cleanup.session_days).
+ * These were configurable in the UI but never actually applied, so audit logs,
+ * notifications and expired sessions grew without bound.
+ */
+async function cleanupRetention() {
+  try {
+    const auditDays = await getConfigInt('cleanup.audit_log_days', 90);
+    const notifDays = await getConfigInt('cleanup.notification_days', 30);
+    const sessionDays = await getConfigInt('cleanup.session_days', 7);
+
+    await executeRqlite(
+      `DELETE FROM audit_log WHERE created_at < datetime('now', '-' || ? || ' days')`,
+      [auditDays]
+    );
+    await executeRqlite(
+      `DELETE FROM notifications WHERE is_dismissed = 1 AND created_at < datetime('now', '-' || ? || ' days')`,
+      [notifDays]
+    );
+    await executeRqlite(
+      `DELETE FROM sessions WHERE expires_at < datetime('now', '-' || ? || ' days')`,
+      [sessionDays]
+    );
+    console.log(`[Poller] Retention cleanup done (audit ${auditDays}d, notifications ${notifDays}d, sessions ${sessionDays}d)`);
+  } catch (err) {
+    console.error('[Poller] Retention cleanup error:', err.message);
   }
 }
 
@@ -299,8 +380,12 @@ async function main() {
 
   setInterval(pollWidgets, POLL_INTERVAL_MS);
   setInterval(cleanupExpired, 60000);
+  // Retention is cheap to check but deletes are heavier; run it at most every
+  // 6 hours rather than on the minute.
+  setInterval(cleanupRetention, 6 * 60 * 60 * 1000);
 
   setTimeout(pollWidgets, 2000);
+  setTimeout(cleanupRetention, 15000);
 
   startHealthServer();
 }

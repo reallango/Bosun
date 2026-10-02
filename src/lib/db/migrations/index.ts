@@ -256,6 +256,73 @@ const MIGRATION_007: string[] = [
     `ALTER TABLE servers ADD COLUMN platform TEXT DEFAULT 'linux'`,
 ];
 
+// Migration 008: User-defined ("custom") widgets.
+//
+// A custom widget is a widget type that lives in the database rather than in
+// the compiled `widgetRegistry`, so operators can add/configure widget types
+// without a rebuild. The row describes the type; individual instances are
+// ordinary `widgets` rows referencing it by `widget_type`.
+const MIGRATION_008: string[] = [
+    `CREATE TABLE IF NOT EXISTS custom_widgets (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL UNIQUE,
+        display_name TEXT NOT NULL,
+        description TEXT DEFAULT '',
+        icon TEXT DEFAULT 'puzzle',
+        category TEXT DEFAULT 'custom',
+        default_size TEXT DEFAULT '{"w":8,"h":6}',
+        min_size TEXT DEFAULT '{"w":4,"h":4}',
+        refresh_interval INTEGER DEFAULT 30,
+        use_database INTEGER DEFAULT 1,
+        supports_linux INTEGER DEFAULT 1,
+        supports_windows INTEGER DEFAULT 1,
+        default_poll_interval INTEGER DEFAULT 30,
+        default_ttl INTEGER DEFAULT 1800,
+        storage_mode TEXT DEFAULT 'latest_ttl',
+        config_schema TEXT DEFAULT '[]',
+        enabled INTEGER DEFAULT 1,
+        builtin INTEGER DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_custom_widgets_type ON custom_widgets(type)`,
+    // Ollama status is the first widget migrated out of the compiled registry
+    // into a database-defined custom widget. It runs on both platforms, uses
+    // the database cache, and exposes an optional base URL.
+    `INSERT OR IGNORE INTO custom_widgets
+        (id, type, display_name, description, icon, category, default_size, min_size, refresh_interval,
+         use_database, supports_linux, supports_windows, default_poll_interval, default_ttl, storage_mode, config_schema, enabled, builtin)
+     VALUES
+        ('custom-ollama-status', 'ollama_status', 'Ollama Status',
+         'Ollama runtime: available and loaded models, memory usage and CPU/GPU split',
+         'bot', 'ai', '{"w":8,"h":8}', '{"w":6,"h":5}', 10,
+         1, 1, 1, 10, 1800, 'latest_ttl',
+         '[{"key":"baseUrl","label":"Ollama base URL","type":"string","placeholder":"http://localhost:11434","default":"http://localhost:11434","description":"Ollama API endpoint on the host"}]',
+         1, 1)`,
+];
+
+// Migration 009: Widget cache lookup indexes.
+//
+// The widget data route's cache read filters on (widget_type, server_id) and
+// orders by collected_at; the poller's change_only hash check does the same.
+// The previous single-column indexes could not serve that access path, so each
+// dashboard load scanned the whole cache table.
+const MIGRATION_009: string[] = [
+    `CREATE INDEX IF NOT EXISTS idx_wdc_type_server_collected ON widget_data_cache(widget_type, server_id, collected_at DESC)`,
+    `CREATE INDEX IF NOT EXISTS idx_wpc_widget_type_server ON widget_polling_config(widget_type, server_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_migrations_id ON migrations(id)`,
+];
+
+// Migration 010: Per-instance database-caching override.
+//
+// `custom_widgets.use_database` sets the type default, but an operator may want
+// one instance to bypass the cache (e.g. a live command) while another keeps
+// caching. The widget settings dialog writes this per-instance value; NULL means
+// "inherit the type default".
+const MIGRATION_010: string[] = [
+    `ALTER TABLE widget_polling_config ADD COLUMN use_database INTEGER`,
+];
+
 // Migration registry
 const migrations: Record<string, string[]> = {
     '001': MIGRATION_001,
@@ -265,6 +332,9 @@ const migrations: Record<string, string[]> = {
     '005': MIGRATION_005,
     '006': MIGRATION_006,
     '007': MIGRATION_007,
+    '008': MIGRATION_008,
+    '009': MIGRATION_009,
+    '010': MIGRATION_010,
 };
 
 // All migration IDs this build expects to be applied, in order.
@@ -288,6 +358,7 @@ export const CORE_TABLES: string[] = [
     'sessions',
     'widget_polling_config',
     'widget_data_cache',
+    'custom_widgets',
 ];
 
 // Errors that mean a statement was already applied on a previous partial run,

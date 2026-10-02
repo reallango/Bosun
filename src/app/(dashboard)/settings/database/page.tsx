@@ -35,6 +35,8 @@ interface DatabaseHealth {
   counts: Record<string, number>;
   missingConfigKeys: string[];
   errors: string[];
+  widgetsWithoutPollingConfig: number;
+  orphanPollingConfigs: number;
 }
 
 const STATUS_STYLES: Record<string, string> = {
@@ -154,6 +156,18 @@ export default function DatabaseSettingsPage() {
                 {health.missingConfigKeys.length > 0 && (
                   <p className="text-sm text-amber-600 dark:text-amber-400">
                     Missing config keys: {health.missingConfigKeys.join(', ')}
+                  </p>
+                )}
+
+                {health.widgetsWithoutPollingConfig > 0 && (
+                  <p className="text-sm text-amber-600 dark:text-amber-400">
+                    {health.widgetsWithoutPollingConfig} widget(s) have no polling config and will always load live.
+                  </p>
+                )}
+
+                {health.orphanPollingConfigs > 0 && (
+                  <p className="text-sm text-amber-600 dark:text-amber-400">
+                    {health.orphanPollingConfigs} orphan polling config(s) not linked to a widget.
                   </p>
                 )}
 
