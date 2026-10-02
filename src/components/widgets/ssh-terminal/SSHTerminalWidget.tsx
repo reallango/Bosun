@@ -11,68 +11,71 @@ interface SSHTerminalWidgetProps {
   serverId: string;
 }
 
-type ConnectionStatus = 'idle' | 'connecting' | 'authenticating' | 'connected' | 'error' | 'disconnected';
+type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'error' | 'disconnected';
+
+function createTerminal(): Terminal {
+  return new Terminal({
+    cursorBlink: true,
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+    fontSize: 13,
+    theme: {
+      background: '#0b1020',
+      foreground: '#e0e0e0',
+      cursor: '#00ff00',
+      cursorAccent: '#0b1020',
+      selectionBackground: 'rgba(0, 255, 0, 0.3)',
+      black: '#000000',
+      red: '#ff5555',
+      green: '#50fa7b',
+      yellow: '#f1fa8c',
+      blue: '#bd93f9',
+      magenta: '#ff79c6',
+      cyan: '#8be9fd',
+      white: '#bfbfbf',
+      brightBlack: '#4f4f4f',
+      brightRed: '#ff6e67',
+      brightGreen: '#5af78e',
+      brightYellow: '#f4f99c',
+      brightBlue: '#caa9fa',
+      brightMagenta: '#ff92d0',
+      brightCyan: '#9aedfe',
+      brightWhite: '#e6e6e6'
+    },
+    allowProposedApi: true
+  });
+}
+
+function ensureXtermCss() {
+  if (!document.getElementById('xterm-css')) {
+    const link = document.createElement('link');
+    link.id = 'xterm-css';
+    link.rel = 'stylesheet';
+    link.href = '/xterm.css';
+    document.head.appendChild(link);
+  }
+}
 
 export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps) {
-  // Auth refs - use refs inside component (not state) to avoid stale closures in onmessage
-  const suSentRef = useRef(false);
-  const authenticatedRef = useRef(false);
-  const authBufferRef = useRef('');
-  const authTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const passwordPromptShownRef = useRef(false);
-  // The service account (server.ssh_user). Used to detect when the user's shell
-  // exits back to the service account so the session can be closed instead of
-  // leaving the user on the service account.
-  const serviceUserRef = useRef('');
-  // Windows: whether we've injected the identity marker command into the
-  // user's shell (used to confirm we actually switched accounts).
-  const userMarkerSentRef = useRef(false);
-  
   const terminalRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const resizeObserverRef = useRef<ResizeObserver | null>(null);
   const statusRef = useRef<ConnectionStatus>('idle');
-  const detachedRef = useRef(false); // Gap: true when terminal disposed but WS kept alive
-
-  // Login username ref - accessible inside onmessage closure
-  const loginUsernameRef = useRef('');
-  // Server platform ('linux' | 'windows') - drives the auth command/flow
-  const platformRef = useRef<string>('linux');
+  const detachedRef = useRef(false); // true when terminal disposed but WS kept alive
+  const passwordRef = useRef('');
 
   const [status, setStatus] = useState<ConnectionStatus>('idle');
   const [error, setError] = useState<string | null>(null);
-  const [username, setUsername] = useState<string>(() => 
+  const [username, setUsername] = useState<string>(() =>
     localStorage.getItem(`bosun-terminal-user-${serverId}`) || ''
   );
+  const [password, setPassword] = useState<string>('');
   const sessionId = widgetId; // Deterministic based on widgetId
 
-  // Sync username with ref
-  useEffect(() => {
-    loginUsernameRef.current = username;
-  }, [username]);
+  useEffect(() => { passwordRef.current = password; }, [password]);
 
-  // Load the server platform once (cached in a ref). The auth flow differs:
-  // Linux uses `su - <user>`, Windows uses a nested `ssh -t <user>@localhost`.
-  const platformLoadedRef = useRef(false);
-  const ensurePlatform = useCallback(async () => {
-    if (platformLoadedRef.current) return platformRef.current;
-    try {
-      const res = await fetchWithAuth(`/api/servers/${serverId}`);
-      const j = await res.json();
-      platformRef.current = j.data?.platform === 'windows' ? 'windows' : 'linux';
-      serviceUserRef.current = (j.data?.ssh_user || '').trim();
-    } catch {
-      platformRef.current = 'linux';
-    }
-    platformLoadedRef.current = true;
-    return platformRef.current;
-  }, [serverId]);
-
-  useEffect(() => { ensurePlatform(); }, [ensurePlatform]);
-
-  // Save username to localStorage when changed
+  // Save username to localStorage when changed (the password is never stored)
   const handleUsernameChange = (value: string) => {
     setUsername(value);
     if (value) {
@@ -83,50 +86,34 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
   // Derive WebSocket URL from current page origin (works with Cloudflare)
   const getWsUrl = () => {
     const proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const host = window.location.host;
-    return `${proto}://${host}/ws/terminal`;
+    return `${proto}://${window.location.host}/ws/terminal`;
   };
 
-  // Full cleanup - destroys all state for a fresh start
-// keepAlive: if true, keep WebSocket session on server but release local terminal
+  // keepAlive: if true, keep the WebSocket session on the server but release
+  // the local terminal (used when the widget unmounts on a dashboard switch).
   const cleanup = useCallback((keepAlive = false) => {
     const tsm = getTerminalSessionManager();
-    
-    // Notify session manager that we're detaching (keep session alive)
+
     if (keepAlive) {
-      detachedRef.current = true; // Mark as detached, preserve auth state
+      detachedRef.current = true;
       tsm.detachFromSession(widgetId);
-      // Only detach terminal, keep WebSocket
       if (termRef.current) {
         termRef.current.dispose();
         termRef.current = null;
       }
       fitAddonRef.current = null;
-      // Clear resize observer
       if (resizeObserverRef.current) {
         resizeObserverRef.current.disconnect();
         resizeObserverRef.current = null;
       }
-      // Clear any pending auth timeouts
-      if (authTimeoutRef.current) {
-        clearTimeout(authTimeoutRef.current);
-        authTimeoutRef.current = null;
-      }
-      // Clear auth buffer but keep auth state (suSentRef, authenticatedRef)
-      // so reattach knows session is already authenticated
-      authBufferRef.current = '';
-      passwordPromptShownRef.current = false;
-      userMarkerSentRef.current = false;
       tsm.setSessionStatus(widgetId, 'disconnected');
       return;
     }
-    
+
     // Full destroy - close WebSocket and clean up completely
     tsm.destroySession(widgetId);
-    
-    // Close WebSocket
+
     if (wsRef.current) {
-      // Null out handlers FIRST to prevent old callbacks from firing
       wsRef.current.onopen = null;
       wsRef.current.onmessage = null;
       wsRef.current.onclose = null;
@@ -134,63 +121,36 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       wsRef.current.close();
       wsRef.current = null;
     }
-    // Destroy terminal instance
     if (termRef.current) {
       termRef.current.dispose();
       termRef.current = null;
     }
-    // Clear fit addon ref
     fitAddonRef.current = null;
-    // Disconnect resize observer
     if (resizeObserverRef.current) {
       resizeObserverRef.current.disconnect();
       resizeObserverRef.current = null;
     }
-    // Clear any pending auth timeouts
-    if (authTimeoutRef.current) {
-      clearTimeout(authTimeoutRef.current);
-      authTimeoutRef.current = null;
-    }
-    // Reset ALL auth state refs
     detachedRef.current = false;
-    suSentRef.current = false;
-    authenticatedRef.current = false;
-    authBufferRef.current = '';
-    passwordPromptShownRef.current = false;
-    userMarkerSentRef.current = false;
   }, [widgetId]);
 
-  // True when the stream shows we've dropped back to the service account (the
-  // user ran `exit`), so the session can be closed instead of left on the
-  // service account. Keyed on the service account name (ssh_user), which
-  // differs from the login user, to avoid matching the user's own prompt.
-  const isBackOnService = useCallback((data: string, user: string) => {
-    const svc = serviceUserRef.current;
-    if (!svc || svc.toLowerCase() === user.toLowerCase()) return false;
-    const esc = svc.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    if (platformRef.current === 'windows') {
-      return new RegExp('(^|\\r?\\n)\\s*PS\\s+[^\\r\\n>]*' + esc + '[^\\r\\n>]*>\\s*$', 'i').test(data) ||
-        /Connection to localhost closed\./i.test(data);
-    }
-    return new RegExp('(^|\\r?\\n)\\s*' + esc + '@[^\\r\\n]*[:#$]\\s*$', 'm').test(data);
-  }, []);
+  const connect = useCallback(async (targetUsername?: string, targetPassword?: string) => {
+    const userToUse = (targetUsername ?? username).trim();
+    const passToUse = targetPassword ?? passwordRef.current;
 
-  const connect = useCallback(async (targetUsername?: string) => {
-    const userToUse = (targetUsername || username).trim();
     if (!userToUse) {
       setError('Username required');
       return;
     }
+    if (!passToUse) {
+      setError('Password required');
+      return;
+    }
 
     // Prevent multiple concurrent connections
-    if (wsRef.current?.readyState === WebSocket.OPEN) {
-      return;
-    }
-    if (statusRef.current === 'connecting' || statusRef.current === 'authenticating') {
-      return;
-    }
+    if (wsRef.current?.readyState === WebSocket.OPEN) return;
+    if (statusRef.current === 'connecting') return;
 
-    // Gap 3: Close any orphaned WebSocket from a previous session
+    // Close any orphaned WebSocket from a previous session
     const tsm = getTerminalSessionManager();
     if (wsRef.current && wsRef.current.readyState !== WebSocket.CLOSED) {
       wsRef.current.onclose = null;
@@ -199,58 +159,19 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       wsRef.current.close();
       wsRef.current = null;
     }
-    // Also check session manager for existing WS
     const existingSession = tsm.getSession(widgetId);
     if (existingSession?.ws && existingSession.ws.readyState === WebSocket.OPEN) {
-      console.log('[WS] Closing orphaned WebSocket from previous session');
       existingSession.ws.close();
       tsm.setSessionWebSocket(widgetId, null);
     }
 
     console.log('[WS] Connecting to:', getWsUrl(), 'serverId:', serverId, 'user:', userToUse);
 
-    // 1) Clean slate - destroy previous terminal + ws
+    // Clean slate - destroy previous terminal + ws
     cleanup();
+    ensureXtermCss();
 
-    // 2) Create FRESH Terminal instance
-    if (!document.getElementById('xterm-css')) {
-      const link = document.createElement('link');
-      link.id = 'xterm-css';
-      link.rel = 'stylesheet';
-      link.href = '/xterm.css';
-      document.head.appendChild(link);
-    }
-
-    const term = new Terminal({
-      cursorBlink: true,
-      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-      fontSize: 13,
-      theme: {
-        background: '#0b1020',
-        foreground: '#e0e0e0',
-        cursor: '#00ff00',
-        cursorAccent: '#0b1020',
-        selectionBackground: 'rgba(0, 255, 0, 0.3)',
-        black: '#000000',
-        red: '#ff5555',
-        green: '#50fa7b',
-        yellow: '#f1fa8c',
-        blue: '#bd93f9',
-        magenta: '#ff79c6',
-        cyan: '#8be9fd',
-        white: '#bfbfbf',
-        brightBlack: '#4f4f4f',
-        brightRed: '#ff6e67',
-        brightGreen: '#5af78e',
-        brightYellow: '#f4f99c',
-        brightBlue: '#caa9fa',
-        brightMagenta: '#ff92d0',
-        brightCyan: '#9aedfe',
-        brightWhite: '#e6e6e6'
-      },
-      allowProposedApi: true
-    });
-
+    const term = createTerminal();
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
     term.open(terminalRef.current!);
@@ -258,21 +179,17 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
 
     termRef.current = term;
     fitAddonRef.current = fitAddon;
-
-    // Gap 4: Register terminal with session manager
     tsm.setSessionTerminal(widgetId, term);
 
-    // 3) Set up resize observer
     const handleResize = () => {
-      if (fitAddonRef.current) {
-        try { fitAddonRef.current.fit(); } catch {}
-        if (wsRef.current?.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify({
-            type: 'resize',
-            cols: termRef.current?.cols,
-            rows: termRef.current?.rows
-          }));
-        }
+      if (!fitAddonRef.current) return;
+      try { fitAddonRef.current.fit(); } catch {}
+      if (wsRef.current?.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({
+          type: 'resize',
+          cols: termRef.current?.cols,
+          rows: termRef.current?.rows
+        }));
       }
     };
     resizeObserverRef.current = new ResizeObserver(handleResize);
@@ -280,26 +197,15 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       resizeObserverRef.current.observe(terminalRef.current.parentElement);
     }
 
-    // 4) Set up terminal input -> WebSocket (on fresh term instance)
     term.onData((data) => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         wsRef.current.send(data);
       }
     });
 
-    // Resolve the platform before the WS so the auth flow (su vs nested ssh) is known.
-    await ensurePlatform();
-
     setStatus('connecting');
+    statusRef.current = 'connecting';
     setError(null);
-
-    // Reset all auth refs
-    suSentRef.current = false;
-    authenticatedRef.current = false;
-    authBufferRef.current = '';
-    passwordPromptShownRef.current = false;
-    userMarkerSentRef.current = false;
-    loginUsernameRef.current = userToUse;
 
     try {
       // Get a short-lived WebSocket token
@@ -310,31 +216,25 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
         throw new Error(tokenJson.error?.message || 'Failed to get WebSocket token');
       }
 
-      const wsToken = tokenJson.data.token;
-      console.log('[WS] Got token, connecting to WebSocket...');
-
-      // Build WebSocket URL using same-host approach
-      const wsBase = getWsUrl();
-      const url = new URL(wsBase);
+      const url = new URL(getWsUrl());
       url.searchParams.set('sessionId', sessionId);
       url.searchParams.set('serverId', serverId);
-      url.searchParams.set('token', wsToken);
-
-      console.log('[WS] WebSocket URL:', url.toString());
+      url.searchParams.set('token', tokenJson.data.token);
+      // Username is needed to match reattached sessions; the password is sent
+      // as the first WebSocket frame so it never lands in URLs or access logs.
+      url.searchParams.set('sshUser', userToUse);
 
       const ws = new WebSocket(url.toString());
       wsRef.current = ws;
 
-      // Gap 4: Register session with session manager
       tsm.registerSession(widgetId, serverId, userToUse);
       tsm.setSessionWebSocket(widgetId, ws);
       tsm.setSessionStatus(widgetId, 'connecting');
 
       ws.onopen = () => {
-        console.log('[WS] Connected, will authenticate as', userToUse);
-        setStatus('authenticating');
-        statusRef.current = 'authenticating';
-
+        console.log('[WS] Connected, authenticating as', userToUse);
+        // Credentials frame for this connection only - never persisted.
+        ws.send(JSON.stringify({ type: 'auth', password: passToUse }));
         // Send initial terminal dimensions
         setTimeout(() => {
           if (termRef.current && ws.readyState === WebSocket.OPEN) {
@@ -345,18 +245,6 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
             }));
           }
         }, 200);
-
-        // Start auth timeout. It covers both the account switch and the user
-        // typing the password into the terminal.
-        authTimeoutRef.current = setTimeout(() => {
-          if (!authenticatedRef.current) {
-            console.log('[WS] Auth timeout');
-            setError('Authentication timed out');
-            ws.close();
-            setStatus('error');
-            statusRef.current = 'error';
-          }
-        }, 60000);
       };
 
       ws.onmessage = (event) => {
@@ -368,28 +256,23 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
           return;
         }
 
-        // ========== SESSION RESTORE CHECK ==========
-        if (!authenticatedRef.current && data.includes('[Session restored]')) {
-          console.log('[WS] Session restored - skipping auth');
-          authenticatedRef.current = true;
-          suSentRef.current = true; // Gap 3: preserve auth state
-          statusRef.current = 'connected';
+        // The server sends this before closing when SSH auth/shell setup fails.
+        const failure = data.match(/\*\*\* SSH (?:connection|shell) failed: (.*?) \*\*\*/);
+        if (failure) {
+          setError(failure[1] || 'Connection failed');
+          setStatus('error');
+          statusRef.current = 'error';
+          tsm.setSessionStatus(widgetId, 'error');
+          if (termRef.current) termRef.current.write(data);
+          return;
+        }
+
+        // First output means the SSH session is up (auth happens during the
+        // WebSocket handshake), so flip to connected and re-fit.
+        if (statusRef.current !== 'connected') {
           setStatus('connected');
-          
-          // Gap 4: Update session status
+          statusRef.current = 'connected';
           tsm.setSessionStatus(widgetId, 'connected');
-          
-          if (authTimeoutRef.current) {
-            clearTimeout(authTimeoutRef.current);
-            authTimeoutRef.current = null;
-          }
-          // Write restore marker + buffer replay to terminal
-          if (termRef.current) {
-            termRef.current.write(data);
-            // Gap 2: Append to scrollback buffer
-            tsm.appendToBuffer(widgetId, data);
-          }
-          // Re-fit terminal and send resize
           setTimeout(() => {
             if (fitAddonRef.current && termRef.current) {
               try { fitAddonRef.current.fit(); } catch {}
@@ -402,285 +285,33 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
               }
             }
           }, 100);
-          return;
         }
 
-        // ========== AUTH PHASE (Linux: interactive `su -`) ==========
-        // Windows uses a nested ssh with the same in-terminal `Password: `
-        // prompt; see WINDOWS NESTED-SSH AUTH below.
-        if (!authenticatedRef.current && platformRef.current !== 'windows') {
-          authBufferRef.current += data;
-
-          // Phase 2: Send su after first output (service shell ready)
-          if (!suSentRef.current && !authenticatedRef.current) {
-            if (suSentRef.current) return;
-
-            setTimeout(() => {
-              if (suSentRef.current || authenticatedRef.current) return;
-              if (wsRef.current?.readyState === WebSocket.OPEN) {
-                wsRef.current.send(`su - ${userToUse}\r`);
-                console.log('[WS] Sent su command for', userToUse);
-                suSentRef.current = true;
-              }
-            }, 500);
-            return; // Don't display the service-account prompt
-          }
-
-          // Phase 3: Detect Password: prompt -> show terminal
-          if (!passwordPromptShownRef.current &&
-              authBufferRef.current.toLowerCase().includes('password')) {
-            passwordPromptShownRef.current = true;
-            authBufferRef.current = '';
-            setStatus('connected');
-            statusRef.current = 'connected';
-            if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
-            setTimeout(() => {
-              if (fitAddonRef.current && termRef.current) {
-                try { fitAddonRef.current.fit(); } catch {}
-                if (wsRef.current?.readyState === WebSocket.OPEN) {
-                  wsRef.current.send(JSON.stringify({
-                    type: 'resize',
-                    cols: termRef.current.cols,
-                    rows: termRef.current.rows
-                  }));
-                }
-              }
-            }, 100);
-            // `su` prompts for the password, but its prompt can be swallowed
-            // by the PTY/echo handling; synthesize it so it is always visible.
-            if (termRef.current) {
-              termRef.current.write('Password: ');
-              termRef.current.focus();
-            }
-            return;
-          }
-
-          // After password prompt shown, pass output to terminal
-          if (passwordPromptShownRef.current) {
-            // Refill the buffer each chunk so a prompt split across writes is
-            // still detected (the buffer is cleared at Phase 3).
-            authBufferRef.current += data;
-
-            if (authBufferRef.current.includes('Authentication failure') ||
-                authBufferRef.current.includes('su: ') ||
-                authBufferRef.current.includes('incorrect password') ||
-                authBufferRef.current.includes('does not exist')) {
-              if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
-              cleanup();
-              setError('Login failed - check your username and password');
-              setStatus('error');
-              statusRef.current = 'error';
-              return;
-            }
-
-            // Write the output (including the user's new prompt) so the shell
-            // appears immediately once the password is accepted.
-            if (termRef.current) {
-              termRef.current.write(data);
-              tsm.appendToBuffer(widgetId, data);
-            }
-
-            // Success: the user's own prompt (e.g. lango@host:~$).
-            const userPromptRe = new RegExp('^' + userToUse.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '@[^\\r\\n]*[:#$]\\s*$', 'm');
-            if (userPromptRe.test(authBufferRef.current) ||
-                data.includes(userToUse + '@')) {
-              authenticatedRef.current = true;
-              suSentRef.current = true;
-              if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
-              authBufferRef.current = '';
-              console.log('[WS] Authentication successful for', userToUse);
-              setStatus('connected');
-              statusRef.current = 'connected';
-              tsm.setSessionStatus(widgetId, 'connected');
-              return;
-            }
-          }
-
-          return;
-        }
-
-        // ========== WINDOWS NESTED-SSH AUTH ==========
-        // Same interaction as Linux: once the nested ssh asks for the password,
-        // synthesize `Password: ` in the terminal and let the user type it there
-        // (input flows through term.onData -> ws.send). Confirm the account with
-        // the BOSUN_USER marker, then clear the screen on success.
-        if (!authenticatedRef.current && platformRef.current === 'windows') {
-          // Start the nested ssh login once the service-account shell is ready.
-          // Mirrors the Linux path: send after the first output rather than
-          // gating on a specific prompt shape (Windows prompts vary by locale
-          // and config, which could stall the session at "Authenticating").
-          if (!suSentRef.current) {
-            setTimeout(() => {
-              if (suSentRef.current || authenticatedRef.current) return;
-              if (wsRef.current?.readyState === WebSocket.OPEN) {
-                wsRef.current.send(`ssh -t -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no ${userToUse}@localhost powershell\r`);
-                console.log('[WS] Sent nested ssh login for', userToUse);
-                suSentRef.current = true;
-              }
-            }, 500);
-            return;
-          }
-
-          if (!passwordPromptShownRef.current) {
-            // Buffer the pre-prompt preamble (the echoed ssh command and the
-            // service prompt) and show only a clean `Password: `. Anchor on the
-            // real ssh prompt so the echoed command line cannot trip this.
-            const tail = authBufferRef.current + data;
-            if (/password[^\r\n]*:\s*$/i.test(tail.trimEnd()) ||
-                /@[^\s']*'s password/i.test(tail)) {
-              passwordPromptShownRef.current = true;
-              authBufferRef.current = '';
-              setStatus('connected');
-              statusRef.current = 'connected';
-              if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
-              if (termRef.current) {
-                termRef.current.write('Password: ');
-                termRef.current.focus();
-              }
-              setTimeout(() => {
-                if (fitAddonRef.current && termRef.current) {
-                  try { fitAddonRef.current.fit(); } catch {}
-                  if (wsRef.current?.readyState === WebSocket.OPEN) {
-                    wsRef.current.send(JSON.stringify({ type: 'resize', cols: termRef.current.cols, rows: termRef.current.rows }));
-                  }
-                }
-              }, 100);
-            } else {
-              authBufferRef.current = tail;
-            }
-            return;
-          }
-
-          const clean = data
-            .replace(/\r?\n?[^\r\n]*@[^\r\n]*'s password:\s*/gi, '')
-            .replace(/\r?\n?Warning: Permanently added[^\r\n]*/gi, '')
-            .replace(/\r?\n?The authenticity of host[^\r\n]*/gi, '')
-            .replace(/\r?\n?Are you sure you want to continue connecting[^\r\n]*/gi, '');
-          if (clean) authBufferRef.current += clean;
-
-          // A second password prompt means the previous password was rejected.
-          if (/password\s*:\s*$/i.test(data.trimEnd()) ||
-              /@[^\s']*'s password:\s*$/i.test(data.trimEnd())) {
-            if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
-            cleanup();
-            setError('Login failed - check your username and password');
-            setStatus('error');
-            statusRef.current = 'error';
-            return;
-          }
-
-          // Once a shell is up, ask it to print its username so we can confirm
-          // the account. The echoed command and its output are never displayed
-          // (the screen is cleared on success). Match any PS prompt (not just a
-          // drive-letter path) so the account name/locale can't stall this.
-          if (!userMarkerSentRef.current &&
-              /(?:^|\r?\n)\s*PS\s+[^\r\n>]*>\s*$/i.test(authBufferRef.current)) {
-            userMarkerSentRef.current = true;
-            if (wsRef.current?.readyState === WebSocket.OPEN) {
-              wsRef.current.send('Write-Output ("BOSUN_USER=" + $env:USERNAME)\r');
-            }
-            return;
-          }
-
-          // The echoed marker command contains "BOSUN_USER=" but is not the
-          // result, so require a line that *starts* with the marker (the
-          // echoed command line starts with "Write-Output").
-          const marker = authBufferRef.current.match(/(?:^|\r?\n)\s*BOSUN_USER=([^\r\n]+)/);
-          if (marker) {
-            // $env:USERNAME is normally bare, but strip any DOMAIN\ prefix so
-            // the comparison is robust.
-            const norm = (v: string) => v.trim().toLowerCase().split('\\').pop() || '';
-            const who = norm(marker[1]);
-            if (who && who !== norm(userToUse)) {
-              if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
-              cleanup();
-              setError('Login failed - could not switch to your account');
-              setStatus('error');
-              statusRef.current = 'error';
-              return;
-            }
-            authenticatedRef.current = true;
-            suSentRef.current = true;
-            if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
-            authBufferRef.current = '';
-            setStatus('connected');
-            statusRef.current = 'connected';
-            tsm.setSessionStatus(widgetId, 'connected');
-            // Wipe the auth noise so the session opens on a clean shell.
-            if (termRef.current) {
-              termRef.current.write('\x1b[2J\x1b[H');
-              tsm.appendToBuffer(widgetId, '\x1b[2J\x1b[H');
-            }
-            setTimeout(() => {
-              if (fitAddonRef.current && termRef.current) {
-                try { fitAddonRef.current.fit(); } catch {}
-                if (wsRef.current?.readyState === WebSocket.OPEN) {
-                  wsRef.current.send(JSON.stringify({ type: 'resize', cols: termRef.current.cols, rows: termRef.current.rows }));
-                }
-              }
-            }, 100);
-            return;
-          }
-
-          if (/permission denied|access is denied|logon failure|1326|1327/i.test(authBufferRef.current)) {
-            if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
-            cleanup();
-            setError('Login failed - check your username and password');
-            setStatus('error');
-            statusRef.current = 'error';
-            return;
-          }
-          return;
-        }
-
-        // ========== NORMAL MODE ==========
-        // If the user's shell exits we drop back to the service account. Close
-        // the session instead of leaving the user on the service account.
-        if (isBackOnService(data, userToUse)) {
-          console.log('[WS] Back on service account, closing session');
-          cleanup();
-          setError('Session ended');
-          setStatus('disconnected');
-          statusRef.current = 'disconnected';
-          tsm.setSessionStatus(widgetId, 'disconnected');
-          return;
-        }
-
-        // Windows: drop any late-arriving marker noise (the echoed command or
-        // its output) so the clean screen isn't clobbered.
-        let output = data;
-        if (platformRef.current === 'windows' &&
-            (output.includes('BOSUN_USER=') || /Write-Output\s*\(\s*"BOSUN_USER=/.test(output))) {
-          output = output
-            .split(/\r?\n/)
-            .filter(l => !l.includes('BOSUN_USER=') && !/Write-Output\s*\(\s*"BOSUN_USER=/.test(l))
-            .join('\r\n');
-        }
-
-        // Normal terminal output
         if (termRef.current) {
-          termRef.current.write(output);
-          // Gap 2: Append to scrollback buffer
-          tsm.appendToBuffer(widgetId, output);
+          termRef.current.write(data);
+          tsm.appendToBuffer(widgetId, data);
         }
       };
 
       ws.onclose = (event) => {
-        if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
         console.log('[WS] Disconnected:', event.code, event.reason);
-        setStatus('idle');
-        statusRef.current = 'idle';
-        
-        // Gap 4: Update session status
-        tsm.setSessionStatus(widgetId, 'disconnected');
+        // A close while still connecting means the SSH login failed; surface
+        // the reason (ssh2 puts e.g. "All configured authentication methods
+        // failed" here). Otherwise it's an ordinary session end.
+        if (statusRef.current === 'connecting') {
+          setError(event.reason || 'Connection failed');
+          setStatus('error');
+          statusRef.current = 'error';
+          tsm.setSessionStatus(widgetId, 'error');
+        } else if (statusRef.current === 'connected') {
+          setStatus('disconnected');
+          statusRef.current = 'disconnected';
+          tsm.setSessionStatus(widgetId, 'disconnected');
+        }
       };
 
-      ws.onerror = (event) => {
-        if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
-        console.error('[WS] Error:', event);
-        setError('WebSocket connection error');
-        setStatus('error');
-        statusRef.current = 'error';
+      ws.onerror = () => {
+        console.error('[WS] WebSocket error');
       };
 
     } catch (err: any) {
@@ -689,220 +320,120 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       setStatus('error');
       statusRef.current = 'error';
     }
-  }, [username, sessionId, serverId, cleanup, ensurePlatform, isBackOnService]); // Removed status from deps
+  }, [username, sessionId, serverId, cleanup, widgetId]);
 
-  // Disconnect from WebSocket server - FULL destroy (user clicked disconnect button)
+  // Disconnect from WebSocket server - FULL destroy (user clicked disconnect)
   const disconnect = useCallback(() => {
-    cleanup(false); // keepAlive = false - destroy session completely
+    cleanup(false);
     setStatus('idle');
     statusRef.current = 'idle';
   }, [cleanup]);
 
-  // (reconnect removed - now handled by handleReconnect)
-
-  // Initialize terminal (CSS only - terminal created in connect)
+  // Cleanup on unmount - detach but KEEP session alive on server so it persists
+  // across dashboard switches.
   useEffect(() => {
-    // Inject xterm CSS once
-    if (!document.getElementById('xterm-css')) {
-      const link = document.createElement('link');
-      link.id = 'xterm-css';
-      link.rel = 'stylesheet';
-      link.href = '/xterm.css';
-      document.head.appendChild(link);
-    }
-
-    // Cleanup on unmount - detach but KEEP session alive on server
-    // This allows session to persist across dashboard switches
+    ensureXtermCss();
     return () => {
-      cleanup(true); // keepAlive = true
+      cleanup(true);
     };
   }, [cleanup]);
 
-  // Auto-reconnect on mount if username saved - Gap 1: Check for existing session
+  // Reattach to a live session after a dashboard switch.
   useEffect(() => {
     const tsm = getTerminalSessionManager();
     const existingSession = tsm.getSession(widgetId);
-    
-    // Gap 1: Reattach if WebSocket is live (status may be 'disconnected' from cleanup, but session might still be alive)
+
     if (existingSession?.ws && existingSession.ws.readyState === WebSocket.OPEN) {
-      // If the session was still authenticating when we detached, its auth
-      // handler is gone (the component that owned it unmounted), so it can
-      // never complete. Restart a clean connect instead of falsely marking the
-      // session connected.
-      if (existingSession.status === 'connecting' || existingSession.status === 'authenticating') {
-        console.log('[TSM] Session was mid-auth, restarting connect:', widgetId);
+      // A session that was still handshaking can never finish now that its
+      // owning component unmounted, and the password isn't retained, so drop it
+      // and let the user reconnect rather than fake a connected state.
+      if (existingSession.status === 'connecting') {
         cleanup(false);
-        connect(existingSession.username);
         return;
       }
 
       console.log('[TSM] Found existing session, reattaching:', widgetId);
-      
-      // Create new Terminal
-      if (!document.getElementById('xterm-css')) {
-        const link = document.createElement('link');
-        link.id = 'xterm-css';
-        link.rel = 'stylesheet';
-        link.href = '/xterm.css';
-        document.head.appendChild(link);
-      }
-      
-      const term = new Terminal({
-        cursorBlink: true,
-        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-        fontSize: 13,
-        theme: {
-          background: '#0b1020',
-          foreground: '#e0e0e0',
-          cursor: '#00ff00',
-          cursorAccent: '#0b1020',
-          selectionBackground: 'rgba(0, 255, 0, 0.3)',
-          black: '#000000',
-          red: '#ff5555',
-          green: '#50fa7b',
-          yellow: '#f1fa8c',
-          blue: '#bd93f9',
-          magenta: '#ff79c6',
-          cyan: '#8be9fd',
-          white: '#bfbfbf',
-          brightBlack: '#4f4f4f',
-          brightRed: '#ff6e67',
-          brightGreen: '#5af78e',
-          brightYellow: '#f4f99c',
-          brightBlue: '#caa9fa',
-          brightMagenta: '#ff92d0',
-          brightCyan: '#9aedfe',
-          brightWhite: '#e6e6e6'
-        },
-        allowProposedApi: true
-      });
-      
+      ensureXtermCss();
+
+      const term = createTerminal();
       const fitAddon = new FitAddon();
       term.loadAddon(fitAddon);
       term.open(terminalRef.current!);
       fitAddon.fit();
-      
+
       termRef.current = term;
       fitAddonRef.current = fitAddon;
-      
-      // Gap 1: Replay scrollback buffer
-      const buffer = tsm.getBuffer(widgetId);
-      for (const chunk of buffer) {
+
+      // Replay scrollback buffer
+      for (const chunk of tsm.getBuffer(widgetId)) {
         term.write(chunk);
       }
-      
-      // Gap 1: Wire up events to existing WebSocket
+
       const ws = existingSession.ws;
-      
-      // Clear detached flag - we're back
       detachedRef.current = false;
-      
-      // Set refs
       wsRef.current = ws;
-      authenticatedRef.current = true;
-      suSentRef.current = true;
-      
-      // Set status
+
       setStatus('connected');
       statusRef.current = 'connected';
       tsm.setSessionStatus(widgetId, 'connected');
       tsm.setSessionTerminal(widgetId, term);
-      
-      // Re-wire terminal input -> WebSocket
+
       term.onData((data) => {
         if (wsRef.current?.readyState === WebSocket.OPEN) {
           wsRef.current.send(data);
         }
       });
-      
-      // Re-wire resize
+
       const handleResize = () => {
-        if (fitAddonRef.current) {
-          try { fitAddonRef.current.fit(); } catch {}
-          if (wsRef.current?.readyState === WebSocket.OPEN) {
-            wsRef.current.send(JSON.stringify({
-              type: 'resize',
-              cols: termRef.current?.cols,
-              rows: termRef.current?.rows
-            }));
-          }
+        if (!fitAddonRef.current) return;
+        try { fitAddonRef.current.fit(); } catch {}
+        if (wsRef.current?.readyState === WebSocket.OPEN) {
+          wsRef.current.send(JSON.stringify({
+            type: 'resize',
+            cols: termRef.current?.cols,
+            rows: termRef.current?.rows
+          }));
         }
       };
       resizeObserverRef.current = new ResizeObserver(handleResize);
       if (terminalRef.current?.parentElement) {
         resizeObserverRef.current.observe(terminalRef.current.parentElement);
       }
-      
-      // ================================================================
-      // REATTACH: Re-wire WebSocket handlers to NEW component refs
-      // ================================================================
-      // NOTE: We MUST re-wire ws.onmessage here. React creates new ref objects on each
-      // mount, so the old handler from connect() closures over dead refs from the
-      // previous component instance. The new handler uses this component's refs.
-      
-      // Re-wire ws.onmessage — MUST replace old handler which closures over dead refs
+
+      // Re-wire handlers to THIS component's refs (React creates new refs on
+      // every mount, so the old closures point at dead refs).
       ws.onmessage = (event) => {
         const data = typeof event.data === 'string' ? event.data : new TextDecoder().decode(event.data);
-        
-        // If detached again (another unmount happened), only buffer
         if (detachedRef.current) {
           tsm.appendToBuffer(widgetId, data);
           return;
         }
-        
-        // If the user's shell exits we drop back to the service account; close.
-        if (isBackOnService(data, loginUsernameRef.current)) {
-          console.log('[WS] Back on service account (reattached), closing session');
-          cleanup();
-          setError('Session ended');
-          setStatus('disconnected');
-          statusRef.current = 'disconnected';
-          tsm.setSessionStatus(widgetId, 'disconnected');
-          return;
-        }
-
-        // Normal authenticated output — write to terminal and buffer
-        if (termRef.current) {
-          termRef.current.write(data);
-        }
+        if (termRef.current) termRef.current.write(data);
         tsm.appendToBuffer(widgetId, data);
       };
-      
-      // Re-wire ws.onclose
-      ws.onclose = (event) => {
-        console.log('[WS] Disconnected (reattached session):', event.code, event.reason);
-        setStatus('idle');
-        statusRef.current = 'idle';
+      ws.onclose = () => {
+        setStatus('disconnected');
+        statusRef.current = 'disconnected';
         tsm.setSessionStatus(widgetId, 'disconnected');
       };
-      
-      // Re-wire ws.onerror
-      ws.onerror = (event) => {
-        console.error('[WS] Error (reattached session):', event);
+      ws.onerror = () => {
         setStatus('error');
         statusRef.current = 'error';
         tsm.setSessionStatus(widgetId, 'error');
       };
-      
-      // ================================================================
-      // END REATTACH
-      // ================================================================
-      
-      // Gap 1: Update session ws to ensure consistent
-      tsm.setSessionWebSocket(widgetId, ws);
-      
-      console.log('[TSM] Reattached to session:', widgetId);
-      return; // Skip regular connect
-    }
-    
-    // No auto-connect when no existing session - let user manually click Connect
-  }, []); // Only on mount
 
-  // Handle control buttons
+      tsm.setSessionWebSocket(widgetId, ws);
+      console.log('[TSM] Reattached to session:', widgetId);
+      return;
+    }
+
+    // No auto-connect when no existing session - let the user sign in.
+  }, [cleanup, widgetId]);
+
   const handleConnect = () => {
     if (status === 'idle' || status === 'disconnected' || status === 'error') {
       if (username) {
-        connect(username);
+        connect(username, password);
       }
     }
   };
@@ -913,7 +444,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
 
   const handleReconnect = () => {
     if (username) {
-      connect(username);
+      connect(username, password);
     }
   };
 
@@ -926,12 +457,12 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
           className="absolute inset-0"
           style={{ minHeight: '150px' }}
         />
-        
-        {/* Idle state - username input form */}
+
+        {/* Idle state - login form */}
         {status === 'idle' && (
           <div className="absolute inset-0 bg-gray-900/90 flex items-center justify-center p-4">
             <div className="text-center w-full max-w-xs">
-              <p className="text-gray-300 text-sm mb-4">Enter username to connect as:</p>
+              <p className="text-gray-300 text-sm mb-4">Sign in to this server</p>
               <input
                 type="text"
                 value={username}
@@ -940,9 +471,17 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
                 className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded text-gray-200 text-sm mb-3"
                 onKeyDown={(e) => e.key === 'Enter' && handleConnect()}
               />
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Password"
+                className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded text-gray-200 text-sm mb-3"
+                onKeyDown={(e) => e.key === 'Enter' && handleConnect()}
+              />
               <button
                 onClick={handleConnect}
-                disabled={!username}
+                disabled={!username || !password}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded disabled:opacity-50 disabled:cursor-not-allowed w-full"
               >
                 Connect
@@ -950,7 +489,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
             </div>
           </div>
         )}
-        
+
         {/* Error overlay */}
         {error && status !== 'idle' && (
           <div className="absolute inset-0 bg-red-900/80 flex items-center justify-center p-4">
@@ -966,13 +505,11 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
             </div>
           </div>
         )}
-        
-        {/* Connecting/Authenticating overlay */}
-        {(status === 'connecting' || status === 'authenticating') && (
+
+        {/* Connecting overlay */}
+        {status === 'connecting' && (
           <div className="absolute inset-0 bg-gray-900/80 flex items-center justify-center">
-            <p className="text-gray-300 text-sm">
-              {status === 'connecting' ? 'Connecting...' : `Authenticating as ${username}...`}
-            </p>
+            <p className="text-gray-300 text-sm">Connecting...</p>
           </div>
         )}
       </div>
@@ -985,7 +522,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
             className={`w-2 h-2 rounded-full ${
               status === 'connected'
                 ? 'bg-green-500'
-                : status === 'connecting' || status === 'authenticating'
+                : status === 'connecting'
                 ? 'bg-yellow-500 animate-pulse'
                 : status === 'error'
                 ? 'bg-red-500'
@@ -999,8 +536,6 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
               ? 'Connected'
               : status === 'connecting'
               ? 'Connecting...'
-              : status === 'authenticating'
-              ? `Authenticating as ${username}...`
               : status === 'error'
               ? 'Error'
               : status === 'idle'
@@ -1021,7 +556,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
           ) : status !== 'idle' && (
             <button
               onClick={handleReconnect}
-              disabled={status === 'connecting' || status === 'authenticating'}
+              disabled={status === 'connecting'}
               className="px-2 py-0.5 text-xs bg-blue-700 hover:bg-blue-600 text-white rounded disabled:opacity-50"
             >
               Retry

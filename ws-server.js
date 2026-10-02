@@ -3,12 +3,10 @@
 const http = require('http');
 const url = require('url');
 const WebSocket = require('ws');
-const crypto = require('crypto');
 const { Client } = require('ssh2');
 
 const PORT = process.env.WS_PORT || 3002;
 const AUTH_SECRET = process.env.AUTH_SECRET || 'fallback-secret-change-me';
-const MASTER_KEY = process.env.MASTER_KEY || 'fallback-master-key';
 const RQLITE_HOST = process.env.RQLITE_HOST || '127.0.0.1:4001';
 
 // WebSocket path for terminal (Cloudflare-compatible)
@@ -46,45 +44,18 @@ async function queryRqlite(sql) {
   }
 }
 
-// Decrypt private key using MASTER_KEY
-function decrypt(encryptedData) {
-  try {
-    const ALGORITHM = 'aes-256-gcm';
-    const IV_LENGTH = 16;
-    const TAG_LENGTH = 16;
-
-    const key = crypto.pbkdf2Sync(
-      MASTER_KEY,
-      'bosun-ssh-key-encryption',
-      100000,
-      32,
-      'sha256'
-    );
-
-    const combined = Buffer.from(encryptedData, 'base64');
-    const iv = combined.subarray(0, IV_LENGTH);
-    const authTag = combined.subarray(IV_LENGTH, IV_LENGTH + TAG_LENGTH);
-    const encrypted = combined.subarray(IV_LENGTH + TAG_LENGTH);
-
-    const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
-    decipher.setAuthTag(authTag);
-
-    let decrypted = decipher.update(encrypted, undefined, 'utf8');
-    decrypted += decipher.final('utf8');
-
-    return decrypted;
-  } catch (err) {
-    console.error('[WS] Decrypt error:', err.message);
-    throw err;
-  }
-}
-
-// Connect to server via SSH
-async function connectToServer(serverId) {
+// Connect to server via SSH.
+//
+// The terminal connects directly with the account and password the user
+// provides, rather than the stored service-account key. Widgets, the poller,
+// health checks and OS detection keep using the service account via the
+// connection pool; only the interactive terminal uses the user's own account.
+// The password is supplied per-connection and never stored.
+async function connectToServer(serverId, sshUser, sshPassword) {
   const conn = new Client();
   
-  // Get server details from rqlite
-  const servers = await queryRqlite(`SELECT id, hostname, ssh_port, ssh_user, ssh_key_id, platform FROM servers WHERE id = '${serverId}'`);
+  // Get server details from rqlite (hostname/port/platform only)
+  const servers = await queryRqlite(`SELECT id, hostname, ssh_port, platform FROM servers WHERE id = '${serverId}'`);
   if (!servers || servers.length === 0) {
     throw new Error('Server not found');
   }
@@ -92,33 +63,19 @@ async function connectToServer(serverId) {
   const server = servers[0];
   const serverHostname = server[1];
   const sshPort = server[2] || 22;
-  const sshUser = server[3];
-  const sshKeyId = server[4];
-  const platform = server[5] || 'linux';
-  
-  if (!sshKeyId) {
-    throw new Error('No SSH key configured for this server');
-  }
-  
-  // Get private key
-  const keys = await queryRqlite(`SELECT private_key_enc FROM ssh_keys WHERE id = '${sshKeyId}'`);
-  if (!keys || keys.length === 0) {
-    throw new Error('SSH key not found');
-  }
-  
-  const privateKey = decrypt(keys[0][0]);
+  const platform = server[3] || 'linux';
   
   return new Promise((resolve, reject) => {
     conn.connect({
       host: serverHostname,
       port: sshPort,
       username: sshUser,
-      privateKey: privateKey,
+      password: sshPassword,
       readyTimeout: 10000,
     });
     
     conn.on('ready', () => {
-      console.log('[WS] SSH connected to', serverHostname);
+      console.log('[WS] SSH connected to', serverHostname, 'as', sshUser);
       resolve({ client: conn, platform });
     });
     
@@ -212,6 +169,10 @@ wss.on('connection', async (ws, req) => {
   const sessionId = parsedUrl.query.sessionId;
   const serverId = parsedUrl.query.serverId;
   const token = parsedUrl.query.token;
+  // Terminal login uses the user's own account. The username travels in the
+  // URL; the password arrives as the first WebSocket frame so it is never
+  // written to URLs or access logs.
+  const sshUser = (parsedUrl.query.sshUser || '').toString().trim();
   
   // Get client IP (respect x-forwarded-for for Cloudflare)
   const clientIP = req.headers['x-forwarded-for']?.split(',')[0] || req.socket.remoteAddress;
@@ -246,11 +207,17 @@ wss.on('connection', async (ws, req) => {
     return;
   }
 
+  if (!sshUser) {
+    ws.close(4000, 'Missing credentials');
+    return;
+  }
+
   console.log('[WS] Client connected: session=' + sessionId + ', server=' + serverId + ', ip=' + clientIP);
   
   // ========== CHECK FOR EXISTING SESSION (REATTACH) ==========
   const existingSession = sshSessions.get(sessionId);
-  if (existingSession && existingSession.stream && existingSession.authenticated) {
+  if (existingSession && existingSession.stream && existingSession.authenticated &&
+      existingSession.username === sshUser) {
     console.log('[WS] Reattaching to existing session: ' + sessionId);
 
     // Cancel grace period timer (Gap 5)
@@ -276,6 +243,9 @@ wss.on('connection', async (ws, req) => {
     ws.on('message', (msg) => {
       try {
         const parsed = JSON.parse(msg.toString());
+        // A reconnect may still send the auth frame; the session is already
+        // authenticated, so drop it rather than typing it into the shell.
+        if (parsed.type === 'auth') return;
         if (parsed.type === 'resize' && existingSession.stream) {
           existingSession.stream.setWindow(parsed.rows, parsed.cols);
           return;
@@ -313,14 +283,73 @@ wss.on('connection', async (ws, req) => {
     return; // SKIP creating new SSH connection
   }
 
+  // An existing session for a *different* account can't be reused; tear it down
+  // so its SSH connection doesn't linger before the new one starts.
+  if (existingSession && existingSession.username !== sshUser) {
+    console.log('[WS] Discarding stale session for a different user: ' + sessionId);
+    if (existingSession.graceTimer) clearTimeout(existingSession.graceTimer);
+    if (existingSession.idleTimeout) clearTimeout(existingSession.idleTimeout);
+    if (existingSession.client) existingSession.client.end();
+    if (existingSession.stream) existingSession.stream.close();
+    sshSessions.delete(sessionId);
+  }
+
   // ========== NEW SESSION ==========
   let sshClient = null;
   let sshStream = null;
+  let ptyReady = false;
+  let passwordResolver = null;
   const outputBuffer = [];
-  
+  const earlyMessages = [];
+
+  // Single input handler for the new session. Until the PTY is ready we buffer
+  // browser input (and resolve the password frame); afterwards it goes straight
+  // to the SSH stream. The password never travels in the URL.
+  ws.on('message', (data) => {
+    const msg = data.toString();
+    let parsed = null;
+    try { parsed = JSON.parse(msg); } catch {}
+
+    if (parsed && parsed.type === 'auth') {
+      if (typeof parsed.password === 'string' && passwordResolver) {
+        passwordResolver(parsed.password);
+      }
+      return;
+    }
+
+    if (ptyReady && sshStream) {
+      if (parsed && parsed.type === 'resize') {
+        sshStream.setWindow(parsed.rows, parsed.cols);
+      } else {
+        sshStream.write(msg);
+      }
+      return;
+    }
+
+    earlyMessages.push(msg);
+  });
+
+  // Resolves once the client's password frame has been received.
+  const waitForPassword = () => new Promise((resolve) => {
+    passwordResolver = (password) => {
+      passwordResolver = null;
+      resolve(password);
+    };
+  });
+
   try {
-    // Connect to server via SSH
-    const connected = await connectToServer(serverId);
+    const sshPassword = await Promise.race([
+      waitForPassword(),
+      new Promise((resolve) => setTimeout(() => resolve(''), 15000)),
+    ]);
+    if (!sshPassword) {
+      ws.send('\r\n*** SSH connection failed: credentials not provided ***\r\n');
+      ws.close(4002, 'credentials not provided');
+      return;
+    }
+
+    // Connect to server via SSH as the user's own account
+    const connected = await connectToServer(serverId, sshUser, sshPassword);
     sshClient = connected.client;
 
     // Open a PTY. Windows hosts get an interactive PowerShell session; Linux
@@ -337,6 +366,20 @@ wss.on('connection', async (ws, req) => {
       ws.send(connected.platform === 'windows'
         ? '\r\n\x1b[32mConnected to server via PowerShell\x1b[0m\r\n\r\n'
         : '\r\n\x1b[32mConnected to server via SSH\x1b[0m\r\n\r\n');
+
+      // Flush input buffered while the session was starting, then route all
+      // further input straight to the stream.
+      ptyReady = true;
+      for (const msg of earlyMessages.splice(0)) {
+        try {
+          const json = JSON.parse(msg);
+          if (json.type === 'resize') {
+            stream.setWindow(json.rows, json.cols);
+            continue;
+          }
+        } catch {}
+        stream.write(msg);
+      }
 
       // SSH output -> browser + buffer
       stream.on('data', (data) => {
@@ -370,27 +413,6 @@ wss.on('connection', async (ws, req) => {
           sshSessions.delete(sessionId);
         }
       });
-
-      // Browser input -> SSH
-      ws.on('message', (data) => {
-        const msg = data.toString();
-
-        // Handle resize JSON
-        try {
-          const json = JSON.parse(msg);
-          if (json.type === 'resize' && sshStream) {
-            sshStream.setWindow(json.rows, json.cols);
-            return;
-          }
-        } catch {
-          // Not JSON, write raw
-        }
-
-        // Write raw input to SSH
-        if (sshStream) {
-          sshStream.write(msg);
-        }
-      });
     };
 
     if (connected.platform === 'windows') {
@@ -410,7 +432,7 @@ wss.on('connection', async (ws, req) => {
       createdAt: Date.now(),
       lastActivity: Date.now(),
       idleTimeout: null,
-      username: '',
+      username: sshUser,
       authenticated: true, // Shell created successfully - server-side auth complete
       serverId: serverId,
     };
