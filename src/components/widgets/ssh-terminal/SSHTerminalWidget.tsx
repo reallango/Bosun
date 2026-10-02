@@ -24,6 +24,16 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
   // Windows: whether we've injected the identity marker command into the
   // user's shell (used to confirm we actually switched accounts).
   const userMarkerSentRef = useRef(false);
+  // Windows auth-phase state:
+  //  - windowsPreambleDoneRef: flips once the nested-ssh password prompt is seen.
+  //    Before that, nothing is written to the terminal, so the service-account
+  //    prompt and the echoed ssh command line never render.
+  //  - sshUserRef: the service account (server.ssh_user), used to recognize the
+  //    service-account prompt when the nested session exits.
+  //  - confirmedUserRef: the account the BOSUN_USER marker confirmed.
+  const windowsPreambleDoneRef = useRef(false);
+  const sshUserRef = useRef('');
+  const confirmedUserRef = useRef('');
   
   const terminalRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -59,6 +69,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       const res = await fetchWithAuth(`/api/servers/${serverId}`);
       const j = await res.json();
       platformRef.current = j.data?.platform === 'windows' ? 'windows' : 'linux';
+      sshUserRef.current = (j.data?.ssh_user || '').trim();
     } catch {
       platformRef.current = 'linux';
     }
@@ -114,6 +125,8 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       passwordPromptShownRef.current = false;
       servicePromptRef.current = '';
       userMarkerSentRef.current = false;
+      windowsPreambleDoneRef.current = false;
+      confirmedUserRef.current = '';
       tsm.setSessionStatus(widgetId, 'disconnected');
       return;
     }
@@ -156,6 +169,8 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
     passwordPromptShownRef.current = false;
     servicePromptRef.current = '';
     userMarkerSentRef.current = false;
+    windowsPreambleDoneRef.current = false;
+    confirmedUserRef.current = '';
   }, [widgetId]);
   const connect = useCallback(async (targetUsername?: string) => {
     const userToUse = (targetUsername || username).trim();
@@ -282,6 +297,8 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
     passwordPromptShownRef.current = false;
     servicePromptRef.current = '';
     userMarkerSentRef.current = false;
+    windowsPreambleDoneRef.current = false;
+    confirmedUserRef.current = '';
     loginUsernameRef.current = userToUse;
 
     try {
@@ -415,8 +432,11 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
                   // open a nested SSH login to localhost as the target user.
                   // -t forces a PTY; password-only auth so it prompts (pubkey
                   // would otherwise log straight in as the service account).
-                  // Run powershell explicitly so the shell is deterministic.
-                  wsRef.current.send(`ssh -t -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no ${userToUse}@localhost powershell\r`);
+                  // Leading space stops PowerShell echoing the command. The
+                  // explicit `powershell` keeps the shell (and the BOSUN_USER
+                  // marker below) deterministic regardless of the host's
+                  // default shell.
+                  wsRef.current.send(` ssh -t -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no ${userToUse}@localhost powershell\r`);
                   console.log('[WS] Sent nested ssh login for', userToUse);
                 } else {
                   wsRef.current.send(`su - ${userToUse}\r`);
@@ -428,10 +448,15 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
             return; // Don't display the service-account prompt
           }
 
-          // Phase 3: Detect Password: prompt -> show terminal
+          // Phase 3: Detect Password: prompt -> show terminal. On Windows anchor
+          // on the real nested-ssh prompt so the echoed command cannot trip it.
           if (!passwordPromptShownRef.current &&
-              authBufferRef.current.toLowerCase().includes('password')) {
+              (platformRef.current === 'windows'
+                ? (/password\s*:\s*$/i.test(authBufferRef.current.trimEnd()) ||
+                   /@[^\s']*'s password:\s*$/i.test(authBufferRef.current.trimEnd()))
+                : authBufferRef.current.toLowerCase().includes('password'))) {
             passwordPromptShownRef.current = true;
+            windowsPreambleDoneRef.current = true;
             // Drop the pre-prompt buffer so the service-account prompt/output
             // cannot be mistaken for the user's own shell.
             authBufferRef.current = '';
@@ -479,17 +504,26 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
             // Windows: confirm the account switch with an identity marker, and
             // tear down on any failure (never fall back to the service account).
             if (platformRef.current === 'windows') {
+              // Defensive: never render anything before the preamble (password
+              // prompt) is done, so the service prompt / echoed command can't leak.
+              if (!windowsPreambleDoneRef.current) return;
               // Strip the nested-ssh preamble/host-key notices from the display.
               const clean = data
                 .replace(/\r?\n?[^\r\n]*@[^\r\n]*'s password:\s*/gi, '')
                 .replace(/\r?\n?Warning: Permanently added[^\r\n]*/gi, '')
                 .replace(/\r?\n?The authenticity of host[^\r\n]*/gi, '')
                 .replace(/\r?\n?Are you sure you want to continue connecting[^\r\n]*/gi, '');
+              // Buffer the raw output (keeps the BOSUN_USER marker for
+              // detection) but never show the echoed marker command or its line.
               if (clean) {
                 authBufferRef.current += clean;
-                if (termRef.current) {
-                  termRef.current.write(clean);
-                  tsm.appendToBuffer(widgetId, clean);
+                const display = clean
+                  .split(/\r?\n/)
+                  .filter(l => !l.includes('BOSUN_USER=') && !/Write-Output\s*\(\s*"BOSUN_USER=/.test(l))
+                  .join('\n');
+                if (display && termRef.current) {
+                  termRef.current.write(display);
+                  tsm.appendToBuffer(widgetId, display);
                 }
               }
 
@@ -508,17 +542,6 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
               const marker = authBufferRef.current.match(/BOSUN_USER=([^\r\n]+)/);
               if (marker) {
                 const who = marker[1].trim().toLowerCase();
-                // Show the shell prompt that arrived with the marker, minus the
-                // echoed marker command and its output line.
-                const promptShown = authBufferRef.current
-                  .split(/\r?\n/)
-                  .filter(l => !l.includes('BOSUN_USER=') && !/Write-Output\s*\(\s*"BOSUN_USER=/.test(l))
-                  .join('\n')
-                  .trim();
-                if (promptShown && termRef.current) {
-                  termRef.current.write(promptShown + '\r\n');
-                  tsm.appendToBuffer(widgetId, promptShown + '\r\n');
-                }
                 if (who && who !== userToUse.toLowerCase()) {
                   // Wrong account (e.g. the service account) - do NOT stay here.
                   if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
@@ -530,6 +553,8 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
                 }
                 authenticatedRef.current = true;
                 suSentRef.current = true;
+                confirmedUserRef.current = who;
+                servicePromptRef.current = '';
                 if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
                 authBufferRef.current = '';
                 tsm.setSessionStatus(widgetId, 'connected');
@@ -616,9 +641,25 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
         }
 
         // ========== NORMAL MODE ==========
-        // Check for service account prompt BEFORE writing to terminal. On
-        // Windows this means the account switch failed and we are back on the
-        // service account - close instead of leaving the user there.
+        // Windows: the nested ssh session has ended (or we are back on the
+        // service account) - close instead of leaving the user on bosun-svc.
+        if (platformRef.current === 'windows') {
+          const svcUser = sshUserRef.current;
+          const backOnService = !!svcUser &&
+            confirmedUserRef.current !== '' &&
+            /PS\s+[^\r\n>]*>/.test(data) &&
+            data.includes(svcUser);
+          if (/Connection to localhost closed\./i.test(data) || backOnService) {
+            console.log('[WS] Nested session ended, closing');
+            cleanup();
+            setError('Session closed');
+            setStatus('disconnected');
+            statusRef.current = 'disconnected';
+            return;
+          }
+        }
+
+        // Linux: returning to the service prompt means the su switch failed.
         if (servicePromptRef.current && data.includes(servicePromptRef.current)) {
           console.log('[WS] Detected return to service account, closing session');
           cleanup();
