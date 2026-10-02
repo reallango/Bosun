@@ -182,7 +182,7 @@ async function pollWidgets() {
       SELECT w.id, w.widget_type, w.server_id, w.config, wpc.poll_interval_sec, wpc.ttl_sec, wpc.storage_mode, wpc.last_polled_at, wpc.enabled
       FROM widgets w
       LEFT JOIN widget_polling_config wpc ON w.widget_type = wpc.widget_type AND w.server_id = wpc.server_id
-      WHERE w.widget_type NOT IN ('ssh_terminal')
+      WHERE w.widget_type NOT IN ('ssh_terminal', 'server_summary')
       AND (wpc.enabled IS NULL OR wpc.enabled = 1)
       ORDER BY w.server_id, w.widget_type
     `);
