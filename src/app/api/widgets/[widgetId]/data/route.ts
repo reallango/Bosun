@@ -83,11 +83,22 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       if (cacheRes.values?.length) {
         const [data, collectedAt, expiresAt, storageMode] = cacheRes.values[0];
         const isStale = expiresAt && new Date(expiresAt as string) < new Date();
-        return NextResponse.json({
-          data: JSON.parse(data as string),
-          cachedAt: collectedAt,
-          stale: isStale
-        });
+        // Let the browser reuse this response for the remainder of its TTL.
+        // Widgets re-fetch on their own interval, so without this every poll
+        // paid a full rqlite round-trip even though the cached row was still
+        // valid. Capped at the definition's refresh interval so a widget never
+        // renders data older than one poll cycle. `force=true` skips this path.
+        const remainingMs = expiresAt
+          ? Math.max(0, new Date(expiresAt as string).getTime() - Date.now())
+          : (def.refreshInterval ?? 15) * 1000;
+        const maxAge = Math.max(1, Math.min(
+          Math.round(remainingMs / 1000) || def.refreshInterval || 15,
+          def.refreshInterval || 15
+        ));
+        return NextResponse.json(
+          { data: JSON.parse(data as string), cachedAt: collectedAt, stale: isStale },
+          { headers: { 'Cache-Control': `private, max-age=${maxAge}` } }
+        );
       }
     }
 

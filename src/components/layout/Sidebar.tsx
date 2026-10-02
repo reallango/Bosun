@@ -31,7 +31,6 @@ export default function Sidebar() {
     fetchWithAuth('/api/servers')
       .then(r => r.json())
       .then(j => {
-        console.log('[Sidebar] servers keys:', Object.keys(j || {}), 'data keys:', Object.keys(j?.data || {}));
         const servers = ensureArray<Server>(j?.data?.servers ?? j?.servers);
         setServers(servers);
       })
@@ -42,7 +41,6 @@ export default function Sidebar() {
     fetchWithAuth('/api/dashboards')
       .then(r => r.json())
       .then(j => {
-        console.log('[Sidebar] dashboards keys:', Object.keys(j || {}), 'data keys:', Object.keys(j?.data || {}));
         const dashboards = ensureArray<Dashboard>(j?.data?.dashboards ?? j?.dashboards);
         setDashboards(dashboards);
       })

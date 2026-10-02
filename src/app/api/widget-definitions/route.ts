@@ -27,7 +27,13 @@ export async function GET(request: NextRequest) {
       platform = (srv.values[0][0] as string) || 'linux';
     }
     const definitions = await getWidgetDefinitions(platform);
-    return NextResponse.json({ data: { definitions, platform: platform ?? null } });
+    // Definitions change only when an operator edits a custom widget, so let the
+    // browser cache them briefly. The Add Widget modal reopens frequently and
+    // otherwise re-queries rqlite for the same list every time.
+    return NextResponse.json(
+      { data: { definitions, platform: platform ?? null } },
+      { headers: { 'Cache-Control': 'private, max-age=300' } }
+    );
   } catch (error) {
     return NextResponse.json({ error: { message: String(error) } }, { status: 500 });
   }
