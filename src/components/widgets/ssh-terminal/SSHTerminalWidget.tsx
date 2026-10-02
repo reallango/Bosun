@@ -563,9 +563,10 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
 
           // Once a shell is up, ask it to print its username so we can confirm
           // the account. The echoed command and its output are never displayed
-          // (the screen is cleared on success).
+          // (the screen is cleared on success). Match any PS prompt (not just a
+          // drive-letter path) so the account name/locale can't stall this.
           if (!userMarkerSentRef.current &&
-              /(?:^|\r?\n)\s*(?:PS\s+)?[A-Za-z]:\\[^\r\n>]*>\s*$/.test(authBufferRef.current)) {
+              /(?:^|\r?\n)\s*PS\s+[^\r\n>]*>\s*$/i.test(authBufferRef.current)) {
             userMarkerSentRef.current = true;
             if (wsRef.current?.readyState === WebSocket.OPEN) {
               wsRef.current.send('Write-Output ("BOSUN_USER=" + $env:USERNAME)\r');
