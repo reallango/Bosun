@@ -29,6 +29,9 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
   // turn off the TTY and make ssh print a banner instead of an interactive
   // session).
   const passwordRef = useRef('');
+  // Whether the password has already been written to the PTY, so it is never
+  // sent twice or leaked into the service-account shell before ssh starts.
+  const passwordSentRef = useRef(false);
   
   const terminalRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -298,6 +301,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
     servicePromptRef.current = '';
     userMarkerSentRef.current = false;
     passwordRef.current = '';
+    passwordSentRef.current = false;
     loginUsernameRef.current = userToUse;
 
     try {
@@ -453,6 +457,11 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
                 }
               }
             }, 100);
+            // `su` prompts for the password, but its prompt can be swallowed
+            // by the PTY/echo handling; synthesize it so it is always visible.
+            if (termRef.current) {
+              termRef.current.write('Password: ');
+            }
             return;
           }
 
@@ -495,29 +504,36 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
         // password when ssh asks, then confirm the account with the BOSUN_USER
         // marker and clear the screen on success.
         if (!authenticatedRef.current && platformRef.current === 'windows') {
-          // Wait for the service-account shell to be ready, then start the
-          // nested ssh login. The password is answered from the modal.
+          // Start the nested ssh login once the service-account shell is ready.
+          // Mirrors the Linux path: send after the first output rather than
+          // gating on a specific prompt shape (Windows prompts vary by locale
+          // and config, which could stall the session at "Authenticating").
           if (!suSentRef.current) {
-            authBufferRef.current += data;
-            if (/(?:^|\r?\n)\s*(?:PS\s+)?[A-Za-z]:\\[^\r\n>]*>\s*$/.test(authBufferRef.current)) {
-              suSentRef.current = true;
-              authBufferRef.current = '';
+            setTimeout(() => {
+              if (suSentRef.current || authenticatedRef.current) return;
               if (wsRef.current?.readyState === WebSocket.OPEN) {
                 wsRef.current.send(`ssh -t -o StrictHostKeyChecking=accept-new -o PreferredAuthentications=password -o PubkeyAuthentication=no ${userToUse}@localhost powershell\r`);
+                console.log('[WS] Sent nested ssh login for', userToUse);
+                suSentRef.current = true;
               }
-            }
+            }, 500);
             return;
           }
 
           if (!passwordPromptShownRef.current) {
-            // Detect the nested-ssh password prompt and answer it with the
-            // password captured by the modal.
+            // Feed the password as soon as ssh asks for it. The buffer is
+            // cleared each time and never rendered, so the echoed command line
+            // (which contains "password") cannot trip this.
             const tail = authBufferRef.current + data;
-            if (/password\s*:\s*$/i.test(tail.trimEnd()) ||
-                /@[^\s']*'s password:\s*$/i.test(tail.trimEnd())) {
+            if (/password[^\r\n]*:\s*$/i.test(tail.trimEnd()) ||
+                /@[^\s']*'s password/i.test(tail)) {
               passwordPromptShownRef.current = true;
               authBufferRef.current = '';
-              if (passwordRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
+              // Only answer once the nested ssh has actually started; otherwise
+              // the password could leak into the service-account shell.
+              if (suSentRef.current && passwordRef.current &&
+                  !passwordSentRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
+                passwordSentRef.current = true;
                 wsRef.current.send(passwordRef.current + '\r');
               }
             } else {
@@ -883,7 +899,10 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
     passwordRef.current = pw;
     setPasswordInput('');
     setShowPasswordModal(false);
-    if (passwordPromptShownRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
+    // If ssh already prompted before the modal was submitted, answer it now.
+    if (suSentRef.current && passwordPromptShownRef.current &&
+        !passwordSentRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
+      passwordSentRef.current = true;
       wsRef.current.send(pw + '\r');
     }
   };
