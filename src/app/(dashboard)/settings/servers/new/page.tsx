@@ -33,6 +33,7 @@ export default function NewServerPage() {
     hostname: '',
     ssh_port: 22,
     name: '',
+    platform: 'linux',
   });
 
   useEffect(() => {
@@ -53,18 +54,19 @@ export default function NewServerPage() {
     const hostname = formData.get('hostname') as string;
     const port = parseInt(formData.get('ssh_port') as string) || 22;
     const name = hostname; // Use hostname as default name
+    const platform = (formData.get('platform') as string) || 'linux';
     const admin_username = formData.get('admin_username') as string;
     const admin_password = formData.get('admin_password') as string;
-    const service_account = formData.get('service_account') as string || 'bosun';
+    const service_account = formData.get('service_account') as string || 'bosun-svc';
 
     // Store form values for later save
-    setProvisionForm({ hostname, ssh_port: port, name });
+    setProvisionForm({ hostname, ssh_port: port, name, platform });
 
     try {
       const res = await fetch('/api/servers/provision', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hostname, port, admin_username, admin_password, service_account })
+        body: JSON.stringify({ hostname, port, admin_username, admin_password, platform, service_account })
       });
       const data = await res.json();
       
@@ -97,6 +99,7 @@ export default function NewServerPage() {
           ssh_port: provisionForm.ssh_port,
           ssh_user: provisionData.service_account,
           ssh_key_id: provisionData.ssh_key_id,
+          platform: provisionForm.platform,
         }),
       });
 
@@ -234,9 +237,18 @@ export default function NewServerPage() {
                       <Input id="ssh_port" name="ssh_port" type="number" defaultValue="22" />
                     </div>
                     <div className="space-y-2">
+                      <Label htmlFor="platform">Platform</Label>
+                      <select id="platform" name="platform" defaultValue="linux"
+                        className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm">
+                        <option value="linux">Linux</option>
+                        <option value="windows">Windows</option>
+                      </select>
+                      <p className="text-xs text-gray-500">Windows hosts are provisioned with PowerShell over OpenSSH.</p>
+                    </div>
+                    <div className="space-y-2">
                       <Label htmlFor="admin_username">Admin Username *</Label>
-                      <Input id="admin_username" name="admin_username" placeholder="root" required />
-                      <p className="text-xs text-gray-500">SSH username with sudo access</p>
+                      <Input id="admin_username" name="admin_username" placeholder="root or Administrator" required />
+                      <p className="text-xs text-gray-500">SSH user with sudo (Linux) or Administrator (Windows) rights</p>
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="admin_password">Admin Password *</Label>
@@ -245,7 +257,7 @@ export default function NewServerPage() {
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="service_account">Service Account Name</Label>
-                      <Input id="service_account" name="service_account" defaultValue="bosun" />
+                      <Input id="service_account" name="service_account" defaultValue="bosun-svc" />
                     </div>
                     <div className="flex gap-2">
                       <Button type="submit" disabled={provisioning}>
