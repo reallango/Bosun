@@ -17,13 +17,37 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const searchParams = new URL(request.url).searchParams;
     const forceRefresh = searchParams.get('force') === 'true';
   try {
-    const widgetRes = await rqlite.query('SELECT * FROM widgets WHERE id = ?', [widgetId]);
+    // One joined read for everything the cache path needs (widget + server +
+    // per-instance caching override). The definition is resolved separately
+    // because it may be a compiled built-in or a `custom_widgets` row.
+    const widgetRes = await rqlite.query(
+      `SELECT w.*, s.name AS server_name, s.hostname, s.ssh_port, s.ssh_user, s.ssh_key_id, s.platform,
+              s.is_online, s.os_type, s.os_version,
+              wpc.use_database AS instance_use_database
+         FROM widgets w
+         LEFT JOIN servers s ON s.id = w.server_id
+         LEFT JOIN widget_polling_config wpc ON wpc.widget_id = w.id
+        WHERE w.id = ?`,
+      [widgetId]
+    );
     if (!widgetRes.values?.length) return NextResponse.json({ error: { message: 'Widget not found' } }, { status: 404 });
     const widget = rowsToObjects(widgetRes)[0] as any;
+    if (!widget.server_id || widget.hostname == null) {
+      return NextResponse.json({ error: { message: 'Server not found' } }, { status: 404 });
+    }
     const wCfg = widget.config ? (typeof widget.config==='string'?JSON.parse(widget.config||'{}'):widget.config) : {};
-    const srvR = await rqlite.query('SELECT * FROM servers WHERE id=?', [widget.server_id]);
-    if (!srvR.values?.length) return NextResponse.json({ error: { message: 'Server not found' } }, { status: 404 });
-    const srv = rowsToObjects(srvR)[0] as any;
+    const srv = {
+      id: widget.server_id,
+      name: widget.server_name,
+      hostname: widget.hostname,
+      ssh_port: widget.ssh_port,
+      ssh_user: widget.ssh_user,
+      ssh_key_id: widget.ssh_key_id,
+      platform: widget.platform,
+      is_online: widget.is_online,
+      os_type: widget.os_type,
+      os_version: widget.os_version,
+    } as any;
 
     // The definition decides how data is collected: built-in types come from
     // the compiled registry, custom types from `custom_widgets`. An unknown type
@@ -36,8 +60,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     // Per-instance override wins over the type default: the widget settings
     // dialog can turn database caching on/off for a single instance. NULL means
     // "inherit the definition's use_database".
-    const pcRes = await rqlite.query('SELECT use_database FROM widget_polling_config WHERE widget_id = ?', [widgetId]);
-    const instanceUseDb = pcRes.values?.length && pcRes.values[0][0] !== null ? Number(pcRes.values[0][0]) !== 0 : undefined;
+    const instanceUseDb = widget.instance_use_database !== null && widget.instance_use_database !== undefined
+      ? Number(widget.instance_use_database) !== 0
+      : undefined;
     const useDatabase = instanceUseDb !== undefined ? instanceUseDb : def.useDatabase !== false;
 
     // Server Summary is served live from the servers row so it always reflects

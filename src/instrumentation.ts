@@ -16,5 +16,21 @@ export async function register() {
   if (process.env.NEXT_RUNTIME === 'nodejs' && process.env.NEXT_PHASE !== 'phase-production-build') {
     const { startHealthChecker } = await import('@/lib/health/checker');
     await startHealthChecker();
+
+    // Widgets created before `ensurePollingConfig` existed have no polling config
+    // row, so the poller skips them and every dashboard load falls back to a live
+    // SSH round-trip. Backfill once at startup (idempotent) so DB caching works.
+    // Fire-and-forget so a slow/unavailable rqlite never blocks server startup.
+    void (async () => {
+      try {
+        const { initializeDatabase } = await import('@/lib/db/initialize');
+        await initializeDatabase();
+        const { backfillPollingConfigs } = await import('@/lib/widgets/polling-config');
+        const created = await backfillPollingConfigs();
+        if (created) console.log(`Backfilled ${created} widget polling config(s)`);
+      } catch (err) {
+        console.error('Widget polling config backfill failed:', err);
+      }
+    })();
   }
 }

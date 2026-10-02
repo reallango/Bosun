@@ -48,6 +48,7 @@ export interface Widget {
   server_name?: string;
   server_host?: string;
   title_override: string | null;
+  display_name?: string | null;
   config: Record<string, unknown>;
   grid_x: number;
   grid_y: number;

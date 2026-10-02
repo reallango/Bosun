@@ -4,10 +4,11 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "dev:all": "concurrently \"npm run dev\" \"npm run ws\"",
+    "dev:all": "concurrently \"npm run dev\" \"npm run ws\" \"npm run poller\"",
     "build": "next build",
     "start": "next start",
     "ws": "node ws-server.js",
+    "poller": "node poller.js",
     "lint": "next lint"
   },
   "dependencies": {

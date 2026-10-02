@@ -45,3 +45,41 @@ export async function ensurePollingConfig(widget: {
     ]
   );
 }
+
+/** Widget types the poller deliberately never caches (matching its SQL filter). */
+const NON_POLLABLE_TYPES = ['ssh_terminal', 'server_summary'];
+
+/**
+ * Backfill a `widget_polling_config` row for every existing pollable widget that
+ * lacks one.
+ *
+ * `ensurePollingConfig` only runs on widget create, so widgets created before it
+ * (or whose seed failed) are never polled and pay a live SSH round-trip on every
+ * dashboard load. This sweep runs once at startup so the cache-first read is
+ * actually backed by a poller. Idempotent: widgets that already have a row
+ * (per-widget or legacy type+server) are skipped.
+ */
+export async function backfillPollingConfigs(): Promise<number> {
+  const res = await rqlite.query(
+    `SELECT w.id, w.widget_type, w.server_id
+       FROM widgets w
+       LEFT JOIN widget_polling_config wpc ON wpc.widget_id = w.id
+       LEFT JOIN widget_polling_config legacy
+         ON legacy.widget_id IS NULL AND legacy.widget_type = w.widget_type AND legacy.server_id = w.server_id
+      WHERE w.widget_type NOT IN (?, ?)
+        AND wpc.id IS NULL AND legacy.id IS NULL`,
+    NON_POLLABLE_TYPES
+  );
+
+  let created = 0;
+  for (const row of res.values || []) {
+    const [id, widgetType, serverId] = row as [string, string, string];
+    try {
+      await ensurePollingConfig({ id, widget_type: widgetType, server_id: serverId });
+      created++;
+    } catch (err) {
+      console.error(`Backfill polling config failed for widget ${id}:`, err);
+    }
+  }
+  return created;
+}
