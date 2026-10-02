@@ -20,18 +20,13 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
   const authBufferRef = useRef('');
   const authTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const passwordPromptShownRef = useRef(false);
-  const servicePromptRef = useRef<string>('');
+  // The service account (server.ssh_user). Used to detect when the user's shell
+  // exits back to the service account so the session can be closed instead of
+  // leaving the user on the service account.
+  const serviceUserRef = useRef('');
   // Windows: whether we've injected the identity marker command into the
   // user's shell (used to confirm we actually switched accounts).
   const userMarkerSentRef = useRef(false);
-  // Windows: password captured by the modal. It is fed to the PTY when the
-  // nested ssh prompts (like sshpass, but without piping stdin, which would
-  // turn off the TTY and make ssh print a banner instead of an interactive
-  // session).
-  const passwordRef = useRef('');
-  // Whether the password has already been written to the PTY, so it is never
-  // sent twice or leaked into the service-account shell before ssh starts.
-  const passwordSentRef = useRef(false);
   
   const terminalRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
@@ -48,8 +43,6 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
 
   const [status, setStatus] = useState<ConnectionStatus>('idle');
   const [error, setError] = useState<string | null>(null);
-  const [showPasswordModal, setShowPasswordModal] = useState(false);
-  const [passwordInput, setPasswordInput] = useState('');
   const [username, setUsername] = useState<string>(() => 
     localStorage.getItem(`bosun-terminal-user-${serverId}`) || ''
   );
@@ -69,6 +62,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       const res = await fetchWithAuth(`/api/servers/${serverId}`);
       const j = await res.json();
       platformRef.current = j.data?.platform === 'windows' ? 'windows' : 'linux';
+      serviceUserRef.current = (j.data?.ssh_user || '').trim();
     } catch {
       platformRef.current = 'linux';
     }
@@ -122,7 +116,6 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       // so reattach knows session is already authenticated
       authBufferRef.current = '';
       passwordPromptShownRef.current = false;
-      servicePromptRef.current = '';
       userMarkerSentRef.current = false;
       tsm.setSessionStatus(widgetId, 'disconnected');
       return;
@@ -164,9 +157,24 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
     authenticatedRef.current = false;
     authBufferRef.current = '';
     passwordPromptShownRef.current = false;
-    servicePromptRef.current = '';
     userMarkerSentRef.current = false;
   }, [widgetId]);
+
+  // True when the stream shows we've dropped back to the service account (the
+  // user ran `exit`), so the session can be closed instead of left on the
+  // service account. Keyed on the service account name (ssh_user), which
+  // differs from the login user, to avoid matching the user's own prompt.
+  const isBackOnService = useCallback((data: string, user: string) => {
+    const svc = serviceUserRef.current;
+    if (!svc || svc.toLowerCase() === user.toLowerCase()) return false;
+    const esc = svc.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (platformRef.current === 'windows') {
+      return new RegExp('(^|\\r?\\n)\\s*PS\\s+[^\\r\\n>]*' + esc + '[^\\r\\n>]*>\\s*$', 'i').test(data) ||
+        /Connection to localhost closed\./i.test(data);
+    }
+    return new RegExp('(^|\\r?\\n)\\s*' + esc + '@[^\\r\\n]*[:#$]\\s*$', 'm').test(data);
+  }, []);
+
   const connect = useCallback(async (targetUsername?: string) => {
     const userToUse = (targetUsername || username).trim();
     if (!userToUse) {
@@ -285,23 +293,12 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
     setStatus('connecting');
     setError(null);
 
-    // Windows switches accounts with a nested ssh, so collect the password in
-    // a modal while the service-account shell initializes.
-    if (platformRef.current === 'windows') {
-      passwordRef.current = '';
-      setPasswordInput('');
-      setShowPasswordModal(true);
-    }
-
     // Reset all auth refs
     suSentRef.current = false;
     authenticatedRef.current = false;
     authBufferRef.current = '';
     passwordPromptShownRef.current = false;
-    servicePromptRef.current = '';
     userMarkerSentRef.current = false;
-    passwordRef.current = '';
-    passwordSentRef.current = false;
     loginUsernameRef.current = userToUse;
 
     try {
@@ -349,19 +346,17 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
           }
         }, 200);
 
-        // Start auth timeout. Windows gets longer because the user types a
-        // password into the modal before the nested ssh completes.
-        const authTimeoutMs = platformRef.current === 'windows' ? 120000 : 15000;
+        // Start auth timeout. It covers both the account switch and the user
+        // typing the password into the terminal.
         authTimeoutRef.current = setTimeout(() => {
           if (!authenticatedRef.current) {
             console.log('[WS] Auth timeout');
-            setShowPasswordModal(false);
             setError('Authentication timed out');
             ws.close();
             setStatus('error');
             statusRef.current = 'error';
           }
-        }, authTimeoutMs);
+        }, 60000);
       };
 
       ws.onmessage = (event) => {
@@ -411,20 +406,14 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
         }
 
         // ========== AUTH PHASE (Linux: interactive `su -`) ==========
-        // Windows uses a password modal + nested ssh; see WINDOWS NESTED-SSH
-        // AUTH below.
+        // Windows uses a nested ssh with the same in-terminal `Password: `
+        // prompt; see WINDOWS NESTED-SSH AUTH below.
         if (!authenticatedRef.current && platformRef.current !== 'windows') {
           authBufferRef.current += data;
 
           // Phase 2: Send su after first output (service shell ready)
           if (!suSentRef.current && !authenticatedRef.current) {
             if (suSentRef.current) return;
-
-            const promptMatch = authBufferRef.current.match(/\S+@\S+[:#$]\s*$/m);
-            if (promptMatch) {
-              servicePromptRef.current = promptMatch[0].trim();
-              console.log('[WS] Captured service prompt:', servicePromptRef.current);
-            }
 
             setTimeout(() => {
               if (suSentRef.current || authenticatedRef.current) return;
@@ -461,12 +450,17 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
             // by the PTY/echo handling; synthesize it so it is always visible.
             if (termRef.current) {
               termRef.current.write('Password: ');
+              termRef.current.focus();
             }
             return;
           }
 
           // After password prompt shown, pass output to terminal
           if (passwordPromptShownRef.current) {
+            // Refill the buffer each chunk so a prompt split across writes is
+            // still detected (the buffer is cleared at Phase 3).
+            authBufferRef.current += data;
+
             if (authBufferRef.current.includes('Authentication failure') ||
                 authBufferRef.current.includes('su: ') ||
                 authBufferRef.current.includes('incorrect password') ||
@@ -479,20 +473,26 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
               return;
             }
 
-            if (data.includes(userToUse + '@') ||
-                (authBufferRef.current.includes(userToUse + '@'))) {
+            // Write the output (including the user's new prompt) so the shell
+            // appears immediately once the password is accepted.
+            if (termRef.current) {
+              termRef.current.write(data);
+              tsm.appendToBuffer(widgetId, data);
+            }
+
+            // Success: the user's own prompt (e.g. lango@host:~$).
+            const userPromptRe = new RegExp('^' + userToUse.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '@[^\\r\\n]*[:#$]\\s*$', 'm');
+            if (userPromptRe.test(authBufferRef.current) ||
+                data.includes(userToUse + '@')) {
               authenticatedRef.current = true;
               suSentRef.current = true;
               if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
               authBufferRef.current = '';
               console.log('[WS] Authentication successful for', userToUse);
+              setStatus('connected');
+              statusRef.current = 'connected';
               tsm.setSessionStatus(widgetId, 'connected');
               return;
-            }
-
-            if (termRef.current) {
-              termRef.current.write(data);
-              tsm.appendToBuffer(widgetId, data);
             }
           }
 
@@ -500,9 +500,10 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
         }
 
         // ========== WINDOWS NESTED-SSH AUTH ==========
-        // The password modal drives the prompt + input. Here we feed the
-        // password when ssh asks, then confirm the account with the BOSUN_USER
-        // marker and clear the screen on success.
+        // Same interaction as Linux: once the nested ssh asks for the password,
+        // synthesize `Password: ` in the terminal and let the user type it there
+        // (input flows through term.onData -> ws.send). Confirm the account with
+        // the BOSUN_USER marker, then clear the screen on success.
         if (!authenticatedRef.current && platformRef.current === 'windows') {
           // Start the nested ssh login once the service-account shell is ready.
           // Mirrors the Linux path: send after the first output rather than
@@ -521,21 +522,29 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
           }
 
           if (!passwordPromptShownRef.current) {
-            // Feed the password as soon as ssh asks for it. The buffer is
-            // cleared each time and never rendered, so the echoed command line
-            // (which contains "password") cannot trip this.
+            // Buffer the pre-prompt preamble (the echoed ssh command and the
+            // service prompt) and show only a clean `Password: `. Anchor on the
+            // real ssh prompt so the echoed command line cannot trip this.
             const tail = authBufferRef.current + data;
             if (/password[^\r\n]*:\s*$/i.test(tail.trimEnd()) ||
                 /@[^\s']*'s password/i.test(tail)) {
               passwordPromptShownRef.current = true;
               authBufferRef.current = '';
-              // Only answer once the nested ssh has actually started; otherwise
-              // the password could leak into the service-account shell.
-              if (suSentRef.current && passwordRef.current &&
-                  !passwordSentRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
-                passwordSentRef.current = true;
-                wsRef.current.send(passwordRef.current + '\r');
+              setStatus('connected');
+              statusRef.current = 'connected';
+              if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
+              if (termRef.current) {
+                termRef.current.write('Password: ');
+                termRef.current.focus();
               }
+              setTimeout(() => {
+                if (fitAddonRef.current && termRef.current) {
+                  try { fitAddonRef.current.fit(); } catch {}
+                  if (wsRef.current?.readyState === WebSocket.OPEN) {
+                    wsRef.current.send(JSON.stringify({ type: 'resize', cols: termRef.current.cols, rows: termRef.current.rows }));
+                  }
+                }
+              }, 100);
             } else {
               authBufferRef.current = tail;
             }
@@ -554,7 +563,6 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
               /@[^\s']*'s password:\s*$/i.test(data.trimEnd())) {
             if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
             cleanup();
-            setShowPasswordModal(false);
             setError('Login failed - check your username and password');
             setStatus('error');
             statusRef.current = 'error';
@@ -586,7 +594,6 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
             if (who && who !== norm(userToUse)) {
               if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
               cleanup();
-              setShowPasswordModal(false);
               setError('Login failed - could not switch to your account');
               setStatus('error');
               statusRef.current = 'error';
@@ -596,7 +603,6 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
             suSentRef.current = true;
             if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
             authBufferRef.current = '';
-            setShowPasswordModal(false);
             setStatus('connected');
             statusRef.current = 'connected';
             tsm.setSessionStatus(widgetId, 'connected');
@@ -619,7 +625,6 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
           if (/permission denied|access is denied|logon failure|1326|1327/i.test(authBufferRef.current)) {
             if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
             cleanup();
-            setShowPasswordModal(false);
             setError('Login failed - check your username and password');
             setStatus('error');
             statusRef.current = 'error';
@@ -629,14 +634,15 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
         }
 
         // ========== NORMAL MODE ==========
-        // Linux: returning to the service prompt means the su switch failed.
-        if (platformRef.current !== 'windows' &&
-            servicePromptRef.current && data.includes(servicePromptRef.current)) {
-          console.log('[WS] Detected return to service account, closing session');
+        // If the user's shell exits we drop back to the service account. Close
+        // the session instead of leaving the user on the service account.
+        if (isBackOnService(data, userToUse)) {
+          console.log('[WS] Back on service account, closing session');
           cleanup();
-          setError('Login failed - could not switch to your account');
-          setStatus('error');
-          statusRef.current = 'error';
+          setError('Session ended');
+          setStatus('disconnected');
+          statusRef.current = 'disconnected';
+          tsm.setSessionStatus(widgetId, 'disconnected');
           return;
         }
 
@@ -662,7 +668,6 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       ws.onclose = (event) => {
         if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
         console.log('[WS] Disconnected:', event.code, event.reason);
-        setShowPasswordModal(false);
         setStatus('idle');
         statusRef.current = 'idle';
         
@@ -674,7 +679,6 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
         if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
         console.error('[WS] Error:', event);
         setError('WebSocket connection error');
-        setShowPasswordModal(false);
         setStatus('error');
         statusRef.current = 'error';
       };
@@ -685,12 +689,11 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       setStatus('error');
       statusRef.current = 'error';
     }
-  }, [username, sessionId, serverId, cleanup, ensurePlatform]); // Removed status from deps
+  }, [username, sessionId, serverId, cleanup, ensurePlatform, isBackOnService]); // Removed status from deps
 
   // Disconnect from WebSocket server - FULL destroy (user clicked disconnect button)
   const disconnect = useCallback(() => {
     cleanup(false); // keepAlive = false - destroy session completely
-    setShowPasswordModal(false);
     setStatus('idle');
     statusRef.current = 'idle';
   }, [cleanup]);
@@ -836,6 +839,17 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
           return;
         }
         
+        // If the user's shell exits we drop back to the service account; close.
+        if (isBackOnService(data, loginUsernameRef.current)) {
+          console.log('[WS] Back on service account (reattached), closing session');
+          cleanup();
+          setError('Session ended');
+          setStatus('disconnected');
+          statusRef.current = 'disconnected';
+          tsm.setSessionStatus(widgetId, 'disconnected');
+          return;
+        }
+
         // Normal authenticated output — write to terminal and buffer
         if (termRef.current) {
           termRef.current.write(data);
@@ -892,30 +906,6 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
     }
   };
 
-  // Submit the Windows password. If ssh has already prompted, send it now;
-  // otherwise the auth handler sends it as soon as the prompt appears.
-  const handlePasswordSubmit = () => {
-    const pw = passwordInput;
-    if (!pw) return;
-    passwordRef.current = pw;
-    setPasswordInput('');
-    setShowPasswordModal(false);
-    // If ssh already prompted before the modal was submitted, answer it now.
-    if (suSentRef.current && passwordPromptShownRef.current &&
-        !passwordSentRef.current && wsRef.current?.readyState === WebSocket.OPEN) {
-      passwordSentRef.current = true;
-      wsRef.current.send(pw + '\r');
-    }
-  };
-
-  const handlePasswordCancel = () => {
-    setPasswordInput('');
-    setShowPasswordModal(false);
-    cleanup();
-    setStatus('idle');
-    statusRef.current = 'idle';
-  };
-
   return (
     <div className="flex flex-col h-full">
       {/* Terminal container */}
@@ -966,42 +956,8 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
           </div>
         )}
         
-        {/* Windows password modal */}
-        {showPasswordModal && (
-          <div className="absolute inset-0 bg-gray-900 flex items-center justify-center p-4 z-10">
-            <div className="w-full max-w-xs bg-gray-800 border border-gray-600 rounded p-4">
-              <p className="text-gray-200 text-sm mb-1">Enter password for</p>
-              <p className="text-gray-400 text-xs mb-3 break-all">{username}</p>
-              <input
-                type="password"
-                autoFocus
-                value={passwordInput}
-                onChange={(e) => setPasswordInput(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && handlePasswordSubmit()}
-                placeholder="Password"
-                className="w-full px-3 py-2 bg-gray-900 border border-gray-600 rounded text-gray-200 text-sm mb-3"
-              />
-              <div className="flex gap-2">
-                <button
-                  onClick={handlePasswordSubmit}
-                  disabled={!passwordInput}
-                  className="flex-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  Connect
-                </button>
-                <button
-                  onClick={handlePasswordCancel}
-                  className="px-3 py-1.5 bg-gray-700 hover:bg-gray-600 text-gray-200 text-sm rounded"
-                >
-                  Cancel
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
         {/* Connecting/Authenticating overlay */}
-        {!showPasswordModal && (status === 'connecting' || status === 'authenticating') && (
+        {(status === 'connecting' || status === 'authenticating') && (
           <div className="absolute inset-0 bg-gray-900/80 flex items-center justify-center">
             <p className="text-gray-300 text-sm">
               {status === 'connecting' ? 'Connecting...' : `Authenticating as ${username}...`}
