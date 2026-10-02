@@ -33,7 +33,7 @@ export default function ServerForm() {
     name: '',
     hostname: '',
     ssh_port: 22,
-    ssh_user: 'svc-bosun',
+    ssh_user: 'bosun-svc',
     ssh_key_id: '',
     notes: '',
     platform: 'linux'
