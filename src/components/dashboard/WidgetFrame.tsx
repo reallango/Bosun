@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import dynamic from 'next/dynamic';
 import { OSInfoWidget } from '@/components/widgets/os-info';
 import { CPUMemoryWidget } from '@/components/widgets/cpu-memory';
 import { DiskUsageWidget } from '@/components/widgets/disk-usage';
@@ -8,15 +9,24 @@ import { NetworkWidget } from '@/components/widgets/network';
 import { SystemServicesWidget } from '@/components/widgets/system-services';
 import { ServerSummaryWidget } from '@/components/widgets/server-summary';
 import { GPUMonitoringWidget } from '@/components/widgets/gpu-monitoring';
-import { SSHTerminalWidget } from '@/components/widgets/ssh-terminal';
 import { DockerContainersWidget } from '@/components/widgets/docker-containers';
 import { CustomCommandWidget } from '@/components/widgets/custom-command';
 import { OSUpdateCheckWidget } from '@/components/widgets/os-update-check';
+import { WidgetLoading } from '@/components/widgets/WidgetLoading';
 import { WidgetSettingsDialog } from '@/components/dialogs/WidgetSettingsDialog';
 import { DeleteConfirmDialog } from '@/components/dialogs/DeleteConfirmDialog';
 import { customWidgetComponents } from '@/components/widgets/custom-registry';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+
+// xterm (+ the terminal session manager that re-exports it) is ~390 kB of JS.
+// Loading it eagerly would add that to every dashboard route, even though most
+// dashboards never render a terminal. next/dynamic keeps it out of the initial
+// bundle and fetches it only when an ssh_terminal widget actually mounts.
+const SSHTerminalWidget = dynamic(
+  () => import('@/components/widgets/ssh-terminal').then(m => m.SSHTerminalWidget),
+  { ssr: false, loading: () => <WidgetLoading /> }
+);
 
 interface WidgetFrameProps {
   widgetId: string;
