@@ -725,6 +725,17 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
     
     // Gap 1: Reattach if WebSocket is live (status may be 'disconnected' from cleanup, but session might still be alive)
     if (existingSession?.ws && existingSession.ws.readyState === WebSocket.OPEN) {
+      // If the session was still authenticating when we detached, its auth
+      // handler is gone (the component that owned it unmounted), so it can
+      // never complete. Restart a clean connect instead of falsely marking the
+      // session connected.
+      if (existingSession.status === 'connecting' || existingSession.status === 'authenticating') {
+        console.log('[TSM] Session was mid-auth, restarting connect:', widgetId);
+        cleanup(false);
+        connect(existingSession.username);
+        return;
+      }
+
       console.log('[TSM] Found existing session, reattaching:', widgetId);
       
       // Create new Terminal
