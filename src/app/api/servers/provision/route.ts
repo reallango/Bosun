@@ -213,6 +213,24 @@ Write-Output 'OK'
     }
     steps.push('Public key installed');
 
+    // Enable Secondary Logon so `runas` (the Windows equivalent of `su -`) works
+    // in the terminal. It is disabled by default on Server SKUs. Idempotent.
+    const seclogonScript = `
+$ErrorActionPreference = 'SilentlyContinue'
+$svc = Get-Service -Name seclogon -ErrorAction SilentlyContinue
+if ($svc) {
+  Set-Service -Name seclogon -StartupType Manual
+  if ($svc.Status -ne 'Running') { Start-Service -Name seclogon }
+  Write-Output 'OK'
+}
+`.trim();
+    const seclogonResult = await sshExec(sshConfig, powershellCommand(seclogonScript));
+    if (seclogonResult.stdout.includes('OK')) {
+        steps.push('Enabled Secondary Logon service (runas)');
+    } else {
+        steps.push(`Secondary Logon service not enabled: ${seclogonResult.stderr.trim() || 'service unavailable'}`);
+    }
+
     return { steps };
 }
 

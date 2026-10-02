@@ -32,6 +32,8 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
 
   // Login username ref - accessible inside onmessage closure
   const loginUsernameRef = useRef('');
+  // Server platform ('linux' | 'windows') - drives the auth command/flow
+  const platformRef = useRef<string>('linux');
 
   const [status, setStatus] = useState<ConnectionStatus>('idle');
   const [error, setError] = useState<string | null>(null);
@@ -44,6 +46,24 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
   useEffect(() => {
     loginUsernameRef.current = username;
   }, [username]);
+
+  // Load the server platform once (cached in a ref). The auth flow differs:
+  // Linux uses `su - <user>`, Windows uses `runas /user:<user>`.
+  const platformLoadedRef = useRef(false);
+  const ensurePlatform = useCallback(async () => {
+    if (platformLoadedRef.current) return platformRef.current;
+    try {
+      const res = await fetchWithAuth(`/api/servers/${serverId}`);
+      const j = await res.json();
+      platformRef.current = j.data?.platform === 'windows' ? 'windows' : 'linux';
+    } catch {
+      platformRef.current = 'linux';
+    }
+    platformLoadedRef.current = true;
+    return platformRef.current;
+  }, [serverId]);
+
+  useEffect(() => { ensurePlatform(); }, [ensurePlatform]);
 
   // Save username to localStorage when changed
   const handleUsernameChange = (value: string) => {
@@ -244,6 +264,9 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       }
     });
 
+    // Resolve the platform before the WS so the auth flow (su vs runas) is known.
+    await ensurePlatform();
+
     setStatus('connecting');
     setError(null);
 
@@ -381,9 +404,18 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
               // Triple-check right before sending to prevent duplicates
               if (suSentRef.current || authenticatedRef.current) return;
               if (wsRef.current?.readyState === WebSocket.OPEN) {
-                wsRef.current.send(`su - ${userToUse}\r`);
+                if (platformRef.current === 'windows') {
+                  // Windows: switch to the user's own account via runas, which
+                  // prompts for that user's password on the console (the Windows
+                  // equivalent of `su -`). Local accounts need `.\user`.
+                  const acct = userToUse.includes('\\') ? userToUse : `.\\${userToUse}`;
+                  wsRef.current.send(`runas /user:${acct} powershell\r`);
+                  console.log('[WS] Sent runas command for', acct);
+                } else {
+                  wsRef.current.send(`su - ${userToUse}\r`);
+                  console.log('[WS] Sent su command for', userToUse);
+                }
                 suSentRef.current = true; // Set IMMEDIATELY before logging
-                console.log('[WS] Sent su command for', userToUse);
               }
             }, 500);
             return; // Don't display bosun-svc prompt
@@ -393,6 +425,10 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
           if (!passwordPromptShownRef.current &&
               authBufferRef.current.toLowerCase().includes('password')) {
             passwordPromptShownRef.current = true;
+            // Drop the pre-prompt buffer so the earlier service-account prompt
+            // cannot be mistaken for the user's own shell (notably on Windows,
+            // where both are `PS C:\...>`).
+            authBufferRef.current = '';
             setStatus('connected');
             statusRef.current = 'connected';
             // Clear the timeout since we got password prompt
@@ -410,8 +446,9 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
                 }
               }
             }, 100);
-            // Write clean password prompt to terminal
-            if (termRef.current) {
+            // Write clean password prompt to terminal. runas prints its own
+            // "Enter the password for ..." prompt, so only synthesize for Linux.
+            if (termRef.current && platformRef.current !== 'windows') {
               termRef.current.write('Password: ');
             }
             return;
@@ -419,11 +456,14 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
 
           // After password prompt shown, pass output to terminal
           if (passwordPromptShownRef.current) {
-            // Check for failure
+            // Check for failure (Linux su errors + Windows runas errors)
             if (authBufferRef.current.includes('Authentication failure') ||
                 authBufferRef.current.includes('su: ') ||
                 authBufferRef.current.includes('incorrect password') ||
-                authBufferRef.current.includes('does not exist')) {
+                authBufferRef.current.includes('does not exist') ||
+                authBufferRef.current.includes('logon failure') ||
+                authBufferRef.current.includes('1326') ||
+                authBufferRef.current.includes('1327')) {
               if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
               cleanup();
               setError('Login failed - check your username and password');
@@ -432,9 +472,13 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
               return;
             }
 
-            // Check for success (user's prompt appeared)
-            if (data.includes(userToUse + '@') ||
-                (authBufferRef.current.includes(userToUse + '@'))) {
+            // Check for success (user's prompt appeared). Linux shows
+            // `user@host`; Windows shows a PowerShell/cmd prompt (`PS C:\...>`).
+            const reachedUserShell = platformRef.current === 'windows'
+              ? /(?:^|\r?\n)\s*(?:PS\s+)?[A-Za-z]:\\.*>\s*$/.test(authBufferRef.current) ||
+                /(?:^|\r?\n)PS\s+[^>\r\n]*>\s*$/.test(authBufferRef.current)
+              : data.includes(userToUse + '@') || authBufferRef.current.includes(userToUse + '@');
+            if (reachedUserShell) {
               authenticatedRef.current = true;
               suSentRef.current = true; // Gap 3: preserve auth state
               if (authTimeoutRef.current) clearTimeout(authTimeoutRef.current);
@@ -519,7 +563,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       setStatus('error');
       statusRef.current = 'error';
     }
-  }, [username, sessionId, serverId, cleanup]); // Removed status from deps
+  }, [username, sessionId, serverId, cleanup, ensurePlatform]); // Removed status from deps
 
   // Disconnect from WebSocket server - FULL destroy (user clicked disconnect button)
   const disconnect = useCallback(() => {

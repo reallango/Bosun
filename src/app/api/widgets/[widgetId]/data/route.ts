@@ -23,6 +23,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     if (!srvR.values?.length) return NextResponse.json({ error: { message: 'Server not found' } }, { status: 404 });
     const srv = rowsToObjects(srvR)[0] as any;
 
+    // Server Summary is served live from the servers row so it always reflects
+    // the current is_online / os_type (the poller no longer caches it).
+    if (widget.widget_type === 'server_summary') {
+      return NextResponse.json({ data: { is_online: !!srv.is_online, hostname: srv.hostname, os_type: srv.os_type, os_version: srv.os_version, name: srv.name } });
+    }
+
     // Try cache first (unless forceRefresh)
     if (!forceRefresh) {
       const cacheRes = await rqlite.query(`
@@ -44,10 +50,6 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
 
     // Fall back to live SSH (original logic continues...)
-
-    if (widget.widget_type === 'server_summary') {
-      return NextResponse.json({ data: { is_online: !!srv.is_online, hostname: srv.hostname, os_type: srv.os_type, os_version: srv.os_version, name: srv.name } });
-    }
 
     if (!srv.ssh_key_id) return NextResponse.json({ error: { message: 'No SSH key' } }, { status: 400 });
     const kR = await rqlite.query('SELECT private_key_enc FROM ssh_keys WHERE id=?', [srv.ssh_key_id]);

@@ -19,7 +19,7 @@ export interface PlatformServer {
   platform?: string | null;
 }
 
-export function isWindows(server: PlatformServer | null | undefined): boolean {
+export function isWindows(server: { platform?: string | null } | null | undefined): boolean {
   return server?.platform === 'windows';
 }
 

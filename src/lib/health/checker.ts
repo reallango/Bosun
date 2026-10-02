@@ -1,6 +1,7 @@
 import { rqlite } from '../db/rqlite-client';
 import { sshPool, SSHConnectionConfig } from '../ssh/connection-pool';
-import { isWindows, powershellCommand } from '../ssh/platform';
+import { powershellCommand } from '../ssh/platform';
+import { detectServerOs } from '../ssh/detect';
 import { decrypt } from '../crypto/keys';
 
 let healthCheckInterval: NodeJS.Timeout | null = null;
@@ -12,10 +13,10 @@ export async function startHealthChecker(): Promise<void> {
   
   const checkServers = async () => {
     try {
-      const result = await rqlite.query(`SELECT id, hostname, ssh_port, ssh_user, ssh_key_id, platform FROM servers`);
+      const result = await rqlite.query(`SELECT id, hostname, ssh_port, ssh_user, ssh_key_id, platform, os_type FROM servers`);
       
       for (const row of result.values) {
-        const [id, hostname, sshPort, sshUser, sshKeyId, platform] = row;
+        const [id, hostname, sshPort, sshUser, sshKeyId, platform, osType] = row;
         if (!hostname || !sshUser || !sshKeyId) continue;
 
         try {
@@ -46,6 +47,17 @@ export async function startHealthChecker(): Promise<void> {
             `UPDATE servers SET is_online = 1, last_seen = CURRENT_TIMESTAMP WHERE id = ?`,
             [id]
           );
+
+          // First successful contact on a server whose OS is still unknown:
+          // detect and persist os_type/cpu/ram so the UI stops showing
+          // "Unknown OS" without a manual Detect OS click. Runs at most once.
+          if (!osType) {
+            try {
+              await detectServerOs(id as string, { platform: platform as string }, sshConfig);
+            } catch (detectErr) {
+              console.error(`OS detect failed for ${id}:`, detectErr);
+            }
+          }
         } catch {
           // Mark as offline
           await rqlite.execute(
@@ -59,15 +71,21 @@ export async function startHealthChecker(): Promise<void> {
     }
   };
 
-  // Initial check
-  await checkServers();
-
-  // Get check interval from config
-  const configResult = await rqlite.query(`SELECT value FROM app_config WHERE key = 'health.check_interval_sec'`);
-  const intervalSec = parseInt(configResult.values[0]?.[0] as string || '30', 10);
+  // Resolve the interval and schedule before the first check, so server startup
+  // is never blocked waiting on SSH/rqlite.
+  let intervalSec = 30;
+  try {
+    const configResult = await rqlite.query(`SELECT value FROM app_config WHERE key = 'health.check_interval_sec'`);
+    intervalSec = parseInt(configResult.values[0]?.[0] as string || '30', 10);
+  } catch (err) {
+    console.error('Health checker: could not read interval, using 30s:', err);
+  }
 
   // Schedule periodic checks
   healthCheckInterval = setInterval(checkServers, intervalSec * 1000);
+
+  // Fire-and-forget the initial check so `register()` returns promptly.
+  void checkServers();
 }
 
 export function stopHealthChecker(): void {
