@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { EditServerModal } from '@/components/settings/EditServerModal';
+import { wakeServer } from '@/lib/api/wake';
 
 interface SSHKey {
   id: string;
@@ -25,6 +26,7 @@ interface Server {
   is_online: boolean;
   hostname?: string;
   notes?: string;
+  mac_address?: string | null;
 }
 
 export default function ServersPage() {
@@ -32,6 +34,7 @@ export default function ServersPage() {
   const [loading, setLoading] = useState(true);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [selectedServer, setSelectedServer] = useState<Server | null>(null);
+  const [wakingId, setWakingId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchServers();
@@ -52,6 +55,22 @@ export default function ServersPage() {
   const handleEditServer = (server: Server) => {
     setSelectedServer(server);
     setEditModalOpen(true);
+  };
+
+  const handleWake = async (server: Server) => {
+    if (!server.mac_address) {
+      alert('No MAC address configured for this server. Add one under Edit.');
+      return;
+    }
+    setWakingId(server.id);
+    try {
+      const result = await wakeServer(server.id);
+      alert(`Magic packet sent to ${result.mac} via ${result.broadcast}:${result.port}. The host should power on shortly.`);
+    } catch (err) {
+      alert(`Failed to wake ${server.name}: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setWakingId(null);
+    }
   };
 
   return (
@@ -79,6 +98,7 @@ export default function ServersPage() {
                   <TableRow>
                     <TableHead>Name</TableHead>
                     <TableHead>Hostname</TableHead>
+                    <TableHead>MAC</TableHead>
                     <TableHead>SSH</TableHead>
                     <TableHead>OS</TableHead>
                     <TableHead>Status</TableHead>
@@ -95,6 +115,13 @@ export default function ServersPage() {
                       </TableCell>
                       <TableCell>{server.host}:{server.ssh_port}</TableCell>
                       <TableCell>
+                        {server.mac_address ? (
+                          <code className="text-xs">{server.mac_address}</code>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">-</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
                         {server.ssh_key_id ? (
                           <span className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded">Configured</span>
                         ) : (
@@ -109,12 +136,22 @@ export default function ServersPage() {
                         </span>
                       </TableCell>
                       <TableCell>
-                        <button
-                          onClick={() => handleEditServer(server)}
-                          className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors"
-                        >
-                          Edit
-                        </button>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleWake(server)}
+                            disabled={!server.mac_address || wakingId === server.id}
+                            title={server.mac_address ? 'Send a Wake-on-LAN magic packet' : 'Add a MAC address to enable Wake-on-LAN'}
+                            className="text-xs px-2 py-1 bg-purple-100 text-purple-700 rounded hover:bg-purple-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                          >
+                            {wakingId === server.id ? 'Waking...' : 'Wake'}
+                          </button>
+                          <button
+                            onClick={() => handleEditServer(server)}
+                            className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors"
+                          >
+                            Edit
+                          </button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}

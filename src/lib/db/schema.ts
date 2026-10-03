@@ -17,6 +17,7 @@ export interface DBServer {
   cpu_cores: number | null;
   total_ram_mb: number | null;
   tags: string;
+  mac_address: string | null;
   created_at: string;
   updated_at: string;
 }

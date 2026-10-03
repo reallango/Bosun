@@ -7,16 +7,18 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
+import { wakeServer } from '@/lib/api/wake';
 
 export default function EditServerPage() {
     const { serverId } = useParams<{ serverId: string }>();
     const router = useRouter();
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
+    const [waking, setWaking] = useState(false);
     const [error, setError] = useState('');
     const [sshKeys, setSSHKeys] = useState<{ id: string; name: string; fingerprint: string }[]>([]);
     const [form, setForm] = useState({
-        name: '', hostname: '', ssh_port: 22, ssh_user: '', ssh_key_id: '', notes: '', platform: 'linux',
+        name: '', hostname: '', ssh_port: 22, ssh_user: '', ssh_key_id: '', notes: '', platform: 'linux', mac_address: '',
     });
 
     useEffect(() => {
@@ -31,6 +33,7 @@ export default function EditServerPage() {
                     ssh_key_id: j.data.ssh_key_id || '',
                     notes: j.data.notes || '',
                     platform: j.data.platform || 'linux',
+                    mac_address: j.data.mac_address || '',
                 });
             })
             .finally(() => setLoading(false));
@@ -75,6 +78,19 @@ export default function EditServerPage() {
         alert(d.data
             ? `✅ Detected:\nOS: ${d.data.os_type} ${d.data.os_version}\nKernel: ${d.data.kernel_version}\nCPU: ${d.data.cpu_model} (${d.data.cpu_cores} cores)\nRAM: ${d.data.total_ram_mb} MB`
             : `❌ Failed: ${d.error?.message}`);
+    };
+
+    const wake = async () => {
+        if (!form.mac_address) { alert('Add a MAC address first to use Wake-on-LAN.'); return; }
+        setWaking(true);
+        try {
+            const result = await wakeServer(serverId, { mac_address: form.mac_address });
+            alert(`✅ Magic packet sent to ${result.mac} via ${result.broadcast}:${result.port}. The host should power on shortly.`);
+        } catch (err) {
+            alert(`❌ Failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        } finally {
+            setWaking(false);
+        }
     };
 
     if (loading) {
@@ -148,12 +164,25 @@ export default function EditServerPage() {
                                 onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
                         </div>
 
+                        <div>
+                            <Label htmlFor="mac_address">MAC Address</Label>
+                            <Input id="mac_address" value={form.mac_address} placeholder="AA:BB:CC:DD:EE:FF"
+                                className="font-mono"
+                                onChange={e => setForm(f => ({ ...f, mac_address: e.target.value }))} />
+                            <p className="text-xs text-muted-foreground mt-1">
+                                Required for Wake-on-LAN. Use the NIC enabled for wake.
+                            </p>
+                        </div>
+
                         <div className="flex gap-2 pt-4 border-t">
                             <Button onClick={save} disabled={saving}>
                                 {saving ? 'Saving...' : 'Save Changes'}
                             </Button>
                             <Button variant="outline" onClick={test}>Test Connection</Button>
                             <Button variant="outline" onClick={detect}>Detect OS</Button>
+                            <Button variant="outline" onClick={wake} disabled={waking}>
+                                {waking ? 'Waking...' : 'Wake'}
+                            </Button>
                             <div className="flex-1" />
                             <Button variant="destructive" onClick={del}>Delete Server</Button>
                         </div>

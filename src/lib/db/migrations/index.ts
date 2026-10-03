@@ -323,6 +323,15 @@ const MIGRATION_010: string[] = [
     `ALTER TABLE widget_polling_config ADD COLUMN use_database INTEGER`,
 ];
 
+// Migration 011: Wake-on-LAN target MAC address per server.
+//
+// The MAC is the one identifier needed to send a magic packet to an offline
+// host, so it is stored on the server row (nullable - hosts without WoL or
+// without a configured NIC simply leave it blank).
+const MIGRATION_011: string[] = [
+    `ALTER TABLE servers ADD COLUMN mac_address TEXT`,
+];
+
 // Migration registry
 const migrations: Record<string, string[]> = {
     '001': MIGRATION_001,
@@ -335,6 +344,7 @@ const migrations: Record<string, string[]> = {
     '008': MIGRATION_008,
     '009': MIGRATION_009,
     '010': MIGRATION_010,
+    '011': MIGRATION_011,
 };
 
 // All migration IDs this build expects to be applied, in order.
