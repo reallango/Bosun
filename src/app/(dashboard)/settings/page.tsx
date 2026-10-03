@@ -4,6 +4,7 @@ import { useState } from 'react';
 import Header from '@/components/layout/Header';
 import { useAuth } from '@/hooks/useAuth';
 import AppSettingsCard from '@/components/settings/AppSettingsCard';
+import WakeOnLanCard from '@/components/settings/WakeOnLanCard';
 
 export default function SettingsPage() {
   const { user } = useAuth();
@@ -50,6 +51,8 @@ export default function SettingsPage() {
         </div>
 
         <AppSettingsCard />
+
+        <WakeOnLanCard />
       </div>
     </>
   );

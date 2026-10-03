@@ -38,6 +38,7 @@ export const AuditActions = {
   SERVER_TEST: 'server.test',
   SERVER_DETECT: 'server.detect',
   SERVER_WAKE: 'server.wake',
+  SERVER_WOL_INSTALL: 'server.wol_install',
   SSH_KEY_CREATE: 'ssh_key.create',
   SSH_KEY_DELETE: 'ssh_key.delete',
   CONFIG_UPDATE: 'config.update'

@@ -332,6 +332,20 @@ const MIGRATION_011: string[] = [
     `ALTER TABLE servers ADD COLUMN mac_address TEXT`,
 ];
 
+// Migration 012: Wake-on-LAN "local server" settings.
+//
+// A magic packet must originate on the same L2 segment as the target, which the
+// Bosun container usually is not. `wol.local_server_id` names a managed server
+// (typically the Docker host) whose SSH credentials Bosun uses to run the WoL
+// utility; `wol.use_local_server` toggles that path; `wol.remote_wol_installed`
+// caches whether the utility was installed on that host so the wake route can
+// offer an install instead of re-probing on every failure.
+const MIGRATION_012: string[] = [
+    `INSERT OR IGNORE INTO app_config (key, value, description) VALUES ('wol.local_server_id', NULL, 'Server id whose host sends Wake-on-LAN packets on its own subnet')`,
+    `INSERT OR IGNORE INTO app_config (key, value, description) VALUES ('wol.use_local_server', 'false', 'Send Wake-on-LAN via the local server instead of from the Bosun container')`,
+    `INSERT OR IGNORE INTO app_config (key, value, description) VALUES ('wol.remote_wol_installed', 'false', 'Whether the Wake-on-LAN utility is installed on the local server')`,
+];
+
 // Migration registry
 const migrations: Record<string, string[]> = {
     '001': MIGRATION_001,
@@ -345,6 +359,7 @@ const migrations: Record<string, string[]> = {
     '009': MIGRATION_009,
     '010': MIGRATION_010,
     '011': MIGRATION_011,
+    '012': MIGRATION_012,
 };
 
 // All migration IDs this build expects to be applied, in order.

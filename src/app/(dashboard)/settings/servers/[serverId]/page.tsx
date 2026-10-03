@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
-import { wakeServer } from '@/lib/api/wake';
+import { wakeServer, installWol, WakeError } from '@/lib/api/wake';
 
 export default function EditServerPage() {
     const { serverId } = useParams<{ serverId: string }>();
@@ -85,9 +85,21 @@ export default function EditServerPage() {
         setWaking(true);
         try {
             const result = await wakeServer(serverId, { mac_address: form.mac_address });
-            alert(`✅ Magic packet sent to ${result.mac} via ${result.broadcast}:${result.port}. The host should power on shortly.`);
+            const from = result.via === 'local_server' && result.host ? ` from ${result.host}` : '';
+            alert(`✅ Magic packet sent to ${result.mac} via ${result.broadcast}:${result.port}${from}. The host should power on shortly.`);
         } catch (err) {
-            alert(`❌ Failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+            if (err instanceof WakeError && err.needsInstall) {
+                if (confirm(`${err.message}\n\nInstall wakeonlan on the local server now?`)) {
+                    try {
+                        const r = await installWol(serverId);
+                        alert(`✅ wakeonlan installed on ${r.host}. Try waking again.`);
+                    } catch (e2) {
+                        alert(`❌ Install failed: ${e2 instanceof Error ? e2.message : 'Unknown error'}`);
+                    }
+                }
+            } else {
+                alert(`❌ Failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+            }
         } finally {
             setWaking(false);
         }
