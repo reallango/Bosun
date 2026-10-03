@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { EditServerModal } from '@/components/settings/EditServerModal';
-import { wakeServer } from '@/lib/api/wake';
+import { wakeServer, installWol, WakeError } from '@/lib/api/wake';
 
 interface SSHKey {
   id: string;
@@ -65,9 +65,21 @@ export default function ServersPage() {
     setWakingId(server.id);
     try {
       const result = await wakeServer(server.id);
-      alert(`Magic packet sent to ${result.mac} via ${result.broadcast}:${result.port}. The host should power on shortly.`);
+      const from = result.via === 'local_server' && result.host ? ` from ${result.host}` : '';
+      alert(`Magic packet sent to ${result.mac} via ${result.broadcast}:${result.port}${from}. The host should power on shortly.`);
     } catch (err) {
-      alert(`Failed to wake ${server.name}: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      if (err instanceof WakeError && err.needsInstall) {
+        if (confirm(`${err.message}\n\nInstall wakeonlan on the local server now?`)) {
+          try {
+            const r = await installWol(server.id);
+            alert(`wakeonlan installed on ${r.host}. Try waking again.`);
+          } catch (e2) {
+            alert(`Install failed: ${e2 instanceof Error ? e2.message : 'Unknown error'}`);
+          }
+        }
+      } else {
+        alert(`Failed to wake ${server.name}: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      }
     } finally {
       setWakingId(null);
     }
