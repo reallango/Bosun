@@ -19,6 +19,7 @@ interface Server {
   ssh_key_id: string | null;
   notes?: string;
   platform?: string;
+  mac_address?: string | null;
 }
 
 interface EditServerModalProps {
@@ -30,7 +31,7 @@ interface EditServerModalProps {
 
 export function EditServerModal({ isOpen, onClose, server, onSave }: EditServerModalProps) {
   const [form, setForm] = useState({
-    name: '', hostname: '', ssh_port: 22, ssh_user: '', ssh_key_id: '', notes: '', platform: 'linux',
+    name: '', hostname: '', ssh_port: 22, ssh_user: '', ssh_key_id: '', notes: '', platform: 'linux', mac_address: '',
   });
   const [sshKeys, setSSHKeys] = useState<SSHKey[]>([]);
   const [loading, setLoading] = useState(false);
@@ -47,6 +48,7 @@ export function EditServerModal({ isOpen, onClose, server, onSave }: EditServerM
         ssh_key_id: server.ssh_key_id || '',
         notes: server.notes || '',
         platform: server.platform || 'linux',
+        mac_address: server.mac_address || '',
       });
       setError('');
 
@@ -59,7 +61,7 @@ export function EditServerModal({ isOpen, onClose, server, onSave }: EditServerM
 
   useEffect(() => {
     if (!isOpen) {
-      setForm({ name: '', hostname: '', ssh_port: 22, ssh_user: '', ssh_key_id: '', notes: '', platform: 'linux' });
+      setForm({ name: '', hostname: '', ssh_port: 22, ssh_user: '', ssh_key_id: '', notes: '', platform: 'linux', mac_address: '' });
       setError('');
     }
   }, [isOpen]);
@@ -193,6 +195,18 @@ export function EditServerModal({ isOpen, onClose, server, onSave }: EditServerM
               onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
               className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm"
             />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">MAC Address</label>
+            <input
+              type="text"
+              value={form.mac_address}
+              onChange={e => setForm(f => ({ ...f, mac_address: e.target.value }))}
+              placeholder="AA:BB:CC:DD:EE:FF"
+              className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm font-mono"
+            />
+            <p className="text-xs text-gray-500 mt-1">Required for Wake-on-LAN. Use the NIC enabled for wake.</p>
           </div>
         </div>
 
