@@ -212,7 +212,10 @@ async function getLinuxWidgetData(type, run, cfg = {}) {
       const lr = await run(listCmd);
       const packages = lr.stdout.trim().split('\n').filter(Boolean);
 
-      return { updatesAvailable: updateCount, packages, lastCheck: new Date().toISOString() };
+      // No per-poll timestamp here: this widget is cached change_only, so a
+      // value that changes on every poll would defeat change detection and grow
+      // the cache without bound. The route's `cachedAt` is the last-check time.
+      return { updatesAvailable: updateCount, securityUpdates: 0, rebootRequired: false, packages };
     }
 
     default:
