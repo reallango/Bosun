@@ -9,20 +9,12 @@ interface OSUpdateCheckWidgetProps {
   serverId: string;
 }
 
-interface Package {
-  name: string;
-  current_version: string;
-  new_version: string;
-  is_security: boolean;
-}
-
 interface OSUpdateData {
-  updates_available: number;
-  security_updates: number;
-  packages: Package[];
-  reboot_required: boolean;
-  last_checked: string;
-  os_type: string;
+  updatesAvailable: number;
+  securityUpdates?: number;
+  packages: string[];
+  rebootRequired?: boolean;
+  source?: string;
 }
 
 function timeAgo(dateString: string): string {
@@ -44,6 +36,7 @@ export function OSUpdateCheckWidget({ widgetId, serverId }: OSUpdateCheckWidgetP
   const [installResult, setInstallResult] = useState<string | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
   const [showPackages, setShowPackages] = useState(false);
+  const [cachedAt, setCachedAt] = useState<string | null>(null);
 
   // Load data on mount
   useEffect(() => {
@@ -58,6 +51,7 @@ export function OSUpdateCheckWidget({ widgetId, serverId }: OSUpdateCheckWidgetP
       const json = await res.json();
       if (json.data) {
         setData(json.data);
+        setCachedAt(json.cachedAt ?? null);
       } else if (json.error) {
         setError(json.error.message || 'Failed to check for updates');
       }
@@ -105,36 +99,47 @@ export function OSUpdateCheckWidget({ widgetId, serverId }: OSUpdateCheckWidgetP
     );
   }
 
+  if (data.source === 'placeholder') {
+    return (
+      <div className="p-4 text-sm text-muted-foreground">
+        OS update check is not supported on this platform.
+      </div>
+    );
+  }
+
+  const updates = data.updatesAvailable ?? 0;
+  const security = data.securityUpdates ?? 0;
+
   return (
     <div className="space-y-3 p-2">
       {/* Update count with color coding */}
-      {data.updates_available === 0 ? (
+      {updates === 0 ? (
         <div className="text-green-600 font-medium text-sm">✅ System up to date</div>
       ) : (
         <div className="space-y-1">
           <div className="text-yellow-600 font-medium text-sm">
-            📦 {data.updates_available} updates available
+            📦 {updates} updates available
           </div>
-          {data.security_updates > 0 && (
+          {security > 0 && (
             <div className="text-red-500 text-sm">
-              🔒 {data.security_updates} security updates
+              🔒 {security} security updates
             </div>
           )}
         </div>
       )}
 
       {/* Reboot required indicator */}
-      {data.reboot_required && (
+      {data.rebootRequired && (
         <div className="text-yellow-500 text-sm font-medium">⚠️ Reboot required</div>
       )}
 
       {/* Last checked relative timestamp */}
-      {data.last_checked && (
-        <div className="text-xs text-gray-500">Last checked: {timeAgo(data.last_checked)}</div>
+      {cachedAt && (
+        <div className="text-xs text-gray-500">Last checked: {timeAgo(cachedAt)}</div>
       )}
 
       {/* Install button - only when updates available */}
-      {data.updates_available > 0 && !showConfirm && (
+      {updates > 0 && !showConfirm && (
         <Button onClick={() => setShowConfirm(true)} className="w-full">
           Install Updates
         </Button>
@@ -146,7 +151,7 @@ export function OSUpdateCheckWidget({ widgetId, serverId }: OSUpdateCheckWidgetP
           <div className="bg-gray-800 border border-red-600 rounded-lg p-4 max-w-sm">
             <p className="text-red-400 font-medium text-sm">⚠️ Install OS Updates?</p>
             <p className="text-gray-300 text-xs mt-2">
-              This will install {data.updates_available} updates.
+              This will install {updates} updates.
               The server may require a reboot afterward.
             </p>
             <p className="text-gray-400 text-xs mt-1">This action will be logged.</p>
@@ -181,9 +186,7 @@ export function OSUpdateCheckWidget({ widgetId, serverId }: OSUpdateCheckWidgetP
           {showPackages && (
             <div className="mt-1 max-h-24 overflow-auto text-xs space-y-1">
               {data.packages.map((pkg, i) => (
-                <div key={i} className={pkg.is_security ? 'text-red-400' : 'text-gray-400'}>
-                  {pkg.name} {pkg.current_version} → {pkg.new_version}
-                </div>
+                <div key={i} className="text-gray-400">{pkg}</div>
               ))}
             </div>
           )}

@@ -138,7 +138,10 @@ async function getSSHConnection(serverId) {
   
   const privateKey = decrypt(keys[0][0]);
   
-  const conn = new Promise((resolve, reject) => {
+  // Resolve the promise before storing the connection. Storing the promise
+  // itself makes every later `client.exec(...)` fail with
+  // "client.exec is not a function", so the poller never caches anything.
+  const client = await new Promise((resolve, reject) => {
     const c = new Client();
     c.connect({
       host: hostname,
@@ -150,7 +153,7 @@ async function getSSHConnection(serverId) {
     c.on('ready', () => resolve(c));
     c.on('error', reject);
   });
-  
+
   const server = {
     id: sid,
     name,
@@ -160,7 +163,13 @@ async function getSSHConnection(serverId) {
     is_online: isOnline,
   };
 
-  const connection = { client: conn, platform: platform || 'linux', server };
+  const connection = { client, platform: platform || 'linux', server };
+  // Drop the cached connection when the host closes it (reboot, sshd restart,
+  // network drop); otherwise the dead client is reused forever and every poll
+  // fails until the poller restarts.
+  client.on('close', () => {
+    if (sshConnections.get(serverId) === connection) sshConnections.delete(serverId);
+  });
   sshConnections.set(serverId, connection);
   return connection;
 }
@@ -269,11 +278,19 @@ async function pollWidgets() {
         // Check for changes in change_only mode
         if (storageMode === 'change_only') {
           const existing = await queryRqlite(
-            `SELECT data_hash FROM widget_data_cache WHERE widget_type = ? AND server_id = ? ORDER BY collected_at DESC LIMIT 1`,
+            `SELECT id, data_hash FROM widget_data_cache WHERE widget_type = ? AND server_id = ? ORDER BY collected_at DESC LIMIT 1`,
             [widgetType, serverId]
           );
-          if (existing.length && existing[0][0] === dataHash) {
-            console.log(`[Poller] No change for ${widgetType}, skipping cache update`);
+          if (existing.length && existing[0][1] === dataHash) {
+            // The value is unchanged, so keep the single row instead of adding
+            // another. Its expiry must still be pushed out, otherwise the row
+            // ages out and the route falls back to a live SSH call even though
+            // the poller is running and the cached value is still current.
+            console.log(`[Poller] No change for ${widgetType}, refreshing cache TTL`);
+            await executeRqlite(
+              `UPDATE widget_data_cache SET collected_at = datetime('now'), expires_at = datetime('now', '+' || ? || ' seconds') WHERE id = ?`,
+              [ttlSec, existing[0][0]]
+            );
             await executeRqlite(
               `UPDATE widget_polling_config SET last_polled_at = CURRENT_TIMESTAMP WHERE widget_id = ?`,
               [widgetId]
