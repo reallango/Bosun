@@ -17,6 +17,7 @@ import { WidgetSettingsDialog } from '@/components/dialogs/WidgetSettingsDialog'
 import { DeleteConfirmDialog } from '@/components/dialogs/DeleteConfirmDialog';
 import { customWidgetComponents } from '@/components/widgets/custom-registry';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
+import { readJson } from '@/lib/api/readJson';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 
 // xterm (+ the terminal session manager that re-exports it) is ~390 kB of JS.
@@ -95,7 +96,7 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName,
     setRemoving(true);
     try {
       const res = await fetchWithAuth(`/api/widgets/${widgetId}`, { method: 'DELETE' });
-      const json = await res.json();
+      const json = await readJson<{ success?: boolean; error?: { message: string } }>(res);
       if (json.success && onRemoved) {
         onRemoved();
       } else if (json.error) {

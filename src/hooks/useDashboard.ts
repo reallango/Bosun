@@ -3,6 +3,7 @@ import { Dashboard, LayoutItem } from '@/types/dashboard';
 import { Widget } from '@/types/widget';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { ensureArray } from '@/lib/api/ensureArray';
+import { readJson } from '@/lib/api/readJson';
 
 export function useDashboard(dashboardId: string) {
     const [dashboard, setDashboard] = useState<Dashboard | null>(null);
@@ -15,7 +16,7 @@ export function useDashboard(dashboardId: string) {
         if (!dashboardId) return;
         try {
             const res = await fetchWithAuth(`/api/dashboards/${dashboardId}`);
-            const json = await res.json();
+            const json = await readJson<{ data?: { dashboard?: Dashboard; widgets?: Widget[] }; dashboard?: Dashboard; widgets?: Widget[] }>(res);
             const dashboard = json?.data?.dashboard ?? json?.dashboard ?? null;
             const widgets = ensureArray<Widget>(json?.data?.widgets ?? json?.widgets);
             setDashboard(dashboard);

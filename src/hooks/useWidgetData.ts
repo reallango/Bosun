@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
+import { readJson } from '@/lib/api/readJson';
 
 export function useWidgetData(widgetId: string, refreshInterval: number = 15) {
   const [data, setData] = useState<unknown>(null);
@@ -10,7 +11,7 @@ export function useWidgetData(widgetId: string, refreshInterval: number = 15) {
     try {
       const url = force ? `/api/widgets/${widgetId}/data?force=true` : `/api/widgets/${widgetId}/data`;
       const res = await fetchWithAuth(url);
-      const json = await res.json();
+      const json = await readJson<{ data?: unknown; error?: { message: string } }>(res);
       if (json.error) {
         setError(json.error.message);
       } else {
