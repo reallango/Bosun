@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { ensureArray } from '@/lib/api/ensureArray';
+import { readJson } from '@/lib/api/readJson';
 
 interface Server {
   id: string;
@@ -29,7 +30,7 @@ export default function Sidebar() {
 
   useEffect(() => {
     fetchWithAuth('/api/servers')
-      .then(r => r.json())
+      .then(r => readJson<{ data?: { servers?: Server[]; dashboards?: Dashboard[] }; servers?: Server[]; dashboards?: Dashboard[] }>(r))
       .then(j => {
         const servers = ensureArray<Server>(j?.data?.servers ?? j?.servers);
         setServers(servers);
@@ -39,7 +40,7 @@ export default function Sidebar() {
         setServers([]);
       });
     fetchWithAuth('/api/dashboards')
-      .then(r => r.json())
+      .then(r => readJson<{ data?: { servers?: Server[]; dashboards?: Dashboard[] }; servers?: Server[]; dashboards?: Dashboard[] }>(r))
       .then(j => {
         const dashboards = ensureArray<Dashboard>(j?.data?.dashboards ?? j?.dashboards);
         setDashboards(dashboards);

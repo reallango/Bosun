@@ -95,10 +95,24 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
           Math.round(remainingMs / 1000) || def.refreshInterval || 15,
           def.refreshInterval || 15
         ));
-        return NextResponse.json(
-          { data: JSON.parse(data as string), cachedAt: collectedAt, stale: isStale },
-          { headers: { 'Cache-Control': `private, max-age=${maxAge}` } }
-        );
+        try {
+          const parsed = JSON.parse(data as string);
+          return NextResponse.json(
+            { data: parsed, cachedAt: collectedAt, stale: isStale },
+            { headers: { 'Cache-Control': `private, max-age=${maxAge}` } }
+          );
+        } catch {
+          // A corrupt/non-JSON cache row (e.g. an HTML page) would otherwise
+          // surface as a cryptic SyntaxError. Treat it as a cache miss and fall
+          // through to live collection, which returns valid JSON.
+          console.warn(
+            `Discarding unparseable widget_data_cache row (widget_type=${widget.widget_type}, server_id=${widget.server_id})`
+          );
+          rqlite.query(
+            'DELETE FROM widget_data_cache WHERE widget_type = ? AND server_id = ?',
+            [widget.widget_type, widget.server_id]
+          ).catch(() => {});
+        }
       }
     }
 

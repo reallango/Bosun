@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
+import { readJson } from '@/lib/api/readJson';
 
 interface OSUpdateCheckWidgetProps {
   widgetId: string;
@@ -48,7 +49,7 @@ export function OSUpdateCheckWidget({ widgetId, serverId }: OSUpdateCheckWidgetP
     setError(null);
     try {
       const res = await fetchWithAuth(`/api/widgets/${widgetId}/data`);
-      const json = await res.json();
+      const json = await readJson<{ data?: OSUpdateData; cachedAt?: string | null; error?: { message?: string } }>(res);
       if (json.data) {
         setData(json.data);
         setCachedAt(json.cachedAt ?? null);
@@ -72,7 +73,7 @@ export function OSUpdateCheckWidget({ widgetId, serverId }: OSUpdateCheckWidgetP
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'install' }),
       });
-      const json = await res.json();
+      const json = await readJson<{ data?: { success?: boolean; message?: string }; error?: { message?: string } }>(res);
       if (json.data?.success) {
         setInstallResult(json.data.message || 'Updates installed successfully');
         setData(null);

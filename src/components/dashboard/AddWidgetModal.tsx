@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { ensureArray } from '@/lib/api/ensureArray';
 import { SIZE_PRESETS, SizePreset } from '@/lib/widget-sizes';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
+import { readJson } from '@/lib/api/readJson';
 import { WidgetDefinition } from '@/types/widget';
 
 interface Server {
@@ -36,7 +37,7 @@ export function AddWidgetModal({ isOpen, onClose, dashboardId, serverId, onAdd }
       fetchWithAuth('/api/servers')
         .then(res => {
           if (!res.ok) throw new Error('Failed to fetch servers');
-          return res.json();
+          return readJson<{ data?: { servers?: Server[] }; servers?: Server[] }>(res);
         })
         .then(data => setServers(ensureArray<Server>(data?.data?.servers ?? data?.servers)))
         .catch(() => setLoadError('Failed to load servers'));
@@ -55,7 +56,7 @@ export function AddWidgetModal({ isOpen, onClose, dashboardId, serverId, onAdd }
     fetchWithAuth(url)
       .then(res => {
         if (!res.ok) throw new Error('Failed to fetch widgets');
-        return res.json();
+        return readJson<{ data?: { definitions?: WidgetDefinition[] } }>(res);
       })
       .then(data => setDefinitions(ensureArray<WidgetDefinition>(data?.data?.definitions)))
       .catch(() => setLoadError('Failed to load widgets'))
