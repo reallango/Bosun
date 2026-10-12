@@ -10,7 +10,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     if (auth instanceof NextResponse) return auth;
     const { dashboardId } = await params;
     try {
-        const result = await rqlite.query('SELECT * FROM widgets WHERE dashboard_id = ? ORDER BY grid_y, grid_x', [dashboardId]);
+        const result = await rqlite.query('SELECT w.*, wpc.ttl_sec AS ttl_sec FROM widgets w LEFT JOIN widget_polling_config wpc ON wpc.widget_id = w.id WHERE w.dashboard_id = ? ORDER BY w.grid_y, w.grid_x', [dashboardId]);
         const widgets = rowsToObjects(result).map((w: any) => ({
             ...w,
             config: typeof w.config === 'string' ? JSON.parse(w.config) : w.config || {},

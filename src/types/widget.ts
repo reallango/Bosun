@@ -56,6 +56,8 @@ export interface Widget {
   grid_h: number;
   grid_min_w: number;
   grid_min_h: number;
+  /** Widget's polling TTL; > 0 means it records history. */
+  ttl_sec?: number | null;
   created_at: string;
   updated_at: string;
 }

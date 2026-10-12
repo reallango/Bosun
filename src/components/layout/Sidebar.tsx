@@ -13,6 +13,7 @@ interface Server {
   name: string;
   hostname: string;
   is_online: number;
+  monitored?: number | boolean;
 }
 
 interface Dashboard {
@@ -105,7 +106,7 @@ export default function Sidebar() {
               href={`/servers/${s.id}`}
               className="flex items-center gap-2 px-3 py-1 text-sm text-gray-400 hover:text-white"
             >
-              <span className={`w-2 h-2 rounded-full ${s.is_online ? 'bg-green-500' : 'bg-gray-500'}`} />
+              <span className={`w-2 h-2 rounded-full ${s.monitored === false || s.monitored === 0 ? 'bg-yellow-500' : s.is_online ? 'bg-green-500' : 'bg-gray-500'}`} />
               {s.name}
             </Link>
           ))}

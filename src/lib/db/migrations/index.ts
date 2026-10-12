@@ -346,6 +346,37 @@ const MIGRATION_012: string[] = [
     `INSERT OR IGNORE INTO app_config (key, value, description) VALUES ('wol.remote_wol_installed', 'false', 'Whether the Wake-on-LAN utility is installed on the local server')`,
 ];
 
+// Migration 013: Per-server "monitored" flag.
+//
+// A monitored server is probed by the health checker and has its widgets
+// collected by the poller. Setting `monitored = 0` opts a host out of all
+// background monitoring while still allowing on-demand actions (terminal, live
+// widget fetches, Test Connection). Status is derived from this flag in the UI
+// rather than stored, so `is_online` keeps its existing meaning for the many
+// call sites that already read it.
+const MIGRATION_013: string[] = [
+    `ALTER TABLE servers ADD COLUMN monitored INTEGER DEFAULT 1`,
+];
+
+// Migration 014: Widget history.
+//
+// An append-only time series per widget, sampled at the widget's poll interval
+// and pruned to its TTL. Kept separate from `widget_data_cache` because that
+// table is deliberately pruned to a single row for `latest_ttl` widgets and
+// de-duplicated for `change_only`, so it cannot hold history.
+const MIGRATION_014: string[] = [
+    `CREATE TABLE IF NOT EXISTS widget_history (
+        id TEXT PRIMARY KEY,
+        widget_id TEXT NOT NULL REFERENCES widgets(id) ON DELETE CASCADE,
+        widget_type TEXT NOT NULL,
+        server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+        data TEXT NOT NULL,
+        collected_at DATETIME NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_widget_history_widget ON widget_history(widget_id, collected_at DESC)`,
+];
+
 // Migration registry
 const migrations: Record<string, string[]> = {
     '001': MIGRATION_001,
@@ -360,6 +391,8 @@ const migrations: Record<string, string[]> = {
     '010': MIGRATION_010,
     '011': MIGRATION_011,
     '012': MIGRATION_012,
+    '013': MIGRATION_013,
+    '014': MIGRATION_014,
 };
 
 // All migration IDs this build expects to be applied, in order.
@@ -383,6 +416,7 @@ export const CORE_TABLES: string[] = [
     'sessions',
     'widget_polling_config',
     'widget_data_cache',
+    'widget_history',
     'custom_widgets',
 ];
 

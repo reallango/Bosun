@@ -42,10 +42,11 @@ export const BACKUP_TABLES: string[] = [
   'audit_log',
   'widget_polling_config',
   'widget_data_cache',
+  'widget_history',
 ];
 
 // Tables excluded by default because they can grow very large.
-export const LARGE_TABLES: string[] = ['widget_data_cache', 'audit_log'];
+export const LARGE_TABLES: string[] = ['widget_data_cache', 'widget_history', 'audit_log'];
 
 // Columns that hold encrypted credentials. Redacted by default in JSON exports.
 const SECRET_COLUMNS = ['private_key_enc', 'passphrase_enc', 'password_hash', 'totp_secret'];

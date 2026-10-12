@@ -1,5 +1,5 @@
 interface StatusBadgeProps {
-  status: 'online' | 'offline' | 'running' | 'stopped' | 'error' | 'unknown';
+  status: 'online' | 'offline' | 'running' | 'stopped' | 'error' | 'unknown' | 'unmonitored';
 }
 
 export function StatusBadge({ status }: StatusBadgeProps) {
@@ -10,6 +10,7 @@ export function StatusBadge({ status }: StatusBadgeProps) {
     stopped: { color: 'bg-red-500', text: 'Stopped' },
     error: { color: 'bg-red-500', text: 'Error' },
     unknown: { color: 'bg-gray-400', text: 'Unknown' },
+    unmonitored: { color: 'bg-yellow-500', text: 'Unmonitored' },
   };
 
   const { color, text } = config[status] || config.unknown;

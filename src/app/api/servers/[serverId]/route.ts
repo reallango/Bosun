@@ -29,9 +29,16 @@ export async function PATCH(request: NextRequest, { params }: { params: { server
     if (!payload || payload.role !== 'admin') return NextResponse.json({ error: { message: 'Forbidden' } }, { status: 403 });
     const { serverId } = await params;
     const body = await request.json();
-    const allowed = ['name','hostname','ssh_port','ssh_user','ssh_key_id','notes','tags','platform','os_type','os_version','os_codename','kernel_version','mac_address'];
+    const allowed = ['name','hostname','ssh_port','ssh_user','ssh_key_id','notes','tags','platform','os_type','os_version','os_codename','kernel_version','mac_address','monitored'];
     const updates: string[] = []; const values: any[] = [];
-    for (const [k,v] of Object.entries(body)) { if (allowed.includes(k)) { updates.push(`${k} = ?`); values.push(k==='tags' ? JSON.stringify(v) : v); } }
+    for (const [k,v] of Object.entries(body)) {
+      if (!allowed.includes(k)) continue;
+      updates.push(`${k} = ?`);
+      if (k === 'tags') values.push(JSON.stringify(v));
+      // SQLite has no boolean type; store the flag as an integer like is_online.
+      else if (k === 'monitored') values.push(v ? 1 : 0);
+      else values.push(v);
+    }
     if (!updates.length) return NextResponse.json({ error: { message: 'Nothing to update' } }, { status: 400 });
     updates.push('updated_at = CURRENT_TIMESTAMP'); values.push(serverId);
     await rqlite.execute(`UPDATE servers SET ${updates.join(', ')} WHERE id = ?`, values);

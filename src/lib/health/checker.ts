@@ -13,10 +13,14 @@ export async function startHealthChecker(): Promise<void> {
   
   const checkServers = async () => {
     try {
-      const result = await rqlite.query(`SELECT id, hostname, ssh_port, ssh_user, ssh_key_id, platform, os_type FROM servers`);
+      const result = await rqlite.query(`SELECT id, hostname, ssh_port, ssh_user, ssh_key_id, platform, os_type, monitored FROM servers`);
       
       for (const row of result.values) {
-        const [id, hostname, sshPort, sshUser, sshKeyId, platform, osType] = row;
+        const [id, hostname, sshPort, sshUser, sshKeyId, platform, osType, monitored] = row;
+        // An unmonitored server is excluded from background monitoring entirely:
+        // no probe, and no is_online/last_seen writes (its stored status is left
+        // as-is and simply not displayed). On-demand actions still work.
+        if (monitored !== null && monitored !== undefined && Number(monitored) === 0) continue;
         if (!hostname || !sshUser || !sshKeyId) continue;
 
         try {

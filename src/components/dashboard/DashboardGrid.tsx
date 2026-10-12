@@ -95,6 +95,7 @@ export function DashboardGrid({ dashboardId, widgets, onLayoutChange, editable =
             editable={editable}
             displayName={widget.display_name}
             config={widget.config}
+            ttlSec={widget.ttl_sec}
             onRemoved={onWidgetRemoved}
             onRefresh={onRefresh}
           />
