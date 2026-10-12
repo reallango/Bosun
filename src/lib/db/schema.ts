@@ -12,6 +12,7 @@ export interface DBServer {
   kernel_version: string | null;
   notes: string | null;
   is_online: number;
+  monitored: number;
   last_seen: string | null;
   cpu_model: string | null;
   cpu_cores: number | null;

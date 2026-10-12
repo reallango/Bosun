@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
     if (!accessToken) return NextResponse.json({ error: { message: 'Not authenticated' } }, { status: 401 });
     const payload = await verifyAccessToken(accessToken);
     if (!payload) return NextResponse.json({ error: { message: 'Invalid token' } }, { status: 401 });
-    const result = await rqlite.query('SELECT id, name, hostname, ssh_port, ssh_user, ssh_key_id, platform, os_type, is_online, mac_address FROM servers ORDER BY name');
+    const result = await rqlite.query('SELECT id, name, hostname, ssh_port, ssh_user, ssh_key_id, platform, os_type, is_online, mac_address, monitored FROM servers ORDER BY name');
     const servers = rowsToObjects(result).map(s => ({ 
       id: s.id, 
       name: s.name, 
@@ -21,7 +21,8 @@ export async function GET(request: NextRequest) {
       platform: s.platform || 'linux',
       os_type: s.os_type,
       is_online: Boolean(s.is_online),
-      mac_address: s.mac_address || null
+      mac_address: s.mac_address || null,
+      monitored: s.monitored === null || s.monitored === undefined ? true : Number(s.monitored) !== 0
     }));
     console.log('[API] /api/servers returning', servers.length, 'servers');
     return NextResponse.json({ data: { servers } });

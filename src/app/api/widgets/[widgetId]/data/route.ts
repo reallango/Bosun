@@ -22,7 +22,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     // because it may be a compiled built-in or a `custom_widgets` row.
     const widgetRes = await rqlite.query(
       `SELECT w.*, s.name AS server_name, s.hostname, s.ssh_port, s.ssh_user, s.ssh_key_id, s.platform,
-              s.is_online, s.os_type, s.os_version,
+              s.is_online, s.monitored, s.os_type, s.os_version,
               wpc.use_database AS instance_use_database
          FROM widgets w
          LEFT JOIN servers s ON s.id = w.server_id
@@ -68,7 +68,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     // Server Summary is served live from the servers row so it always reflects
     // the current is_online / os_type (the poller no longer caches it).
     if (widget.widget_type === 'server_summary') {
-      return NextResponse.json({ data: { is_online: !!srv.is_online, hostname: srv.hostname, os_type: srv.os_type, os_version: srv.os_version, name: srv.name } });
+      return NextResponse.json({ data: { is_online: !!srv.is_online, monitored: widget.monitored === null || widget.monitored === undefined ? true : Number(widget.monitored) !== 0, hostname: srv.hostname, os_type: srv.os_type, os_version: srv.os_version, name: srv.name } });
     }
 
     // Try cache first (unless forceRefresh or the widget opted out of the DB)

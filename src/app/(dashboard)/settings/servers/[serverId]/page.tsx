@@ -18,7 +18,7 @@ export default function EditServerPage() {
     const [error, setError] = useState('');
     const [sshKeys, setSSHKeys] = useState<{ id: string; name: string; fingerprint: string }[]>([]);
     const [form, setForm] = useState({
-        name: '', hostname: '', ssh_port: 22, ssh_user: '', ssh_key_id: '', notes: '', platform: 'linux', mac_address: '',
+        name: '', hostname: '', ssh_port: 22, ssh_user: '', ssh_key_id: '', notes: '', platform: 'linux', mac_address: '', monitored: true,
     });
 
     useEffect(() => {
@@ -34,6 +34,7 @@ export default function EditServerPage() {
                     notes: j.data.notes || '',
                     platform: j.data.platform || 'linux',
                     mac_address: j.data.mac_address || '',
+                    monitored: j.data.monitored === null || j.data.monitored === undefined ? true : Number(j.data.monitored) !== 0,
                 });
             })
             .finally(() => setLoading(false));
@@ -184,6 +185,19 @@ export default function EditServerPage() {
                             <p className="text-xs text-muted-foreground mt-1">
                                 Required for Wake-on-LAN. Use the NIC enabled for wake.
                             </p>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                            <input
+                                type="checkbox"
+                                id="monitored"
+                                checked={form.monitored}
+                                onChange={e => setForm(f => ({ ...f, monitored: e.target.checked }))}
+                            />
+                            <Label htmlFor="monitored">Monitored</Label>
+                            <span className="text-xs text-muted-foreground">
+                                When off, the host is excluded from background health checks and widget polling.
+                            </span>
                         </div>
 
                         <div className="flex gap-2 pt-4 border-t">

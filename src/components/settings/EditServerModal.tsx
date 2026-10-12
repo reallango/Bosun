@@ -20,6 +20,7 @@ interface Server {
   notes?: string;
   platform?: string;
   mac_address?: string | null;
+  monitored?: boolean;
 }
 
 interface EditServerModalProps {
@@ -31,7 +32,7 @@ interface EditServerModalProps {
 
 export function EditServerModal({ isOpen, onClose, server, onSave }: EditServerModalProps) {
   const [form, setForm] = useState({
-    name: '', hostname: '', ssh_port: 22, ssh_user: '', ssh_key_id: '', notes: '', platform: 'linux', mac_address: '',
+    name: '', hostname: '', ssh_port: 22, ssh_user: '', ssh_key_id: '', notes: '', platform: 'linux', mac_address: '', monitored: true,
   });
   const [sshKeys, setSSHKeys] = useState<SSHKey[]>([]);
   const [loading, setLoading] = useState(false);
@@ -49,6 +50,7 @@ export function EditServerModal({ isOpen, onClose, server, onSave }: EditServerM
         notes: server.notes || '',
         platform: server.platform || 'linux',
         mac_address: server.mac_address || '',
+        monitored: server.monitored === undefined ? true : server.monitored,
       });
       setError('');
 
@@ -61,7 +63,7 @@ export function EditServerModal({ isOpen, onClose, server, onSave }: EditServerM
 
   useEffect(() => {
     if (!isOpen) {
-      setForm({ name: '', hostname: '', ssh_port: 22, ssh_user: '', ssh_key_id: '', notes: '', platform: 'linux', mac_address: '' });
+      setForm({ name: '', hostname: '', ssh_port: 22, ssh_user: '', ssh_key_id: '', notes: '', platform: 'linux', mac_address: '', monitored: true });
       setError('');
     }
   }, [isOpen]);
@@ -207,6 +209,17 @@ export function EditServerModal({ isOpen, onClose, server, onSave }: EditServerM
               className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm font-mono"
             />
             <p className="text-xs text-gray-500 mt-1">Required for Wake-on-LAN. Use the NIC enabled for wake.</p>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="edit-monitored"
+              checked={form.monitored}
+              onChange={e => setForm(f => ({ ...f, monitored: e.target.checked }))}
+            />
+            <label htmlFor="edit-monitored" className="text-sm font-medium text-gray-700 dark:text-gray-300">Monitored</label>
+            <span className="text-xs text-gray-500">Off = excluded from background health checks and widget polling.</span>
           </div>
         </div>
 

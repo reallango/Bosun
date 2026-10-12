@@ -12,6 +12,8 @@ export interface Server {
   kernel_version: string | null;
   notes: string | null;
   is_online: boolean;
+  /** When false the host is excluded from all background monitoring. */
+  monitored: boolean;
   last_seen: string | null;
   cpu_model: string | null;
   cpu_cores: number | null;

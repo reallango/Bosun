@@ -14,6 +14,7 @@ import { CustomCommandWidget } from '@/components/widgets/custom-command';
 import { OSUpdateCheckWidget } from '@/components/widgets/os-update-check';
 import { WidgetLoading } from '@/components/widgets/WidgetLoading';
 import { WidgetSettingsDialog } from '@/components/dialogs/WidgetSettingsDialog';
+import { WidgetHistoryDialog } from '@/components/dialogs/WidgetHistoryDialog';
 import { DeleteConfirmDialog } from '@/components/dialogs/DeleteConfirmDialog';
 import { customWidgetComponents } from '@/components/widgets/custom-registry';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
@@ -39,6 +40,8 @@ interface WidgetFrameProps {
   /** Widget row already loaded by the dashboard (config + display_name). */
   displayName?: string | null;
   config?: Record<string, unknown>;
+  /** Widget's polling TTL; > 0 means it records history. */
+  ttlSec?: number | null;
   onRemoved?: () => void;
   onRefresh?: () => void;
 }
@@ -82,11 +85,14 @@ function WidgetContent({ widgetId, widgetType, serverId, serverName, config }: {
   }
 }
 
-export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName, editable = false, displayName, config, onRemoved, onRefresh }: WidgetFrameProps) {
+export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName, editable = false, displayName, config, ttlSec, onRemoved, onRefresh }: WidgetFrameProps) {
   const [removing, setRemoving] = useState(false);
 
   const displayTitle = displayName || title;
   const widgetConfig: Record<string, unknown> = config || {};
+  // History is only recorded for widgets with a TTL configured, so the menu
+  // item is disabled otherwise.
+  const historyEligible = (ttlSec ?? 0) > 0;
 
   const handleRemove = async () => {
     setDeleteOpen(true);
@@ -115,6 +121,7 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName,
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   return (
@@ -148,6 +155,16 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName,
               >
                 Refresh
               </DropdownMenu.Item>
+              <DropdownMenu.Item 
+                className="px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer outline-none data-[disabled]:opacity-50 data-[disabled]:cursor-not-allowed"
+                disabled={!historyEligible}
+                onSelect={() => {
+                  setMenuOpen(false);
+                  setHistoryOpen(true);
+                }}
+              >
+                History
+              </DropdownMenu.Item>
               <DropdownMenu.Separator className="h-px bg-gray-200 dark:bg-gray-700 my-1" />
               <DropdownMenu.Item 
                 className="px-4 py-2 text-sm text-red-600 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer outline-none disabled:opacity-50"
@@ -167,6 +184,7 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName,
         <WidgetContent widgetId={widgetId} widgetType={widgetType} serverId={serverId} serverName={serverName} config={widgetConfig} />
       </div>
       <WidgetSettingsDialog widgetId={widgetId} widgetType={widgetType} open={settingsOpen} onOpenChange={setSettingsOpen} onSave={onRefresh} />
+      <WidgetHistoryDialog widgetId={widgetId} widgetTitle={displayTitle} open={historyOpen} onOpenChange={setHistoryOpen} />
       <DeleteConfirmDialog widgetTitle={displayTitle} open={deleteOpen} onOpenChange={setDeleteOpen} onConfirm={doRemove} loading={removing} />
     </div>
   );

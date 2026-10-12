@@ -14,13 +14,13 @@ export function ServerSummaryWidget({ widgetId, serverId, serverName }: { widget
     return <div className="text-red-500 text-sm">Error: {fetchError}</div>;
   }
 
-  const serverData = data as { is_online?: boolean; os_type?: string; hostname?: string } | null;
+  const serverData = data as { is_online?: boolean; monitored?: boolean; os_type?: string; hostname?: string } | null;
 
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
         <span className="font-medium">{serverName || serverId}</span>
-        <StatusBadge status={serverData?.is_online ? 'online' : 'offline'} />
+        <StatusBadge status={serverData?.monitored === false ? 'unmonitored' : (serverData?.is_online ? 'online' : 'offline')} />
       </div>
       <div className="text-sm text-gray-600 dark:text-gray-400">
         {serverData?.os_type || 'Unknown OS'}

@@ -24,6 +24,7 @@ interface Server {
   ssh_key_id: string | null;
   os_type: string | null;
   is_online: boolean;
+  monitored?: boolean;
   hostname?: string;
   notes?: string;
   mac_address?: string | null;
@@ -142,10 +143,17 @@ export default function ServersPage() {
                       </TableCell>
                       <TableCell>{server.os_type || '-'}</TableCell>
                       <TableCell>
-                        <span className={`inline-flex items-center ${server.is_online ? 'text-green-600' : 'text-gray-400'}`}>
-                          <span className={`w-2 h-2 rounded-full mr-2 ${server.is_online ? 'bg-green-500' : 'bg-gray-400'}`} />
-                          {server.is_online ? 'Online' : 'Offline'}
-                        </span>
+                        {server.monitored === false ? (
+                          <span className="inline-flex items-center text-yellow-600">
+                            <span className="w-2 h-2 rounded-full mr-2 bg-yellow-500" />
+                            Unmonitored
+                          </span>
+                        ) : (
+                          <span className={`inline-flex items-center ${server.is_online ? 'text-green-600' : 'text-gray-400'}`}>
+                            <span className={`w-2 h-2 rounded-full mr-2 ${server.is_online ? 'bg-green-500' : 'bg-gray-400'}`} />
+                            {server.is_online ? 'Online' : 'Offline'}
+                          </span>
+                        )}
                       </TableCell>
                       <TableCell>
                         <div className="flex gap-2">

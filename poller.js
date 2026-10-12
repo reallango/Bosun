@@ -188,6 +188,27 @@ function hashData(data) {
   return crypto.createHash('sha256').update(JSON.stringify(data)).digest('hex');
 }
 
+// Append a history sample for a widget and drop samples older than its TTL.
+// Only widgets with a TTL configured (ttl_sec > 0) record history; the TTL is
+// the retention window and the poll interval is the sampling cadence (each call
+// happens once per successful poll). `data` is the already-serialized JSON that
+// was written to the cache, so the two stores never diverge.
+async function recordHistory(widgetId, widgetType, serverId, data, ttlSec) {
+  if (!ttlSec || ttlSec <= 0) return;
+  try {
+    await executeRqlite(
+      `INSERT INTO widget_history (id, widget_id, widget_type, server_id, data, collected_at) VALUES (?, ?, ?, ?, ?, datetime('now'))`,
+      [generateId(), widgetId, widgetType, serverId, data]
+    );
+    await executeRqlite(
+      `DELETE FROM widget_history WHERE widget_id = ? AND collected_at < datetime('now', '-' || ? || ' seconds')`,
+      [widgetId, ttlSec]
+    );
+  } catch (err) {
+    console.error(`[Poller] History error for ${widgetType}:`, err.message);
+  }
+}
+
 // Main polling loop
 async function pollWidgets() {
   lastPollAt = new Date().toISOString();
@@ -213,10 +234,12 @@ async function pollWidgets() {
              COALESCE(wpc.last_polled_at, legacy.last_polled_at) AS last_polled_at,
              COALESCE(wpc.enabled, legacy.enabled, 1) AS enabled
       FROM widgets w
+      JOIN servers s ON s.id = w.server_id
       LEFT JOIN widget_polling_config wpc ON wpc.widget_id = w.id
       LEFT JOIN widget_polling_config legacy
         ON legacy.widget_id IS NULL AND legacy.widget_type = w.widget_type AND legacy.server_id = w.server_id
       WHERE w.widget_type NOT IN ('ssh_terminal', 'server_summary')
+      AND COALESCE(s.monitored, 1) = 1
       AND COALESCE(wpc.enabled, legacy.enabled, 1) = 1
       AND COALESCE(wpc.use_database, legacy.use_database, 1) = 1
       ORDER BY w.server_id, w.widget_type
@@ -295,6 +318,9 @@ async function pollWidgets() {
               `UPDATE widget_polling_config SET last_polled_at = CURRENT_TIMESTAMP WHERE widget_id = ?`,
               [widgetId]
             );
+            // Record a history sample even when the value is unchanged, so the
+            // series stays continuous instead of having gaps at flat values.
+            await recordHistory(widgetId, widgetType, serverId, data, ttl);
             continue;
           }
         }
@@ -323,6 +349,11 @@ async function pollWidgets() {
           [widgetId]
         );
         
+        // Append a history sample (only when a TTL is configured). Uses the raw
+        // `ttl` rather than the defaulted `ttlSec`, so a widget with no TTL does
+        // not silently start recording history.
+        await recordHistory(widgetId, widgetType, serverId, data, ttl);
+
         console.log(`[Poller] Cached ${widgetType} data (${data.length} bytes)`);
         
       } catch (err) {
