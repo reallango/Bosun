@@ -1,7 +1,7 @@
 #!/command/with-contenv sh
 # rqlite node. Single node by default. Cluster settings come from the UI
 # (Settings > Cluster, stored in <data>/bosun/cluster.json and applied by
-# cluster-boot.js) or from the environment (NODE_NAME, RQLITE_ADV_HOST,
+# src/lib/cluster/boot.js) or from the environment (NODE_NAME, RQLITE_ADV_HOST,
 # RQLITE_JOIN, RQLITE_BOOTSTRAP_EXPECT). See README "Clustering".
 RQLITE_HTTP_PORT="${RQLITE_HTTP_PORT:-4001}"
 RQLITE_RAFT_PORT="${RQLITE_RAFT_PORT:-4002}"

@@ -68,16 +68,17 @@ applies to a legacy schema, so leaving the variable set is harmless.
 ## Running
 
 ```bash
-cp .env.example .env    # set MASTER_KEY and AUTH_SECRET (openssl rand -base64 48)
+cp .env.example .env    # optional: set MASTER_KEY and AUTH_SECRET (openssl rand -base64 48)
 docker compose up -d --build
 ```
 
-Open `http://<host>:3042`. The first visit runs setup and creates the admin account.
+Open `http://<host>:3042`. The first visit runs setup: create the admin account, or
+join an existing cluster with a join code (see *Clustering*).
 
 | Variable | Purpose |
 | --- | --- |
-| `MASTER_KEY` | **Required.** Encrypts stored SSH private keys. Changing it makes stored keys unreadable. |
-| `AUTH_SECRET` | **Required.** Signs login and terminal tokens. Production refuses to start without it. |
+| `MASTER_KEY` | Encrypts stored SSH private keys, SMTP password and MFA seeds. If unset, Bosun generates one into `<data volume>/bosun/secrets.json`. Changing it makes stored secrets unreadable, so back up the data volume (or set it explicitly). |
+| `AUTH_SECRET` | Signs login and terminal tokens. Generated like `MASTER_KEY` if unset. |
 | `COOKIE_SECURE` | `true` when served over HTTPS (e.g. behind Cloudflare). |
 | `NODE_NAME`, `RQLITE_ADV_HOST`, `RQLITE_JOIN`, `RQLITE_BOOTSTRAP_EXPECT` | Clustering (see *Clustering*). |
 | `RQLITE_FORCE_SINGLE` | `1` = disaster recovery: make this node a single-node cluster (see *Clustering*). |
@@ -201,9 +202,38 @@ Every node serves the full UI and API; any node can be used.
   Raft membership to just itself and becomes leader with all its data. Then add fresh
   nodes (empty data volumes) with the usual join settings to get back to three. The
   switch is applied once per data volume, so leaving it set cannot undo the rebuilt
-  cluster, but remove it anyway.
+  cluster, but remove it anyway. Settings → Cluster → *Convert to single node* does the
+  same from the UI.
 
-Setting up three nodes: run `docker-compose.cluster.yaml` on each machine with an
+### Managing the cluster from the UI
+
+Settings → Cluster (admins) covers the whole lifecycle without editing `.env` files:
+
+1. **Switch to multi-node.** On a single node, *Enable clustering* sets the address
+   other nodes use to reach this one (LAN IP or DNS name) and optionally renames the
+   node. The database restarts for a few seconds; data is kept.
+2. **Add a node.** *Create join code* produces a code valid for 24 hours. Start Bosun
+   on the new machine (`docker-compose.cluster.yaml` with ports 4001/4002 published,
+   no join settings needed), open its setup page, choose **Join an existing cluster**
+   and paste the code with that machine's address and a node name. No admin account is
+   created there: the node discards its empty database, joins, and from then on uses
+   the cluster's users, servers and settings. The code contains the cluster's
+   `MASTER_KEY` and `AUTH_SECRET`, so treat it like a password. Joining is only
+   offered on a node with no users and setup not completed.
+3. **Remove a node.** The trash icon on a node row removes it from the membership
+   (needs a leader). Reset that machine's data volume before reusing it.
+4. **Convert to single node.** With a majority available the other nodes are removed
+   through Raft; without one (the others are gone) this node's database restarts as a
+   one-node cluster with its last data, like `RQLITE_FORCE_SINGLE`.
+
+Settings made here are stored in `<data volume>/bosun/cluster.json` and take
+precedence over `NODE_NAME`, `RQLITE_ADV_HOST` and `RQLITE_JOIN`, which remain the
+defaults. Ports 4001 and 4002 are not authenticated: allow them only between the
+cluster machines.
+
+### Setting up a cluster with environment variables
+
+Alternatively, to set up three nodes: run `docker-compose.cluster.yaml` on each machine with an
 `.env` like this:
 
 ```bash

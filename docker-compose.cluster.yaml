@@ -1,5 +1,6 @@
-# One Bosun node of a 3-node cluster. Run this file on each of three machines
-# with its own .env (see README "Clustering"):
+# One Bosun node of a cluster. Run this file on each machine. Either join the
+# nodes from the UI (setup page > Join an existing cluster; no variables
+# needed), or configure them with an .env (see README "Clustering"):
 #
 #   NODE_NAME=n1                      # n2, n3 on the other machines
 #   RQLITE_ADV_HOST=192.168.1.161     # this machine's LAN address
@@ -16,9 +17,9 @@ services:
     container_name: bosun
     restart: unless-stopped
     environment:
-      - NODE_NAME=${NODE_NAME:?set NODE_NAME}
-      - RQLITE_ADV_HOST=${RQLITE_ADV_HOST:?set RQLITE_ADV_HOST}
-      - RQLITE_JOIN=${RQLITE_JOIN:?set RQLITE_JOIN}
+      - NODE_NAME=${NODE_NAME:-}
+      - RQLITE_ADV_HOST=${RQLITE_ADV_HOST:-}
+      - RQLITE_JOIN=${RQLITE_JOIN:-}
       - RQLITE_BOOTSTRAP_EXPECT=${RQLITE_BOOTSTRAP_EXPECT:-3}
       - COOKIE_SECURE=${COOKIE_SECURE:-false}
       # Optional: if unset, Bosun generates both and keeps them in the data volume.
