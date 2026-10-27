@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '@/hooks/useAuth';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -32,6 +33,7 @@ function ErrorBox({ children }: { children: React.ReactNode }) {
 
 export default function LoginForm() {
   const router = useRouter();
+  const { refresh } = useAuth();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -67,6 +69,7 @@ export default function LoginForm() {
         }
         return;
       }
+      await refresh(); // load the new session into the auth context before navigating
       router.push('/');
     } catch {
       setError('An error occurred');
@@ -101,6 +104,7 @@ export default function LoginForm() {
         setCode('');
         return;
       }
+      await refresh(); // load the new session into the auth context before navigating
       router.push('/');
     } catch {
       setError('An error occurred');
