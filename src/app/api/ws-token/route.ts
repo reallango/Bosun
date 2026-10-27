@@ -35,11 +35,13 @@ export async function POST(request: NextRequest) {
     const row = r.values[0];
     const userId = row[0] as string;
     const username = row[1] as string;
+    const role = row[2] as string;
 
     // Create a short-lived WebSocket token (5 minutes)
     const authSecret = process.env.AUTH_SECRET || 'fallback-secret-change-me';
     const secret = new TextEncoder().encode(authSecret);
-    const wsToken = await new SignJWT({ userId, username, type: 'ws' })
+    // ws-server verifies the signature, expiry, type and role of this token.
+    const wsToken = await new SignJWT({ userId, username, role, type: 'ws' })
       .setProtectedHeader({ alg: 'HS256' })
       .setIssuedAt()
       .setExpirationTime('5m')
