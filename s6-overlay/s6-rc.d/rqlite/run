@@ -1,23 +1,51 @@
 #!/command/with-contenv sh
+# rqlite node. Single node by default; set RQLITE_JOIN (and normally
+# RQLITE_BOOTSTRAP_EXPECT=3) to form a cluster. See README "Clustering".
 NODE_NAME="${NODE_NAME:-node1}"
 RQLITE_HTTP_PORT="${RQLITE_HTTP_PORT:-4001}"
 RQLITE_RAFT_PORT="${RQLITE_RAFT_PORT:-4002}"
 RQLITE_DATA_DIR="${RQLITE_DATA_DIR:-/data/rqlite}"
-# Advertised addresses: other nodes must reach these when clustering.
-RQLITE_HTTP_ADV="${RQLITE_HTTP_ADV:-localhost:${RQLITE_HTTP_PORT}}"
-RQLITE_RAFT_ADV="${RQLITE_RAFT_ADV:-localhost:${RQLITE_RAFT_PORT}}"
+# Address other nodes use to reach this one (container name, DNS name or IP).
+RQLITE_ADV_HOST="${RQLITE_ADV_HOST:-localhost}"
+RQLITE_HTTP_ADV="${RQLITE_HTTP_ADV:-${RQLITE_ADV_HOST}:${RQLITE_HTTP_PORT}}"
+RQLITE_RAFT_ADV="${RQLITE_RAFT_ADV:-${RQLITE_ADV_HOST}:${RQLITE_RAFT_PORT}}"
 
-JOIN_FLAG=""
+CLUSTER_FLAGS=""
 if [ -n "${RQLITE_JOIN}" ]; then
-    JOIN_FLAG="-join=${RQLITE_JOIN}"
+    # RQLITE_JOIN: comma-separated Raft addresses of the other nodes (host:4002).
+    CLUSTER_FLAGS="-join=${RQLITE_JOIN}"
+    if [ -n "${RQLITE_BOOTSTRAP_EXPECT}" ]; then
+        # All nodes start with the same join list and wait until this many are
+        # up, then elect a leader together (no special "first" node).
+        CLUSTER_FLAGS="${CLUSTER_FLAGS} -bootstrap-expect=${RQLITE_BOOTSTRAP_EXPECT}"
+    fi
 fi
 
-mkdir -p "${RQLITE_DATA_DIR}" && chown -R node:node "${RQLITE_DATA_DIR}"
+mkdir -p "${RQLITE_DATA_DIR}"
+
+# Disaster recovery only: the other nodes are permanently gone and this node
+# must carry on alone. Rewrites the Raft configuration to just this node
+# (rqlite peers.json recovery). Applied once per data directory: a marker
+# file stops a forgotten RQLITE_FORCE_SINGLE=1 from undoing a cluster that was
+# rebuilt later. Remove the variable after recovering.
+FORCE_MARKER="${RQLITE_DATA_DIR}/.force-single-applied"
+if [ "${RQLITE_FORCE_SINGLE}" = "1" ]; then
+    if [ -f "${FORCE_MARKER}" ]; then
+        echo "[rqlite] RQLITE_FORCE_SINGLE=1 ignored: recovery was already applied ($(cat "${FORCE_MARKER}")). Remove the variable."
+    elif [ -d "${RQLITE_DATA_DIR}/raft" ]; then
+        echo "[rqlite] RQLITE_FORCE_SINGLE=1: recovering as a single-node cluster (${NODE_NAME} @ ${RQLITE_RAFT_ADV})"
+        printf '[{"id":"%s","address":"%s","non_voter":false}]\n' "${NODE_NAME}" "${RQLITE_RAFT_ADV}" > "${RQLITE_DATA_DIR}/raft/peers.json"
+        date -u +%Y-%m-%dT%H:%M:%SZ > "${FORCE_MARKER}"
+    fi
+    CLUSTER_FLAGS=""
+fi
+
+chown -R node:node "${RQLITE_DATA_DIR}"
 exec s6-setuidgid node /usr/local/bin/rqlited \
     -node-id="${NODE_NAME}" \
     -http-addr="0.0.0.0:${RQLITE_HTTP_PORT}" \
     -http-adv-addr="${RQLITE_HTTP_ADV}" \
     -raft-addr="0.0.0.0:${RQLITE_RAFT_PORT}" \
     -raft-adv-addr="${RQLITE_RAFT_ADV}" \
-    ${JOIN_FLAG} \
+    ${CLUSTER_FLAGS} \
     "${RQLITE_DATA_DIR}"

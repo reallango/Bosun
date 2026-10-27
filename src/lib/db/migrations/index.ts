@@ -412,13 +412,24 @@ export async function runMigrations(): Promise<void> {
     for (const m of MIGRATIONS) {
         if (m.version <= current) continue;
         console.log(`[db] applying schema migration ${m.version} (${m.name}, ${m.statements.length} statements)`);
-        await rqlite.executeBatch(
-            [
-                ...m.statements.map(sql => ({ sql })),
-                { sql: 'INSERT INTO schema_migrations (version, name) VALUES (?, ?)', params: [m.version, m.name] },
-            ],
-            { transaction: true },
-        );
+        try {
+            await rqlite.executeBatch(
+                [
+                    ...m.statements.map(sql => ({ sql })),
+                    { sql: 'INSERT INTO schema_migrations (version, name) VALUES (?, ?)', params: [m.version, m.name] },
+                ],
+                { transaction: true },
+            );
+        } catch (err) {
+            // In a cluster every node starts the same migrations; the loser of
+            // the race gets an error (duplicate column / version) after the
+            // winner's transaction committed. That is success, not failure.
+            if ((await getCurrentVersion().catch(() => 0)) >= m.version) {
+                console.log(`[db] migration ${m.version} was applied by another node`);
+                continue;
+            }
+            throw err;
+        }
     }
     console.log(`[db] schema at version ${SCHEMA_VERSION}`);
 }
