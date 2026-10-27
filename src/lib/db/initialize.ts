@@ -1,18 +1,45 @@
 import { rqlite } from './rqlite-client';
-import { runMigrations } from './migrations';
+import { runMigrations, getCurrentVersion, SCHEMA_VERSION } from './migrations';
 
 // Kept on globalThis: instrumentation and route handlers are separate bundles
 // with separate module state, but must share one initialisation.
 const g = globalThis as unknown as { __bosunDbInit?: Promise<void> | null };
 
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * Bring the database to the current schema.
+ *
+ * Waits for this node's rqlite, then for a cluster leader (up to ~45 s, which
+ * covers a normal cluster start/election). With a leader, migrations run
+ * (they are forwarded to the leader; nodes racing each other are handled in
+ * runMigrations). Without one - this node is cut off from the majority - the
+ * app still starts read-only if the local copy already has the current
+ * schema, so dashboards keep showing the last replicated data.
+ */
 export async function initializeDatabase(): Promise<void> {
-  // Wait up to ~60 s for rqlite to be ready (it starts alongside the app).
-  for (let attempt = 0; attempt < 60 && !(await rqlite.isReady()); attempt++) {
+  for (let attempt = 0; attempt < 60 && !(await rqlite.isUp()); attempt++) {
     if (attempt % 10 === 0) console.log('[db] waiting for rqlite...');
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await sleep(1000);
   }
-  if (!(await rqlite.isReady())) throw new Error('rqlite did not become ready');
-  await runMigrations();
+  if (!(await rqlite.isUp())) throw new Error('rqlite did not start');
+
+  for (let attempt = 0; attempt < 45 && !(await rqlite.isReady()); attempt++) {
+    if (attempt % 10 === 0) console.log('[db] waiting for a cluster leader...');
+    await sleep(1000);
+  }
+
+  if (await rqlite.isReady()) {
+    await runMigrations();
+    return;
+  }
+
+  const version = await getCurrentVersion().catch(() => 0);
+  if (version >= SCHEMA_VERSION) {
+    console.warn(`[db] no cluster leader; starting read-only on the local copy (schema ${version})`);
+    return;
+  }
+  throw new Error('No database cluster leader and the local copy has no current schema yet');
 }
 
 /**

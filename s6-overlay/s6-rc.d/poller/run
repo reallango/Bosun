@@ -1,7 +1,7 @@
 #!/command/with-contenv sh
 RQLITE_URL="http://localhost:${RQLITE_HTTP_PORT:-4001}"
 echo "[poller] waiting for rqlite at ${RQLITE_URL}..."
-until wget -q -O /dev/null "${RQLITE_URL}/readyz" 2>/dev/null; do
+until wget -q -O /dev/null "${RQLITE_URL}/readyz?noleader" 2>/dev/null; do
     sleep 2
 done
 cd /app

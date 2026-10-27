@@ -39,6 +39,8 @@ const MASTER_KEY = process.env.MASTER_KEY || '';
 const HEALTH_PORT = parseInt(process.env.POLLER_HEALTH_PORT, 10) || 3003;
 const MAX_PARALLEL = parseInt(process.env.POLLER_MAX_PARALLEL, 10) || 8;
 const TICK_MS = 1000;
+const LEADER_CHECK_MS = 3000;
+const NODE_NAME = process.env.NODE_NAME || require('os').hostname();
 const MIN_INTERVAL_SEC = 5;
 const MAX_BACKOFF_MS = 5 * 60 * 1000;
 
@@ -92,8 +94,9 @@ async function isLeader() {
   const status = await rq('/status');
   const store_ = status.store || {};
   const raft = store_.raft || {};
-  if (raft.state) return raft.state === 'Leader';
-  return true; // single node without raft info
+  // Only the raft leader polls. Anything unexpected counts as "not leader",
+  // so two nodes never poll at the same time.
+  return raft.state === 'Leader';
 }
 
 async function schemaReady() {
@@ -308,6 +311,7 @@ class HostAgent {
 const agents = new Map();
 let leader = false;
 let lastLeaderCheck = 0;
+let lastHeartbeat = 0;
 let lastServerSync = 0;
 let lastRetention = 0;
 let lastAlertSync = 0;
@@ -374,14 +378,31 @@ async function tick() {
   const now = Date.now();
   lastTickAt = new Date(now).toISOString();
   try {
-    if (now - lastLeaderCheck > 30000) {
+    // Cheap local /status call; checked often so a newly elected leader takes
+    // over polling within seconds of a failover.
+    if (now - lastLeaderCheck > LEADER_CHECK_MS) {
       lastLeaderCheck = now;
       const was = leader;
       leader = await isLeader().catch(() => false);
-      if (was !== leader) log(leader ? 'this node is the raft leader; polling' : 'not the leader; idle');
-      if (!leader) for (const a of agents.values()) a.close();
+      if (was !== leader) {
+        log(leader ? `this node (${NODE_NAME}) is the raft leader; polling` : `${NODE_NAME} is not the leader; idle`);
+        if (!leader) {
+          for (const a of agents.values()) a.close();
+          agents.clear();
+        }
+      }
     }
     if (!leader) return;
+
+    // Heartbeat so every node can show which node is polling and when.
+    if (now - lastHeartbeat > 15000) {
+      lastHeartbeat = now;
+      executeBatch([{
+        sql: "INSERT INTO app_config (key, value, description) VALUES ('poller.active', ?, 'Node currently running the poller (heartbeat)') " +
+          'ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP',
+        params: [JSON.stringify({ node: NODE_NAME, at: new Date(now).toISOString(), hosts: agents.size })],
+      }]).catch(err => warn('heartbeat failed:', err.message));
+    }
 
     if (now - lastServerSync > 2000) {
       lastServerSync = now;
@@ -422,7 +443,7 @@ function startHealthServer() {
     if (req.url === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
-        status: 'ok', service: 'poller', leader, last_tick_at: lastTickAt,
+        status: 'ok', service: 'poller', node: NODE_NAME, leader, last_tick_at: lastTickAt,
         hosts: [...agents.values()].map(a => a.status()),
       }));
       return;
