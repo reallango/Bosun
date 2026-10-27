@@ -1,7 +1,8 @@
 import { NextRequest } from 'next/server';
 import { rqlite } from '@/lib/db/rqlite-client';
 import { getConfig } from '@/lib/db/migrations';
-import { joinCluster } from '@/lib/cluster/control';
+import { joinCluster, abortJoin } from '@/lib/cluster/control';
+import { joinStalled } from '@/lib/auth/setup-state';
 import { effectiveClusterConfig } from '@/lib/cluster/config';
 import { checkLoginRateLimit, recordLoginAttempt } from '@/lib/utils/rate-limiter';
 import { ok, fail, failFrom } from '@/lib/api/response';
@@ -14,6 +15,8 @@ export const dynamic = 'force-dynamic';
  * database.
  */
 async function freshNode(): Promise<{ fresh: boolean; reason?: string }> {
+  // A join that never completed can be retried: the node is still empty.
+  if (await joinStalled()) return { fresh: true };
   if ((await getConfig('app.setup_complete')) === 'true') return { fresh: false, reason: 'Setup is already complete on this node' };
   try {
     const users = await rqlite.query('SELECT COUNT(*) FROM users');
@@ -39,11 +42,13 @@ export async function GET() {
       users = Number((await rqlite.query('SELECT COUNT(*) FROM users')).values?.[0]?.[0] || 0);
     }
   } catch { /* restarting */ }
-  const f = ready ? await freshNode() : { fresh: false };
+  const stalled = await joinStalled();
+  const f = ready || stalled ? await freshNode() : { fresh: false };
   return ok({
     node_id: eff.node_id,
     adv_host: eff.adv_host,
     joinable: f.fresh,
+    stalled,
     reason: f.reason ?? null,
     // During/after a join: joined once the cluster (with its users) is visible here.
     db_ready: ready,
@@ -66,6 +71,21 @@ export async function POST(request: NextRequest) {
   try {
     const members = await joinCluster(String(body.code || ''), String(body.adv_host || '').trim(), String(body.node_id || '').trim());
     return ok({ joining: true, members: members.map(m => m.id) });
+  } catch (error) {
+    return failFrom(error);
+  }
+}
+
+/** Cancel a join that has not completed: wipe the (empty) local database and start fresh. */
+export async function DELETE(request: NextRequest) {
+  const ip = request.headers.get('x-forwarded-for')?.split(',')[0] || 'unknown';
+  const limit = checkLoginRateLimit(ip);
+  if (!limit.allowed) return fail('Too many attempts', 429, 'RATE_LIMITED');
+  recordLoginAttempt(ip);
+  if (!(await joinStalled())) return fail('No unfinished join to cancel on this node', 409, 'NOT_JOINING');
+  try {
+    abortJoin();
+    return ok({ aborted: true });
   } catch (error) {
     return failFrom(error);
   }

@@ -13,6 +13,10 @@
  *                             membership (single node -> cluster-ready)
  *             'force_single'  make this node a one-node cluster (recovery)
  *             'wipe_and_join' discard this node's (empty) database and join
+ *             'abort_join'    give up a stalled join: wipe and start as a fresh node
+ *   join_started_at  set while a setup-page join is in flight; cleared once
+ *                    the cluster is visible, so a stalled join can be retried
+ *                    or cancelled from /setup instead of locking the node out
  *
  * Values in the file win over the environment (NODE_NAME, RQLITE_ADV_HOST,
  * RQLITE_JOIN), which act as defaults. Dependency-free CommonJS.
@@ -28,7 +32,7 @@ const RAFT_PORT = process.env.RQLITE_RAFT_PORT || '4002';
 const HOST_RE = /^(?=.{1,253}$)[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$/;
 const ADDR_RE = /^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?:\d{1,5}$/;
 const NODE_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$/;
-const ACTIONS = ['readdress', 'force_single', 'wipe_and_join'];
+const ACTIONS = ['readdress', 'force_single', 'wipe_and_join', 'abort_join'];
 
 function isValidHost(h) { return typeof h === 'string' && HOST_RE.test(h); }
 function isValidAddr(a) { return typeof a === 'string' && ADDR_RE.test(a) && Number(a.split(':').pop()) <= 65535; }

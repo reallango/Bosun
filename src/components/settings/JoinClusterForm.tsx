@@ -12,6 +12,8 @@ interface JoinStatus {
   node_id: string;
   adv_host: string;
   joinable: boolean;
+  /** A join was submitted here and has not completed (it can be retried or cancelled). */
+  stalled: boolean;
   reason: string | null;
   db_ready: boolean;
   voters: number;
@@ -39,7 +41,7 @@ export default function JoinClusterForm() {
   const [advHost, setAdvHost] = useState('');
   const [nodeId, setNodeId] = useState('');
   const [error, setError] = useState('');
-  const [phase, setPhase] = useState<'form' | 'submitting' | 'joining' | 'joined' | 'timeout'>('form');
+  const [phase, setPhase] = useState<'form' | 'submitting' | 'joining' | 'joined' | 'timeout' | 'cancelling'>('form');
 
   useEffect(() => {
     getStatus().then(s => {
@@ -48,8 +50,35 @@ export default function JoinClusterForm() {
       const host = window.location.hostname;
       setAdvHost(s.adv_host && s.adv_host !== 'localhost' ? s.adv_host : host !== 'localhost' && !host.startsWith('127.') ? host : '');
       setNodeId(s.node_id || '');
+      // A join from an earlier visit is still unfinished: show its progress, with retry and cancel.
+      if (s.stalled) setPhase('joining');
     });
   }, []);
+
+  const tryAgain = async () => {
+    setStatus(await getStatus());
+    setError('');
+    setPhase('form');
+  };
+
+  // Give up the unfinished join: this node starts over as a fresh one.
+  const cancelJoin = async () => {
+    setError('');
+    try {
+      const res = await fetch('/api/setup/join', { method: 'DELETE' });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setError(data.error?.message || 'Could not cancel the join');
+        return;
+      }
+    } catch {
+      setError('An error occurred');
+      return;
+    }
+    // rqlite restarts empty; give it a moment, then reload so setup starts clean.
+    setPhase('cancelling');
+    setTimeout(() => window.location.assign('/setup'), 5000);
+  };
 
   // After submitting: wait for the database to come back as part of the cluster.
   useEffect(() => {
@@ -92,16 +121,26 @@ export default function JoinClusterForm() {
     }
   };
 
-  if (phase === 'joining' || phase === 'joined' || phase === 'timeout') {
+  if (phase === 'joining' || phase === 'joined' || phase === 'timeout' || phase === 'cancelling') {
     return (
       <Card>
         <CardHeader><CardTitle>Joining the cluster</CardTitle></CardHeader>
         <CardContent className="space-y-3 text-sm">
-          {phase === 'joining' && (
+          {error && <p role="alert" className="text-destructive">{error}</p>}
+          {phase === 'cancelling' && (
             <p className="flex items-center gap-2">
               <RefreshCw className="size-4 animate-spin motion-reduce:animate-none" aria-hidden />
-              Restarting the database and copying the cluster&apos;s data…
+              Cancelling the join and resetting this node…
             </p>
+          )}
+          {phase === 'joining' && (
+            <>
+              <p className="flex items-center gap-2">
+                <RefreshCw className="size-4 animate-spin motion-reduce:animate-none" aria-hidden />
+                Restarting the database and copying the cluster&apos;s data…
+              </p>
+              <Button variant="outline" size="sm" onClick={cancelJoin}>Cancel</Button>
+            </>
           )}
           {phase === 'joined' && <p className="text-success">Joined. Sign in with an account from the cluster.</p>}
           {phase === 'timeout' && (
@@ -110,7 +149,11 @@ export default function JoinClusterForm() {
               <p className="text-muted-foreground">
                 Check that this machine reaches the cluster on ports 4001 and 4002 and that the cluster reaches this machine at {advHost}. The container log (rqlite service) shows the details.
               </p>
-              <Button variant="outline" size="sm" onClick={() => setPhase('joining')}>Keep waiting</Button>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" size="sm" onClick={() => setPhase('joining')}>Keep waiting</Button>
+                <Button variant="outline" size="sm" onClick={tryAgain}>Change settings and retry</Button>
+                <Button variant="outline" size="sm" onClick={cancelJoin}>Cancel and start over</Button>
+              </div>
             </div>
           )}
         </CardContent>

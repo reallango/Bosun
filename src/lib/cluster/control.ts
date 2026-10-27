@@ -28,6 +28,15 @@ export function restartLocalRqlite(): number {
   throw err('rqlited process not found (not running inside the Bosun container?)', 500);
 }
 
+/** As restartLocalRqlite, but a node whose rqlited is not up yet (a failed join keeps it restarting) is fine: s6 starts it and applies the pending action. */
+function restartLocalRqliteIfRunning(): void {
+  try {
+    restartLocalRqlite();
+  } catch (e) {
+    if ((e as { status?: number }).status !== 500) throw e;
+  }
+}
+
 // ---- join codes ----
 
 export interface JoinCode {
@@ -169,7 +178,18 @@ export async function joinCluster(code: string, advHost: string, nodeId: string)
     adv_host: advHost,
     join: c.members.map(m => m.raft),
     pending: 'wipe_and_join',
+    join_started_at: new Date().toISOString(),
   });
-  restartLocalRqlite();
+  restartLocalRqliteIfRunning();
   return c.members;
+}
+
+/**
+ * Give up a join that never completed: discard the local database and start
+ * as a fresh node, so /setup works again (new installation or another attempt)
+ * without wiping the data volume by hand.
+ */
+export function abortJoin(): void {
+  clusterConfig.writeClusterFile({ join: [], pending: 'abort_join', join_started_at: null });
+  restartLocalRqliteIfRunning();
 }
