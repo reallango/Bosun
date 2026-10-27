@@ -177,8 +177,13 @@ export function layoutForBreakpoint(widgets: LayoutSource[], bp: GridBreakpoint)
     const saved = w.layouts?.[bp];
     if (saved) return { i: w.id, ...fitRect(saved, cols), minW, minH };
     const r = lgRect(w);
-    const width = clamp(Math.round(r.w * factor), Math.min(cols, Math.max(2, minW ?? 0)), cols);
-    const x = clamp(Math.round(r.x * factor), 0, cols - width);
+    // Scale both edges (not x and w separately) so widgets that touch on lg
+    // still touch instead of overlapping after rounding, which would make the
+    // grid push one of them down a row.
+    const left = Math.round(r.x * factor);
+    const right = Math.round((r.x + r.w) * factor);
+    const width = clamp(right - left, Math.min(cols, Math.max(2, minW ?? 0)), cols);
+    const x = clamp(left, 0, cols - width);
     return { i: w.id, x, y: r.y, w: width, h: r.h, minW, minH };
   });
 }
