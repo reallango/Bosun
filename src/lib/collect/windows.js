@@ -86,8 +86,11 @@ const round1 = v => Math.round(v * 10) / 10;
 
 /** Convert raw Windows probe output into the Linux-style raw sections. */
 function buildSnapshot(raw, prev, now = Date.now()) {
+  /** @type {Record<string, any>} */
   const sections = {};
+  /** @type {Record<string, number>} */
   const metrics = {};
+  /** @type {Record<string, any>} */
   const state = { ...(prev || {}) };
 
   if (raw.stat !== undefined || raw.mem !== undefined) {
