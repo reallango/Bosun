@@ -7,6 +7,7 @@ import { Client } from 'ssh2';
 import { encrypt } from '@/lib/crypto/keys';
 import { generateSSHKeyPair } from '@/lib/ssh/keygen';
 import { powershellCommand } from '@/lib/collect/windows';
+import { pruneWindowsKeysScript } from '@/lib/ssh/windows-keys';
 import crypto from 'crypto';
 
 interface SshAuth {
@@ -384,21 +385,48 @@ export async function POST(request: NextRequest) {
         // log in, so a host is never left without a working key.
         let keysRemoved: number | null = null;
         if (replace_keys !== false) {
-            if (isWindowsHost) {
-                steps.push(`${WARNING}Replacing earlier keys is not supported on Windows hosts yet; any earlier Bosun key is still authorized.`);
-            } else if (testSuccess) {
-                const pruned = await sshExec(sshConfig, asRootCommand(sshConfig, admin_password, pruneKeysScript(service_account, publicKey)));
-                const removed = pruned.stdout.match(/BOSUN_REMOVED=(\d+)/);
-                if (pruned.exitCode === 0 && removed) {
-                    keysRemoved = Number(removed[1]);
-                    steps.push(keysRemoved > 0
-                        ? `Removed ${keysRemoved} earlier Bosun key${keysRemoved === 1 ? '' : 's'} from ${service_account} (access for any other Bosun install using them is revoked)`
-                        : 'No earlier Bosun keys to remove');
-                } else {
-                    steps.push(`${WARNING}Could not remove earlier Bosun keys (${stripSudo(pruned.stderr) || `exit ${pruned.exitCode}`}); they are still authorized.`);
-                }
-            } else {
+            if (!testSuccess) {
                 steps.push(`${WARNING}Earlier Bosun keys were not removed because the new key could not be verified.`);
+            } else {
+                // Never fail the whole provisioning over this step (for example if sshd
+                // is still restarting): the host is set up, the old keys just stay.
+                try {
+                    const plural = (n: number) => `${n} earlier Bosun key${n === 1 ? '' : 's'}`;
+                    if (isWindowsHost) {
+                        const pruned = await sshExec(sshConfig, powershellCommand(pruneWindowsKeysScript({ account: service_account, label: keyName, publicKey })));
+                        const removed = pruned.stdout.match(/BOSUN_REMOVED=(\d+)/);
+                        const lookalike = Number(pruned.stdout.match(/BOSUN_LOOKALIKE=(\d+)/)?.[1] ?? 0);
+                        if (removed) {
+                            keysRemoved = Number(removed[1]);
+                            steps.push(keysRemoved > 0
+                                ? `Removed ${plural(keysRemoved)} for ${keyName} from administrators_authorized_keys (a backup was saved next to it as .bosun-bak; any other Bosun install using them is revoked)`
+                                : 'No earlier Bosun keys to remove');
+                            if (lookalike > 0) {
+                                steps.push(`${WARNING}${lookalike} other key${lookalike === 1 ? '' : 's'} in administrators_authorized_keys end in -${service_account} but were left alone because they are not labeled ${keyName}. Remove them by hand if they belong to an old Bosun.`);
+                            }
+                        } else if (pruned.stdout.includes('BOSUN_RESTORED')) {
+                            steps.push(`${WARNING}Removing earlier Bosun keys failed a safety check, so administrators_authorized_keys was restored from its backup; earlier keys are still authorized.`);
+                        } else {
+                            const why = pruned.stdout.includes('BOSUN_NOFILE') ? 'administrators_authorized_keys was not found'
+                                : pruned.stdout.includes('BOSUN_NEWKEY_MISSING') ? 'the new key was not found in administrators_authorized_keys'
+                                : (pruned.stderr.trim() || pruned.stdout.trim() || `exit ${pruned.exitCode}`).slice(0, 200);
+                            steps.push(`${WARNING}Could not remove earlier Bosun keys (${why}); they are still authorized.`);
+                        }
+                    } else {
+                        const pruned = await sshExec(sshConfig, asRootCommand(sshConfig, admin_password, pruneKeysScript(service_account, publicKey)));
+                        const removed = pruned.stdout.match(/BOSUN_REMOVED=(\d+)/);
+                        if (pruned.exitCode === 0 && removed) {
+                            keysRemoved = Number(removed[1]);
+                            steps.push(keysRemoved > 0
+                                ? `Removed ${plural(keysRemoved)} from ${service_account} (access for any other Bosun install using them is revoked)`
+                                : 'No earlier Bosun keys to remove');
+                        } else {
+                            steps.push(`${WARNING}Could not remove earlier Bosun keys (${stripSudo(pruned.stderr) || `exit ${pruned.exitCode}`}); they are still authorized.`);
+                        }
+                    }
+                } catch (err) {
+                    steps.push(`${WARNING}Could not remove earlier Bosun keys (${String(err).slice(0, 200)}); they are still authorized.`);
+                }
             }
         }
 
