@@ -5,6 +5,7 @@ import {
   Activity,
   Box,
   Bot,
+  LineChart,
   Cpu,
   Gauge,
   HardDrive,
@@ -54,11 +55,12 @@ const WIDGETS: { type: string; name: string; desc: string; icon: LucideIcon }[] 
   { type: 'network', name: 'Network', desc: 'Interfaces', icon: Network },
   { type: 'system_services', name: 'Services', desc: 'Running services', icon: ListChecks },
   { type: 'gpu_monitoring', name: 'GPU Monitoring', desc: 'NVIDIA GPU stats', icon: Cpu },
-  { type: 'ollama_status', name: 'Ollama Status', desc: 'LLM runtime status', icon: Bot },
+  { type: 'ollama_status', name: 'Ollama Status', desc: 'Models, pull and delete', icon: Bot },
   { type: 'ssh_terminal', name: 'SSH Terminal', desc: 'Command terminal', icon: SquareTerminal },
   { type: 'os_update_check', name: 'OS Update Check', desc: 'System updates', icon: PackageCheck },
   { type: 'docker_containers', name: 'Docker Containers', desc: 'Container management', icon: Box },
   { type: 'custom_command', name: 'Custom Command', desc: 'Run custom SSH command', icon: Terminal },
+  { type: 'metrics_chart', name: 'Metrics History', desc: 'Charts of recorded metrics', icon: LineChart },
 ];
 
 export function AddWidgetModal({ isOpen, onClose, serverId, onAdd }: AddWidgetModalProps) {
