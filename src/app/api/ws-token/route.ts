@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyAccessToken, createAccessToken } from '@/lib/auth/jwt';
+import { verifyAccessToken, authSecret } from '@/lib/auth/jwt';
 import { rqlite } from '@/lib/db/rqlite-client';
 import { SignJWT } from 'jose';
 
@@ -38,8 +38,7 @@ export async function POST(request: NextRequest) {
     const role = row[2] as string;
 
     // Create a short-lived WebSocket token (5 minutes)
-    const authSecret = process.env.AUTH_SECRET || 'fallback-secret-change-me';
-    const secret = new TextEncoder().encode(authSecret);
+    const secret = authSecret();
     // ws-server verifies the signature, expiry, type and role of this token.
     const wsToken = await new SignJWT({ userId, username, role, type: 'ws' })
       .setProtectedHeader({ alg: 'HS256' })
