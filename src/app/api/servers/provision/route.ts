@@ -82,8 +82,22 @@ function psQuote(value: string): string {
 }
 
 /**
- * Create/verify the service account on a Linux host, grant it sudo + docker,
- * and install the Bosun public key.
+ * Shell script (run as root) that installs a validated sudoers drop-in giving
+ * the service account passwordless sudo. Bosun runs its privileged actions
+ * (OS updates, restart/shut down, installing wakeonlan, docker fallback) with
+ * `sudo -n`, which fails rather than prompting. The rule is checked with
+ * visudo before it is installed, so a bad rule can never break sudo. Only
+ * characters allowed by SERVICE_ACCOUNT_RE reach the script.
+ */
+function sudoersScript(serviceAccount: string): string {
+    const file = `bosun-${serviceAccount.replace(/[^A-Za-z0-9_-]/g, '_')}`;
+    return `f=$(mktemp) && echo "${serviceAccount} ALL=(ALL) NOPASSWD:ALL" > "$f" && `
+        + `visudo -cf "$f" >/dev/null && install -m 440 -o root -g root "$f" /etc/sudoers.d/${file}; rc=$?; rm -f "$f"; exit $rc`;
+}
+
+/**
+ * Create/verify the service account on a Linux host, grant it passwordless sudo
+ * + docker, and install the Bosun public key.
  */
 async function setupLinux(
     sshConfig: SshAuth,
@@ -94,12 +108,20 @@ async function setupLinux(
     const steps: string[] = [];
     const isRoot = sshConfig.username === 'root';
     const escapedPassword = adminPassword.replace(/'/g, "'\\''");
+    // Run a script as root: directly, or through sudo with the admin password.
+    const asRoot = (script: string) => isRoot ? `sh -c '${script}'` : `echo '${escapedPassword}' | sudo -S -p '' sh -c '${script}'`;
+
+    // The admin group is `sudo` on Debian/Ubuntu and `wheel` on RHEL-family hosts.
+    // If neither exists the sudoers rule below still grants access.
+    const groupCheck = await sshExec(sshConfig, 'getent group sudo >/dev/null 2>&1 && echo sudo || { getent group wheel >/dev/null 2>&1 && echo wheel; }');
+    const adminGroup = /^(sudo|wheel)$/.test(groupCheck.stdout.trim()) ? groupCheck.stdout.trim() : '';
+    const groupFlag = adminGroup ? `-G ${adminGroup} ` : '';
 
     const userCheck = await sshExec(sshConfig, `id ${serviceAccount} 2>/dev/null && echo EXISTS || echo MISSING`);
     if (!userCheck.stdout.includes('EXISTS')) {
         const createCmd = isRoot
-            ? `useradd -m -s /bin/bash ${serviceAccount} && usermod -aG sudo ${serviceAccount}`
-            : `echo '${escapedPassword}' | sudo -S useradd -m -s /bin/bash ${serviceAccount} && echo '${escapedPassword}' | sudo -S usermod -aG sudo ${serviceAccount}`;
+            ? `useradd -m -s /bin/bash ${groupFlag}${serviceAccount}`
+            : `echo '${escapedPassword}' | sudo -S useradd -m -s /bin/bash ${groupFlag}${serviceAccount}`;
         const createResult = await sshExec(sshConfig, createCmd);
         if (createResult.exitCode !== 0 && !createResult.stderr.includes('already exists')) {
             return { error: { message: `Failed to create account: ${stripSudo(createResult.stderr)}`, code: 'ACCOUNT_CREATE_FAILED' } };
@@ -114,6 +136,13 @@ async function setupLinux(
         : `echo '${escapedPassword}' | sudo -S usermod -aG docker ${serviceAccount} 2>/dev/null || echo '${escapedPassword}' | sudo -S groupadd docker 2>/dev/null || true`;
     await sshExec(sshConfig, dockerGroupCmd);
     steps.push('Added service account to docker group');
+
+    // Not fatal: an unusual host (no visudo, no /etc/sudoers.d) can still be used,
+    // but actions that need root will ask for sudo to be configured by hand.
+    const sudoersResult = await sshExec(sshConfig, asRoot(sudoersScript(serviceAccount)));
+    steps.push(sudoersResult.exitCode === 0
+        ? 'Enabled passwordless sudo for the service account'
+        : `Could not enable passwordless sudo (${stripSudo(sudoersResult.stderr) || `exit ${sudoersResult.exitCode}`}); restart, shut down and OS updates need it`);
 
     const installCmd = isRoot
         ? [

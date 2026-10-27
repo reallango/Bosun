@@ -96,8 +96,15 @@ All services except nginx run as the unprivileged `node` user inside the contain
 
 Requirements on Linux hosts: `sh`, `/proc`. Optional: `ip` (addresses), `nvidia-smi`,
 `docker` (the SSH user in the `docker` group, or passwordless `sudo docker`),
-`curl` (Ollama), `systemctl`. For installing OS updates the SSH user needs
-passwordless `sudo` for the package manager.
+`curl` (Ollama), `systemctl`. For installing OS updates, restarting and shutting
+down the host, the SSH user needs passwordless `sudo`.
+
+*Provision* sets that up for the service account it creates: it writes a
+`/etc/sudoers.d/bosun-<account>` rule (`NOPASSWD:ALL`), checked with `visudo` before it is
+installed, and adds the account to the `sudo` (Debian/Ubuntu) or `wheel` (RHEL-family)
+group. Running Provision again on an existing account adds the rule too. If you add a
+host with your own key and account instead, grant it passwordless sudo yourself.
+Windows hosts have no sudo; the service account is an administrator.
 
 ### Windows hosts
 
