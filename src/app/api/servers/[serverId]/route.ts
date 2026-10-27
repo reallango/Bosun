@@ -29,9 +29,20 @@ export async function PATCH(request: NextRequest, { params }: { params: { server
     if (!payload || payload.role !== 'admin') return NextResponse.json({ error: { message: 'Forbidden' } }, { status: 403 });
     const { serverId } = await params;
     const body = await request.json();
-    const allowed = ['name','hostname','ssh_port','ssh_user','ssh_key_id','notes','tags','platform','os_type','os_version','os_codename','kernel_version'];
+    const allowed = ['name','hostname','ssh_port','ssh_user','ssh_key_id','notes','tags','platform','os_type','os_version','os_codename','kernel_version',
+      'poll_enabled','poll_interval_sec','host_key_fingerprint'];
     const updates: string[] = []; const values: any[] = [];
-    for (const [k,v] of Object.entries(body)) { if (allowed.includes(k)) { updates.push(`${k} = ?`); values.push(k==='tags' ? JSON.stringify(v) : v); } }
+    for (const [k,v] of Object.entries(body)) {
+      if (!allowed.includes(k)) continue;
+      let value: unknown = v;
+      if (k === 'tags') value = JSON.stringify(v);
+      if (k === 'platform') value = v === 'windows' ? 'windows' : 'linux';
+      if (k === 'poll_enabled') value = v ? 1 : 0;
+      if (k === 'poll_interval_sec') value = Math.min(3600, Math.max(5, Math.round(Number(v) || 15)));
+      // Only clearing is allowed (re-trust a host whose key legitimately changed).
+      if (k === 'host_key_fingerprint') { if (v !== null) continue; value = null; }
+      updates.push(`${k} = ?`); values.push(value);
+    }
     if (!updates.length) return NextResponse.json({ error: { message: 'Nothing to update' } }, { status: 400 });
     updates.push('updated_at = CURRENT_TIMESTAMP'); values.push(serverId);
     await rqlite.execute(`UPDATE servers SET ${updates.join(', ')} WHERE id = ?`, values);
@@ -51,8 +62,18 @@ export async function DELETE(request: NextRequest, { params }: { params: { serve
     const payload = await verifyAccessToken(accessToken);
     if (!payload || payload.role !== 'admin') return NextResponse.json({ error: { message: 'Forbidden' } }, { status: 403 });
     const { serverId } = await params;
-    await rqlite.execute("DELETE FROM dashboards WHERE type='server' AND server_id=?", [serverId]);
-    await rqlite.execute("DELETE FROM servers WHERE id=?", [serverId]);
+    // Remove everything that hangs off the server in one transaction (does not
+    // rely on SQLite foreign-key enforcement being enabled).
+    await rqlite.executeBatch([
+      "DELETE FROM widgets WHERE server_id=? OR dashboard_id IN (SELECT id FROM dashboards WHERE type='server' AND server_id=?)",
+      "DELETE FROM dashboards WHERE type='server' AND server_id=?",
+      'DELETE FROM host_snapshots WHERE server_id=?',
+      'DELETE FROM metric_samples WHERE server_id=?',
+      'DELETE FROM metric_rollups WHERE server_id=?',
+      'DELETE FROM alert_rules WHERE server_id=?',
+      'DELETE FROM notifications WHERE server_id=?',
+      'DELETE FROM servers WHERE id=?',
+    ].map(sql => ({ sql, params: sql.split('?').length === 3 ? [serverId, serverId] : [serverId] })), { transaction: true });
     try { await sshPool.drainServer(serverId); } catch {}
     await logAudit({ userId: payload.userId, serverId, action: AuditActions.SERVER_DELETE, status: 'success' });
     return NextResponse.json({ data: { success: true } });

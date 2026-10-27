@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { rqlite } from '../db/rqlite-client';
 
 export interface AuditLogEntry {
@@ -11,21 +12,30 @@ export interface AuditLogEntry {
   durationMs?: number;
 }
 
+/**
+ * Append an audit record. Never throws: a failed audit write is logged but
+ * must not fail the action being audited.
+ */
 export async function logAudit(entry: AuditLogEntry): Promise<void> {
-  await rqlite.execute(
-    `INSERT INTO audit_log (user_id, server_id, action, category, details, status, ip_address, duration_ms)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-    [
-      entry.userId || null,
-      entry.serverId || null,
-      entry.action,
-      entry.category || 'general',
-      entry.details || null,
-      entry.status,
-      entry.ipAddress || null,
-      entry.durationMs || null
-    ]
-  );
+  try {
+    await rqlite.execute(
+      `INSERT INTO audit_log (id, user_id, server_id, action, category, details, status, ip_address, duration_ms)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        crypto.randomUUID(),
+        entry.userId || null,
+        entry.serverId || null,
+        entry.action,
+        entry.category || entry.action.split('.')[0] || 'general',
+        entry.details || null,
+        entry.status,
+        entry.ipAddress || null,
+        entry.durationMs ?? null
+      ]
+    );
+  } catch (err) {
+    console.error('Audit log write failed:', err);
+  }
 }
 
 export const AuditActions = {
@@ -39,5 +49,8 @@ export const AuditActions = {
   SERVER_DETECT: 'server.detect',
   SSH_KEY_CREATE: 'ssh_key.create',
   SSH_KEY_DELETE: 'ssh_key.delete',
-  CONFIG_UPDATE: 'config.update'
+  CONFIG_UPDATE: 'config.update',
+  CONTAINER_ACTION: 'docker.container_action',
+  OLLAMA_PULL: 'ollama.pull',
+  OLLAMA_DELETE: 'ollama.delete',
 } as const;

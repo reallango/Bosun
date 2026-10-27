@@ -1,27 +1,30 @@
 import { rqlite } from './rqlite-client';
 import { runMigrations } from './migrations';
 
+let initPromise: Promise<void> | null = null;
+
 export async function initializeDatabase(): Promise<void> {
-  console.log('Initializing database...');
-  
-  // Wait for rqlite to be ready
-  let attempts = 0;
-  while (!(await rqlite.isReady()) && attempts < 30) {
+  // Wait up to ~60 s for rqlite to be ready (it starts alongside the app).
+  for (let attempt = 0; attempt < 60 && !(await rqlite.isReady()); attempt++) {
+    if (attempt % 10 === 0) console.log('[db] waiting for rqlite...');
     await new Promise(resolve => setTimeout(resolve, 1000));
-    attempts++;
-    console.log('Waiting for rqlite...');
   }
-
-  if (!(await rqlite.isReady())) {
-    throw new Error('rqlite failed to start');
-  }
-
-  console.log('rqlite is ready');
-
-  // Run migrations
+  if (!(await rqlite.isReady())) throw new Error('rqlite did not become ready');
   await runMigrations();
+}
 
-  console.log('Database initialized');
+/**
+ * Initialise once per process. Concurrent callers share the same promise; a
+ * failure clears it so the next caller retries.
+ */
+export function ensureDatabase(): Promise<void> {
+  if (!initPromise) {
+    initPromise = initializeDatabase().catch(err => {
+      initPromise = null;
+      throw err;
+    });
+  }
+  return initPromise;
 }
 
 export default initializeDatabase;

@@ -25,7 +25,10 @@ export const EDITABLE_SETTINGS: SettingDef[] = [
   { key: 'cleanup.audit_log_days', label: 'Audit log retention (days)', type: 'number', description: 'Days to keep audit log entries' },
   { key: 'cleanup.notification_days', label: 'Notification retention (days)', type: 'number', description: 'Days to keep notifications' },
   { key: 'cleanup.session_days', label: 'Session retention (days)', type: 'number', description: 'Days to keep expired sessions' },
-  { key: 'health.check_interval_sec', label: 'Health check interval (s)', type: 'number', description: 'Server health check interval in seconds' },
+  { key: 'poller.default_interval_sec', label: 'Default poll interval (s)', type: 'number', description: 'Poll interval for newly added servers (per-server setting after that)' },
+  { key: 'metrics.raw_retention_hours', label: 'Raw metric retention (h)', type: 'number', description: 'Hours to keep raw metric samples' },
+  { key: 'metrics.rollup_5m_retention_days', label: '5-minute rollup retention (days)', type: 'number', description: 'Days to keep 5-minute metric aggregates' },
+  { key: 'metrics.rollup_1h_retention_days', label: '1-hour rollup retention (days)', type: 'number', description: 'Days to keep 1-hour metric aggregates' },
 ];
 
 export const EDITABLE_SETTING_KEYS = EDITABLE_SETTINGS.map(s => s.key);
