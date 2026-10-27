@@ -1,15 +1,29 @@
+/**
+ * POST { username, password }
+ *  -> 200 { data: { user } } with session cookies, or, when the account has
+ *     MFA, 200 { data: { mfa_required: true, challenge_id, method, email_sent? } }
+ *     without cookies; finish with POST /api/auth/mfa.
+ *  -> 401 INVALID_CREDENTIALS, 403 ACCOUNT_DISABLED, 429 RATE_LIMITED, 503 NO_QUORUM
+ */
 import { NextRequest, NextResponse } from 'next/server';
-import { rqlite, isNoQuorumError } from '@/lib/db/rqlite-client';
+import { isNoQuorumError } from '@/lib/db/rqlite-client';
+import crypto from 'crypto';
 import { hashPassword, verifyPassword } from '@/lib/auth/password';
-import { createAccessToken, generateRefreshToken, hashToken } from '@/lib/auth/jwt';
 import { logAudit, AuditActions } from '@/lib/audit/logger';
 import { checkLoginRateLimit, recordLoginAttempt } from '@/lib/utils/rate-limiter';
-import crypto from 'crypto';
+import { clientIp, findUserByUsername, startSession } from '@/lib/auth/session';
+import { createChallenge, startEmailChallenge } from '@/lib/auth/mfa';
+
+let dummyHash: Promise<string> | undefined;
+
+const INVALID ={ error: { message: 'Invalid username or password', code: 'INVALID_CREDENTIALS' } };
 
 export async function POST(request: NextRequest) {
   try {
-    const { username, password } = await request.json();
-    const ip = request.headers.get('x-forwarded-for')?.split(',')[0] || 'unknown';
+    const body = await request.json().catch(() => ({}));
+    const username = typeof body?.username === 'string' ? body.username : '';
+    const password = typeof body?.password === 'string' ? body.password : '';
+    const ip = clientIp(request);
 
     const rateLimit = checkLoginRateLimit(ip);
     if (!rateLimit.allowed) {
@@ -20,31 +34,39 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const userResult = await rqlite.query("SELECT id, username, password_hash, role FROM users WHERE username = ?", [username]);
-    if (!userResult.values || userResult.values.length === 0) {
+    const user = username ? await findUserByUsername(username) : null;
+    if (!user) {
+      // Spend the same scrypt time as for a real account (no user enumeration by timing).
+      dummyHash ??= hashPassword(crypto.randomUUID());
+      await verifyPassword(password || 'x', await dummyHash).catch(() => false);
       recordLoginAttempt(ip);
-      await logAudit({ action: AuditActions.LOGIN_FAILED, details: `Unknown user: ${username}`, status: 'failure', ipAddress: ip });
-      return NextResponse.json({ error: { message: 'Invalid username or password', code: 'INVALID_CREDENTIALS' } }, { status: 401 });
+      await logAudit({ action: AuditActions.LOGIN_FAILED, details: `Unknown user: ${username.slice(0, 100)}`, status: 'failure', ipAddress: ip });
+      return NextResponse.json(INVALID, { status: 401 });
     }
-    const [userId, uname, pwHash, role] = userResult.values[0] as [string, string, string, string];
-    const valid = await verifyPassword(password, pwHash);
+    const valid = password ? await verifyPassword(password, user.password_hash) : false;
     if (!valid) {
       recordLoginAttempt(ip);
-      await logAudit({ userId, action: AuditActions.LOGIN_FAILED, status: 'failure', ipAddress: ip });
-      return NextResponse.json({ error: { message: 'Invalid username or password', code: 'INVALID_CREDENTIALS' } }, { status: 401 });
+      await logAudit({ userId: user.id, action: AuditActions.LOGIN_FAILED, status: 'failure', ipAddress: ip });
+      return NextResponse.json(INVALID, { status: 401 });
     }
-    const accessToken = await createAccessToken(userId, uname, role);
-    const refreshToken = generateRefreshToken();
-    const refreshHash = hashToken(refreshToken);
-    const sessionId = crypto.randomUUID();
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-    await rqlite.execute("INSERT INTO sessions (id, user_id, token_hash, ip_address, expires_at) VALUES (?, ?, ?, ?, ?)", [sessionId, userId, refreshHash, ip, expiresAt]);
-    await rqlite.execute("UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?", [userId]);
-    await logAudit({ userId, action: AuditActions.LOGIN, status: 'success', ipAddress: ip });
-    const response = NextResponse.json({ data: { user: { id: userId, username: uname, role } } });
-    response.cookies.set('access_token', accessToken, { httpOnly: true, secure: process.env.COOKIE_SECURE === 'true', sameSite: 'strict', path: '/', maxAge: 15 * 60 });
-    response.cookies.set('refresh_token', refreshToken, { httpOnly: true, secure: process.env.COOKIE_SECURE === 'true', sameSite: 'strict', path: '/', maxAge: 7 * 24 * 60 * 60 });
-    return response;
+    if (user.disabled) {
+      recordLoginAttempt(ip);
+      await logAudit({ userId: user.id, action: AuditActions.LOGIN_FAILED, details: 'Account disabled', status: 'failure', ipAddress: ip });
+      return NextResponse.json({ error: { message: 'This account cannot sign in. Contact an administrator.', code: 'ACCOUNT_DISABLED' } }, { status: 403 });
+    }
+
+    if (user.mfa_method === 'totp' || user.mfa_method === 'email') {
+      if (user.mfa_method === 'totp') {
+        const challenge = await createChallenge(user.id, 'totp');
+        await logAudit({ userId: user.id, action: 'auth.mfa_challenge', details: 'totp', status: 'pending', ipAddress: ip });
+        return NextResponse.json({ data: { mfa_required: true, challenge_id: challenge.id, method: 'totp' } });
+      }
+      const { challenge, sent } = await startEmailChallenge(user, 'email', 'login');
+      await logAudit({ userId: user.id, action: 'auth.mfa_challenge', details: sent ? 'email code sent' : 'email code could not be sent', status: 'pending', ipAddress: ip });
+      return NextResponse.json({ data: { mfa_required: true, challenge_id: challenge.id, method: 'email', email_sent: sent } });
+    }
+
+    return await startSession(request, user);
   } catch (error) {
     if (isNoQuorumError(error)) {
       return NextResponse.json({ error: { message: error.message, code: error.code } }, { status: 503 });
