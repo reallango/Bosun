@@ -158,15 +158,19 @@ export default function NewServerPage() {
   return (
     <>
       <Header title="Add Server" />
-      <div className="p-8">
-        <Card className="max-w-lg">
+      <div className="page max-w-2xl">
+        <Card>
           <CardHeader>
             <CardTitle>Add Server</CardTitle>
           </CardHeader>
           <CardContent>
             {/* Setup Method Tabs */}
-            <div className="flex gap-2 mb-6">
+            <div role="tablist" aria-label="Setup method" className="mb-6 grid grid-cols-1 gap-2 xs:grid-cols-2">
               <Button
+                size="lg"
+                role="tab"
+                aria-selected={setupMethod === 'existing'}
+                className="h-auto min-h-9 whitespace-normal py-2"
                 type="button"
                 variant={setupMethod === 'existing' ? 'default' : 'outline'}
                 onClick={() => setSetupMethod('existing')}
@@ -174,6 +178,10 @@ export default function NewServerPage() {
                 I have existing SSH credentials
               </Button>
               <Button
+                size="lg"
+                role="tab"
+                aria-selected={setupMethod === 'auto'}
+                className="h-auto min-h-9 whitespace-normal py-2"
                 type="button"
                 variant={setupMethod === 'auto' ? 'default' : 'outline'}
                 onClick={() => { setSetupMethod('auto'); setProvisionData(null); setProvisionSteps([]); }}
@@ -185,7 +193,7 @@ export default function NewServerPage() {
             {setupMethod === 'auto' ? (
               <form onSubmit={handleProvision} className="space-y-4">
                 {(provisionError || error) && (
-                  <div className="p-3 bg-red-50 border border-red-200 rounded-md text-red-600 text-sm">
+                  <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
                     {provisionError || error}
                   </div>
                 )}
@@ -194,26 +202,26 @@ export default function NewServerPage() {
                   // Show results after provisioning
                   <div className="space-y-4">
                     {error && (
-                      <div className="p-3 bg-red-50 border border-red-200 rounded-md text-red-600 text-sm">
+                      <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
                         {error}
                       </div>
                     )}
-                    <div className="p-4 bg-green-50 border border-green-200 rounded-md">
-                      <div className="font-medium text-green-700 mb-2">Provisioning Successful!</div>
+                    <div className="rounded-md border border-green-500/30 bg-green-500/10 p-4">
+                      <div className="mb-2 font-medium text-success">Provisioning Successful!</div>
                       <div className="text-sm space-y-1">
                         {provisionSteps.map((step, i) => (
                           <div key={i} className="flex items-center gap-2">
-                            <span className="text-green-600">✓</span>
-                            <span className="text-green-600">{step}</span>
+                            <span className="text-success" aria-hidden>✓</span>
+                            <span className="min-w-0 break-words text-success">{step}</span>
                           </div>
                         ))}
                       </div>
                     </div>
-                    <div className="text-sm text-gray-600">
+                    <div className="break-words text-sm text-muted-foreground">
                       <p>Service account: <strong>{provisionData.service_account}</strong></p>
                       <p>SSH Key: <strong>{provisionData.ssh_key_name}</strong></p>
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex flex-col-reverse gap-2 pt-2 xs:flex-row">
                       <Button
                         type="button"
                         onClick={handleProvisionSave}
@@ -239,27 +247,27 @@ export default function NewServerPage() {
                     <div className="space-y-2">
                       <Label htmlFor="platform">Platform</Label>
                       <select id="platform" name="platform" defaultValue="linux"
-                        className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm">
+                        className="form-select">
                         <option value="linux">Linux</option>
                         <option value="windows">Windows</option>
                       </select>
-                      <p className="text-xs text-gray-500">Windows hosts are provisioned with PowerShell over OpenSSH.</p>
+                      <p className="text-xs text-muted-foreground">Windows hosts are provisioned with PowerShell over OpenSSH.</p>
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="admin_username">Admin Username *</Label>
                       <Input id="admin_username" name="admin_username" placeholder="root or Administrator" required />
-                      <p className="text-xs text-gray-500">SSH user with sudo (Linux) or Administrator (Windows) rights</p>
+                      <p className="text-xs text-muted-foreground">SSH user with sudo (Linux) or Administrator (Windows) rights</p>
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="admin_password">Admin Password *</Label>
-                      <Input id="admin_password" name="admin_password" type="password" required />
-                      <p className="text-xs text-gray-500">Password for admin user (used once, not stored)</p>
+                      <Input id="admin_password" name="admin_password" type="password" autoComplete="off" required />
+                      <p className="text-xs text-muted-foreground">Password for admin user (used once, not stored)</p>
                     </div>
                     <div className="space-y-2">
                       <Label htmlFor="service_account">Service Account Name</Label>
                       <Input id="service_account" name="service_account" defaultValue="bosun-svc" />
                     </div>
-                    <div className="flex gap-2">
+                    <div className="flex flex-col-reverse gap-2 pt-2 xs:flex-row">
                       <Button type="submit" disabled={provisioning}>
                         {provisioning ? 'Provisioning...' : 'Provision Server'}
                       </Button>
@@ -273,7 +281,7 @@ export default function NewServerPage() {
             ) : (
               <form onSubmit={handleSubmit} className="space-y-4">
                 {error && (
-                  <div className="p-3 bg-red-50 border border-red-200 rounded-md text-red-600 text-sm">
+                  <div className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
                     {error}
                   </div>
                 )}
@@ -296,7 +304,7 @@ export default function NewServerPage() {
                 <div className="space-y-2">
                   <Label htmlFor="ssh_key_id">SSH Key</Label>
                   <select id="ssh_key_id" name="ssh_key_id" defaultValue=""
-                    className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm">
+                    className="form-select">
                     <option value="">-- No key selected --</option>
                     {sshKeys.map(k => (
                       <option key={k.id} value={k.id}>
@@ -304,22 +312,22 @@ export default function NewServerPage() {
                       </option>
                     ))}
                   </select>
-                  <p className="text-xs text-gray-500">Required for widgets, Detect OS, and the terminal.</p>
+                  <p className="text-xs text-muted-foreground">Required for widgets, Detect OS, and the terminal.</p>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="platform">Platform</Label>
                   <select id="platform" name="platform" defaultValue="linux"
-                    className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm">
+                    className="form-select">
                     <option value="linux">Linux</option>
                     <option value="windows">Windows</option>
                   </select>
-                  <p className="text-xs text-gray-500">Windows hosts use PowerShell over OpenSSH.</p>
+                  <p className="text-xs text-muted-foreground">Windows hosts use PowerShell over OpenSSH.</p>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="notes">Notes</Label>
                   <Input id="notes" name="notes" />
                 </div>
-                <div className="flex gap-2">
+                <div className="flex flex-col-reverse gap-2 pt-2 xs:flex-row">
                   <Button type="submit" disabled={loading}>
                     {loading ? 'Creating...' : 'Create Server'}
                   </Button>

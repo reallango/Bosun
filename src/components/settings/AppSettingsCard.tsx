@@ -72,24 +72,25 @@ export default function AppSettingsCard() {
       <CardHeader>
         <CardTitle>Settings</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent className="grid grid-cols-1 gap-4 md:grid-cols-2">
         {loading ? (
-          <p className="text-gray-500">Loading...</p>
+          <p className="text-sm text-muted-foreground">Loading…</p>
         ) : (
           <>
             {error && (
-              <div className="p-3 rounded bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-sm">
+              <div className="md:col-span-2 rounded-md bg-destructive/10 p-3 text-sm text-destructive">
                 {error}
               </div>
             )}
             {settings.map(def => (
               <div key={def.key}>
-                <Label className="mb-1">{def.label}</Label>
+                <Label htmlFor={`setting-${def.key}`} className="mb-1.5">{def.label}</Label>
                 {def.type === 'boolean' ? (
                   <select
                     value={values[def.key] ?? ''}
                     onChange={e => setValues(v => ({ ...v, [def.key]: e.target.value }))}
-                    className="w-full border rounded px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white border-gray-300 dark:border-gray-600"
+                    id={`setting-${def.key}`}
+                    className="form-select"
                   >
                     <option value="true">Enabled</option>
                     <option value="false">Disabled</option>
@@ -98,7 +99,8 @@ export default function AppSettingsCard() {
                   <select
                     value={values[def.key] ?? ''}
                     onChange={e => setValues(v => ({ ...v, [def.key]: e.target.value }))}
-                    className="w-full border rounded px-3 py-2 bg-white dark:bg-gray-700 text-gray-900 dark:text-white border-gray-300 dark:border-gray-600"
+                    id={`setting-${def.key}`}
+                    className="form-select"
                   >
                     {def.options.map(o => (
                       <option key={o} value={o}>{o}</option>
@@ -106,19 +108,20 @@ export default function AppSettingsCard() {
                   </select>
                 ) : (
                   <Input
+                    id={`setting-${def.key}`}
                     type={def.type === 'number' ? 'number' : 'text'}
                     value={values[def.key] ?? ''}
                     onChange={e => setValues(v => ({ ...v, [def.key]: e.target.value }))}
                   />
                 )}
-                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{def.description}</p>
+                <p className="mt-1 text-xs text-muted-foreground">{def.description}</p>
               </div>
             ))}
-            <div className="flex items-center gap-3">
-              <Button onClick={handleSave} disabled={saving}>
+            <div className="flex flex-wrap items-center gap-3 md:col-span-2">
+              <Button size="lg" onClick={handleSave} disabled={saving}>
                 {saving ? 'Saving...' : 'Save Settings'}
               </Button>
-              {message && <span className="text-sm text-green-600">{message}</span>}
+              {message && <span className="text-sm text-success" role="status">{message}</span>}
             </div>
           </>
         )}
