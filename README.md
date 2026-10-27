@@ -111,14 +111,22 @@ host without Docker, Provision shows a warning instead; run it again after insta
 and the account is added then.
 
 **Moving a host from another Bosun.** Each Provision run generates a new key. With *Replace
-earlier Bosun keys on this host* ticked (the default, Linux only), Bosun first adds and tests
-the new key, then removes earlier Bosun keys from the service account's `authorized_keys`:
-the lines whose comment ends in `-<account>`, which is how Bosun labels the keys it
-generates. Other keys on the account are left alone. The old Bosun install loses access
-to that host, so tick this when migrating and untick it to run two installs side by side.
-If the host is already added to this Bosun, Provision points it at the new key instead of
-creating a duplicate. Windows hosts keep earlier keys for now (they share one
-`administrators_authorized_keys` file); a warning says so.
+earlier Bosun keys on this host* ticked (the default), Bosun first adds and tests the new
+key, then removes earlier Bosun keys. Nothing is removed if the new key cannot be verified.
+The old Bosun install loses access to that host, so tick this when migrating and untick it
+to run two installs side by side. If the host is already added to this Bosun, Provision
+points it at the new key instead of creating a duplicate.
+
+- **Linux:** removes the lines in the service account's `authorized_keys` whose comment ends
+  in `-<account>`, which is how Bosun labels the keys it generates. Other keys on the account
+  are left alone.
+- **Windows:** every administrator shares one `C:\ProgramData\ssh\administrators_authorized_keys`,
+  so this is stricter: only lines whose comment is *exactly* `<host>-<account>` are removed,
+  where `<host>` is the hostname you typed. Keys that merely end in `-<account>` (an old Bosun
+  that used a different host name, or another Bosun account) are kept and reported as a
+  warning. The file is backed up as `administrators_authorized_keys.bosun-bak` first, edited
+  in place (permissions untouched), re-read afterwards, and restored from the backup if the
+  new key is not in it.
 
 ### Windows hosts
 

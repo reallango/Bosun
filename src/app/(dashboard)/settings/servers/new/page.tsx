@@ -287,7 +287,8 @@ export default function NewServerPage() {
                       </label>
                       <p className="pl-6 text-xs text-muted-foreground">
                         Removes keys a previous Bosun install added to the service account, once the new key is verified.
-                        Use this when moving a host from an old Bosun; the old install loses access. Linux hosts only.
+                        Use this when moving a host from an old Bosun; the old install loses access. On Windows only keys
+                        labeled exactly for this host are removed.
                       </p>
                     </div>
                     <div className="flex flex-col-reverse gap-2 pt-2 xs:flex-row">
