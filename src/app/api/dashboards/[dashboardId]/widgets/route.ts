@@ -2,7 +2,7 @@ import { findFreeSpot } from '@/lib/widgets/placement';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireRole } from '@/lib/auth/middleware';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
-import { getWidgetDefinition } from '@/components/widgets/registry';
+import { resolveWidgetDefinition, supportsPlatform } from '@/components/widgets/registry-loader';
 import crypto from 'crypto';
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ dashboardId: string }> }) {
@@ -32,7 +32,26 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   try {
     const { widget_type, server_id, config, title_override, grid_x, grid_y, grid_w, grid_h } = await request.json();
     if (!widget_type||!server_id) return NextResponse.json({ error: { message: 'widget_type and server_id required' } }, { status: 400 });
-    const def = getWidgetDefinition(widget_type);
+    const def = await resolveWidgetDefinition(widget_type);
+    if (!def) return NextResponse.json({ error: { message: `Unknown widget type: ${widget_type}` } }, { status: 400 });
+    // Platform support and enabled state are enforced here, not just hidden in the picker.
+    const srv = await rqlite.query('SELECT platform FROM servers WHERE id = ?', [server_id]);
+    if (!srv.values?.length) return NextResponse.json({ error: { message: 'Server not found' } }, { status: 404 });
+    const platform = (srv.values[0][0] as string) || 'linux';
+    if (!supportsPlatform(def, platform)) {
+      return NextResponse.json({ error: { message: `${def.displayName} is not available on ${platform} servers` } }, { status: 400 });
+    }
+    if (def.isCustom) {
+      const enabled = await rqlite.query('SELECT enabled FROM custom_widgets WHERE type = ?', [widget_type]);
+      if (Number(enabled.values?.[0]?.[0]) !== 1) {
+        return NextResponse.json({ error: { message: `${def.displayName} is disabled` } }, { status: 400 });
+      }
+    }
+    // Seed config from the definition's field defaults; explicit values win.
+    const initialConfig = {
+      ...Object.fromEntries((def.configSchema || []).filter(f => f.default !== undefined).map(f => [f.key, f.default])),
+      ...(config && typeof config === 'object' ? config : {}),
+    };
     const wid = crypto.randomUUID();
     // Use user-provided grid_w/grid_h if explicitly passed, otherwise use widget definition defaults
     const w = grid_w !== undefined ? grid_w : (def?.defaultSize?.w ?? 4);
@@ -47,7 +66,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       y = spot.y;
     }
     await rqlite.execute("INSERT INTO widgets (id,dashboard_id,widget_type,server_id,title_override,config,grid_x,grid_y,grid_w,grid_h,grid_min_w,grid_min_h) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-        [wid,dashboardId,widget_type,server_id,title_override||null,JSON.stringify(config||{}),x,y,w,h,def?.minSize.w??2,def?.minSize.h??2]);
+        [wid,dashboardId,widget_type,server_id,title_override||null,JSON.stringify(initialConfig),x,y,w,h,def?.minSize.w??2,def?.minSize.h??2]);
     const r = await rqlite.query('SELECT * FROM widgets WHERE id=?', [wid]);
     return NextResponse.json({ data: { widget: rowsToObjects(r)[0] } }, { status: 201 });
   } catch (error) {

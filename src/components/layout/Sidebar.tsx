@@ -6,6 +6,7 @@ import { usePathname } from 'next/navigation';
 import { Dialog as DialogPrimitive } from 'radix-ui';
 import {
   Bell,
+  Puzzle,
   Database,
   FileClock,
   House,
@@ -23,6 +24,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
+import { readJson } from '@/lib/api/readJson';
 import { ensureArray } from '@/lib/api/ensureArray';
 import { useShell } from './ShellContext';
 
@@ -30,7 +32,9 @@ interface Server {
   id: string;
   name: string;
   hostname: string;
-  is_online: number;
+  is_online: number | boolean;
+  /** false = monitoring paused (shown as a yellow dot). */
+  poll_enabled?: boolean;
 }
 
 interface Dashboard {
@@ -59,6 +63,7 @@ const SETTINGS_NAV: NavItem[] = [
   { href: '/settings/cluster', label: 'Cluster', icon: Network },
   { href: '/settings/database', label: 'Database', icon: Database },
   { href: '/settings/alerts', label: 'Alerts', icon: Bell },
+  { href: '/settings/custom-widgets', label: 'Custom Widgets', icon: Puzzle },
   { href: '/settings/audit-log', label: 'Audit Log', icon: FileClock },
 ];
 
@@ -74,7 +79,8 @@ function useNavData() {
   useEffect(() => {
     let cancelled = false;
     fetchWithAuth('/api/servers')
-      .then(r => r.json())
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .then(r => readJson<any>(r))
       .then(j => {
         if (!cancelled) setServers(ensureArray<Server>(j?.data?.servers ?? j?.servers));
       })
@@ -83,7 +89,8 @@ function useNavData() {
         if (!cancelled) setServers([]);
       });
     fetchWithAuth('/api/dashboards')
-      .then(r => r.json())
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      .then(r => readJson<any>(r))
       .then(j => {
         if (!cancelled) setDashboards(ensureArray<Dashboard>(j?.data?.dashboards ?? j?.dashboards));
       })
@@ -182,14 +189,14 @@ function SidebarNav({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?
                 <span
                   className={cn(
                     'absolute -bottom-0.5 -right-0.5 size-2 rounded-full ring-2 ring-sidebar',
-                    s.is_online ? 'bg-green-500' : 'bg-gray-500'
+                    s.poll_enabled === false ? 'bg-yellow-500' : s.is_online ? 'bg-green-500' : 'bg-gray-500'
                   )}
                 />
               </span>
             ) : (
               <span
-                className={cn('ml-1 mr-1 size-2 shrink-0 rounded-full', s.is_online ? 'bg-green-500' : 'bg-gray-500')}
-                aria-label={s.is_online ? 'online' : 'offline'}
+                className={cn('ml-1 mr-1 size-2 shrink-0 rounded-full', s.poll_enabled === false ? 'bg-yellow-500' : s.is_online ? 'bg-green-500' : 'bg-gray-500')}
+                aria-label={s.poll_enabled === false ? 'not monitored' : s.is_online ? 'online' : 'offline'}
               />
             )
           }

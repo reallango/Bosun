@@ -258,6 +258,50 @@ export const DEFAULT_CONFIG: [string, string, string][] = [
     ['metrics.rollup_1h_retention_days', '400', 'Days to keep 1-hour metric rollups'],
 ];
 
+// ---- Version 2: Wake-on-LAN and database-defined widget types (from dev) ----
+const V2_WOL_AND_CUSTOM_WIDGETS: string[] = [
+    // MAC address of the NIC to wake (nullable: hosts without WoL leave it blank).
+    `ALTER TABLE servers ADD COLUMN mac_address TEXT`,
+    // Set by "Check for updates"; the poller then runs the 6-hourly update probe once.
+    `ALTER TABLE servers ADD COLUMN updates_requested_at INTEGER`,
+
+    // A magic packet must originate on the target's L2 segment, which the Bosun
+    // container usually is not. wol.local_server_id names a managed server
+    // (typically the Docker host) that sends it with the `wakeonlan` utility.
+    `INSERT OR IGNORE INTO app_config (key, value, description) VALUES ('wol.local_server_id', NULL, 'Server id whose host sends Wake-on-LAN packets on its own subnet')`,
+    `INSERT OR IGNORE INTO app_config (key, value, description) VALUES ('wol.use_local_server', 'false', 'Send Wake-on-LAN via the local server instead of from the Bosun container')`,
+    `INSERT OR IGNORE INTO app_config (key, value, description) VALUES ('wol.remote_wol_installed', 'false', 'Whether the Wake-on-LAN utility is installed on the local server')`,
+
+    // Widget types defined in the database rather than the compiled registry,
+    // so an admin can rename them, resize defaults, restrict platforms or
+    // disable them without a rebuild. Data comes from the poller's snapshot
+    // sections; the view from components/widgets/custom-registry.
+    `CREATE TABLE IF NOT EXISTS custom_widgets (
+        id TEXT PRIMARY KEY,
+        type TEXT NOT NULL UNIQUE,
+        display_name TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        icon TEXT NOT NULL DEFAULT 'puzzle',
+        category TEXT NOT NULL DEFAULT 'custom',
+        default_size TEXT NOT NULL DEFAULT '{"w":8,"h":6}',
+        min_size TEXT NOT NULL DEFAULT '{"w":4,"h":4}',
+        refresh_interval INTEGER NOT NULL DEFAULT 30,
+        supports_linux INTEGER NOT NULL DEFAULT 1,
+        supports_windows INTEGER NOT NULL DEFAULT 1,
+        config_schema TEXT NOT NULL DEFAULT '[]',
+        enabled INTEGER NOT NULL DEFAULT 1,
+        builtin INTEGER NOT NULL DEFAULT 0,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`,
+    // Ollama Status is the first widget moved out of the compiled registry.
+    `INSERT OR IGNORE INTO custom_widgets
+        (id, type, display_name, description, icon, category, default_size, min_size, refresh_interval, supports_linux, supports_windows, config_schema, enabled, builtin)
+     VALUES ('custom-ollama-status', 'ollama_status', 'Ollama Status',
+        'Models, loaded models and their CPU/GPU memory split; pull and delete (admin)',
+        'bot', 'ai', '{"w":8,"h":8}', '{"w":6,"h":5}', 30, 1, 1, '[]', 1, 1)`,
+];
+
 export const MIGRATIONS: Migration[] = [
     {
         version: 1,
@@ -268,6 +312,7 @@ export const MIGRATIONS: Migration[] = [
                 `INSERT OR IGNORE INTO app_config (key, value, description) VALUES ('${k}', '${v.replace(/'/g, "''")}', '${d.replace(/'/g, "''")}')`),
         ],
     },
+    { version: 2, name: 'wol_and_custom_widgets', statements: V2_WOL_AND_CUSTOM_WIDGETS },
 ];
 
 /** The schema version this build expects. */
@@ -293,6 +338,7 @@ export const CORE_TABLES: string[] = [
     'alert_rules',
     'notifications',
     'notification_channels',
+    'custom_widgets',
 ];
 
 export class LegacySchemaError extends Error {

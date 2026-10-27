@@ -1,5 +1,6 @@
 'use client';
 
+import { WakeButton } from '@/components/servers/WakeButton';
 import { useRouter } from 'next/navigation';
 import { Check, EllipsisVertical, LayoutGrid, Pencil, Plus, Server } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -54,6 +55,9 @@ export function DashboardToolbar({ name, serverName, type, onAddWidget, serverId
           <Plus />
           <span className="hidden xs:inline">Add widget</span>
         </Button>
+        {type === 'server' && serverId && (
+          <WakeButton serverId={serverId} serverName={serverName || name} iconOnly className="size-9" />
+        )}
         {type === 'server' && serverId && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>

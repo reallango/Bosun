@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useCallback, ReactNode } from 'react';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
+import { readJson } from '@/lib/api/readJson';
 
 export interface Notification {
   id: string;
@@ -31,7 +32,7 @@ export function NotificationProvider({ children }: { children: ReactNode }) {
     setLoading(true);
     try {
       const res = await fetchWithAuth('/api/notifications');
-      const json = await res.json();
+      const json = await readJson<{ data?: { notifications?: Notification[] } }>(res);
       setNotifications(json?.data?.notifications || []);
     } catch (err) {
       console.error('Failed to fetch notifications:', err);

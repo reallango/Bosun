@@ -15,12 +15,15 @@ import {
   PackageCheck,
   SquareTerminal,
   Terminal,
+  Puzzle,
   type LucideIcon,
 } from 'lucide-react';
 import { ensureArray } from '@/lib/api/ensureArray';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { SIZE_PRESETS, SizePreset } from '@/lib/widget-sizes';
 import { cn } from '@/lib/utils';
+import { readJson } from '@/lib/api/readJson';
+import { WidgetDefinition } from '@/types/widget';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import {
@@ -47,30 +50,25 @@ interface AddWidgetModalProps {
   onAdd: (widgetType: string, serverId: string, gridW?: number, gridH?: number) => void | Promise<void>;
 }
 
-const WIDGETS: { type: string; name: string; desc: string; icon: LucideIcon }[] = [
-  { type: 'server_summary', name: 'Server Summary', desc: 'Compact server overview', icon: Activity },
-  { type: 'os_info', name: 'OS Info', desc: 'OS, kernel, hostname', icon: Info },
-  { type: 'cpu_memory', name: 'CPU/Memory', desc: 'Usage gauges', icon: Gauge },
-  { type: 'disk_usage', name: 'Disk Usage', desc: 'Per-mount usage', icon: HardDrive },
-  { type: 'network', name: 'Network', desc: 'Interfaces', icon: Network },
-  { type: 'system_services', name: 'Services', desc: 'Running services', icon: ListChecks },
-  { type: 'gpu_monitoring', name: 'GPU Monitoring', desc: 'NVIDIA GPU stats', icon: Cpu },
-  { type: 'ollama_status', name: 'Ollama Status', desc: 'Models, pull and delete', icon: Bot },
-  { type: 'ssh_terminal', name: 'SSH Terminal', desc: 'Command terminal', icon: SquareTerminal },
-  { type: 'os_update_check', name: 'OS Update Check', desc: 'System updates', icon: PackageCheck },
-  { type: 'docker_containers', name: 'Docker Containers', desc: 'Container management', icon: Box },
-  { type: 'custom_command', name: 'Custom Command', desc: 'Run custom SSH command', icon: Terminal },
-  { type: 'metrics_chart', name: 'Metrics History', desc: 'Charts of recorded metrics', icon: LineChart },
-];
+// Icons by registry icon name; unknown names fall back to a puzzle piece.
+const ICONS: Record<string, LucideIcon> = {
+  server: Activity, monitor: Info, cpu: Cpu, 'hard-drive': HardDrive, network: Network, settings: ListChecks,
+  bot: Bot, terminal: Terminal, box: Box, 'refresh-cw': PackageCheck, 'line-chart': LineChart, gauge: Gauge,
+  'square-terminal': SquareTerminal,
+};
 
 export function AddWidgetModal({ isOpen, onClose, serverId, onAdd }: AddWidgetModalProps) {
   const [selected, setSelected] = useState<string | null>(null);
   const [targetServer, setTargetServer] = useState(serverId || '');
-  const [selectedSize, setSelectedSize] = useState<SizePreset>(SIZE_PRESETS[2]); // Default to Medium (S)
+  // null = the widget definition's default size.
+  const [selectedSize, setSelectedSize] = useState<SizePreset | null>(null);
   const [servers, setServers] = useState<Server[]>([]);
   const [loadingServers, setLoadingServers] = useState(true);
   const [serversError, setServersError] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [definitions, setDefinitions] = useState<WidgetDefinition[]>([]);
+  const [defsLoading, setDefsLoading] = useState(true);
+  const [defsError, setDefsError] = useState<string | null>(null);
 
   useEffect(() => {
     if (isOpen && !serverId) {
@@ -79,7 +77,8 @@ export function AddWidgetModal({ isOpen, onClose, serverId, onAdd }: AddWidgetMo
       fetchWithAuth('/api/servers')
         .then(res => {
           if (!res.ok) throw new Error('Failed to fetch servers');
-          return res.json();
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          return readJson<any>(res);
         })
         .then(data => {
           setServers(ensureArray<Server>(data?.data?.servers ?? data?.servers));
@@ -93,11 +92,32 @@ export function AddWidgetModal({ isOpen, onClose, serverId, onAdd }: AddWidgetMo
     }
   }, [isOpen, serverId]);
 
+  // Widget types for the selected server: built-ins plus enabled custom
+  // types, filtered to what that server's platform supports.
+  useEffect(() => {
+    if (!isOpen) return;
+    let ignore = false;
+    setDefsLoading(true);
+    setDefsError(null);
+    fetchWithAuth(targetServer ? `/api/widget-definitions?serverId=${encodeURIComponent(targetServer)}` : '/api/widget-definitions')
+      .then(res => readJson<{ data?: { definitions?: WidgetDefinition[] }; error?: { message?: string } }>(res))
+      .then(json => {
+        if (ignore) return;
+        if (json.error) throw new Error(json.error.message);
+        const defs = ensureArray<WidgetDefinition>(json.data?.definitions);
+        setDefinitions(defs);
+        setSelected(sel => (sel && defs.some(d => d.type === sel) ? sel : null));
+      })
+      .catch(err => { if (!ignore) setDefsError(err instanceof Error ? err.message : 'Failed to load widgets'); })
+      .finally(() => { if (!ignore) setDefsLoading(false); });
+    return () => { ignore = true; };
+  }, [isOpen, targetServer]);
+
   useEffect(() => {
     if (!isOpen) {
       setSelected(null);
       setTargetServer(serverId || '');
-      setSelectedSize(SIZE_PRESETS[2]); // Reset to Medium (S)
+      setSelectedSize(null);
       setServers([]);
       setLoadingServers(true);
       setServersError(null);
@@ -109,7 +129,7 @@ export function AddWidgetModal({ isOpen, onClose, serverId, onAdd }: AddWidgetMo
     if (!selected || !targetServer) return;
     setAdding(true);
     try {
-      await onAdd(selected, targetServer, selectedSize.gridW, selectedSize.gridH);
+      await onAdd(selected, targetServer, selectedSize?.gridW, selectedSize?.gridH);
       onClose();
     } finally {
       setAdding(false);
@@ -127,8 +147,13 @@ export function AddWidgetModal({ isOpen, onClose, serverId, onAdd }: AddWidgetMo
         </DialogHeader>
 
         <DialogBody className="space-y-4">
+          {defsLoading && definitions.length === 0 && <p className="text-sm text-muted-foreground">Loading widgets…</p>}
+          {defsError && <p role="alert" className="text-sm text-destructive">{defsError}</p>}
+          {!defsLoading && !defsError && definitions.length === 0 && (
+            <p className="text-sm text-muted-foreground">No widgets are available for this server.</p>
+          )}
           <div role="radiogroup" aria-label="Widget type" className="grid grid-cols-1 gap-2 xs:grid-cols-2 lg:grid-cols-3">
-            {WIDGETS.map(w => (
+            {definitions.map(d => ({ ...d, Icon: ICONS[d.icon] || Puzzle })).map(w => (
               <button
                 key={w.type}
                 type="button"
@@ -140,10 +165,15 @@ export function AddWidgetModal({ isOpen, onClose, serverId, onAdd }: AddWidgetMo
                   selected === w.type ? 'border-primary bg-primary/10' : 'hover:bg-accent'
                 )}
               >
-                <w.icon className={cn('mt-0.5 size-5 shrink-0', selected === w.type ? 'text-primary' : 'text-muted-foreground')} aria-hidden />
+                <w.Icon className={cn('mt-0.5 size-5 shrink-0', selected === w.type ? 'text-primary' : 'text-muted-foreground')} aria-hidden />
                 <span className="min-w-0">
-                  <span className="block text-sm font-medium">{w.name}</span>
-                  <span className="block text-xs text-muted-foreground">{w.desc}</span>
+                  <span className="flex items-center gap-1.5 text-sm font-medium">
+                    {w.displayName}
+                    {w.isCustom && (
+                      <span className="rounded bg-primary/10 px-1 text-[10px] font-normal uppercase tracking-wide text-primary">custom</span>
+                    )}
+                  </span>
+                  <span className="block text-xs text-muted-foreground">{w.description}</span>
                 </span>
               </button>
             ))}
@@ -182,13 +212,14 @@ export function AddWidgetModal({ isOpen, onClose, serverId, onAdd }: AddWidgetMo
               <Label htmlFor="add-widget-size">Size</Label>
               <select
                 id="add-widget-size"
-                value={selectedSize.id}
+                value={selectedSize?.id ?? ''}
                 onChange={e => {
                   const preset = SIZE_PRESETS.find(p => p.id === e.target.value);
-                  if (preset) setSelectedSize(preset);
+                  setSelectedSize(preset ?? null);
                 }}
                 className="form-select"
               >
+                <option value="">Widget default</option>
                 {SIZE_PRESETS.map(preset => (
                   <option key={preset.id} value={preset.id}>
                     {preset.name} ({preset.description})

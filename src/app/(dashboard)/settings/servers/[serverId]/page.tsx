@@ -10,6 +10,7 @@ import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { useToast } from '@/components/ui/toast';
 import { DeleteConfirmDialog } from '@/components/dialogs/DeleteConfirmDialog';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
+import { WakeButton } from '@/components/servers/WakeButton';
 
 export default function EditServerPage() {
     const { serverId } = useParams<{ serverId: string }>();
@@ -26,7 +27,7 @@ export default function EditServerPage() {
     const { toast } = useToast();
     const [form, setForm] = useState({
         name: '', hostname: '', ssh_port: 22, ssh_user: '', ssh_key_id: '', notes: '', platform: 'linux',
-        poll_enabled: true, poll_interval_sec: 15,
+        poll_enabled: true, poll_interval_sec: 15, mac_address: '',
     });
 
     useEffect(() => {
@@ -43,6 +44,7 @@ export default function EditServerPage() {
                     platform: j.data.platform || 'linux',
                     poll_enabled: j.data.poll_enabled === undefined ? true : Number(j.data.poll_enabled) === 1,
                     poll_interval_sec: Number(j.data.poll_interval_sec) || 15,
+                    mac_address: j.data.mac_address || '',
                 });
                 if (j.data) {
                     setHostKey(j.data.host_key_fingerprint || null);
@@ -214,6 +216,13 @@ RAM: ${d.data.total_ram_mb} MB`,
                         </div>
 
                         <div>
+                            <Label htmlFor="mac_address">MAC address</Label>
+                            <Input id="mac_address" value={form.mac_address} placeholder="AA:BB:CC:DD:EE:FF" className="font-mono"
+                                onChange={e => setForm(f => ({ ...f, mac_address: e.target.value }))} />
+                            <p className="mt-1 text-xs text-muted-foreground">Optional. Needed for Wake-on-LAN; use the NIC enabled for wake.</p>
+                        </div>
+
+                        <div>
                             <Label htmlFor="notes">Notes</Label>
                             <Input id="notes" value={form.notes}
                                 onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
@@ -229,6 +238,7 @@ RAM: ${d.data.total_ram_mb} MB`,
                             <Button size="lg" variant="outline" onClick={detect} disabled={busy !== null}>
                                 {busy === 'detect' ? 'Detecting…' : 'Detect OS'}
                             </Button>
+                            <WakeButton serverId={serverId} serverName={form.name} macAddress={form.mac_address || null} size="lg" />
                             <div className="hidden flex-1 sm:block" />
                             <Button size="lg" variant="destructive" onClick={() => setConfirmDelete(true)}>Delete server</Button>
                         </div>

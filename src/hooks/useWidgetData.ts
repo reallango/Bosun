@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
+import { readJson } from '@/lib/api/readJson';
 import { useWidgetFrame } from '@/components/dashboard/widget-context';
 
 /**
@@ -24,16 +25,16 @@ export function useWidgetData(widgetId: string, refreshInterval: number = 15) {
     try {
       const url = force ? `/api/widgets/${widgetId}/data?force=true` : `/api/widgets/${widgetId}/data`;
       const res = await fetchWithAuth(url);
-      const json = await res.json();
+      const json = await readJson<{ data?: unknown; error?: { message?: string } }>(res);
       if (!mounted.current) return;
       if (json.error) {
-        setError(json.error.message);
+        setError(json.error.message || 'Request failed');
       } else {
         setData(json.data);
         setError(null);
       }
     } catch (err) {
-      if (mounted.current) setError(String(err));
+      if (mounted.current) setError(err instanceof Error ? err.message : String(err));
     } finally {
       if (mounted.current) setIsLoading(false);
     }

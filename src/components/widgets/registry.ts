@@ -74,7 +74,10 @@ export const widgetRegistry: Record<string, WidgetDefinition> = {
   system_services: {
     type: 'system_services',
     displayName: 'System Services',
-    description: 'Running system services with status',
+    description: 'System services with status',
+    configSchema: [
+      { key: 'filter', label: 'Show', type: 'select', options: ['running', 'failed', 'all'], default: 'running' },
+    ],
     icon: 'settings',
     category: 'system',
     defaultSize: { w: 8, h: 6 },
@@ -98,20 +101,6 @@ export const widgetRegistry: Record<string, WidgetDefinition> = {
     defaultPollInterval: 10,
     defaultTTL: 1800,
     storageMode: 'latest_ttl',
-  },
-  ollama_status: {
-    type: 'ollama_status',
-    displayName: 'Ollama Status',
-    description: 'Ollama status, models, pull and delete (admin)',
-    icon: 'bot',
-    category: 'ai',
-    defaultSize: { w: 8, h: 6 },
-    minSize: { w: 6, h: 4 },
-    refreshInterval: 30,
-    backgroundPollable: true,
-    defaultPollInterval: 30,
-    defaultTTL: 15552000,
-    storageMode: 'change_only',
   },
   ssh_terminal: {
     type: 'ssh_terminal',
@@ -141,7 +130,10 @@ export const widgetRegistry: Record<string, WidgetDefinition> = {
   custom_command: {
     type: 'custom_command',
     displayName: 'Custom Command',
-    description: 'Run custom SSH command',
+    description: 'Run a command on the host (PowerShell on Windows) and show its output',
+    configSchema: [
+      { key: 'command', label: 'Command', type: 'string', placeholder: 'uptime', default: 'uptime', description: 'Runs as the server SSH user when the widget refreshes' },
+    ],
     icon: 'terminal',
     category: 'utility',
     defaultSize: { w: 8, h: 5 },
@@ -167,6 +159,7 @@ export const widgetRegistry: Record<string, WidgetDefinition> = {
     type: 'os_update_check',
     displayName: 'OS Update Check',
     description: 'Check for and install OS updates',
+    supportsWindows: false,
     icon: 'refresh-cw',
     category: 'system',
     defaultSize: { w: 8, h: 5 },

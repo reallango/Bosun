@@ -16,6 +16,8 @@ import {
 import { useToast } from '@/components/ui/toast';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { SIZE_PRESETS, SizePreset } from '@/lib/widget-sizes';
+import { readJson } from '@/lib/api/readJson';
+import { WidgetConfigField } from '@/types/widget';
 
 interface WidgetSettingsDialogProps {
   widgetId: string;
@@ -31,6 +33,9 @@ export function WidgetSettingsDialog({ widgetId, open, onOpenChange, onSave }: W
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [data, setData] = useState<any>(null);
   const [selectedSize, setSelectedSize] = useState<SizePreset | null>(null);
+  const [config, setConfig] = useState<Record<string, unknown>>({});
+  const [configSchema, setConfigSchema] = useState<WidgetConfigField[]>([]);
+  const setConfigValue = (key: string, value: unknown) => setConfig(prev => ({ ...prev, [key]: value }));
   const { toast } = useToast();
 
   useEffect(() => {
@@ -38,10 +43,12 @@ export function WidgetSettingsDialog({ widgetId, open, onOpenChange, onSave }: W
       setLoading(true);
       setError(null);
       fetchWithAuth(`/api/widgets/${widgetId}/settings`)
-        .then(r => r.json())
+        .then(r => readJson<{ data?: any; error?: { message?: string } }>(r)) // eslint-disable-line @typescript-eslint/no-explicit-any
         .then(json => {
           if (json.data) {
             setData(json.data);
+            setConfig(json.data.config && typeof json.data.config === 'object' ? json.data.config : {});
+            setConfigSchema(Array.isArray(json.data.config_schema) ? json.data.config_schema : []);
             // Find matching size preset or set to null
             const matchingPreset = SIZE_PRESETS.find(p => p.gridW === json.data.grid_w && p.gridH === json.data.grid_h);
             setSelectedSize(matchingPreset || null);
@@ -60,6 +67,7 @@ export function WidgetSettingsDialog({ widgetId, open, onOpenChange, onSave }: W
     try {
       // Only widget-level fields; polling is configured per server.
       const payload: Record<string, unknown> = { display_name: data?.display_name ?? null };
+      if (configSchema.length) payload.config = Object.fromEntries(configSchema.map(f => [f.key, config[f.key] ?? f.default ?? null]));
       // Always include grid_w and grid_h - use selectedSize if available, otherwise use current values from data
       if (selectedSize) {
         payload.grid_w = selectedSize.gridW;
@@ -92,7 +100,7 @@ export function WidgetSettingsDialog({ widgetId, open, onOpenChange, onSave }: W
       <DialogContent size="md">
         <DialogHeader>
           <DialogTitle>Widget settings</DialogTitle>
-          <DialogDescription>Name, polling and default (desktop) size.</DialogDescription>
+          <DialogDescription>Name, widget options and default (desktop) size.</DialogDescription>
         </DialogHeader>
 
         <DialogBody>
@@ -114,6 +122,37 @@ export function WidgetSettingsDialog({ widgetId, open, onOpenChange, onSave }: W
                   placeholder="Optional custom name"
                 />
               </div>
+
+              {/* Widget-specific settings declared by the widget definition. */}
+              {configSchema.map(field => {
+                const id = `ws-cfg-${widgetId}-${field.key}`;
+                const value = config[field.key] ?? field.default ?? '';
+                return (
+                  <div key={field.key} className="space-y-1.5">
+                    {field.type === 'boolean' ? (
+                      <label className="flex items-center gap-2 text-sm font-medium">
+                        <input type="checkbox" className="size-4 accent-primary" checked={value === true || value === 'true'}
+                          onChange={e => setConfigValue(field.key, e.target.checked)} />
+                        {field.label}
+                      </label>
+                    ) : (
+                      <>
+                        <Label htmlFor={id}>{field.label}</Label>
+                        {field.type === 'select' ? (
+                          <select id={id} className="form-select" value={String(value)} onChange={e => setConfigValue(field.key, e.target.value)}>
+                            {(field.options || []).map(o => <option key={o} value={o}>{o}</option>)}
+                          </select>
+                        ) : (
+                          <Input id={id} type={field.type === 'number' ? 'number' : 'text'} value={String(value)} placeholder={field.placeholder}
+                            className={field.key === 'command' ? 'font-mono' : undefined}
+                            onChange={e => setConfigValue(field.key, field.type === 'number' ? Number(e.target.value) : e.target.value)} />
+                        )}
+                      </>
+                    )}
+                    {field.description && <p className="text-xs text-muted-foreground">{field.description}</p>}
+                  </div>
+                );
+              })}
 
               <p className="text-xs text-muted-foreground">
                 Data is collected once per server; the poll interval is set under Settings → Servers.

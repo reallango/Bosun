@@ -1,3 +1,4 @@
+import { formatMac } from '@/lib/network/wake-on-lan';
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyAccessToken } from '@/lib/auth/jwt';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
@@ -10,7 +11,7 @@ export async function GET(request: NextRequest) {
     if (!accessToken) return NextResponse.json({ error: { message: 'Not authenticated' } }, { status: 401 });
     const payload = await verifyAccessToken(accessToken);
     if (!payload) return NextResponse.json({ error: { message: 'Invalid token' } }, { status: 401 });
-    const result = await rqlite.query('SELECT id, name, hostname, ssh_port, ssh_user, ssh_key_id, platform, os_type, os_version, cpu_model, cpu_cores, total_ram_mb, is_online, last_seen, last_error, poll_enabled, poll_interval_sec, capabilities FROM servers ORDER BY name');
+    const result = await rqlite.query('SELECT id, name, hostname, ssh_port, ssh_user, ssh_key_id, platform, os_type, os_version, cpu_model, cpu_cores, total_ram_mb, is_online, last_seen, last_error, poll_enabled, poll_interval_sec, capabilities, mac_address FROM servers ORDER BY name');
     const servers = rowsToObjects(result).map(s => ({ 
       id: s.id, 
       name: s.name, 
@@ -27,6 +28,7 @@ export async function GET(request: NextRequest) {
       is_online: Boolean(s.is_online),
       last_seen: s.last_seen,
       last_error: s.last_error,
+      mac_address: s.mac_address ?? null,
       poll_enabled: Boolean(s.poll_enabled),
       poll_interval_sec: s.poll_interval_sec,
       capabilities: (() => { try { return JSON.parse(String(s.capabilities || '{}')); } catch { return {}; } })(),
@@ -44,7 +46,12 @@ export async function POST(request: NextRequest) {
     if (!accessToken) return NextResponse.json({ error: { message: 'Not authenticated' } }, { status: 401 });
     const payload = await verifyAccessToken(accessToken);
     if (!payload || payload.role !== 'admin') return NextResponse.json({ error: { message: 'Forbidden' } }, { status: 403 });
-    const { name, hostname, ssh_port, ssh_user, ssh_key_id, notes, tags, platform } = await request.json();
+    const { name, hostname, ssh_port, ssh_user, ssh_key_id, notes, tags, platform, mac_address } = await request.json();
+    let mac: string | null = null;
+    if (mac_address) {
+      mac = formatMac(String(mac_address));
+      if (!mac) return NextResponse.json({ error: { message: 'Invalid MAC address' } }, { status: 400 });
+    }
     if (!name || !hostname || !ssh_user) return NextResponse.json({ error: { message: 'name, hostname, ssh_user required' } }, { status: 400 });
     const serverId = crypto.randomUUID();
     const now = new Date().toISOString();
@@ -52,7 +59,7 @@ export async function POST(request: NextRequest) {
     // Windows runs PowerShell per poll, which costs more than a sh script; poll it less often.
     const configured = Number((await rqlite.query("SELECT value FROM app_config WHERE key = 'poller.default_interval_sec'")).values?.[0]?.[0]) || 15;
     const pollInterval = platformValue === 'windows' ? Math.max(30, configured) : configured;
-    await rqlite.execute("INSERT INTO servers (id,name,hostname,ssh_port,ssh_user,ssh_key_id,notes,tags,platform,poll_interval_sec,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", [serverId, name, hostname, ssh_port||22, ssh_user, ssh_key_id||null, notes||null, JSON.stringify(tags||[]), platformValue, pollInterval, now, now]);
+    await rqlite.execute("INSERT INTO servers (id,name,hostname,ssh_port,ssh_user,ssh_key_id,notes,tags,platform,poll_interval_sec,mac_address,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)", [serverId, name, hostname, ssh_port||22, ssh_user, ssh_key_id||null, notes||null, JSON.stringify(tags||[]), platformValue, pollInterval, mac, now, now]);
     await rqlite.execute("INSERT INTO dashboards (id,name,type,server_id,sort_order,created_at,updated_at) VALUES (?,?,'server',?,(SELECT COALESCE(MAX(sort_order),0)+1 FROM dashboards WHERE type='server'),?,?)", [crypto.randomUUID(), name, serverId, now, now]);
     await logAudit({ userId: payload.userId, serverId, action: AuditActions.SERVER_CREATE, status: 'success' });
     return NextResponse.json({ data: { id: serverId, name, hostname } }, { status: 201 });

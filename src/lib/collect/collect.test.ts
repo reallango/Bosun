@@ -138,3 +138,22 @@ describe('store', () => {
     expect(st.map(s => s.params[0])).toEqual([1_000_000 - 3600, 1_000_000 - 86400, 1_000_000 - 172800]);
   });
 });
+
+describe('linux update parsing', () => {
+  it('reads apt versions, security origin and pending reboot', () => {
+    const r = linux._parsers.parseUpdates([
+      'MGR apt',
+      'Inst openssl [3.0.13-0ubuntu3.4] (3.0.13-0ubuntu3.5 Ubuntu:24.04/noble-security [amd64])',
+      'Inst curl [8.5.0-2ubuntu10.4] (8.5.0-2ubuntu10.5 Ubuntu:24.04/noble-updates [amd64])',
+      'REBOOT 1',
+    ].join('\n'));
+    expect(r).toMatchObject({ manager: 'apt', updatesAvailable: 2, securityUpdates: 1, rebootRequired: true });
+    expect(r.packages[0]).toEqual({ name: 'openssl', current_version: '3.0.13-0ubuntu3.4', new_version: '3.0.13-0ubuntu3.5', is_security: true });
+    expect(r).not.toHaveProperty('lastCheck');
+  });
+  it('reads dnf check-update output', () => {
+    const r = linux._parsers.parseUpdates('MGR dnf\nkernel.x86_64  6.8.1-1.fc40  updates\n');
+    expect(r.packages).toEqual([{ name: 'kernel.x86_64', current_version: '', new_version: '6.8.1-1.fc40', is_security: false }]);
+    expect(r.rebootRequired).toBe(false);
+  });
+});

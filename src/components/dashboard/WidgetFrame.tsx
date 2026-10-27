@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import dynamic from 'next/dynamic';
 import { EllipsisVertical, GripVertical, RefreshCw, Settings2, Trash2 } from 'lucide-react';
 import { OSInfoWidget } from '@/components/widgets/os-info';
 import { CPUMemoryWidget } from '@/components/widgets/cpu-memory';
@@ -9,9 +10,7 @@ import { NetworkWidget } from '@/components/widgets/network';
 import { SystemServicesWidget } from '@/components/widgets/system-services';
 import { ServerSummaryWidget } from '@/components/widgets/server-summary';
 import { GPUMonitoringWidget } from '@/components/widgets/gpu-monitoring';
-import { OllamaStatusWidget } from '@/components/widgets/ollama-status';
 import { MetricsChartWidget } from '@/components/widgets/metrics-chart';
-import { SSHTerminalWidget } from '@/components/widgets/ssh-terminal';
 import { DockerContainersWidget } from '@/components/widgets/docker-containers';
 import { CustomCommandWidget } from '@/components/widgets/custom-command';
 import { OSUpdateCheckWidget } from '@/components/widgets/os-update-check';
@@ -29,6 +28,16 @@ import { useToast } from '@/components/ui/toast';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { cn } from '@/lib/utils';
 import { RefreshHandler, WidgetFrameContext } from './widget-context';
+import { customWidgetComponents } from '@/components/widgets/custom-registry';
+import { WidgetLoading } from '@/components/widgets/WidgetLoading';
+
+// xterm and its addons are ~390 kB of JS. Loading the terminal lazily keeps
+// them out of every dashboard route's first load; the chunk is fetched only
+// when a terminal widget actually mounts.
+const SSHTerminalWidget = dynamic(
+  () => import('@/components/widgets/ssh-terminal').then(m => m.SSHTerminalWidget),
+  { ssr: false, loading: () => <WidgetLoading /> },
+);
 
 interface WidgetFrameProps {
   widgetId: string;
@@ -61,8 +70,6 @@ function WidgetContent({ widgetId, widgetType, serverId, serverName }: { widgetI
       return <ServerSummaryWidget widgetId={widgetId} serverId={serverId} serverName={serverName} />;
     case 'gpu_monitoring':
       return <GPUMonitoringWidget widgetId={widgetId} serverId={serverId} />;
-    case 'ollama_status':
-      return <OllamaStatusWidget widgetId={widgetId} serverId={serverId} />;
     case 'ssh_terminal':
       return <SSHTerminalWidget widgetId={widgetId} serverId={serverId} />;
     case 'docker_containers':
@@ -74,7 +81,12 @@ function WidgetContent({ widgetId, widgetType, serverId, serverName }: { widgetI
     case 'os_update_check':
       return <OSUpdateCheckWidget widgetId={widgetId} serverId={serverId} />;
     default:
+    {
+      // Database-defined widget types render through the custom registry.
+      const Custom = customWidgetComponents[widgetType];
+      if (Custom) return <Custom widgetId={widgetId} serverId={serverId} serverName={serverName} />;
       return <div className="text-sm text-muted-foreground">Unknown widget: {widgetType}</div>;
+    }
   }
 }
 
@@ -91,7 +103,6 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName,
   const { toast } = useToast();
   const [removing, setRemoving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [displayName, setDisplayName] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
@@ -109,31 +120,8 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName,
     []
   );
 
-  // Fetch widget to get display_name - with error handling to avoid infinite retries
-  useEffect(() => {
-    let ignore = false;
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 5000);
-
-    fetchWithAuth(`/api/widgets/${widgetId}`, { signal: controller.signal })
-      .then(res => {
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        return res.json();
-      })
-      .then(json => {
-        if (!ignore && json.data) setDisplayName(json.data.display_name || null);
-      })
-      .catch(() => {
-        // Silently ignore errors - don't retry infinitely
-      });
-
-    return () => {
-      ignore = true;
-      clearTimeout(timeoutId);
-    };
-  }, [widgetId]);
-
-  const displayTitle = displayName || (title === widgetType ? prettyType(widgetType) : title);
+  // The grid passes the saved title (or the definition's name), so no per-widget fetch is needed.
+  const displayTitle = title === widgetType ? prettyType(widgetType) : title;
 
   const doRemove = async () => {
     setRemoving(true);

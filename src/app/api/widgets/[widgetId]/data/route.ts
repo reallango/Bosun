@@ -22,7 +22,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
   const { widgetId } = await params;
-  const force = new URL(request.url).searchParams.get('force') === 'true';
+  const forceParam = new URL(request.url).searchParams.get('force');
+  const force = forceParam === 'true' || forceParam === 'updates';
 
   try {
     const widgetRes = await rqlite.query('SELECT * FROM widgets WHERE id = ?', [widgetId]);
@@ -36,13 +37,15 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const server = rowsToObjects(srvRes)[0] as unknown as ServerRow;
 
     if (widget.widget_type === 'custom_command') {
-      const cached = customCache.get(widgetId);
+      // Keyed by command too, so editing the command takes effect immediately.
+      const cacheKey = `${widgetId}|${cfg.command || ''}`;
+      const cached = customCache.get(cacheKey);
       if (!force && cached && Date.now() - cached.at < CUSTOM_TTL_MS) {
         return NextResponse.json({ data: cached.data, collectedAt: new Date(cached.at).toISOString() });
       }
       const r = await runOnServerId(server.id, cfg.command || 'uptime', { timeoutMs: 20_000 });
       const data = { output: (r.stdout + r.stderr).slice(0, 64 * 1024), exitCode: r.exitCode, timedOut: !!r.timedOut };
-      customCache.set(widgetId, { at: Date.now(), data });
+      customCache.set(cacheKey, { at: Date.now(), data });
       return NextResponse.json({ data, collectedAt: new Date().toISOString() });
     }
 
@@ -54,7 +57,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     if (force) {
       // Ask the poller for an immediate full poll of this host; it picks the
       // request up within ~2 s. No SSH from the web process.
-      await rqlite.execute('UPDATE servers SET poll_requested_at = ? WHERE id = ?', [Date.now(), server.id]);
+      // force=updates (OS Update Check) also runs the 6-hourly package check now.
+      await rqlite.execute(
+        forceParam === 'updates'
+          ? 'UPDATE servers SET poll_requested_at = ?, updates_requested_at = ? WHERE id = ?'
+          : 'UPDATE servers SET poll_requested_at = ? WHERE id = ?',
+        forceParam === 'updates' ? [Date.now(), Date.now(), server.id] : [Date.now(), server.id]);
     }
 
     const snaps: Sections = {};
@@ -74,13 +82,17 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     // Slow-tier sections (services, updates) are refreshed less often than the
     // poll interval; only call data stale when it is far behind.
     const staleAfterMs = Math.max(interval * 4 * 1000, 10 * 60 * 1000) * (widget.widget_type === 'os_update_check' ? 80 : 1);
+    // Several widgets of one host refresh at about the poll interval; let the
+    // browser reuse a response for a few seconds instead of re-querying rqlite.
+    // Forced refreshes are never cached.
+    const maxAge = force ? 0 : Math.max(2, Math.min(10, Math.floor(interval / 3)));
     return NextResponse.json({
       data,
       pending: data === null,
       collectedAt: collectedAt ? new Date(collectedAt).toISOString() : null,
       stale: collectedAt ? Date.now() - collectedAt > staleAfterMs : false,
       server: { is_online: !!server.is_online, last_error: server.last_error ?? null },
-    });
+    }, { headers: { 'Cache-Control': maxAge ? `private, max-age=${maxAge}` : 'no-store' } });
   } catch (error) {
     console.error('Widget data error:', error);
     const status = (error as any)?.status;

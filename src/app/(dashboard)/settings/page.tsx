@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import AppSettingsCard from '@/components/settings/AppSettingsCard';
+import WakeOnLanCard from '@/components/settings/WakeOnLanCard';
 
 export default function SettingsPage() {
   const { user } = useAuth();
@@ -37,6 +38,8 @@ export default function SettingsPage() {
         </Card>
 
         <AppSettingsCard />
+
+        <WakeOnLanCard />
       </div>
     </>
   );

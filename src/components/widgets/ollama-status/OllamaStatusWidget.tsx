@@ -23,7 +23,7 @@ interface OllamaData {
   status: 'running' | 'stopped' | 'error' | 'unknown';
   version?: string | null;
   models: Model[];
-  running: { name: string; size_vram?: number }[];
+  running: { name: string; size?: number; size_vram?: number }[];
 }
 
 interface PullJob {
@@ -120,11 +120,18 @@ export function OllamaStatusWidget({ widgetId, serverId }: Props) {
           {ollama.version && <span>v{ollama.version}</span>}
         </span>
         <span>{ollama.models.length} models · {formatBytes(totalSize)}</span>
-        {ollama.running.length > 0 && (
-          <span className="flex items-center gap-1 text-green-600 dark:text-green-400">
-            <Cpu className="size-3" aria-hidden /> {ollama.running.length} loaded
-          </span>
-        )}
+        {ollama.running.length > 0 && (() => {
+          // Loaded models: total resident memory and how much of it is in VRAM
+          // (the rest is offloaded to system RAM / CPU).
+          const total = ollama.running.reduce((a, m) => a + (m.size || 0), 0);
+          const gpu = ollama.running.reduce((a, m) => a + (m.size_vram || 0), 0);
+          const gpuPct = total > 0 ? Math.round((gpu / total) * 100) : 0;
+          return (
+            <span className="flex items-center gap-1 text-green-600 dark:text-green-400" title={`${formatBytes(gpu)} in VRAM, ${formatBytes(total - gpu)} on CPU`}>
+              <Cpu className="size-3" aria-hidden /> {ollama.running.length} loaded · {formatBytes(total)} · {gpuPct}% GPU / {100 - gpuPct}% CPU
+            </span>
+          );
+        })()}
       </div>
 
       {isAdmin && ollama.status === 'running' && (

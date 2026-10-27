@@ -1,3 +1,4 @@
+import { formatMac } from '@/lib/network/wake-on-lan';
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyAccessToken } from '@/lib/auth/jwt';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
@@ -30,7 +31,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { server
     const { serverId } = await params;
     const body = await request.json();
     const allowed = ['name','hostname','ssh_port','ssh_user','ssh_key_id','notes','tags','platform','os_type','os_version','os_codename','kernel_version',
-      'poll_enabled','poll_interval_sec','host_key_fingerprint'];
+      'poll_enabled','poll_interval_sec','host_key_fingerprint','mac_address'];
     const updates: string[] = []; const values: any[] = [];
     for (const [k,v] of Object.entries(body)) {
       if (!allowed.includes(k)) continue;
@@ -41,6 +42,10 @@ export async function PATCH(request: NextRequest, { params }: { params: { server
       if (k === 'poll_interval_sec') value = Math.min(3600, Math.max(5, Math.round(Number(v) || 15)));
       // Only clearing is allowed (re-trust a host whose key legitimately changed).
       if (k === 'host_key_fingerprint') { if (v !== null) continue; value = null; }
+      if (k === 'mac_address' && v) {
+        value = formatMac(String(v));
+        if (!value) return NextResponse.json({ error: { message: 'Invalid MAC address' } }, { status: 400 });
+      } else if (k === 'mac_address') value = null;
       updates.push(`${k} = ?`); values.push(value);
     }
     if (!updates.length) return NextResponse.json({ error: { message: 'Nothing to update' } }, { status: 400 });

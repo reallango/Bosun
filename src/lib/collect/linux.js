@@ -67,7 +67,8 @@ updates) m updates
   if have apt-get; then echo "MGR apt"; apt-get -s -o Debug::NoLocking=1 upgrade 2>/dev/null | grep '^Inst ' | head -n 300
   elif have dnf; then echo "MGR dnf"; dnf -q check-update 2>/dev/null | head -n 300
   elif have yum; then echo "MGR yum"; yum -q check-update 2>/dev/null | head -n 300
-  else echo "MGR none"; fi ;;
+  else echo "MGR none"; fi
+  if [ -f /var/run/reboot-required ]; then echo "REBOOT 1"; fi ;;
 esac
 done
 m end
@@ -284,9 +285,30 @@ function parseUpdates(text) {
   const [first, ...rest] = (text || '').split('\n');
   const mgr = (first || '').replace('MGR ', '').trim();
   let packages = [];
-  if (mgr === 'apt') packages = rest.filter(l => l.startsWith('Inst ')).map(l => l.split(/\s+/)[1]);
-  else if (mgr === 'dnf' || mgr === 'yum') packages = rest.filter(l => /^\S+\.\S+\s+\S+\s+\S+/.test(l)).map(l => l.split(/\s+/)[0]);
-  return { manager: mgr || 'none', updatesAvailable: packages.length, packages: packages.slice(0, 100), lastCheck: new Date().toISOString() };
+  if (mgr === 'apt') {
+    // Inst <name> [<current>] (<new> <origin> [<arch>])
+    packages = rest.filter(l => l.startsWith('Inst ')).map(l => {
+      const mm = l.match(/^Inst (\S+)(?: \[([^\]]+)\])? \((\S+) ([^)]*)\)/);
+      return mm
+        ? { name: mm[1], current_version: mm[2] || '', new_version: mm[3], is_security: /security/i.test(mm[4]) }
+        : { name: l.split(/\s+/)[1], current_version: '', new_version: '', is_security: false };
+    });
+  } else if (mgr === 'dnf' || mgr === 'yum') {
+    // <name>.<arch>  <new version>  <repo>
+    packages = rest.filter(l => /^\S+\.\S+\s+\S+\s+\S+/.test(l)).map(l => {
+      const [name, version, repo] = l.trim().split(/\s+/);
+      return { name, current_version: '', new_version: version, is_security: /security/i.test(repo || '') };
+    });
+  }
+  // No timestamp here: collected_at already records when this ran, and a
+  // volatile field would rewrite the snapshot on every check.
+  return {
+    manager: mgr || 'none',
+    updatesAvailable: packages.length,
+    securityUpdates: packages.filter(p => p.is_security).length,
+    rebootRequired: rest.some(l => l.trim() === 'REBOOT 1'),
+    packages: packages.slice(0, 200),
+  };
 }
 
 /**
