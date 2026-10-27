@@ -302,6 +302,20 @@ const V2_WOL_AND_CUSTOM_WIDGETS: string[] = [
         'bot', 'ai', '{"w":8,"h":8}', '{"w":6,"h":5}', 30, 1, 1, '[]', 1, 1)`,
 ];
 
+// ---- Version 3: second WoL MAC and per-node WoL sender ----
+const V3_WOL_HOSTS: string[] = [
+    // Machines that move between wired and wireless have two NICs to wake.
+    // NULL = not known yet (the poller fills both from the host's NICs);
+    // '' = deliberately empty.
+    `ALTER TABLE servers ADD COLUMN mac_address_alt TEXT`,
+    // How magic packets are sent: 'auto' = over SSH from the managed server
+    // this Bosun node's container runs on (mapped or detected), falling back to
+    // the container; 'local_server' = always from wol.local_server_id;
+    // 'container' = from the Bosun container itself.
+    `INSERT OR IGNORE INTO app_config (key, value, description) VALUES ('wol.sender', 'auto', 'How Wake-on-LAN packets are sent: auto, local_server or container')`,
+    `UPDATE app_config SET value = 'local_server' WHERE key = 'wol.sender' AND EXISTS (SELECT 1 FROM app_config WHERE key = 'wol.use_local_server' AND value = 'true')`,
+];
+
 export const MIGRATIONS: Migration[] = [
     {
         version: 1,
@@ -313,6 +327,7 @@ export const MIGRATIONS: Migration[] = [
         ],
     },
     { version: 2, name: 'wol_and_custom_widgets', statements: V2_WOL_AND_CUSTOM_WIDGETS },
+    { version: 3, name: 'wol_hosts', statements: V3_WOL_HOSTS },
 ];
 
 /** The schema version this build expects. */

@@ -252,6 +252,8 @@ class HostAgent {
       this.state = snap.state;
 
       const stmts = store.buildPollStatements(this.id, snap, Date.now(), this.hashes);
+      // Wake-on-LAN MACs: filled from the host's NICs while still unset.
+      stmts.push(...store.macAutofillStatements(this.id, snap.sections.nics));
       const caps = store.capabilitiesOf(snap.sections, this.caps);
       if (JSON.stringify(caps) !== JSON.stringify(this.caps)) {
         this.caps = caps;
