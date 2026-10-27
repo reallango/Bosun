@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireRole } from '@/lib/auth/middleware';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { resolveWidgetDefinition } from '@/components/widgets/registry-loader';
+import { COMMAND_CHANGE_FORBIDDEN, changesCommand, mayChangeCommand } from '@/lib/auth/widget-policy';
 
 /**
  * Widget settings. Polling is per server (one batched collection per host),
@@ -67,6 +68,9 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       // state in config (e.g. Metrics History) do not overwrite each other.
       let existing: Record<string, unknown> = {};
       try { existing = JSON.parse(String(widget.config || '{}')) || {}; } catch { existing = {}; }
+      if (changesCommand(existing, config) && !mayChangeCommand(auth.role)) {
+        return NextResponse.json({ error: { message: COMMAND_CHANGE_FORBIDDEN, code: 'FORBIDDEN' } }, { status: 403 });
+      }
       const merged = { ...existing, ...config };
       if (JSON.stringify(merged).length > 16 * 1024) return NextResponse.json({ error: { message: 'Widget config too large' } }, { status: 400 });
       sets.push('config = ?');

@@ -6,13 +6,13 @@ import { logAudit, AuditActions } from '@/lib/audit/logger';
 import { ok, fail, failFrom } from '@/lib/api/response';
 
 /**
- * Start / stop / restart a container. Admin only, requires an explicit
+ * Start / stop / restart a container. Read + actions (operator) or higher, requires an explicit
  * `confirm: true`, rate limited and audited.
  */
 export async function POST(request: NextRequest, { params }: { params: Promise<{ serverId: string; containerId: string }> }) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
-  const roleError = requireRole(auth, 'admin');
+  const roleError = requireRole(auth, 'operator');
   if (roleError) return roleError;
   const { serverId, containerId } = await params;
 

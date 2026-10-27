@@ -17,11 +17,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   return ok({ pulls: jobs });
 }
 
-/** Start pulling a model. Admin only; audited. Body: { model } */
+/** Start pulling a model. Read + actions (operator) or higher; audited. Body: { model } */
 export async function POST(request: NextRequest, { params }: { params: Promise<{ serverId: string }> }) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
-  const roleError = requireRole(auth, 'admin');
+  const roleError = requireRole(auth, 'operator');
   if (roleError) return roleError;
   const { serverId } = await params;
   let body: { model?: unknown };
@@ -39,11 +39,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   }
 }
 
-/** Cancel a running pull: ?jobId=... Admin only. */
+/** Cancel a running pull: ?jobId=... Read + actions (operator) or higher. */
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ serverId: string }> }) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
-  const roleError = requireRole(auth, 'admin');
+  const roleError = requireRole(auth, 'operator');
   if (roleError) return roleError;
   const { serverId } = await params;
   const jobId = new URL(request.url).searchParams.get('jobId') || '';

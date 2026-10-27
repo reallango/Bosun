@@ -6,6 +6,9 @@ import { randomUUID } from 'crypto';
 export async function GET(request: NextRequest) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
+  // Channel configs hold webhook URLs and credentials.
+  const roleError = requireRole(auth, 'admin');
+  if (roleError) return roleError;
 
   try {
     const result = await rqlite.query('SELECT * FROM notification_channels ORDER BY name');
@@ -23,7 +26,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
-  const roleError = requireRole(auth as any, 'admin');
+  const roleError = requireRole(auth, 'admin');
   if (roleError) return roleError;
 
   try {

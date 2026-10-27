@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { requireAuth, requireRole } from '@/lib/auth/middleware';
+import { hasRole } from '@/lib/auth/levels';
 import { runOnServerId } from '@/lib/ssh/connection-pool';
 import { WIDGET_SECTIONS, widgetDataFromSnapshots, collectedAtFor, Sections, ServerRow } from '@/lib/widgets/snapshot-data';
 import { consumeActionRateLimit } from '@/lib/utils/rate-limiter';
@@ -22,7 +23,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
   const { widgetId } = await params;
-  const forceParam = new URL(request.url).searchParams.get('force');
+  // Forcing a poll (or re-running a custom command) is an action: operator+.
+  // Read-only callers silently get the regular (cached) data instead.
+  const forceParam = hasRole(auth.role, 'operator') ? new URL(request.url).searchParams.get('force') : null;
   const force = forceParam === 'true' || forceParam === 'updates';
 
   try {
@@ -102,11 +105,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
 }
 
-// POST: os_update_check "install updates" (admin only, audited, rate limited).
+// POST: os_update_check "install updates" (operator or higher, audited, rate limited).
 export async function POST(request: NextRequest, { params }: { params: Promise<{ widgetId: string }> }) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
-  const roleError = requireRole(auth, 'admin');
+  const roleError = requireRole(auth, 'operator');
   if (roleError) return roleError;
   const limited = consumeActionRateLimit(auth.userId);
   if (!limited.allowed) return NextResponse.json({ error: { message: 'Too many actions, slow down' } }, { status: 429 });
