@@ -248,13 +248,41 @@ All three start with the same join list and `RQLITE_BOOTSTRAP_EXPECT=3`, and for
 cluster together once all are up. Ports 4001 and 4002 must be reachable between the
 nodes and should be firewalled from everything else.
 
-## Management actions and permissions
+## Access levels, users and API keys
 
-| Role | Can |
-| --- | --- |
-| viewer | View dashboards, statistics, container and model lists. |
-| operator | Edit dashboards and widgets, container logs, custom commands, host terminals, Wake-on-LAN. |
-| admin | Everything, including container start/stop/restart and shells, Ollama pull/delete, OS update install, installing wakeonlan, custom widget types, servers, keys and settings. |
+Every user account and every API key has one of three access levels:
+
+| Level | Role | Can |
+| --- | --- | --- |
+| Read only | `viewer` | View dashboards, statistics, live widget data, server and cluster status. |
+| Read + actions | `operator` | Also run widget actions: container start/stop/restart and logs, Ollama pull/delete, OS update install, Wake-on-LAN, forced refreshes, dashboard and widget edits. No shells, terminals or arbitrary commands. |
+| Full access | `admin` | Everything: servers, SSH keys, host and container shells, command execution, custom commands, settings, alerts, users and API keys. |
+
+**Users** (Settings → Users, admins): create accounts, change their level, disable
+them (signed-in sessions stop within 30 s), or reset their password. The last active
+admin cannot be demoted or disabled. Everyone manages their own profile, password and
+two-step verification under **My Account**.
+
+**API keys** (Settings → API Access, admins) let scripts and AI agents use the API
+without a browser session, for example to give an assistant read-only or
+read-plus-actions access to the servers without SSH access:
+
+```bash
+curl -H "Authorization: Bearer bosun_..." http://<host>:3042/api/servers
+```
+
+The key is shown once; only its hash is stored. Keys can expire and be revoked, and
+are limited to 300 requests per minute. Keys never reach the web UI, terminals,
+user and key management, or cluster management (join codes contain the cluster
+secrets), whatever their level. The API Access page lists the endpoints per level.
+
+**Email (SMTP)**, under Settings → General (admins), enables password reset links,
+emailed sign-in codes and email alert actions. Set *App URL* to the address users open
+Bosun at: reset links are built from it. The SMTP password is stored encrypted.
+
+**Two-step verification** is optional per user: an authenticator app (TOTP) or codes
+sent by email, plus ten single-use backup codes. Password reset needs SMTP; without it,
+an admin resets the password from Settings → Users.
 
 Destructive actions require a confirmation in the UI, which the API enforces with
 `confirm: true`. Deleting a model also requires typing its name. These actions are

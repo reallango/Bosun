@@ -8,6 +8,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/components/ui/toast';
 import { accountApi, type Account } from './api';
+import { roleLabel } from '@/lib/auth/levels';
 
 export function ProfileCard({ account, onChange }: { account: Account; onChange: (a: Account) => void }) {
   const { toast } = useToast();
@@ -53,7 +54,7 @@ export function ProfileCard({ account, onChange }: { account: Account; onChange:
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="acct-role">Access level</Label>
-            <Input id="acct-role" value={account.role} readOnly className="bg-muted/50 capitalize" />
+            <Input id="acct-role" value={roleLabel(account.role)} readOnly className="bg-muted/50" />
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="acct-display">Display name</Label>
