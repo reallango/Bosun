@@ -316,6 +316,62 @@ const V3_WOL_HOSTS: string[] = [
     `UPDATE app_config SET value = 'local_server' WHERE key = 'wol.sender' AND EXISTS (SELECT 1 FROM app_config WHERE key = 'wol.use_local_server' AND value = 'true')`,
 ];
 
+// ---- Version 4: accounts, API keys, password reset, MFA ----
+// Access levels (stored role values): viewer = read only (statistics and live
+// data); operator = read + actions (widget actions such as container
+// start/stop, model pull/delete, updates, wake; no shells or arbitrary
+// commands); admin = full access.
+const V4_ACCESS: string[] = [
+    `ALTER TABLE users ADD COLUMN disabled INTEGER NOT NULL DEFAULT 0`,
+    // 'none' | 'totp' | 'email'. totp_secret holds the encrypted TOTP seed.
+    `ALTER TABLE users ADD COLUMN mfa_method TEXT NOT NULL DEFAULT 'none'`,
+    // JSON array of SHA-256 hashes of unused one-time backup codes.
+    `ALTER TABLE users ADD COLUMN mfa_backup_codes TEXT`,
+    `ALTER TABLE users ADD COLUMN password_changed_at DATETIME`,
+
+    // API-only access keys. The secret is shown once; only its hash is kept.
+    `CREATE TABLE IF NOT EXISTS api_keys (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        key_prefix TEXT NOT NULL UNIQUE,
+        key_hash TEXT NOT NULL,
+        role TEXT NOT NULL CHECK (role IN ('admin', 'operator', 'viewer')),
+        created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        last_used_at DATETIME,
+        last_used_ip TEXT,
+        expires_at DATETIME,
+        revoked_at DATETIME
+    )`,
+
+    `CREATE TABLE IF NOT EXISTS password_resets (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        token_hash TEXT NOT NULL UNIQUE,
+        expires_at DATETIME NOT NULL,
+        used_at DATETIME,
+        ip_address TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_resets(user_id)`,
+
+    // Short-lived second-factor challenges (login step 2; email codes).
+    `CREATE TABLE IF NOT EXISTS mfa_challenges (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        method TEXT NOT NULL,
+        code_hash TEXT,
+        attempts INTEGER NOT NULL DEFAULT 0,
+        expires_at DATETIME NOT NULL,
+        used_at DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`,
+
+    // SMTP (smtp.*) and the public URL used in emailed links.
+    `INSERT OR IGNORE INTO app_config (key, value, description) VALUES ('app.url', '', 'Public URL of Bosun, used in emailed links (e.g. password reset)')`,
+    `INSERT OR IGNORE INTO app_config (key, value, description) VALUES ('smtp.enabled', 'false', 'Whether outgoing email is configured')`,
+];
+
 export const MIGRATIONS: Migration[] = [
     {
         version: 1,
@@ -328,6 +384,7 @@ export const MIGRATIONS: Migration[] = [
     },
     { version: 2, name: 'wol_and_custom_widgets', statements: V2_WOL_AND_CUSTOM_WIDGETS },
     { version: 3, name: 'wol_hosts', statements: V3_WOL_HOSTS },
+    { version: 4, name: 'access', statements: V4_ACCESS },
 ];
 
 /** The schema version this build expects. */
@@ -354,6 +411,9 @@ export const CORE_TABLES: string[] = [
     'notifications',
     'notification_channels',
     'custom_widgets',
+    'api_keys',
+    'password_resets',
+    'mfa_challenges',
 ];
 
 export class LegacySchemaError extends Error {

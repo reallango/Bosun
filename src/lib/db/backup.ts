@@ -44,13 +44,14 @@ export const BACKUP_TABLES: string[] = [
   'metric_rollups',
   'metric_samples',
   'custom_widgets',
+  'api_keys',
 ];
 
 // Tables excluded by default because they can grow very large.
 export const LARGE_TABLES: string[] = ['metric_samples', 'metric_rollups', 'host_snapshots', 'audit_log'];
 
 // Columns that hold encrypted credentials. Redacted by default in JSON exports.
-const SECRET_COLUMNS = ['private_key_enc', 'passphrase_enc', 'password_hash', 'totp_secret'];
+const SECRET_COLUMNS = ['private_key_enc', 'passphrase_enc', 'password_hash', 'totp_secret', 'mfa_backup_codes', 'key_hash'];
 const REDACTED_PLACEHOLDER = '__REDACTED__';
 
 export interface BackupMeta {
