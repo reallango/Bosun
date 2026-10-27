@@ -217,7 +217,9 @@ class HostAgent {
     for (const tier of TIERS[this.platform]) {
       const last = this.tierLast[tier.name];
       let due;
-      if (tier.periodMs === 0 || forceAll) due = true;
+      // Forced/initial polls refresh everything except tiers with an initial
+      // delay (package updates), which keep their own schedule.
+      if (tier.periodMs === 0 || (forceAll && !tier.initialDelayMs)) due = true;
       else if (last === undefined) due = now - this.started >= (tier.initialDelayMs || 0);
       else due = now - last >= tier.periodMs;
       if (due) {
@@ -277,7 +279,7 @@ class HostAgent {
       // A failed exec usually means a dead connection; start clean next time.
       this.close();
       this.state = null;
-      this.tierLast = {};
+      this.tierLast = { updates: this.tierLast.updates };
       this.polls = 0;
       const offline = this.failures >= 2 || err.code === 'HOST_KEY_MISMATCH' ? 0 : 1;
       executeBatch([{
