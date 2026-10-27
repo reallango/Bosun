@@ -4,7 +4,7 @@
 
 @layer base {
   :root {
-    --background: #ffffff;
+    --background: #f8fafc;
     --foreground: #0f172a;
     --card: #ffffff;
     --card-foreground: #0f172a;
@@ -18,20 +18,32 @@
     --muted-foreground: #64748b;
     --accent: #f1f5f9;
     --accent-foreground: #0f172a;
-    --destructive: #ef4444;
+    --destructive: #dc2626;
     --destructive-foreground: #ffffff;
     --border: #e2e8f0;
-    --input: #e2e8f0;
+    --input: #cbd5e1;
     --ring: #2563eb;
+    --success: #16a34a;
+    --warning: #d97706;
     --radius: 0.625rem;
+
+    /* App shell sidebar (always dark-ish in both themes) */
+    --sidebar: #0f172a;
+    --sidebar-foreground: #e2e8f0;
+    --sidebar-muted: #94a3b8;
+    --sidebar-accent: #1e293b;
+    --sidebar-border: #1e293b;
+
+    /* Dashboard grid spacing (overridden at larger viewports) */
+    --page-gutter: 0.75rem;
   }
-  
+
   .dark {
-    --background: #1f2937;
+    --background: #111827;
     --foreground: #f9fafb;
-    --card: #374151;
+    --card: #1f2937;
     --card-foreground: #f9fafb;
-    --popover: #374151;
+    --popover: #1f2937;
     --popover-foreground: #f9fafb;
     --primary: #3b82f6;
     --primary-foreground: #ffffff;
@@ -41,17 +53,102 @@
     --muted-foreground: #9ca3af;
     --accent: #374151;
     --accent-foreground: #f9fafb;
-    --destructive: #991b1b;
-    --destructive-foreground: #f9fafb;
-    --border: #4b5563;
+    --destructive: #ef4444;
+    --destructive-foreground: #ffffff;
+    --border: #374151;
     --input: #4b5563;
     --ring: #3b82f6;
+    --success: #22c55e;
+    --warning: #f59e0b;
+
+    --sidebar: #030712;
+    --sidebar-foreground: #e5e7eb;
+    --sidebar-muted: #9ca3af;
+    --sidebar-accent: #1f2937;
+    --sidebar-border: #1f2937;
+  }
+
+  @media (min-width: 640px) {
+    :root { --page-gutter: 1rem; }
+  }
+  @media (min-width: 1280px) {
+    :root { --page-gutter: 1.5rem; }
+  }
+  @media (min-width: 1920px) {
+    :root { --page-gutter: 2rem; }
   }
 
   * {
     @apply border-border;
   }
+  html {
+    -webkit-text-size-adjust: 100%;
+    color-scheme: light;
+  }
+  html.dark {
+    color-scheme: dark;
+  }
   body {
+    @apply bg-background text-foreground antialiased;
+    min-height: 100vh;
+    min-height: 100dvh;
+  }
+  /* Consistent keyboard focus ring for native controls without their own styling */
+  :where(a, button, input, select, textarea, [tabindex]):focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  /* Native form controls follow the theme */
+  select,
+  input,
+  textarea {
     @apply bg-background text-foreground;
+  }
+}
+
+@layer components {
+  /* Page container used by every dashboard-layout page */
+  .page {
+    @apply mx-auto w-full min-w-0;
+    padding: var(--page-gutter);
+    padding-left: max(var(--page-gutter), env(safe-area-inset-left));
+    padding-right: max(var(--page-gutter), env(safe-area-inset-right));
+    padding-bottom: max(var(--page-gutter), env(safe-area-inset-bottom));
+  }
+  /* Native <select> styled like the shadcn Input */
+  .form-select {
+    @apply h-9 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+  .form-input {
+    @apply h-9 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+}
+
+/* ---- react-grid-layout theming ---- */
+.react-grid-layout {
+  transition: height 200ms ease;
+}
+.react-grid-item.react-grid-placeholder {
+  background: var(--primary);
+  opacity: 0.15;
+  border-radius: var(--radius);
+}
+.react-grid-item > .react-resizable-handle {
+  z-index: 5;
+}
+.react-grid-item > .react-resizable-handle::after {
+  border-color: var(--muted-foreground) !important;
+}
+.dark .react-grid-item > .react-resizable-handle {
+  filter: invert(1);
+}
+.react-grid-item.resizing,
+.react-grid-item.react-draggable-dragging {
+  z-index: 20;
+}
+@media (prefers-reduced-motion: reduce) {
+  .react-grid-item,
+  .react-grid-layout {
+    transition: none !important;
   }
 }
