@@ -9,10 +9,14 @@ export async function GET(request: NextRequest) {
     if (!accessToken) return NextResponse.json({ error: { message: 'Not authenticated', code: 'NOT_AUTHENTICATED' } }, { status: 401 });
     const payload = await verifyAccessToken(accessToken);
     if (!payload) return NextResponse.json({ error: { message: 'Invalid token', code: 'TOKEN_EXPIRED' } }, { status: 401 });
-    const r = await rqlite.query("SELECT id, username, role, display_name, email, preferences FROM users WHERE id = ?", [payload.userId]);
+    const r = await rqlite.query("SELECT id, username, role, display_name, email, preferences, disabled, mfa_method FROM users WHERE id = ?", [payload.userId]);
     if (!r.values || r.values.length === 0) return NextResponse.json({ error: { message: 'User not found' } }, { status: 404 });
     const row = r.values[0];
-    return NextResponse.json({ data: { user: { id: row[0], username: row[1], role: row[2], display_name: row[3], email: row[4], preferences: row[5] ? JSON.parse(row[5] as string) : {} } } });
+    // 401 (not 403) so the client's refresh attempt fails too and it signs out.
+    if (Number(row[6]) === 1) return NextResponse.json({ error: { message: 'Not authenticated', code: 'NOT_AUTHENTICATED' } }, { status: 401 });
+    let preferences = {};
+    try { preferences = row[5] ? JSON.parse(row[5] as string) : {}; } catch { preferences = {}; }
+    return NextResponse.json({ data: { user: { id: row[0], username: row[1], role: row[2], display_name: row[3], email: row[4], preferences, mfa_method: row[7] || 'none' } } });
   } catch (error) {
     console.error('Me error:', error);
     return internalError(error);
