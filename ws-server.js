@@ -3,6 +3,7 @@
 const http = require('http');
 const url = require('url');
 const WebSocket = require('ws');
+const crypto = require('crypto');
 const { Client } = require('ssh2');
 
 const PORT = process.env.WS_PORT || 3002;
@@ -26,13 +27,16 @@ const rateLimitMap = new Map();
 const RATE_LIMIT_MAX = 10;
 const RATE_LIMIT_WINDOW_MS = 60000;
 
-// Query rqlite database
-async function queryRqlite(sql) {
+// Container names/IDs accepted for `docker exec` terminals.
+const CONTAINER_REF_RE = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
+
+// Query rqlite database (parameterized)
+async function queryRqlite(sql, params = []) {
   try {
     const res = await fetch(`http://${RQLITE_HOST}/db/query`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify([sql]),
+      body: JSON.stringify([[sql, ...params]]),
     });
     const json = await res.json();
     const result = json.results?.[0];
@@ -55,7 +59,7 @@ async function connectToServer(serverId, sshUser, sshPassword) {
   const conn = new Client();
   
   // Get server details from rqlite (hostname/port/platform only)
-  const servers = await queryRqlite(`SELECT id, hostname, ssh_port, platform FROM servers WHERE id = '${serverId}'`);
+  const servers = await queryRqlite('SELECT id, hostname, ssh_port, platform FROM servers WHERE id = ?', [serverId]);
   if (!servers || servers.length === 0) {
     throw new Error('Server not found');
   }
@@ -139,12 +143,21 @@ server.on('upgrade', (req, socket, head) => {
   });
 });
 
-// JWT verification - simple HS256
+// JWT verification: HS256 signature, expiry and token type. Only the
+// short-lived `type: 'ws'` tokens minted by /api/ws-token are accepted.
 function verifyToken(token) {
   try {
-    const parts = token.split('.');
+    const parts = String(token).split('.');
     if (parts.length !== 3) return null;
-    const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString());
+    const header = JSON.parse(Buffer.from(parts[0], 'base64url').toString());
+    if (header.alg !== 'HS256') return null;
+    const expected = crypto.createHmac('sha256', AUTH_SECRET).update(parts[0] + '.' + parts[1]).digest();
+    const actual = Buffer.from(parts[2], 'base64url');
+    if (actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected)) return null;
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString());
+    const now = Math.floor(Date.now() / 1000);
+    if (typeof payload.exp !== 'number' || payload.exp < now) return null;
+    if (payload.type !== 'ws' || !payload.userId) return null;
     return payload;
   } catch {
     return null;
@@ -173,7 +186,9 @@ wss.on('connection', async (ws, req) => {
   // URL; the password arrives as the first WebSocket frame so it is never
   // written to URLs or access logs.
   const sshUser = (parsedUrl.query.sshUser || '').toString().trim();
-  
+  // Optional: open `docker exec` into this container instead of a login shell.
+  const containerId = (parsedUrl.query.containerId || '').toString().trim();
+
   // Get client IP (respect x-forwarded-for for Cloudflare)
   const clientIP = req.headers['x-forwarded-for']?.split(',')[0] || req.socket.remoteAddress;
 
@@ -191,8 +206,20 @@ wss.on('connection', async (ws, req) => {
     return;
   }
 
+  // Interactive shells need at least operator; container shells need admin.
+  const roleLevel = { admin: 3, operator: 2, viewer: 1 }[payload.role] || 0;
+  if (roleLevel < (containerId ? 3 : 2)) {
+    ws.close(4003, 'Insufficient permissions');
+    return;
+  }
+
   if (!sessionId) {
     ws.close(4000, 'Missing sessionId');
+    return;
+  }
+
+  if (containerId && !CONTAINER_REF_RE.test(containerId)) {
+    ws.close(4000, 'Invalid container');
     return;
   }
 
@@ -216,8 +243,14 @@ wss.on('connection', async (ws, req) => {
   
   // ========== CHECK FOR EXISTING SESSION (REATTACH) ==========
   const existingSession = sshSessions.get(sessionId);
-  if (existingSession && existingSession.stream && existingSession.authenticated &&
-      existingSession.username === sshUser) {
+  // A session can only be reattached by the same Bosun user, for the same
+  // server/container and SSH account; anything else starts a fresh session.
+  const sameTarget = existingSession &&
+    existingSession.ownerUserId === payload.userId &&
+    existingSession.serverId === serverId &&
+    (existingSession.containerId || '') === containerId &&
+    existingSession.username === sshUser;
+  if (existingSession && existingSession.stream && existingSession.authenticated && sameTarget) {
     console.log('[WS] Reattaching to existing session: ' + sessionId);
 
     // Cancel grace period timer (Gap 5)
@@ -285,8 +318,8 @@ wss.on('connection', async (ws, req) => {
 
   // An existing session for a *different* account can't be reused; tear it down
   // so its SSH connection doesn't linger before the new one starts.
-  if (existingSession && existingSession.username !== sshUser) {
-    console.log('[WS] Discarding stale session for a different user: ' + sessionId);
+  if (existingSession && !sameTarget) {
+    console.log('[WS] Discarding stale session for a different user/target: ' + sessionId);
     if (existingSession.graceTimer) clearTimeout(existingSession.graceTimer);
     if (existingSession.idleTimeout) clearTimeout(existingSession.idleTimeout);
     if (existingSession.client) existingSession.client.end();
@@ -363,6 +396,10 @@ wss.on('connection', async (ws, req) => {
       }
 
       sshStream = stream;
+      // The session record is created before this callback runs; give it the
+      // stream so a reconnecting browser can reattach.
+      const stored = sshSessions.get(sessionId);
+      if (stored) stored.stream = stream;
       // Windows sessions have no MOTD/"Last login" preamble, so only Linux
       // needs the post-login screen clear.
       let loginBannerCleared = connected.platform === 'windows';
@@ -429,7 +466,13 @@ wss.on('connection', async (ws, req) => {
       });
     };
 
-    if (connected.platform === 'windows') {
+    if (containerId) {
+      // Container shell: docker exec through the host's SSH session. Prefer
+      // bash, fall back to sh (alpine/distroless-ish images).
+      const execCmd = `docker exec -it ${containerId} sh -c 'if command -v bash >/dev/null 2>&1; then exec bash; else exec sh; fi'`;
+      ws.send('\r\n\x1b[36mOpening shell in container ' + containerId + '...\x1b[0m\r\n');
+      sshClient.exec(execCmd, { pty: { term: 'xterm-256color', cols: 80, rows: 24 } }, openPty);
+    } else if (connected.platform === 'windows') {
       // exec() gives a stream we can drive directly; with a pty, powershell.exe
       // renders an interactive prompt (client.shell() would run cmd.exe).
       sshClient.exec('powershell -NoLogo -NoProfile', { pty: { term: 'xterm-256color', cols: 80, rows: 24 } }, openPty);
@@ -449,6 +492,8 @@ wss.on('connection', async (ws, req) => {
       username: sshUser,
       authenticated: true, // Shell created successfully - server-side auth complete
       serverId: serverId,
+      containerId: containerId,
+      ownerUserId: payload.userId,
     };
     sshSessions.set(sessionId, sessionData);
 
