@@ -2,341 +2,424 @@
 'use strict';
 
 /**
- * Background Widget Poller Service
- * 
- * Polls widgets in the background and caches results.
- * Run as: node poller.js
- * 
+ * Bosun host poller.
+ *
+ * The only process that collects monitoring data. Designed to be gentle on
+ * monitored hosts:
+ *  - one persistent SSH connection per host (keepalives, reused across polls);
+ *  - one exec per poll running a batched, read-only script at nice 19 /
+ *    ionice idle (PowerShell at BelowNormal on Windows);
+ *  - probes are tiered: cheap counters every poll, docker/ollama/disks every
+ *    minute, services/OS facts every few minutes, package updates every 6h;
+ *  - CPU% and network rates come from counter deltas between polls, so
+ *    nothing sleeps on the host;
+ *  - failures back off exponentially (up to 5 minutes) and drop the
+ *    connection; a host is marked offline after 2 consecutive failures.
+ *
+ * Results go to rqlite in one transaction per poll: latest snapshots per
+ * section (host_snapshots), raw metric samples, and incrementally maintained
+ * 5m/1h rollups. In a cluster only the raft leader polls.
+ *
  * Environment:
- *   RQLITE_HOST - rqlite address (default: 127.0.0.1:4001)
- *   POLL_INTERVAL_MS - base polling interval (default: 10000)
- *   MASTER_KEY - key for decrypting SSH private keys
+ *   RQLITE_HOST          rqlite address (default 127.0.0.1:4001)
+ *   MASTER_KEY           key used to decrypt stored SSH private keys (required)
+ *   POLLER_HEALTH_PORT   health endpoint port (default 3003)
+ *   POLLER_MAX_PARALLEL  hosts polled concurrently (default 8)
  */
 
 const http = require('http');
-const crypto = require('crypto');
-const { Client } = require('ssh2');
-const { getLinuxWidgetData } = require('./src/lib/linux/collectors');
-const { getWindowsWidgetData, powershellCommand } = require('./src/lib/windows/collectors');
+const linux = require('./src/lib/collect/linux');
+const windows = require('./src/lib/collect/windows');
+const ssh = require('./src/lib/collect/ssh');
+const store = require('./src/lib/collect/store');
 
 const RQLITE_HOST = process.env.RQLITE_HOST || '127.0.0.1:4001';
-const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS) || 10000;
-const MASTER_KEY = process.env.MASTER_KEY || 'fallback-master-key';
+const MASTER_KEY = process.env.MASTER_KEY || '';
+const HEALTH_PORT = parseInt(process.env.POLLER_HEALTH_PORT, 10) || 3003;
+const MAX_PARALLEL = parseInt(process.env.POLLER_MAX_PARALLEL, 10) || 8;
+const TICK_MS = 1000;
+const MIN_INTERVAL_SEC = 5;
+const MAX_BACKOFF_MS = 5 * 60 * 1000;
 
-// Query rqlite
-async function queryRqlite(sql, params = []) {
-  try {
-    const res = await fetch(`http://${RQLITE_HOST}/db/query`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params.length ? [sql, ...params] : [sql]),
-    });
-    const json = await res.json();
-    return json.results?.[0]?.values || [];
-  } catch (err) {
-    console.error('[Poller] Query error:', err.message);
-    return [];
-  }
+/** Probe tiers: [probes, period ms]. The fast tier runs every poll. */
+const TIERS = {
+  linux: [
+    { name: 'fast', probes: ['stat', 'mem', 'load', 'temp', 'netdev', 'gpu'], periodMs: 0 },
+    { name: 'medium', probes: ['df', 'ip', 'docker', 'ollama'], periodMs: 60 * 1000 },
+    { name: 'slow', probes: ['services', 'system'], periodMs: 5 * 60 * 1000 },
+    { name: 'updates', probes: ['updates'], periodMs: 6 * 3600 * 1000, initialDelayMs: 5 * 60 * 1000 },
+  ],
+  windows: [
+    { name: 'fast', probes: ['stat', 'mem', 'netdev', 'gpu'], periodMs: 0 },
+    { name: 'medium', probes: ['df', 'docker', 'ollama'], periodMs: 2 * 60 * 1000 },
+    { name: 'slow', probes: ['ip', 'services', 'system'], periodMs: 15 * 60 * 1000 },
+  ],
+};
+
+const log = (...a) => console.log('[Poller]', ...a);
+const warn = (...a) => console.warn('[Poller]', ...a);
+
+// ---------------------------------------------------------------- rqlite ---
+
+async function rq(path, body, timeoutMs = 15000) {
+  const res = await fetch(`http://${RQLITE_HOST}${path}`, {
+    method: body ? 'POST' : 'GET',
+    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!res.ok) throw new Error(`rqlite ${path} -> HTTP ${res.status}`);
+  return res.json();
 }
 
-// Execute rqlite
-async function executeRqlite(sql, params = []) {
-  try {
-    await fetch(`http://${RQLITE_HOST}/db/execute`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params.length ? [sql, ...params] : [sql]),
-    });
-  } catch (err) {
-    console.error('[Poller] Execute error:', err.message);
-  }
+async function query(sql, params = []) {
+  const json = await rq('/db/query', [[sql, ...params]]);
+  const r = json.results && json.results[0];
+  if (!r || r.error) throw new Error(`query failed: ${(r && r.error) || 'no result'}`);
+  const cols = r.columns || [];
+  return (r.values || []).map(row => Object.fromEntries(cols.map((c, i) => [c, row[i]])));
 }
 
-// Check if this node is leader
+async function executeBatch(statements) {
+  if (!statements.length) return;
+  const json = await rq('/db/execute?transaction', statements.map(s => [s.sql, ...(s.params || [])]), 30000);
+  const bad = (json.results || []).find(r => r && r.error);
+  if (json.error || bad) throw new Error(`execute failed: ${json.error || bad.error}`);
+}
+
 async function isLeader() {
+  const status = await rq('/status');
+  const store_ = status.store || {};
+  const raft = store_.raft || {};
+  if (raft.state) return raft.state === 'Leader';
+  return true; // single node without raft info
+}
+
+async function schemaReady() {
   try {
-    const res = await fetch(`http://${RQLITE_HOST}/status`);
-    const json = await res.json();
-    // Check raft state for leadership
-    const raftState = json.store?.raft?.state;
-    if (raftState === 'Leader') return true;
-    // Single node (no raft), assume leader
-    if (!json.store?.raft) return true;
+    const rows = await query('SELECT MAX(version) AS v FROM schema_migrations');
+    return Number(rows[0] && rows[0].v) >= 1;
+  } catch {
     return false;
-  } catch (err) {
-    console.error('[Poller] Leader check error:', err.message);
-    return false;
   }
 }
 
-// Decrypt private key
-function decrypt(encryptedData) {
+async function readRetention() {
+  const cfg = { rawHours: 48, rollup5mDays: 30, rollup1hDays: 400 };
   try {
-    const ALGORITHM = 'aes-256-gcm';
-    const IV_LENGTH = 16;
-    const TAG_LENGTH = 16;
-    const key = crypto.pbkdf2Sync(
-      MASTER_KEY, 'bosun-ssh-key-encryption', 100000, 32, 'sha256'
-    );
-    const combined = Buffer.from(encryptedData, 'base64');
-    const iv = combined.subarray(0, IV_LENGTH);
-    const authTag = combined.subarray(IV_LENGTH, IV_LENGTH + TAG_LENGTH);
-    const encrypted = combined.subarray(IV_LENGTH + TAG_LENGTH);
-    const decipher = crypto.createDecipheriv(ALGORITHM, key, iv);
-    decipher.setAuthTag(authTag);
-    let decrypted = decipher.update(encrypted, undefined, 'utf8');
-    decrypted += decipher.final('utf8');
-    return decrypted;
+    const rows = await query("SELECT key, value FROM app_config WHERE key LIKE 'metrics.%'");
+    for (const { key, value } of rows) {
+      const n = Number(value);
+      if (!Number.isFinite(n) || n <= 0) continue;
+      if (key === 'metrics.raw_retention_hours') cfg.rawHours = n;
+      if (key === 'metrics.rollup_5m_retention_days') cfg.rollup5mDays = n;
+      if (key === 'metrics.rollup_1h_retention_days') cfg.rollup1hDays = n;
+    }
   } catch (err) {
-    console.error('[Poller] Decrypt error:', err.message);
-    throw err;
+    warn('retention config read failed:', err.message);
   }
+  return cfg;
 }
 
-// SSH connection cache
-const sshConnections = new Map();
+// ------------------------------------------------------------ host agent ---
 
-async function getSSHConnection(serverId) {
-  if (sshConnections.has(serverId)) {
-    return sshConnections.get(serverId);
+class HostAgent {
+  constructor(row) {
+    this.id = row.id;
+    this.update(row);
+    this.client = null;
+    this.connecting = null;
+    this.state = null; // counters from the previous poll
+    this.hashes = new Map();
+    this.tierLast = {};
+    this.started = Date.now();
+    this.nextDue = Date.now();
+    this.failures = 0;
+    this.busy = false;
+    this.lastPollAt = null;
+    this.lastDurationMs = null;
+    this.lastError = null;
+    this.polls = 0;
   }
-  
-  const servers = await queryRqlite(
-    `SELECT id, name, hostname, ssh_port, ssh_user, ssh_key_id, platform, os_type, os_version, is_online FROM servers WHERE id = ?`,
-    [serverId]
-  );
-  if (!servers.length) {
-    throw new Error('Server not found: ' + serverId);
+
+  update(row) {
+    const changed = this.row && ['hostname', 'ssh_port', 'ssh_user', 'ssh_key_id', 'platform', 'host_key_fingerprint']
+      .some(k => this.row[k] !== row[k]);
+    this.row = row;
+    if (changed) {
+      log(`${row.name}: connection settings changed, reconnecting`);
+      this.close();
+      this.state = null;
+    }
   }
-  
-  const [sid, name, hostname, port, user, keyId, platform, osType, osVersion, isOnline] = servers[0];
-  if (!keyId) {
-    throw new Error('No SSH key for server');
+
+  get platform() {
+    return this.row.platform === 'windows' ? 'windows' : 'linux';
   }
-  
-  const keys = await queryRqlite(
-    `SELECT private_key_enc FROM ssh_keys WHERE id = ?`, [keyId]
-  );
-  if (!keys.length) {
-    throw new Error('SSH key not found');
+
+  get intervalMs() {
+    const def = this.platform === 'windows' ? 30 : 15;
+    return Math.max(MIN_INTERVAL_SEC, Number(this.row.poll_interval_sec) || def) * 1000;
   }
-  
-  const privateKey = decrypt(keys[0][0]);
-  
-  const conn = new Promise((resolve, reject) => {
-    const c = new Client();
-    c.connect({
-      host: hostname,
-      port: port || 22,
-      username: user,
-      privateKey,
-      readyTimeout: 10000,
-    });
-    c.on('ready', () => resolve(c));
-    c.on('error', reject);
-  });
-  
-  const server = {
-    id: sid,
-    name,
-    hostname,
-    os_type: osType,
-    os_version: osVersion,
-    is_online: isOnline,
-  };
 
-  const connection = { client: conn, platform: platform || 'linux', server };
-  sshConnections.set(serverId, connection);
-  return connection;
-}
-
-// Generate ID
-function generateId() {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = Math.random() * 16 | 0;
-    const v = c === 'x' ? r : (r & 0x3 | 0x8);
-    return v.toString(16);
-  });
-}
-
-// SHA-256 hash for change detection
-function hashData(data) {
-  return crypto.createHash('sha256').update(JSON.stringify(data)).digest('hex');
-}
-
-// Main polling loop
-async function pollWidgets() {
-  lastPollAt = new Date().toISOString();
-  const leader = await isLeader();
-  if (!leader) {
-    console.log('[Poller] Not leader, skipping cycle');
-    return;
+  close() {
+    if (this.client) {
+      try { this.client.end(); } catch { /* ignore */ }
+    }
+    this.client = null;
+    this.connecting = null;
   }
-  console.log('[Poller] I am leader, polling...');
-  
-  console.log('[Poller] Checking for widgets to poll...');
-  
-  try {
-    // Get widgets that are pollable
-    const widgets = await queryRqlite(`
-      SELECT w.id, w.widget_type, w.server_id, w.config, wpc.poll_interval_sec, wpc.ttl_sec, wpc.storage_mode, wpc.last_polled_at, wpc.enabled
-      FROM widgets w
-      LEFT JOIN widget_polling_config wpc ON w.widget_type = wpc.widget_type AND w.server_id = wpc.server_id
-      WHERE w.widget_type NOT IN ('ssh_terminal', 'server_summary')
-      AND (wpc.enabled IS NULL OR wpc.enabled = 1)
-      ORDER BY w.server_id, w.widget_type
-    `);
-    
-    const now = Date.now();
-    
-    for (const row of widgets) {
-      const [widgetId, widgetType, serverId, configJson, pollInterval, ttl, storageMode, lastPolled, enabled] = row;
-      
-      const intervalMs = (pollInterval || 30) * 1000;
-      if (lastPolled && now - new Date(lastPolled).getTime() < intervalMs) {
-        continue;
-      }
-      
-      console.log(`[Poller] Polling ${widgetType} on ${serverId}...`);
-      
-      try {
-        const { client, platform, server } = await getSSHConnection(serverId);
 
-        // Run a command on the cached connection, returning the same
-        // { stdout, stderr, exitCode } shape the shared collectors expect.
-        const runCommand = (cmd) => new Promise((resolve, reject) => {
-          client.exec(cmd, (err, stream) => {
-            if (err) return reject(err);
-            let stdout = '', stderr = '';
-            stream.on('data', (d) => { stdout += d.toString(); });
-            stream.stderr.on('data', (d) => { stderr += d.toString(); });
-            stream.on('close', (code) => resolve({ stdout, stderr, exitCode: code || 0 }));
-          });
-        });
-
-        // gpu_monitoring / ollama_status / custom_command are served live by the
-        // widget route on both platforms, so the poller never handles them.
-        let data;
-        if (platform === 'windows') {
-          data = await getWindowsWidgetData(widgetType, (s) => runCommand(powershellCommand(s)), { server });
-        } else {
-          data = await getLinuxWidgetData(widgetType, runCommand, { server });
+  async ensureConnected() {
+    if (this.client) return this.client;
+    if (this.connecting) return this.connecting;
+    this.connecting = (async () => {
+      if (!this.row.ssh_key_id) throw new Error('no SSH key assigned');
+      const keys = await query('SELECT private_key_enc, passphrase_enc FROM ssh_keys WHERE id = ?', [this.row.ssh_key_id]);
+      if (!keys.length) throw new Error('SSH key not found');
+      const privateKey = ssh.decryptSecret(keys[0].private_key_enc, MASTER_KEY);
+      const passphrase = keys[0].passphrase_enc ? ssh.decryptSecret(keys[0].passphrase_enc, MASTER_KEY) : undefined;
+      const client = await ssh.connect({
+        host: this.row.hostname,
+        port: this.row.ssh_port || 22,
+        username: this.row.ssh_user,
+        privateKey,
+        passphrase,
+        expectedFingerprint: this.row.host_key_fingerprint || undefined,
+        onNewFingerprint: (fp) => {
+          this.row.host_key_fingerprint = fp;
+          executeBatch([{ sql: 'UPDATE servers SET host_key_fingerprint = ? WHERE id = ? AND host_key_fingerprint IS NULL', params: [fp, this.id] }])
+            .catch(err => warn(`${this.row.name}: storing host key failed:`, err.message));
+        },
+      });
+      client.on('close', () => {
+        if (this.client === client) {
+          log(`${this.row.name}: connection closed`);
+          this.client = null;
         }
+      });
+      client.on('error', (err) => warn(`${this.row.name}: connection error:`, err.message));
+      this.client = client;
+      log(`${this.row.name}: connected (${this.platform})`);
+      return client;
+    })();
+    try {
+      return await this.connecting;
+    } finally {
+      this.connecting = null;
+    }
+  }
 
-        if (data === undefined) {
-          console.log(`[Poller] No collector for ${widgetType}`);
-          continue;
-        }
-
-        // The cache column is TEXT; store the same JSON the route parses.
-        data = JSON.stringify(data);
-        const dataHash = hashData(data);
-        const ttlSec = ttl || 300;
-        
-        // Check for changes in change_only mode
-        if (storageMode === 'change_only') {
-          const existing = await queryRqlite(
-            `SELECT data_hash FROM widget_data_cache WHERE widget_type = ? AND server_id = ? ORDER BY collected_at DESC LIMIT 1`,
-            [widgetType, serverId]
-          );
-          if (existing.length && existing[0][0] === dataHash) {
-            console.log(`[Poller] No change for ${widgetType}, skipping cache update`);
-            await executeRqlite(
-              `UPDATE widget_polling_config SET last_polled_at = CURRENT_TIMESTAMP WHERE widget_type = ? AND server_id = ?`,
-              [widgetType, serverId]
-            );
-            continue;
-          }
-        }
-        
-        // Store in cache
-        const cacheId = generateId();
-        await executeRqlite(
-          `INSERT INTO widget_data_cache (id, widget_type, server_id, data, data_hash, storage_mode, collected_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now', '+' || ? || ' seconds'))`,
-          [cacheId, widgetType, serverId, data, dataHash, storageMode || 'latest_ttl', ttlSec]
-        );
-        
-        // Update last_polled_at
-        await executeRqlite(
-          `UPDATE widget_polling_config SET last_polled_at = CURRENT_TIMESTAMP WHERE widget_type = ? AND server_id = ?`,
-          [widgetType, serverId]
-        );
-        
-        console.log(`[Poller] Cached ${widgetType} data (${data.length} bytes)`);
-        
-      } catch (err) {
-        console.error(`[Poller] Error polling ${widgetType}:`, err.message);
+  /** Probes due this poll; marks their tiers as run. */
+  dueProbes(now, forceAll) {
+    const probes = [];
+    for (const tier of TIERS[this.platform]) {
+      const last = this.tierLast[tier.name];
+      let due;
+      if (tier.periodMs === 0 || forceAll) due = true;
+      else if (last === undefined) due = now - this.started >= (tier.initialDelayMs || 0);
+      else due = now - last >= tier.periodMs;
+      if (due) {
+        probes.push(...tier.probes);
+        this.tierLast[tier.name] = now;
       }
     }
-    
-  } catch (err) {
-    console.error('[Poller] Main loop error:', err.message);
+    return probes;
+  }
+
+  async poll({ forceAll = false } = {}) {
+    this.busy = true;
+    const started = Date.now();
+    const lib = this.platform === 'windows' ? windows : linux;
+    try {
+      const client = await this.ensureConnected();
+      // First poll after (re)connecting collects everything so widgets fill in.
+      const probes = this.dueProbes(started, forceAll || this.polls === 0);
+      const cmd = lib.buildCommand(probes);
+      const r = await ssh.exec(client, cmd, {
+        stdin: this.platform === 'windows' ? undefined : linux.SCRIPT,
+        timeoutMs: probes.includes('updates') ? 120000 : 45000,
+      });
+      if (r.timedOut) throw new Error(`collection timed out after ${r.durationMs} ms`);
+      const raw = lib.splitSections(r.stdout);
+      if (!Object.keys(raw).length) {
+        throw new Error(`no output from collector (exit ${r.exitCode}): ${(r.stderr || '').trim().slice(0, 200)}`);
+      }
+      const snap = lib.buildSnapshot(raw, this.state, Date.now());
+      this.state = snap.state;
+
+      const stmts = store.buildPollStatements(this.id, snap, Date.now(), this.hashes);
+      const caps = store.capabilitiesOf(snap.sections, this.caps);
+      if (JSON.stringify(caps) !== JSON.stringify(this.caps)) {
+        this.caps = caps;
+        stmts.push({ sql: 'UPDATE servers SET capabilities = ? WHERE id = ?', params: [JSON.stringify(caps), this.id] });
+      }
+      await executeBatch(stmts);
+
+      this.failures = 0;
+      this.lastError = null;
+      this.polls++;
+      this.lastDurationMs = Date.now() - started;
+      this.nextDue = started + this.intervalMs;
+    } catch (err) {
+      this.failures++;
+      this.lastError = err.message;
+      const backoff = Math.min(MAX_BACKOFF_MS, this.intervalMs * 2 ** Math.min(this.failures, 6));
+      this.nextDue = Date.now() + backoff;
+      warn(`${this.row.name}: poll failed (${this.failures}x, retry in ${Math.round(backoff / 1000)}s): ${err.message}`);
+      // A failed exec usually means a dead connection; start clean next time.
+      this.close();
+      this.state = null;
+      this.tierLast = {};
+      this.polls = 0;
+      const offline = this.failures >= 2 || err.code === 'HOST_KEY_MISMATCH' ? 0 : 1;
+      executeBatch([{
+        sql: 'UPDATE servers SET is_online = CASE WHEN ? = 0 THEN 0 ELSE is_online END, last_error = ? WHERE id = ?',
+        params: [offline, String(err.message).slice(0, 500), this.id],
+      }]).catch(e => warn('status update failed:', e.message));
+    } finally {
+      this.lastPollAt = new Date(started).toISOString();
+      this.busy = false;
+    }
+  }
+
+  status() {
+    return {
+      id: this.id, name: this.row.name, platform: this.platform, connected: !!this.client,
+      intervalSec: this.intervalMs / 1000, failures: this.failures, lastPollAt: this.lastPollAt,
+      lastDurationMs: this.lastDurationMs, lastError: this.lastError, nextDueInSec: Math.max(0, Math.round((this.nextDue - Date.now()) / 1000)),
+    };
   }
 }
 
-// Cleanup expired cache entries
-async function cleanupExpired() {
-  console.log('[Poller] Cleaning up expired cache...');
-  
+// ------------------------------------------------------------- scheduler ---
+
+const agents = new Map();
+let leader = false;
+let lastLeaderCheck = 0;
+let lastServerSync = 0;
+let lastRetention = 0;
+let lastTickAt = null;
+let ticking = false;
+
+async function syncServers() {
+  const rows = await query(
+    'SELECT id, name, hostname, ssh_port, ssh_user, ssh_key_id, platform, poll_enabled, poll_interval_sec, ' +
+    'host_key_fingerprint, poll_requested_at, capabilities FROM servers');
+  const seen = new Set();
+  for (const row of rows) {
+    if (Number(row.poll_enabled) !== 1) continue;
+    seen.add(row.id);
+    const a = agents.get(row.id);
+    if (a) {
+      a.update(row);
+      // "Refresh" in the UI sets poll_requested_at; poll now with all tiers.
+      if (row.poll_requested_at && row.poll_requested_at > (a.lastRequest || 0)) {
+        a.lastRequest = row.poll_requested_at;
+        a.forceNext = true;
+        a.nextDue = Math.min(a.nextDue, Date.now());
+      }
+    } else {
+      const agent = new HostAgent(row);
+      agent.lastRequest = row.poll_requested_at || 0;
+      try { agent.caps = JSON.parse(row.capabilities || '{}'); } catch { agent.caps = {}; }
+      agents.set(row.id, agent);
+      log(`${row.name}: added (${row.platform || 'linux'} ${row.hostname})`);
+    }
+  }
+  for (const [id, a] of agents) {
+    if (!seen.has(id)) {
+      log(`${a.row.name}: removed or disabled`);
+      a.close();
+      agents.delete(id);
+    }
+  }
+}
+
+async function tick() {
+  if (ticking) return;
+  ticking = true;
+  const now = Date.now();
+  lastTickAt = new Date(now).toISOString();
   try {
-    await executeRqlite(
-      `DELETE FROM widget_data_cache WHERE storage_mode = 'latest_ttl' AND expires_at < datetime('now')`
-    );
-    
-    await executeRqlite(
-      `DELETE FROM widget_data_cache WHERE storage_mode = 'change_only' AND collected_at < datetime('now', '-180 days')`
-    );
-    
+    if (now - lastLeaderCheck > 30000) {
+      lastLeaderCheck = now;
+      const was = leader;
+      leader = await isLeader().catch(() => false);
+      if (was !== leader) log(leader ? 'this node is the raft leader; polling' : 'not the leader; idle');
+      if (!leader) for (const a of agents.values()) a.close();
+    }
+    if (!leader) return;
+
+    if (now - lastServerSync > 2000) {
+      lastServerSync = now;
+      await syncServers();
+    }
+
+    let running = [...agents.values()].filter(a => a.busy).length;
+    for (const a of agents.values()) {
+      if (running >= MAX_PARALLEL) break;
+      if (a.busy || a.nextDue > now) continue;
+      running++;
+      const forceAll = !!a.forceNext;
+      a.forceNext = false;
+      a.poll({ forceAll }); // runs concurrently; errors handled inside
+    }
+
+    if (now - lastRetention > 10 * 60 * 1000) {
+      lastRetention = now;
+      const cfg = await readRetention();
+      await executeBatch(store.retentionStatements(cfg, now)).catch(err => warn('retention failed:', err.message));
+    }
   } catch (err) {
-    console.error('[Poller] Cleanup error:', err.message);
+    warn('tick failed:', err.message);
+  } finally {
+    ticking = false;
   }
 }
 
-// Main
-async function main() {
-  console.log('[Poller] Widget poller service started');
-  console.log('[Poller] RQLITE_HOST:', RQLITE_HOST);
-
-  setInterval(pollWidgets, POLL_INTERVAL_MS);
-  setInterval(cleanupExpired, 60000);
-
-  setTimeout(pollWidgets, 2000);
-
-  startHealthServer();
-}
-
-const HEALTH_PORT = parseInt(process.env.POLLER_HEALTH_PORT) || 3003;
-let lastPollAt = null;
-
-// Exposes GET /health so the app's system-health check can confirm the poller
-// is running, and reports when the last poll cycle started.
 function startHealthServer() {
   http.createServer((req, res) => {
     if (req.url === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
-        status: 'ok',
-        service: 'poller',
-        last_poll_at: lastPollAt,
-        poll_interval_ms: POLL_INTERVAL_MS,
+        status: 'ok', service: 'poller', leader, last_tick_at: lastTickAt,
+        hosts: [...agents.values()].map(a => a.status()),
       }));
       return;
     }
-    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.writeHead(404, { 'Content-Type': 'text/plain' });
     res.end('Bosun Poller');
-  }).listen(HEALTH_PORT, '0.0.0.0', () => {
-    console.log('[Poller] Health endpoint on port', HEALTH_PORT);
-  });
+  }).listen(HEALTH_PORT, '127.0.0.1', () => log('health endpoint on 127.0.0.1:' + HEALTH_PORT));
 }
 
-main();
+async function main() {
+  if (!MASTER_KEY) {
+    console.error('[Poller] MASTER_KEY is not set; cannot decrypt SSH keys. Exiting.');
+    process.exit(1);
+  }
+  log('starting; rqlite at', RQLITE_HOST);
+  startHealthServer();
+  while (!(await schemaReady())) {
+    log('waiting for the database schema (the web app creates it on startup)...');
+    await new Promise(r => setTimeout(r, 3000));
+  }
+  setInterval(tick, TICK_MS);
+  tick();
+}
 
-process.on('SIGINT', () => {
-  console.log('[Poller] Shutting down...');
+function shutdown() {
+  log('shutting down');
+  for (const a of agents.values()) a.close();
   process.exit(0);
-});
+}
 
-process.on('SIGTERM', () => {
-  console.log('[Poller] Shutting down...');
-  process.exit(0);
-});
+
+
+if (require.main === module) {
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
+  main();
+}
+
+module.exports = { HostAgent, TIERS };
