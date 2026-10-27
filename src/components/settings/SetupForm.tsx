@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '@/hooks/useAuth';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -9,6 +10,7 @@ import { Label } from '@/components/ui/label';
 
 export default function SetupForm() {
   const router = useRouter();
+  const { refresh } = useAuth();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [email, setEmail] = useState('');
@@ -34,6 +36,7 @@ export default function SetupForm() {
         return;
       }
 
+      await refresh(); // load the new session into the auth context before navigating
       router.push('/');
     } catch (err) {
       setError('An error occurred');
