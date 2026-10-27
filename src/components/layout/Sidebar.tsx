@@ -307,7 +307,7 @@ function Brand({ collapsed }: { collapsed: boolean }) {
   );
 }
 
-/** Double chevron: points right to collapse the rail, left to expand it. */
+/** Double chevron: points left to collapse the rail, right to expand it. */
 function RailToggle({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
   return (
     <button
@@ -318,7 +318,7 @@ function RailToggle({ collapsed, onToggle }: { collapsed: boolean; onToggle: () 
       title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
       className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-sidebar-muted transition-colors hover:bg-sidebar-accent/60 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
     >
-      {collapsed ? <ChevronsLeft className="size-4" /> : <ChevronsRight className="size-4" />}
+      {collapsed ? <ChevronsRight className="size-4" /> : <ChevronsLeft className="size-4" />}
     </button>
   );
 }
