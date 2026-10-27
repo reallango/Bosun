@@ -40,7 +40,9 @@ const HEALTH_PORT = parseInt(process.env.POLLER_HEALTH_PORT, 10) || 3003;
 const MAX_PARALLEL = parseInt(process.env.POLLER_MAX_PARALLEL, 10) || 8;
 const TICK_MS = 1000;
 const LEADER_CHECK_MS = 3000;
-const NODE_NAME = process.env.NODE_NAME || require('os').hostname();
+// rqlite node id: UI cluster settings over NODE_NAME (same as the rqlite start script).
+const clusterConfig = require('./src/lib/cluster/config');
+const nodeName = () => clusterConfig.effectiveClusterConfig().node_id;
 const MIN_INTERVAL_SEC = 5;
 const MAX_BACKOFF_MS = 5 * 60 * 1000;
 
@@ -385,7 +387,7 @@ async function tick() {
       const was = leader;
       leader = await isLeader().catch(() => false);
       if (was !== leader) {
-        log(leader ? `this node (${NODE_NAME}) is the raft leader; polling` : `${NODE_NAME} is not the leader; idle`);
+        log(leader ? `this node (${nodeName()}) is the raft leader; polling` : `${nodeName()} is not the leader; idle`);
         if (!leader) {
           for (const a of agents.values()) a.close();
           agents.clear();
@@ -400,7 +402,7 @@ async function tick() {
       executeBatch([{
         sql: "INSERT INTO app_config (key, value, description) VALUES ('poller.active', ?, 'Node currently running the poller (heartbeat)') " +
           'ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP',
-        params: [JSON.stringify({ node: NODE_NAME, at: new Date(now).toISOString(), hosts: agents.size })],
+        params: [JSON.stringify({ node: nodeName(), at: new Date(now).toISOString(), hosts: agents.size })],
       }]).catch(err => warn('heartbeat failed:', err.message));
     }
 
@@ -443,7 +445,7 @@ function startHealthServer() {
     if (req.url === '/health') {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({
-        status: 'ok', service: 'poller', node: NODE_NAME, leader, last_tick_at: lastTickAt,
+        status: 'ok', service: 'poller', node: nodeName(), leader, last_tick_at: lastTickAt,
         hosts: [...agents.values()].map(a => a.status()),
       }));
       return;
