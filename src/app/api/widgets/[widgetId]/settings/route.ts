@@ -2,56 +2,31 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireRole } from '@/lib/auth/middleware';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 
-// Simple UUID generator
-function generateId(): string {
-  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-    const r = Math.random() * 16 | 0;
-    const v = c === 'x' ? r : (r & 0x3 | 0x8);
-    return v.toString(16);
-  });
-}
+/**
+ * Widget settings. Polling is per server (one batched collection per host),
+ * so `poll_interval_sec` / `enabled` here read and write the widget's server.
+ * `ttl_sec` / `storage_mode` are accepted for compatibility and ignored:
+ * history retention is global (Database settings).
+ */
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ widgetId: string }> }) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
-  const roleError = requireRole(auth as any, 'viewer');
-  if (roleError) return roleError;
   const { widgetId } = await params;
-  
   try {
-    // Get widget info first
-    const widgetRes = await rqlite.query('SELECT * FROM widgets WHERE id=?', [widgetId]);
-    const widgets = rowsToObjects(widgetRes);
-    if (!widgets.length) {
-      return NextResponse.json({ error: { message: 'Widget not found' } }, { status: 404 });
-    }
-    const widget = widgets[0];
-    
-    // Get or create polling config using widget_id
-    let configRes = await rqlite.query(
-      'SELECT * FROM widget_polling_config WHERE widget_id=?',
-      [widgetId]
-    );
-    let config = rowsToObjects(configRes)[0];
-    
-    if (!config) {
-      // Create default config for this widget
-      const configId = generateId();
-      await rqlite.execute(
-        `INSERT INTO widget_polling_config (id, widget_id, widget_type, server_id, enabled) VALUES (?, ?, ?, ?, 1)`,
-        [configId, widgetId, widget.widget_type, widget.server_id]
-      );
-      configRes = await rqlite.query('SELECT * FROM widget_polling_config WHERE id=?', [configId]);
-      config = rowsToObjects(configRes)[0];
-    }
-    
-    // Return combined widget + config data with display_name alias for title_override
-    return NextResponse.json({ 
-      data: { 
+    const r = await rqlite.query(
+      'SELECT w.*, s.poll_interval_sec, s.poll_enabled, s.name AS server_name FROM widgets w LEFT JOIN servers s ON s.id = w.server_id WHERE w.id = ?',
+      [widgetId]);
+    const widget = rowsToObjects(r)[0];
+    if (!widget) return NextResponse.json({ error: { message: 'Widget not found' } }, { status: 404 });
+    return NextResponse.json({
+      data: {
         ...widget,
-        ...config,
-        display_name: widget.title_override 
-      } 
+        enabled: widget.poll_enabled,
+        storage_mode: 'server',
+        ttl_sec: null,
+        display_name: widget.title_override,
+      },
     });
   } catch (error) {
     return NextResponse.json({ error: { message: String(error) } }, { status: 500 });
@@ -61,93 +36,50 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ widgetId: string }> }) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
-  const roleError = requireRole(auth as any, 'operator');
+  const roleError = requireRole(auth, 'operator');
   if (roleError) return roleError;
   const { widgetId } = await params;
-  
+
   try {
-    // Get widget info
-    const widgetRes = await rqlite.query('SELECT * FROM widgets WHERE id=?', [widgetId]);
-    const widgets = rowsToObjects(widgetRes);
-    if (!widgets.length) {
-      return NextResponse.json({ error: { message: 'Widget not found' } }, { status: 404 });
+    const r = await rqlite.query('SELECT id, server_id, config FROM widgets WHERE id = ?', [widgetId]);
+    const widget = rowsToObjects(r)[0];
+    if (!widget) return NextResponse.json({ error: { message: 'Widget not found' } }, { status: 404 });
+
+    const body = await request.json();
+    const { display_name, title_override, poll_interval_sec, enabled, grid_w, grid_h, config } = body;
+    const stmts: { sql: string; params: unknown[] }[] = [];
+
+    const sets: string[] = [];
+    const values: unknown[] = [];
+    const name = title_override ?? display_name;
+    if (name !== undefined) { sets.push('title_override = ?'); values.push(name ? String(name).slice(0, 100) : null); }
+    if (grid_w !== undefined) { sets.push('grid_w = ?'); values.push(Math.max(1, Math.min(48, Number(grid_w) || 4))); }
+    if (grid_h !== undefined) { sets.push('grid_h = ?'); values.push(Math.max(1, Math.min(48, Number(grid_h) || 3))); }
+    if (config !== undefined && typeof config === 'object' && config !== null) {
+      sets.push('config = ?');
+      values.push(JSON.stringify(config));
     }
-    const widget = widgets[0];
-    
-    const { display_name, title_override, poll_interval_sec, ttl_sec, storage_mode, enabled, grid_w, grid_h } = await request.json();
-    
-    // Update widget table fields (title_override and grid size)
-    const widgetUpdates: string[] = [];
-    const widgetValues: any[] = [];
-    
-    // Handle display_name as alias for title_override
-    const nameToSave = title_override ?? display_name;
-    if (nameToSave !== undefined) {
-      widgetUpdates.push('title_override=?');
-      widgetValues.push(nameToSave || null);
+    if (sets.length) {
+      sets.push('updated_at = CURRENT_TIMESTAMP');
+      stmts.push({ sql: `UPDATE widgets SET ${sets.join(', ')} WHERE id = ?`, params: [...values, widgetId] });
     }
-    if (grid_w !== undefined) {
-      widgetUpdates.push('grid_w=?');
-      widgetValues.push(grid_w);
-    }
-    if (grid_h !== undefined) {
-      widgetUpdates.push('grid_h=?');
-      widgetValues.push(grid_h);
-    }
-    
-    if (widgetUpdates.length > 0) {
-      widgetUpdates.push('updated_at=CURRENT_TIMESTAMP');
-      await rqlite.execute(
-        `UPDATE widgets SET ${widgetUpdates.join(',')} WHERE id=?`,
-        [...widgetValues, widgetId]
-      );
-    }
-    
-    // Update polling config (per-widget)
-    const configUpdates: string[] = [];
-    const configValues: any[] = [];
-    
-    if (poll_interval_sec !== undefined) {
-      configUpdates.push('poll_interval_sec=?');
-      configValues.push(poll_interval_sec);
-    }
-    if (ttl_sec !== undefined) {
-      configUpdates.push('ttl_sec=?');
-      configValues.push(ttl_sec);
-    }
-    if (storage_mode !== undefined) {
-      configUpdates.push('storage_mode=?');
-      configValues.push(storage_mode);
-    }
-    if (enabled !== undefined) {
-      configUpdates.push('enabled=?');
-      configValues.push(enabled ? 1 : 0);
-    }
-    
-    // Upsert polling config by widget_id
-    const existingRes = await rqlite.query(
-      'SELECT id FROM widget_polling_config WHERE widget_id=?',
-      [widgetId]
-    );
-    const existing = rowsToObjects(existingRes)[0];
-    
-    if (existing) {
-      if (configUpdates.length > 0) {
-        configUpdates.push('updated_at=CURRENT_TIMESTAMP');
-        await rqlite.execute(
-          `UPDATE widget_polling_config SET ${configUpdates.join(',')} WHERE id=?`,
-          [...configValues, existing.id]
-        );
+
+    // Server polling settings changed from a widget dialog: admin only.
+    if (poll_interval_sec !== undefined || enabled !== undefined) {
+      if (auth.role !== 'admin') {
+        return NextResponse.json({ error: { message: 'Only admins can change server polling' } }, { status: 403 });
       }
-    } else if (configUpdates.length > 0) {
-      const configId = generateId();
-      await rqlite.execute(
-        `INSERT INTO widget_polling_config (id, widget_id, widget_type, server_id, poll_interval_sec, ttl_sec, storage_mode, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        [configId, widgetId, widget.widget_type, widget.server_id, poll_interval_sec ?? null, ttl_sec ?? null, storage_mode ?? 'latest_ttl', enabled ?? 1]
-      );
+      if (poll_interval_sec !== undefined && poll_interval_sec !== null) {
+        stmts.push({ sql: 'UPDATE servers SET poll_interval_sec = ? WHERE id = ?',
+          params: [Math.min(3600, Math.max(5, Math.round(Number(poll_interval_sec) || 15))), widget.server_id] });
+      }
+      if (enabled !== undefined) {
+        stmts.push({ sql: 'UPDATE servers SET poll_enabled = ? WHERE id = ?', params: [enabled ? 1 : 0, widget.server_id] });
+      }
     }
-    
-    return NextResponse.json({ success: true });
+
+    if (stmts.length) await rqlite.executeBatch(stmts, { transaction: true });
+    return NextResponse.json({ success: true, data: { success: true } });
   } catch (error) {
     return NextResponse.json({ error: { message: String(error) } }, { status: 500 });
   }

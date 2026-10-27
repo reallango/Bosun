@@ -1,65 +1,37 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireRole } from '@/lib/auth/middleware';
-import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
-import { SSHConnectionPool } from '@/lib/ssh/connection-pool';
+import { runOnServerId } from '@/lib/ssh/connection-pool';
+import { consumeActionRateLimit } from '@/lib/utils/rate-limiter';
+import { logAudit } from '@/lib/audit/logger';
+import { ok, fail, failFrom } from '@/lib/api/response';
 
-const pool = new SSHConnectionPool();
-
+/**
+ * Run an ad-hoc command as the server's service account (custom command
+ * widget). Operator or admin; rate limited and audited. Windows hosts run it
+ * as PowerShell.
+ */
 export async function POST(request: NextRequest, { params }: { params: Promise<{ serverId: string }> }) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
-  const roleError = requireRole(auth as any, 'operator');
+  const roleError = requireRole(auth, 'operator');
   if (roleError) return roleError;
   const { serverId } = await params;
 
+  let body: { command?: unknown };
+  try { body = await request.json(); } catch { return fail('Invalid JSON body'); }
+  const command = typeof body.command === 'string' ? body.command.trim() : '';
+  if (!command) return fail('Command required');
+  if (command.length > 4000) return fail('Command too long');
+  const limit = consumeActionRateLimit(auth.userId);
+  if (!limit.allowed) return fail('Too many commands, slow down', 429, 'RATE_LIMITED');
+
+  const started = Date.now();
   try {
-    const body = await request.json();
-    const { command } = body;
-
-    if (!command) {
-      return NextResponse.json({ error: { message: 'Command required' } }, { status: 400 });
-    }
-
-    // Get server and key
-    const srvR = await rqlite.query('SELECT * FROM servers WHERE id = ?', [serverId]);
-    if (!srvR.values?.length) {
-      return NextResponse.json({ error: { message: 'Server not found' } }, { status: 404 });
-    }
-    const srv = rowsToObjects(srvR)[0] as any;
-
-    if (!srv.ssh_key_id) {
-      return NextResponse.json({ error: { message: 'No SSH key configured' } }, { status: 400 });
-    }
-
-    const kR = await rqlite.query('SELECT private_key_enc FROM ssh_keys WHERE id = ?', [srv.ssh_key_id]);
-    if (!kR.values?.length) {
-      return NextResponse.json({ error: { message: 'SSH key not found' } }, { status: 404 });
-    }
-
-    const { decrypt } = await import('@/lib/crypto/keys');
-    const pk = decrypt(kR.values[0][0] as string, process.env.MASTER_KEY || '');
-    if (!pk) {
-      return NextResponse.json({ error: { message: 'Failed to decrypt SSH key' } }, { status: 500 });
-    }
-
-    const sshConfig = {
-      host: srv.hostname,
-      port: srv.ssh_port || 22,
-      username: srv.ssh_user,
-      privateKey: pk
-    };
-
-    // Execute command
-    const result = await pool.executeCommand(serverId, sshConfig, command);
-
-    return NextResponse.json({
-      data: {
-        output: result.stdout,
-        error: result.stderr,
-        exitCode: result.exitCode
-      }
-    });
+    const r = await runOnServerId(serverId, command, { timeoutMs: 60_000 });
+    await logAudit({ userId: auth.userId, serverId, action: 'server.exec', status: r.exitCode === 0 ? 'success' : 'failure',
+      details: command.slice(0, 500), durationMs: Date.now() - started });
+    return ok({ output: r.stdout.slice(0, 256 * 1024), error: r.stderr.slice(0, 64 * 1024), exitCode: r.exitCode, timedOut: !!r.timedOut });
   } catch (error) {
-    return NextResponse.json({ error: { message: String(error) } }, { status: 500 });
+    return failFrom(error);
   }
 }
