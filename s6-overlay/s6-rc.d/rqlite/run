@@ -1,34 +1,23 @@
-#!/bin/sh
-
-
-# Inherit container environment from s6
-ENV_DIR=""
-[ -d /run/s6/container_environment ] && ENV_DIR="/run/s6/container_environment"
-[ -d /var/run/s6/container_environment ] && ENV_DIR="/var/run/s6/container_environment"
-if [ -n "$ENV_DIR" ]; then
-    for f in "$ENV_DIR"/*; do
-        [ -f "$f" ] && export "$(basename "$f")=$(cat "$f")"
-    done
-fi
-
-
+#!/command/with-contenv sh
 NODE_NAME="${NODE_NAME:-node1}"
 RQLITE_HTTP_PORT="${RQLITE_HTTP_PORT:-4001}"
 RQLITE_RAFT_PORT="${RQLITE_RAFT_PORT:-4002}"
 RQLITE_DATA_DIR="${RQLITE_DATA_DIR:-/data/rqlite}"
-
+# Advertised addresses: other nodes must reach these when clustering.
+RQLITE_HTTP_ADV="${RQLITE_HTTP_ADV:-localhost:${RQLITE_HTTP_PORT}}"
+RQLITE_RAFT_ADV="${RQLITE_RAFT_ADV:-localhost:${RQLITE_RAFT_PORT}}"
 
 JOIN_FLAG=""
 if [ -n "${RQLITE_JOIN}" ]; then
     JOIN_FLAG="-join=${RQLITE_JOIN}"
 fi
 
-
-exec /usr/local/bin/rqlited \
+mkdir -p "${RQLITE_DATA_DIR}" && chown -R node:node "${RQLITE_DATA_DIR}"
+exec s6-setuidgid node /usr/local/bin/rqlited \
     -node-id="${NODE_NAME}" \
     -http-addr="0.0.0.0:${RQLITE_HTTP_PORT}" \
-    -http-adv-addr="localhost:${RQLITE_HTTP_PORT}" \
+    -http-adv-addr="${RQLITE_HTTP_ADV}" \
     -raft-addr="0.0.0.0:${RQLITE_RAFT_PORT}" \
-    -raft-adv-addr="localhost:${RQLITE_RAFT_PORT}" \
+    -raft-adv-addr="${RQLITE_RAFT_ADV}" \
     ${JOIN_FLAG} \
     "${RQLITE_DATA_DIR}"
