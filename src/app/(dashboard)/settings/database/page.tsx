@@ -35,7 +35,12 @@ interface DatabaseHealth {
   counts: Record<string, number>;
   missingConfigKeys: string[];
   errors: string[];
+  dbSizeBytes?: number | null;
+  checkedAt?: string;
+  checks?: { name: string; status: 'ok' | 'warn' | 'fail'; detail: string; durationMs: number }[];
 }
+
+const CHECK_DOT: Record<string, string> = { ok: 'bg-green-500', warn: 'bg-amber-500', fail: 'bg-red-500' };
 
 const STATUS_STYLES: Record<string, string> = {
   ok: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300',
@@ -112,6 +117,28 @@ export default function DatabaseSettingsPage() {
                     <div className="break-all font-mono text-xs">{health.leader || '—'}</div>
                   </div>
                 </div>
+
+                {health.checks && health.checks.length > 0 && (
+                  <div>
+                    <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2 text-sm">
+                      <span className="font-medium">Checks</span>
+                      <span className="text-xs text-muted-foreground">
+                        {health.dbSizeBytes ? `${(health.dbSizeBytes / 1048576).toFixed(1)} MB · ` : ''}
+                        {health.checkedAt ? new Date(health.checkedAt).toLocaleTimeString() : ''}
+                      </span>
+                    </div>
+                    <ul className="divide-y rounded-md border text-sm">
+                      {health.checks.map(c => (
+                        <li key={c.name} className="flex items-start gap-2 px-3 py-2">
+                          <span className={`mt-1.5 size-2 shrink-0 rounded-full ${CHECK_DOT[c.status]}`} aria-label={c.status} />
+                          <span className="w-20 shrink-0 font-medium">{c.name}</span>
+                          <span className="min-w-0 flex-1 break-words text-muted-foreground">{c.detail}</span>
+                          <span className="shrink-0 text-xs tabular-nums text-muted-foreground">{c.durationMs} ms</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
 
                 <div>
                   <div className="text-sm font-medium mb-2">Migrations</div>
