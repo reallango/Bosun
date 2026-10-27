@@ -51,6 +51,12 @@ function main() {
       log(`wipe_and_join: local database cleared; joining ${join.join(',')}`);
       expect = '';
       cfg.writeClusterFile({ pending: null, last_action: { action, at: new Date().toISOString() } });
+    } else if (action === 'abort_join') {
+      wipeData();
+      log('abort_join: local database cleared; starting as a fresh node');
+      join = [];
+      expect = '';
+      cfg.writeClusterFile({ pending: null, join: [], join_started_at: null, last_action: { action, at: new Date().toISOString() } });
     }
   }
 

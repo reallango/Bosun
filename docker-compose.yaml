@@ -17,6 +17,10 @@ services:
       - bosun-data:/data/rqlite
     ports:
       - "${BOSUN_PORT:-3042}:3042"
+      # rqlite HTTP and Raft: other cluster nodes join through these. They are
+      # not authenticated; firewall them to the cluster machines.
+      - "4001:4001"
+      - "4002:4002"
     networks:
       - bosun-net
 
@@ -24,6 +28,10 @@ volumes:
   bosun-data:
     driver: local
 
+# BOSUN_NETWORK picks the network by name (default: bosun-net). Set
+# BOSUN_NETWORK_EXTERNAL=true to attach to a network that already exists
+# (e.g. one created in Portainer) instead of creating it with the stack.
 networks:
   bosun-net:
-    driver: bridge
+    name: ${BOSUN_NETWORK:-bosun-net}
+    external: ${BOSUN_NETWORK_EXTERNAL:-false}

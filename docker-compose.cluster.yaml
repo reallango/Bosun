@@ -34,7 +34,17 @@ services:
       - "${BOSUN_PORT:-3042}:3042"
       - "4001:4001"
       - "4002:4002"
+    networks:
+      - bosun-net
 
 volumes:
   bosun-data:
     driver: local
+
+# BOSUN_NETWORK picks the network by name (default: bosun-net). Set
+# BOSUN_NETWORK_EXTERNAL=true to attach to a network that already exists
+# (e.g. one created in Portainer) instead of creating it with the stack.
+networks:
+  bosun-net:
+    name: ${BOSUN_NETWORK:-bosun-net}
+    external: ${BOSUN_NETWORK_EXTERNAL:-false}

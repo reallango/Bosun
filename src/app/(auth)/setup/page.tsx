@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import SetupForm from '@/components/settings/SetupForm';
 import JoinClusterForm from '@/components/settings/JoinClusterForm';
 import { AuthBrand } from '@/components/settings/AuthBrand';
@@ -8,6 +8,13 @@ import { cn } from '@/lib/utils';
 
 export default function SetupPage() {
   const [mode, setMode] = useState<'new' | 'join'>('new');
+  // An unfinished join from an earlier visit opens on the join tab (progress, retry, cancel).
+  useEffect(() => {
+    fetch('/api/setup/join', { cache: 'no-store' })
+      .then(r => r.json())
+      .then(d => { if (d?.data?.stalled) setMode('join'); })
+      .catch(() => {});
+  }, []);
   const tab = (m: typeof mode, label: string) => (
     <button
       type="button"
