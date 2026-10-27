@@ -32,6 +32,7 @@ const linux = require('./src/lib/collect/linux');
 const windows = require('./src/lib/collect/windows');
 const ssh = require('./src/lib/collect/ssh');
 const store = require('./src/lib/collect/store');
+const alerts = require('./src/lib/collect/alerts');
 
 const RQLITE_HOST = process.env.RQLITE_HOST || '127.0.0.1:4001';
 const MASTER_KEY = process.env.MASTER_KEY || '';
@@ -254,7 +255,13 @@ class HostAgent {
         this.caps = caps;
         stmts.push({ sql: 'UPDATE servers SET capabilities = ? WHERE id = ?', params: [JSON.stringify(caps), this.id] });
       }
+      const fired = alerts.evaluateRules(alertRules, { id: this.id, name: this.row.name }, snap.metrics, Date.now(), alertLastFired);
+      stmts.push(...alerts.alertStatements(fired, { id: this.id }, Date.now()));
       await executeBatch(stmts);
+      if (fired.length) {
+        log(`${this.row.name}: ${fired.length} alert(s) fired`);
+        alerts.deliverWebhooks(fired, alertChannels).catch(err => warn('alert delivery failed:', err.message));
+      }
 
       this.failures = 0;
       this.lastError = null;
@@ -299,6 +306,20 @@ let leader = false;
 let lastLeaderCheck = 0;
 let lastServerSync = 0;
 let lastRetention = 0;
+let lastAlertSync = 0;
+let alertRules = [];
+let alertChannels = new Map();
+const alertLastFired = new Map();
+
+async function syncAlerts() {
+  try {
+    alertRules = await query('SELECT * FROM alert_rules WHERE enabled = 1');
+    const ch = await query('SELECT id, type, config, enabled FROM notification_channels');
+    alertChannels = new Map(ch.map(c => [c.id, c]));
+  } catch (err) {
+    warn('alert rule sync failed:', err.message);
+  }
+}
 let lastTickAt = null;
 let ticking = false;
 
@@ -364,6 +385,11 @@ async function tick() {
       const forceAll = !!a.forceNext;
       a.forceNext = false;
       a.poll({ forceAll }); // runs concurrently; errors handled inside
+    }
+
+    if (now - lastAlertSync > 30000) {
+      lastAlertSync = now;
+      await syncAlerts();
     }
 
     if (now - lastRetention > 10 * 60 * 1000) {

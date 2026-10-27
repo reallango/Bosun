@@ -18,13 +18,30 @@ interface AlertRule {
   metric: string;
   condition: string;
   threshold: number;
+  server_id?: string | null;
+  server_name?: string | null;
+  severity?: string;
+  trigger_count?: number;
+  last_triggered?: string | null;
   cooldown_seconds: number;
   enabled: boolean;
 }
 
 const CONDITION_LABEL: Record<string, string> = { gt: '>', lt: '<', gte: '≥', lte: '≤' };
 
-const EMPTY_FORM = { name: '', metric: 'cpu', condition: 'gt', threshold: 80, cooldown_seconds: 300, channel_ids: [] as string[], enabled: true };
+const EMPTY_FORM = { name: '', metric: 'cpu.usage', server_id: '', severity: 'warning', condition: 'gt', threshold: 90, cooldown_seconds: 900, channel_ids: [] as string[], enabled: true };
+
+// Metric keys recorded by the poller (see Statistics).
+const METRICS: [string, string][] = [
+  ['cpu.usage', 'CPU usage (%)'], ['mem.used_pct', 'Memory used (%)'], ['disk.max_used_pct', 'Fullest disk (%)'],
+  ['disk.root_used_pct', 'Root disk (%)'], ['cpu.temp', 'CPU temperature (°C)'], ['cpu.load1', 'Load (1m)'],
+  ['swap.used_mb', 'Swap used (MB)'], ['net.rx_bps', 'Network in (B/s)'], ['net.tx_bps', 'Network out (B/s)'],
+  ['gpu0.util', 'GPU 0 utilization (%)'], ['gpu0.temp', 'GPU 0 temperature (°C)'], ['gpu0.vram_mb', 'GPU 0 VRAM used (MB)'],
+  ['docker.running', 'Running containers'], ['ollama.loaded', 'Loaded Ollama models'],
+];
+const METRIC_LABEL = Object.fromEntries(METRICS);
+
+interface ServerOption { id: string; name: string }
 
 export default function AlertsPage() {
   const [rules, setRules] = useState<AlertRule[]>([]);
@@ -32,6 +49,7 @@ export default function AlertsPage() {
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
+  const [servers, setServers] = useState<ServerOption[]>([]);
   const { toast } = useToast();
 
   const fetchData = useCallback(async () => {
@@ -50,6 +68,13 @@ export default function AlertsPage() {
     fetchData();
   }, [fetchData]);
 
+  useEffect(() => {
+    fetchWithAuth('/api/servers')
+      .then(r => r.json())
+      .then(j => setServers((j?.data?.servers || []).map((s: ServerOption) => ({ id: s.id, name: s.name }))))
+      .catch(() => undefined);
+  }, []);
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSaving(true);
@@ -57,7 +82,7 @@ export default function AlertsPage() {
       const res = await fetchWithAuth('/api/alert-rules', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(form)
+        body: JSON.stringify({ ...form, server_id: form.server_id || null, cooldown_sec: form.cooldown_seconds, channels: form.channel_ids })
       });
       if (!res.ok) {
         const json = await res.json().catch(() => null);
@@ -113,11 +138,24 @@ export default function AlertsPage() {
                   <Input id="alert-name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required />
                 </div>
                 <div className="space-y-1.5">
+                  <Label htmlFor="alert-server">Server</Label>
+                  <select id="alert-server" value={form.server_id} onChange={e => setForm({ ...form, server_id: e.target.value })} className="form-select">
+                    <option value="">Any server</option>
+                    {servers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="alert-severity">Severity</Label>
+                  <select id="alert-severity" value={form.severity} onChange={e => setForm({ ...form, severity: e.target.value })} className="form-select">
+                    <option value="info">Info</option>
+                    <option value="warning">Warning</option>
+                    <option value="critical">Critical</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5">
                   <Label htmlFor="alert-metric">Metric</Label>
                   <select id="alert-metric" value={form.metric} onChange={e => setForm({ ...form, metric: e.target.value })} className="form-select">
-                    <option value="cpu">CPU Usage</option>
-                    <option value="memory">Memory Usage</option>
-                    <option value="disk">Disk Usage</option>
+                    {METRICS.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
                   </select>
                 </div>
                 <div className="space-y-1.5">
@@ -163,7 +201,7 @@ export default function AlertsPage() {
                   <div className="min-w-0">
                     <div className="truncate font-medium">{rule.name}</div>
                     <div className="text-sm text-muted-foreground">
-                      When {rule.metric} {CONDITION_LABEL[rule.condition] ?? rule.condition} {rule.threshold} · cooldown {rule.cooldown_seconds}s
+                      {rule.server_name || 'Any server'}: {METRIC_LABEL[rule.metric] ?? rule.metric} {CONDITION_LABEL[rule.condition] ?? rule.condition} {rule.threshold} · {rule.severity || 'warning'} · cooldown {rule.cooldown_seconds}s{rule.trigger_count ? ` · fired ${rule.trigger_count}×` : ''}
                     </div>
                   </div>
                 </div>
