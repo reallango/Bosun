@@ -1,3 +1,4 @@
+import { getMasterKey, getAuthSecret } from '@/lib/secrets';
 import { internalError } from '@/lib/api/response';
 import { NextRequest, NextResponse } from 'next/server';
 import { rqlite } from '@/lib/db/rqlite-client';
@@ -12,13 +13,14 @@ export async function POST(request: NextRequest) {
     if (setupComplete === 'true') {
       return NextResponse.json({ error: { message: 'Setup already complete', code: 'SETUP_COMPLETE' } }, { status: 400 });
     }
-    const masterKey = process.env.MASTER_KEY;
-    const authSecret = process.env.AUTH_SECRET;
+    // From the environment, or generated into the data volume on first use.
+    const masterKey = getMasterKey();
+    const authSecret = getAuthSecret();
     if (!masterKey || masterKey.length < 32) {
-      return NextResponse.json({ error: { message: 'MASTER_KEY must be set and 32+ characters', code: 'MISSING_MASTER_KEY' } }, { status: 400 });
+      return NextResponse.json({ error: { message: 'MASTER_KEY must be 32+ characters (set it, or unset it to let Bosun generate one)', code: 'MISSING_MASTER_KEY' } }, { status: 400 });
     }
     if (!authSecret || authSecret.length < 16) {
-      return NextResponse.json({ error: { message: 'AUTH_SECRET must be set and 16+ characters', code: 'MISSING_AUTH_SECRET' } }, { status: 400 });
+      return NextResponse.json({ error: { message: 'AUTH_SECRET must be 16+ characters (set it, or unset it to let Bosun generate one)', code: 'MISSING_AUTH_SECRET' } }, { status: 400 });
     }
     const { username, password, email } = await request.json();
     if (!username || !password || password.length < 8) return NextResponse.json({ error: { message: 'Username and password (8+ chars) required' } }, { status: 400 });

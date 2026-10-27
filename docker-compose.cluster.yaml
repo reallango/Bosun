@@ -4,7 +4,8 @@
 #   NODE_NAME=n1                      # n2, n3 on the other machines
 #   RQLITE_ADV_HOST=192.168.1.161     # this machine's LAN address
 #   RQLITE_JOIN=192.168.1.161:4002,192.168.1.131:4002,192.168.1.171:4002
-#   MASTER_KEY=...  AUTH_SECRET=...   # identical on every node
+#   (MASTER_KEY/AUTH_SECRET: leave unset on nodes that join with a join code;
+#    if you set them, they must be identical on every node)
 #
 # Ports 4001 (rqlite HTTP) and 4002 (Raft) must be reachable between the
 # nodes; keep them off the internet (firewall them to the cluster machines).
@@ -20,8 +21,9 @@ services:
       - RQLITE_JOIN=${RQLITE_JOIN:?set RQLITE_JOIN}
       - RQLITE_BOOTSTRAP_EXPECT=${RQLITE_BOOTSTRAP_EXPECT:-3}
       - COOKIE_SECURE=${COOKIE_SECURE:-false}
-      - MASTER_KEY=${MASTER_KEY:?set MASTER_KEY}
-      - AUTH_SECRET=${AUTH_SECRET:?set AUTH_SECRET}
+      # Optional: if unset, Bosun generates both and keeps them in the data volume.
+      - MASTER_KEY=${MASTER_KEY:-}
+      - AUTH_SECRET=${AUTH_SECRET:-}
       - WS_PORT=3002
       - APP_URL=${APP_URL:-http://localhost:3042}
       # Disaster recovery only (see README): - RQLITE_FORCE_SINGLE=1

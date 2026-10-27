@@ -55,6 +55,7 @@ COPY --from=builder /app/next.config.mjs ./next.config.mjs
 COPY --from=builder /app/ws-server.js ./ws-server.js
 COPY --from=builder /app/poller.js ./poller.js
 COPY --from=builder /app/src/lib/collect ./src/lib/collect
+COPY --from=builder /app/src/lib/secrets.js ./src/lib/secrets.js
 # Next writes its cache under .next at runtime; services run as `node`.
 RUN chown -R node:node /app/.next
 

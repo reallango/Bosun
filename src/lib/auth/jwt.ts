@@ -1,5 +1,6 @@
 import { SignJWT, jwtVerify, JWTPayload } from 'jose';
 import crypto from 'crypto';
+import { getAuthSecret } from '@/lib/secrets';
 
 const DEV_FALLBACK_SECRET = 'fallback-secret-change-me';
 
@@ -8,9 +9,9 @@ const DEV_FALLBACK_SECRET = 'fallback-secret-change-me';
  * development fallback (anyone could forge tokens with it).
  */
 export function authSecret(): Uint8Array {
-  const value = process.env.AUTH_SECRET;
+  const value = getAuthSecret();
   if (!value) {
-    if (process.env.NODE_ENV === 'production') throw new Error('AUTH_SECRET is not set');
+    if (process.env.NODE_ENV === 'production') throw new Error('AUTH_SECRET is not set and no secrets file could be created');
     return new TextEncoder().encode(DEV_FALLBACK_SECRET);
   }
   return new TextEncoder().encode(value);
