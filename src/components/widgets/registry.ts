@@ -102,7 +102,7 @@ export const widgetRegistry: Record<string, WidgetDefinition> = {
   ollama_status: {
     type: 'ollama_status',
     displayName: 'Ollama Status',
-    description: 'LLM runtime status and model list',
+    description: 'Ollama status, models, pull and delete (admin)',
     icon: 'bot',
     category: 'ai',
     defaultSize: { w: 8, h: 6 },
@@ -127,7 +127,7 @@ export const widgetRegistry: Record<string, WidgetDefinition> = {
   docker_containers: {
     type: 'docker_containers',
     displayName: 'Docker Containers',
-    description: 'Container management with start/stop/restart',
+    description: 'Containers with logs, shell, and start/stop/restart (admin)',
     icon: 'box',
     category: 'system',
     defaultSize: { w: 8, h: 6 },
@@ -151,6 +151,17 @@ export const widgetRegistry: Record<string, WidgetDefinition> = {
     defaultPollInterval: 60,
     defaultTTL: 1800,
     storageMode: 'latest_ttl',
+  },
+  metrics_chart: {
+    type: 'metrics_chart',
+    displayName: 'Metrics History',
+    description: 'Charts recorded CPU, memory, network, disk and GPU history for a server',
+    icon: 'line-chart',
+    category: 'system',
+    defaultSize: { w: 12, h: 6 },
+    minSize: { w: 6, h: 4 },
+    refreshInterval: 60,
+    backgroundPollable: false,
   },
   os_update_check: {
     type: 'os_update_check',
