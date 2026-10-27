@@ -12,6 +12,7 @@
  */
 
 const linux = require('./linux');
+const macs = require('./macs');
 const { splitSections } = linux;
 
 const PROBES = ['stat', 'mem', 'netdev', 'gpu', 'df', 'ip', 'docker', 'ollama', 'services', 'system'];
@@ -42,7 +43,11 @@ foreach ($p in $Probes) {
     'df' { M 'df'
       J @(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object { @{ id = $_.DeviceID; fs = $_.FileSystem; size = [double]$_.Size; free = [double]$_.FreeSpace; label = $_.VolumeName } }) }
     'ip' { M 'ip'
-      J @(Get-CimInstance Win32_NetworkAdapterConfiguration -Filter 'IPEnabled=True' | ForEach-Object { @{ name = $_.Description; mac = $_.MACAddress; ips = @($_.IPAddress) } }) }
+      Write-Output ("SSHCONN " + $env:SSH_CONNECTION)
+      $cfgs = @{}; Get-CimInstance Win32_NetworkAdapterConfiguration | ForEach-Object { $cfgs[[int]$_.Index] = $_ }
+      J @(Get-CimInstance Win32_NetworkAdapter -Filter 'PhysicalAdapter=True' | Where-Object { $_.MACAddress } | ForEach-Object {
+        $c = $cfgs[[int]$_.Index]
+        @{ name = $_.NetConnectionID; desc = $_.Name; mac = $_.MACAddress; up = ($_.NetConnectionStatus -eq 2); ips = @(if ($c -and $c.IPAddress) { $c.IPAddress }) } }) }
     'docker' { M 'docker'
       $d = Get-Command docker.exe -ErrorAction SilentlyContinue
       if ($d) { $out = & $d.Source ps -a --no-trunc --format '{{json .}}' 2>&1; Write-Output ("RC " + $LASTEXITCODE); $out | Select-Object -First 500 }
@@ -148,11 +153,20 @@ function buildSnapshot(raw, prev, now = Date.now()) {
   }
 
   if (raw.ip !== undefined) {
-    sections.network = arr(jsonOf(raw.ip)).map(a => ({
-      name: a.name, state: 'UP', mtu: null, macAddress: a.mac || '',
+    // SSHCONN line, then a JSON list of physical adapters (connected or not).
+    const lines = String(raw.ip).split('\n');
+    const sshConn = (lines.find(l => l.startsWith('SSHCONN')) || '').replace(/^SSHCONN ?/, '');
+    const adapters = arr(jsonOf(lines.filter(l => !l.startsWith('SSHCONN')).join('\n').trim()))
+      .filter(a => !/bluetooth|virtual|hyper-v|vpn|tap-|miniport|loopback/i.test(`${a.name || ''} ${a.desc || ''}`));
+    sections.network = adapters.map(a => ({
+      name: a.name || a.desc, description: a.desc || '', state: a.up ? 'UP' : 'DOWN', mtu: null, macAddress: (a.mac || '').toLowerCase(),
       ipv4: arr(a.ips).filter(ip => ip.includes('.')), ipv6: arr(a.ips).filter(ip => ip.includes(':')),
+      physical: true, wireless: /wi-?fi|wireless|wlan|802\.11/i.test(`${a.name || ''} ${a.desc || ''}`),
       rxBps: null, txBps: null,
     }));
+    sections.nics = macs.pickMacs(sections.network.map(n => ({
+      name: n.name, mac: n.macAddress, physical: true, wireless: n.wireless, up: n.state === 'UP', ipv4: n.ipv4,
+    })), macs.serverIpFromSshConnection(sshConn));
   }
 
   if (raw.df !== undefined) {

@@ -31,7 +31,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { server
     const { serverId } = await params;
     const body = await request.json();
     const allowed = ['name','hostname','ssh_port','ssh_user','ssh_key_id','notes','tags','platform','os_type','os_version','os_codename','kernel_version',
-      'poll_enabled','poll_interval_sec','host_key_fingerprint','mac_address'];
+      'poll_enabled','poll_interval_sec','host_key_fingerprint','mac_address','mac_address_alt'];
     const updates: string[] = []; const values: any[] = [];
     for (const [k,v] of Object.entries(body)) {
       if (!allowed.includes(k)) continue;
@@ -42,10 +42,21 @@ export async function PATCH(request: NextRequest, { params }: { params: { server
       if (k === 'poll_interval_sec') value = Math.min(3600, Math.max(5, Math.round(Number(v) || 15)));
       // Only clearing is allowed (re-trust a host whose key legitimately changed).
       if (k === 'host_key_fingerprint') { if (v !== null) continue; value = null; }
-      if (k === 'mac_address' && v) {
-        value = formatMac(String(v));
-        if (!value) return NextResponse.json({ error: { message: 'Invalid MAC address' } }, { status: 400 });
-      } else if (k === 'mac_address') value = null;
+      if (k === 'mac_address' || k === 'mac_address_alt') {
+        // null = auto-detect again (the poller refills it); '' = deliberately
+        // empty, but only when a MAC was stored (so saving a form before the
+        // first poll does not block detection).
+        if (v === null) value = null;
+        else if (v === '' || v === undefined) {
+          const cur = await rqlite.query(`SELECT ${k} FROM servers WHERE id = ?`, [serverId]);
+          const stored = cur.values?.[0]?.[0];
+          if (stored === null || stored === undefined) continue;
+          value = '';
+        } else {
+          value = formatMac(String(v));
+          if (!value) return NextResponse.json({ error: { message: `Invalid ${k === 'mac_address' ? '' : 'alternate '}MAC address` } }, { status: 400 });
+        }
+      }
       updates.push(`${k} = ?`); values.push(value);
     }
     if (!updates.length) return NextResponse.json({ error: { message: 'Nothing to update' } }, { status: 400 });

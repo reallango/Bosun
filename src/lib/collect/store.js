@@ -76,6 +76,27 @@ function buildPollStatements(serverId, snap, nowMs, hashes) {
   return stmts;
 }
 
+/**
+ * Fill in Wake-on-LAN MACs the host reports, but only where the server has
+ * none yet (NULL). A user-entered value is never overwritten, and an empty
+ * string (the user cleared it) means "leave empty". The alternate MAC is the
+ * wired/wireless counterpart and must differ from the primary.
+ */
+function macAutofillStatements(serverId, nics) {
+  const stmts = [];
+  if (!nics) return stmts;
+  if (nics.primary) {
+    stmts.push({ sql: 'UPDATE servers SET mac_address = ? WHERE id = ? AND mac_address IS NULL', params: [nics.primary.mac, serverId] });
+  }
+  if (nics.alt) {
+    stmts.push({
+      sql: 'UPDATE servers SET mac_address_alt = ? WHERE id = ? AND mac_address_alt IS NULL AND COALESCE(mac_address, \'\') <> ?',
+      params: [nics.alt.mac, serverId, nics.alt.mac],
+    });
+  }
+  return stmts;
+}
+
 /** Capabilities summary stored on the server row (drives widget suggestions). */
 function capabilitiesOf(sections, prev) {
   const caps = { ...(prev || {}) };
@@ -97,4 +118,4 @@ function retentionStatements(cfg, nowMs) {
   ];
 }
 
-module.exports = { buildPollStatements, retentionStatements, capabilitiesOf, hashOf, ROLLUP_RESOLUTIONS };
+module.exports = { buildPollStatements, retentionStatements, capabilitiesOf, macAutofillStatements, hashOf, ROLLUP_RESOLUTIONS };

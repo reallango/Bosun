@@ -11,6 +11,8 @@
  * Dependency-free CommonJS: shared by poller.js and the Next.js server.
  */
 
+const macs = require('./macs');
+
 const MARK = '@@BOSUN ';
 
 /** Probes the script understands; the poller picks a subset per tick. */
@@ -40,7 +42,11 @@ gpu) m gpu
     nvidia-smi --query-gpu=index,name,memory.total,memory.used,utilization.gpu,temperature.gpu,power.draw,power.limit,fan.speed --format=csv,noheader,nounits 2>&1 | head -n 16
   else echo NONE; fi ;;
 df) m df; df -P -T -k 2>/dev/null | tail -n +2 ;;
-ip) m ip; if have ip; then ip -j addr show 2>/dev/null || echo NOJSON; else echo NONE; fi ;;
+ip) m ip
+  echo "SSHCONN $SSH_CONNECTION"
+  printf "PHYS"; for d in /sys/class/net/*; do [ -e "$d/device" ] && printf " %s" "$(basename "$d")"; done; echo
+  printf "WIFI"; for d in /sys/class/net/*; do [ -e "$d/wireless" ] && printf " %s" "$(basename "$d")"; done; echo
+  if have ip; then ip -j addr show 2>/dev/null || echo NOJSON; else echo NONE; fi ;;
 docker) m docker
   if have docker; then
     out=$(docker ps -a --no-trunc --format '{{json .}}' 2>&1); rc=$?
@@ -193,17 +199,40 @@ function parseDf(text) {
     .filter(d => (seen.has(d.filesystem) ? false : (seen.add(d.filesystem), true)));
 }
 
-function parseIp(text) {
-  if (!text || !text.startsWith('[')) return [];
-  try {
-    return JSON.parse(text).filter(i => i.ifname !== 'lo').map(i => ({
-      name: i.ifname, state: i.operstate || 'UNKNOWN', mtu: i.mtu, macAddress: i.address || '',
-      ipv4: (i.addr_info || []).filter(a => a.family === 'inet').map(a => a.local),
-      ipv6: (i.addr_info || []).filter(a => a.family === 'inet6').map(a => a.local),
-    }));
-  } catch {
-    return [];
+/**
+ * `ip` probe: SSHCONN/PHYS/WIFI metadata lines, then `ip -j addr` JSON.
+ * Returns { interfaces, serverIp }; interfaces are flagged physical (has a
+ * /sys device) and wireless (has /sys wireless).
+ */
+function parseIpProbe(text) {
+  const meta = { SSHCONN: '', PHYS: '', WIFI: '' };
+  let json = '';
+  for (const line of String(text || '').split('\n')) {
+    const mm = line.match(/^(SSHCONN|PHYS|WIFI)\b ?(.*)$/);
+    if (mm) meta[mm[1]] = mm[2].trim();
+    else if (line.trim().startsWith('[')) json = line.trim();
   }
+  const phys = new Set(meta.PHYS.split(/\s+/).filter(Boolean));
+  const wifi = new Set(meta.WIFI.split(/\s+/).filter(Boolean));
+  let interfaces = [];
+  if (json) {
+    try {
+      interfaces = JSON.parse(json).filter(i => i.ifname !== 'lo').map(i => ({
+        name: i.ifname, state: i.operstate || 'UNKNOWN', mtu: i.mtu, macAddress: i.address || '',
+        ipv4: (i.addr_info || []).filter(a => a.family === 'inet').map(a => a.local),
+        ipv6: (i.addr_info || []).filter(a => a.family === 'inet6').map(a => a.local),
+        physical: phys.size ? phys.has(i.ifname) : !VIRTUAL_IF.test(i.ifname),
+        wireless: wifi.has(i.ifname) || /^wl/.test(i.ifname),
+      }));
+    } catch {
+      interfaces = [];
+    }
+  }
+  return { interfaces, serverIp: macs.serverIpFromSshConnection(meta.SSHCONN) };
+}
+
+function parseIp(text) {
+  return parseIpProbe(text).interfaces;
 }
 
 function parseDocker(text) {
@@ -384,7 +413,12 @@ function buildSnapshot(raw, prev, now = Date.now()) {
 
   if (raw.ip !== undefined) {
     const rates = state.netRates || {};
-    sections.network = parseIp(raw.ip).map(i => ({ ...i, rxBps: rates[i.name] ? rates[i.name].rxBps : null, txBps: rates[i.name] ? rates[i.name].txBps : null }));
+    const probe = parseIpProbe(raw.ip);
+    sections.network = probe.interfaces.map(i => ({ ...i, rxBps: rates[i.name] ? rates[i.name].rxBps : null, txBps: rates[i.name] ? rates[i.name].txBps : null }));
+    // Wake-on-LAN candidates (primary = NIC the SSH connection arrived on).
+    sections.nics = macs.pickMacs(probe.interfaces.map(i => ({
+      name: i.name, mac: i.macAddress, physical: i.physical, wireless: i.wireless, up: i.state === 'UP', ipv4: i.ipv4,
+    })), probe.serverIp);
   }
 
   if (raw.gpu !== undefined) {
@@ -437,5 +471,5 @@ module.exports = {
   buildCommand,
   splitSections,
   buildSnapshot,
-  _parsers: { parseStat, parseMeminfo, parseLoad, parseTemp, parseNetdev, parseGpu, parseDf, parseIp, parseDocker, parseOllama, parseServices, parseSystem, parseUpdates },
+  _parsers: { parseStat, parseMeminfo, parseLoad, parseTemp, parseNetdev, parseGpu, parseDf, parseIp, parseIpProbe, parseDocker, parseOllama, parseServices, parseSystem, parseUpdates },
 };
