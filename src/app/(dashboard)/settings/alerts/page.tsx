@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import { BellRing, Plus, Trash2 } from 'lucide-react';
+import { BellRing, Mail, Plus, Trash2 } from 'lucide-react';
 import Header from '@/components/layout/Header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -11,6 +11,13 @@ import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import { useToast } from '@/components/ui/toast';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { cn } from '@/lib/utils';
+import { parseRecipients } from '@/lib/collect/recipients';
+
+/** Validate a comma-separated recipient list; returns an error message or null. */
+function recipientsError(value: string): string | null {
+  const { invalid } = parseRecipients(value);
+  return invalid.length ? `Invalid address: ${invalid.join(', ')}` : null;
+}
 
 interface AlertRule {
   id: string;
@@ -25,11 +32,12 @@ interface AlertRule {
   last_triggered?: string | null;
   cooldown_seconds: number;
   enabled: boolean;
+  emails?: string[];
 }
 
 const CONDITION_LABEL: Record<string, string> = { gt: '>', lt: '<', gte: '≥', lte: '≤' };
 
-const EMPTY_FORM = { name: '', metric: 'cpu.usage', server_id: '', severity: 'warning', condition: 'gt', threshold: 90, cooldown_seconds: 900, channel_ids: [] as string[], enabled: true };
+const EMPTY_FORM = { name: '', metric: 'cpu.usage', server_id: '', severity: 'warning', condition: 'gt', threshold: 90, cooldown_seconds: 900, channel_ids: [] as string[], emails: '', enabled: true };
 
 // Metric keys recorded by the poller (see Statistics).
 const METRICS: [string, string][] = [
@@ -50,7 +58,9 @@ export default function AlertsPage() {
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [servers, setServers] = useState<ServerOption[]>([]);
+  const [editing, setEditing] = useState<{ id: string; emails: string } | null>(null);
   const { toast } = useToast();
+  const formEmailError = form.emails.trim() ? recipientsError(form.emails) : null;
 
   const fetchData = useCallback(async () => {
     try {
@@ -77,12 +87,13 @@ export default function AlertsPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (formEmailError) return;
     setSaving(true);
     try {
       const res = await fetchWithAuth('/api/alert-rules', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...form, server_id: form.server_id || null, cooldown_sec: form.cooldown_seconds, channels: form.channel_ids })
+        body: JSON.stringify({ ...form, server_id: form.server_id || null, cooldown_sec: form.cooldown_seconds, channels: form.channel_ids, emails: parseRecipients(form.emails).emails })
       });
       if (!res.ok) {
         const json = await res.json().catch(() => null);
@@ -105,6 +116,25 @@ export default function AlertsPage() {
       body: JSON.stringify({ enabled })
     });
     fetchData();
+  };
+
+  const saveEmails = async () => {
+    if (!editing || recipientsError(editing.emails)) return;
+    try {
+      const res = await fetchWithAuth(`/api/alert-rules/${editing.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ emails: parseRecipients(editing.emails).emails }),
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => null);
+        throw new Error(json?.error?.message || `HTTP ${res.status}`);
+      }
+      setEditing(null);
+      fetchData();
+    } catch (err) {
+      toast('Failed to save recipients', { variant: 'error', description: err instanceof Error ? err.message : undefined });
+    }
   };
 
   const deleteRule = async (id: string) => {
@@ -175,11 +205,20 @@ export default function AlertsPage() {
                   <Label htmlFor="alert-cooldown">Cooldown (seconds)</Label>
                   <Input id="alert-cooldown" type="number" inputMode="numeric" value={form.cooldown_seconds} onChange={e => setForm({ ...form, cooldown_seconds: Number(e.target.value) })} />
                 </div>
+                <div className="space-y-1.5 sm:col-span-2 lg:col-span-3">
+                  <Label htmlFor="alert-emails">Email to (optional)</Label>
+                  <Input id="alert-emails" type="text" inputMode="email" autoComplete="off" placeholder="ops@example.com, me@example.com"
+                    value={form.emails} onChange={e => setForm({ ...form, emails: e.target.value })}
+                    aria-invalid={!!formEmailError} aria-describedby="alert-emails-help" />
+                  <p id="alert-emails-help" className={cn('text-xs', formEmailError ? 'text-destructive' : 'text-muted-foreground')}>
+                    {formEmailError || 'Comma-separated addresses. Sent when email (SMTP) is enabled under Settings → General.'}
+                  </p>
+                </div>
                 <div className="flex flex-col-reverse gap-2 sm:col-span-2 sm:flex-row sm:justify-end lg:col-span-3">
                   <Button type="button" variant="outline" size="lg" onClick={() => setShowForm(false)}>
                     Cancel
                   </Button>
-                  <Button type="submit" size="lg" disabled={saving}>
+                  <Button type="submit" size="lg" disabled={saving || !!formEmailError}>
                     {saving ? 'Saving…' : 'Save rule'}
                   </Button>
                 </div>
@@ -203,6 +242,27 @@ export default function AlertsPage() {
                     <div className="text-sm text-muted-foreground">
                       {rule.server_name || 'Any server'}: {METRIC_LABEL[rule.metric] ?? rule.metric} {CONDITION_LABEL[rule.condition] ?? rule.condition} {rule.threshold} · {rule.severity || 'warning'} · cooldown {rule.cooldown_seconds}s{rule.trigger_count ? ` · fired ${rule.trigger_count}×` : ''}
                     </div>
+                    {editing?.id === rule.id ? (
+                      <form className="mt-2 flex flex-col gap-2 sm:flex-row sm:items-start" onSubmit={e => { e.preventDefault(); saveEmails(); }}>
+                        <div className="min-w-0 flex-1 space-y-1">
+                          <Input aria-label={`Email recipients for ${rule.name}`} inputMode="email" autoFocus placeholder="ops@example.com, me@example.com"
+                            value={editing.emails} onChange={e => setEditing({ id: rule.id, emails: e.target.value })}
+                            aria-invalid={!!recipientsError(editing.emails)} />
+                          {recipientsError(editing.emails) && <p className="text-xs text-destructive">{recipientsError(editing.emails)}</p>}
+                        </div>
+                        <div className="flex gap-2">
+                          <Button type="submit" disabled={!!recipientsError(editing.emails)}>Save</Button>
+                          <Button type="button" variant="outline" onClick={() => setEditing(null)}>Cancel</Button>
+                        </div>
+                      </form>
+                    ) : (
+                      <button type="button" onClick={() => setEditing({ id: rule.id, emails: (rule.emails || []).join(', ') })}
+                        className="mt-1 flex max-w-full items-center gap-1.5 text-left text-sm text-muted-foreground hover:text-foreground"
+                        aria-label={`Edit email recipients for ${rule.name}`}>
+                        <Mail className="size-3.5 shrink-0" aria-hidden />
+                        <span className="truncate">{rule.emails?.length ? rule.emails.join(', ') : 'No email recipients (add)'}</span>
+                      </button>
+                    )}
                   </div>
                 </div>
                 <div className="flex shrink-0 items-center gap-2 self-end sm:self-auto">

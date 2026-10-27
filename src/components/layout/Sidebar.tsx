@@ -19,6 +19,7 @@ import {
   Plus,
   Server as ServerIcon,
   Settings,
+  UserCog,
   X,
   type LucideIcon,
 } from 'lucide-react';
@@ -65,6 +66,7 @@ const SETTINGS_NAV: NavItem[] = [
   { href: '/settings/alerts', label: 'Alerts', icon: Bell },
   { href: '/settings/custom-widgets', label: 'Custom Widgets', icon: Puzzle },
   { href: '/settings/audit-log', label: 'Audit Log', icon: FileClock },
+  { href: '/settings/account', label: 'My Account', icon: UserCog },
 ];
 
 function isActive(pathname: string, href: string, exact?: boolean) {

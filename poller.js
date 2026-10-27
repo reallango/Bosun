@@ -33,6 +33,7 @@ const windows = require('./src/lib/collect/windows');
 const ssh = require('./src/lib/collect/ssh');
 const store = require('./src/lib/collect/store');
 const alerts = require('./src/lib/collect/alerts');
+const mailer = require('./src/lib/collect/mailer');
 
 const RQLITE_HOST = process.env.RQLITE_HOST || '127.0.0.1:4001';
 const { getMasterKey } = require('./src/lib/secrets');
@@ -265,11 +266,14 @@ class HostAgent {
         stmts.push({ sql: 'UPDATE servers SET capabilities = ? WHERE id = ?', params: [JSON.stringify(caps), this.id] });
       }
       const fired = alerts.evaluateRules(alertRules, { id: this.id, name: this.row.name }, snap.metrics, Date.now(), alertLastFired);
-      stmts.push(...alerts.alertStatements(fired, { id: this.id }, Date.now()));
+      const alertMailer = fired.length ? await getAlertMailer() : null;
+      stmts.push(...alerts.alertStatements(fired, { id: this.id }, Date.now(), { email: !!alertMailer }));
       await executeBatch(stmts);
       if (fired.length) {
         log(`${this.row.name}: ${fired.length} alert(s) fired`);
         alerts.deliverWebhooks(fired, alertChannels).catch(err => warn('alert delivery failed:', err.message));
+        alerts.deliverEmails(fired, { id: this.id, name: this.row.name }, alertMailer, { appUrl: alertAppUrl })
+          .catch(err => warn('alert email failed:', err.message));
       }
 
       this.failures = 0;
@@ -320,6 +324,18 @@ let lastAlertSync = 0;
 let alertRules = [];
 let alertChannels = new Map();
 const alertLastFired = new Map();
+
+// Alert emails: SMTP settings from app_config (smtp.*), password decrypted
+// with the master key. Re-read at most every 60 s; the transport is rebuilt
+// only when the settings change. null = email disabled.
+let alertAppUrl = '';
+const getAlertMailer = mailer.mailerCache(async () => {
+  const keys = [...mailer.SMTP_KEYS, 'app.url'];
+  const rows = await query(`SELECT key, value FROM app_config WHERE key IN (${keys.map(() => '?').join(', ')})`, keys);
+  const values = Object.fromEntries(rows.map(r => [r.key, r.value]));
+  alertAppUrl = values['app.url'] || '';
+  return mailer.configFromValues(values, enc => ssh.decryptSecret(enc, getMasterKey()));
+}, { ttlMs: 60000 });
 
 async function syncAlerts() {
   try {
