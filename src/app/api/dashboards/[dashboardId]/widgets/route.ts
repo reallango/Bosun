@@ -1,3 +1,4 @@
+import { findFreeSpot } from '@/lib/widgets/placement';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireRole } from '@/lib/auth/middleware';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
@@ -33,15 +34,20 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (!widget_type||!server_id) return NextResponse.json({ error: { message: 'widget_type and server_id required' } }, { status: 400 });
     const def = getWidgetDefinition(widget_type);
     const wid = crypto.randomUUID();
-    let y = grid_y ?? 0;
-    if (grid_y===undefined) { const my=await rqlite.query('SELECT COALESCE(MAX(grid_y+grid_h),0) FROM widgets WHERE dashboard_id=?',[dashboardId]); y=(my.values?.[0]?.[0] as number)||0; }
     // Use user-provided grid_w/grid_h if explicitly passed, otherwise use widget definition defaults
-    const hasExplicitW = grid_w !== undefined;
-    const hasExplicitH = grid_h !== undefined;
-    const w = hasExplicitW ? grid_w : (def?.defaultSize?.w ?? 4);
-    const h = hasExplicitH ? grid_h : (def?.defaultSize?.h ?? 3);
+    const w = grid_w !== undefined ? grid_w : (def?.defaultSize?.w ?? 4);
+    const h = grid_h !== undefined ? grid_h : (def?.defaultSize?.h ?? 3);
+    // Without an explicit position, take the first free spot on the lg grid.
+    let x = grid_x ?? 0;
+    let y = grid_y ?? 0;
+    if (grid_x === undefined || grid_y === undefined) {
+      const ex = await rqlite.query('SELECT grid_x, grid_y, grid_w, grid_h FROM widgets WHERE dashboard_id=?', [dashboardId]);
+      const spot = findFreeSpot(ex.values.map(([gx, gy, gw, gh]) => ({ x: Number(gx), y: Number(gy), w: Number(gw), h: Number(gh) })), w, h);
+      x = spot.x;
+      y = spot.y;
+    }
     await rqlite.execute("INSERT INTO widgets (id,dashboard_id,widget_type,server_id,title_override,config,grid_x,grid_y,grid_w,grid_h,grid_min_w,grid_min_h) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-        [wid,dashboardId,widget_type,server_id,title_override||null,JSON.stringify(config||{}),grid_x??0,y,w,h,def?.minSize.w??2,def?.minSize.h??2]);
+        [wid,dashboardId,widget_type,server_id,title_override||null,JSON.stringify(config||{}),x,y,w,h,def?.minSize.w??2,def?.minSize.h??2]);
     const r = await rqlite.query('SELECT * FROM widgets WHERE id=?', [wid]);
     return NextResponse.json({ data: { widget: rowsToObjects(r)[0] } }, { status: 201 });
   } catch (error) {
