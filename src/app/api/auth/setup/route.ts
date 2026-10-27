@@ -1,11 +1,19 @@
 import { getMasterKey, getAuthSecret } from '@/lib/secrets';
-import { internalError } from '@/lib/api/response';
+import { internalError, ok } from '@/lib/api/response';
+import { isSetupRequired } from '@/lib/auth/setup-state';
 import { NextRequest, NextResponse } from 'next/server';
 import { rqlite } from '@/lib/db/rqlite-client';
 import { getConfig, setConfig } from '@/lib/db/migrations';
 import { hashPassword } from '@/lib/auth/password';
 import { createAccessToken, generateRefreshToken, hashToken } from '@/lib/auth/jwt';
 import crypto from 'crypto';
+
+export const dynamic = 'force-dynamic';
+
+/** Public: does this node still need initial setup? */
+export async function GET() {
+  return ok({ setupRequired: await isSetupRequired() });
+}
 
 export async function POST(request: NextRequest) {
   try {
