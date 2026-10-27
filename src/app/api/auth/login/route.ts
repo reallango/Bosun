@@ -12,7 +12,13 @@ export async function POST(request: NextRequest) {
     const ip = request.headers.get('x-forwarded-for')?.split(',')[0] || 'unknown';
 
     const rateLimit = checkLoginRateLimit(ip);
-    if (!rateLimit.allowed) return NextResponse.json({ error: { message: 'Too many attempts', code: 'RATE_LIMITED' } }, { status: 429 });
+    if (!rateLimit.allowed) {
+      const retryAfterSec = Math.ceil((rateLimit.retryAfterMs ?? 60_000) / 1000);
+      return NextResponse.json(
+        { error: { message: `Too many attempts, try again in ${Math.ceil(retryAfterSec / 60)} min`, code: 'RATE_LIMITED' } },
+        { status: 429, headers: { 'Retry-After': String(retryAfterSec) } }
+      );
+    }
 
     const userResult = await rqlite.query("SELECT id, username, password_hash, role FROM users WHERE username = ?", [username]);
     if (!userResult.values || userResult.values.length === 0) {
