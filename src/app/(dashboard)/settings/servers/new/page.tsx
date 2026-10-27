@@ -58,6 +58,7 @@ export default function NewServerPage() {
     const admin_username = formData.get('admin_username') as string;
     const admin_password = formData.get('admin_password') as string;
     const service_account = formData.get('service_account') as string || 'bosun-svc';
+    const replace_keys = formData.get('replace_keys') === 'on';
 
     // Store form values for later save
     setProvisionForm({ hostname, ssh_port: port, name, platform });
@@ -66,7 +67,7 @@ export default function NewServerPage() {
       const res = await fetch('/api/servers/provision', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hostname, port, admin_username, admin_password, platform, service_account })
+        body: JSON.stringify({ hostname, port, admin_username, admin_password, platform, service_account, replace_keys })
       });
       const data = await res.json();
       
@@ -86,6 +87,11 @@ export default function NewServerPage() {
 
   const handleProvisionSave = async () => {
     if (!provisionData) return;
+    // The host was already added to this Bosun: provisioning updated its key in place.
+    if (provisionData.existing_server) {
+      router.push('/settings/servers');
+      return;
+    }
     setLoading(true);
     setError('');
 
@@ -211,12 +217,17 @@ export default function NewServerPage() {
                     <div className="rounded-md border border-green-500/30 bg-green-500/10 p-4">
                       <div className="mb-2 font-medium text-success">Provisioning Successful!</div>
                       <div className="text-sm space-y-1">
-                        {provisionSteps.map((step, i) => (
-                          <div key={i} className="flex items-center gap-2">
-                            <span className="text-success" aria-hidden>✓</span>
-                            <span className="min-w-0 break-words text-success">{step}</span>
-                          </div>
-                        ))}
+                        {provisionSteps.map((step, i) => {
+                          const warning = step.startsWith('Warning: ');
+                          return (
+                            <div key={i} className="flex items-start gap-2">
+                              <span className={warning ? 'text-warning' : 'text-success'} aria-hidden>{warning ? '⚠' : '✓'}</span>
+                              <span className={`min-w-0 break-words ${warning ? 'text-warning' : 'text-success'}`}>
+                                {warning ? <><span className="sr-only">Warning: </span>{step.slice('Warning: '.length)}</> : step}
+                              </span>
+                            </div>
+                          );
+                        })}
                       </div>
                     </div>
                     <div className="break-words text-sm text-muted-foreground">
@@ -229,7 +240,7 @@ export default function NewServerPage() {
                         onClick={handleProvisionSave}
                         disabled={loading}
                       >
-                        {loading ? 'Saving...' : 'Save Server'}
+                        {loading ? 'Saving...' : provisionData.existing_server ? 'Done' : 'Save Server'}
                       </Button>
                       <Button type="button" variant="outline" onClick={() => router.back()}>
                         Cancel
@@ -268,6 +279,16 @@ export default function NewServerPage() {
                     <div className="space-y-2">
                       <Label htmlFor="service_account">Service Account Name</Label>
                       <Input id="service_account" name="service_account" defaultValue="bosun-svc" />
+                    </div>
+                    <div className="space-y-1">
+                      <label htmlFor="replace_keys" className="flex items-start gap-2 text-sm font-medium">
+                        <input id="replace_keys" name="replace_keys" type="checkbox" defaultChecked className="mt-1" />
+                        <span>Replace earlier Bosun keys on this host</span>
+                      </label>
+                      <p className="pl-6 text-xs text-muted-foreground">
+                        Removes keys a previous Bosun install added to the service account, once the new key is verified.
+                        Use this when moving a host from an old Bosun; the old install loses access. Linux hosts only.
+                      </p>
                     </div>
                     <div className="flex flex-col-reverse gap-2 pt-2 xs:flex-row">
                       <Button type="submit" disabled={provisioning}>

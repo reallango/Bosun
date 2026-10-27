@@ -106,6 +106,20 @@ group. Running Provision again on an existing account adds the rule too. If you 
 host with your own key and account instead, grant it passwordless sudo yourself.
 Windows hosts have no sudo; the service account is an administrator.
 
+**Docker.** The service account is added to the `docker` group only if the group exists. On a
+host without Docker, Provision shows a warning instead; run it again after installing Docker
+and the account is added then.
+
+**Moving a host from another Bosun.** Each Provision run generates a new key. With *Replace
+earlier Bosun keys on this host* ticked (the default, Linux only), Bosun first adds and tests
+the new key, then removes earlier Bosun keys from the service account's `authorized_keys`:
+the lines whose comment ends in `-<account>`, which is how Bosun labels the keys it
+generates. Other keys on the account are left alone. The old Bosun install loses access
+to that host, so tick this when migrating and untick it to run two installs side by side.
+If the host is already added to this Bosun, Provision points it at the new key instead of
+creating a duplicate. Windows hosts keep earlier keys for now (they share one
+`administrators_authorized_keys` file); a warning says so.
+
 ### Windows hosts
 
 Bosun runs PowerShell over the host's OpenSSH server, the same way

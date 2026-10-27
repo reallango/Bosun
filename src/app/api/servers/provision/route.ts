@@ -20,6 +20,9 @@ interface SshAuth {
 // safe everywhere and keeps the name from breaking the shell commands below.
 const SERVICE_ACCOUNT_RE = /^[A-Za-z_][A-Za-z0-9._-]{0,19}$/;
 
+/** Setup steps that start with this are shown as warnings, not successes. */
+const WARNING = 'Warning: ';
+
 // Helper to run a command over SSH
 async function sshExec(
     config: SshAuth,
@@ -95,6 +98,46 @@ function sudoersScript(serviceAccount: string): string {
         + `visudo -cf "$f" >/dev/null && install -m 440 -o root -g root "$f" /etc/sudoers.d/${file}; rc=$?; rm -f "$f"; exit $rc`;
 }
 
+/** Single-quote a value for a POSIX shell. */
+const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
+
+/**
+ * Wrap a script so it runs as root on the host: directly when the admin user is
+ * root, otherwise through sudo with the admin password. The script travels
+ * base64-encoded so it can contain any quoting.
+ */
+function asRootCommand(sshConfig: SshAuth, adminPassword: string, script: string): string {
+    const run = `sh -c "$(printf %s '${Buffer.from(script).toString('base64')}' | base64 -d)"`;
+    return sshConfig.username === 'root' ? run : `echo ${shq(adminPassword)} | sudo -S -p '' ${run}`;
+}
+
+/** Add the Bosun public key to the service account's authorized_keys (idempotent). */
+function installKeyScript(serviceAccount: string, publicKey: string): string {
+    return `d=/home/${serviceAccount}/.ssh; ak="$d/authorized_keys"; KEY=${shq(publicKey)}; `
+        + `mkdir -p "$d" && touch "$ak" && { grep -qxF -- "$KEY" "$ak" || echo "$KEY" >> "$ak"; } `
+        + `&& chmod 700 "$d" && chmod 600 "$ak" && chown -R ${serviceAccount}:${serviceAccount} "$d"`;
+}
+
+/**
+ * Remove earlier Bosun keys from the service account's authorized_keys: lines
+ * whose comment ends in `-<account>` (how Bosun labels the keys it generates),
+ * except the new key. Other keys on the account are left alone, and the file is
+ * never rewritten without the new key in it. Prints BOSUN_REMOVED=<count>.
+ */
+function pruneKeysScript(serviceAccount: string, publicKey: string): string {
+    return `ak=/home/${serviceAccount}/.ssh/authorized_keys; KEY=${shq(publicKey)}; body=$(echo "$KEY" | awk '{print $2}'); `
+        + `[ -f "$ak" ] || { echo BOSUN_REMOVED=0; exit 0; }; tmp=$(mktemp) || exit 1; `
+        + `awk -v suf="-${serviceAccount}" -v body="$body" '{ n=length($NF); s=length(suf); `
+        + `if (n>=s && substr($NF,n-s+1)==suf && index($0,body)==0) next; print }' "$ak" > "$tmp" || { rm -f "$tmp"; exit 1; }; `
+        + `grep -qF -- "$body" "$tmp" || { rm -f "$tmp"; exit 2; }; `
+        + `removed=$(( $(grep -c . "$ak") - $(grep -c . "$tmp") )); cat "$tmp" > "$ak"; rm -f "$tmp"; echo BOSUN_REMOVED=$removed`;
+}
+
+/** Add the service account to the docker group; exit 3 when Docker is not installed (no such group). */
+function dockerGroupScript(serviceAccount: string): string {
+    return `getent group docker >/dev/null 2>&1 || exit 3; usermod -aG docker ${serviceAccount}`;
+}
+
 /**
  * Create/verify the service account on a Linux host, grant it passwordless sudo
  * + docker, and install the Bosun public key.
@@ -108,8 +151,7 @@ async function setupLinux(
     const steps: string[] = [];
     const isRoot = sshConfig.username === 'root';
     const escapedPassword = adminPassword.replace(/'/g, "'\\''");
-    // Run a script as root: directly, or through sudo with the admin password.
-    const asRoot = (script: string) => isRoot ? `sh -c '${script}'` : `echo '${escapedPassword}' | sudo -S -p '' sh -c '${script}'`;
+    const asRoot = (script: string) => asRootCommand(sshConfig, adminPassword, script);
 
     // The admin group is `sudo` on Debian/Ubuntu and `wheel` on RHEL-family hosts.
     // If neither exists the sudoers rule below still grants access.
@@ -131,36 +173,25 @@ async function setupLinux(
         steps.push(`Service account exists: ${serviceAccount}`);
     }
 
-    const dockerGroupCmd = isRoot
-        ? `usermod -aG docker ${serviceAccount} || groupadd docker || true`
-        : `echo '${escapedPassword}' | sudo -S usermod -aG docker ${serviceAccount} 2>/dev/null || echo '${escapedPassword}' | sudo -S groupadd docker 2>/dev/null || true`;
-    await sshExec(sshConfig, dockerGroupCmd);
-    steps.push('Added service account to docker group');
+    // Only join the docker group if Docker is installed (the group exists). Without
+    // it this is a warning, not an error: run Provision again once Docker is installed.
+    const dockerResult = await sshExec(sshConfig, asRoot(dockerGroupScript(serviceAccount)));
+    if (dockerResult.exitCode === 0) {
+        steps.push('Added service account to docker group');
+    } else if (dockerResult.exitCode === 3) {
+        steps.push(`${WARNING}Docker is not set up on this host (no docker group), so the service account was not added to it. Docker widgets will not work until Docker is installed; run Provision again afterwards.`);
+    } else {
+        steps.push(`${WARNING}Could not add the service account to the docker group (${stripSudo(dockerResult.stderr) || `exit ${dockerResult.exitCode}`}). Docker widgets may not work.`);
+    }
 
     // Not fatal: an unusual host (no visudo, no /etc/sudoers.d) can still be used,
     // but actions that need root will ask for sudo to be configured by hand.
     const sudoersResult = await sshExec(sshConfig, asRoot(sudoersScript(serviceAccount)));
     steps.push(sudoersResult.exitCode === 0
         ? 'Enabled passwordless sudo for the service account'
-        : `Could not enable passwordless sudo (${stripSudo(sudoersResult.stderr) || `exit ${sudoersResult.exitCode}`}); restart, shut down and OS updates need it`);
+        : `${WARNING}Could not enable passwordless sudo (${stripSudo(sudoersResult.stderr) || `exit ${sudoersResult.exitCode}`}); restart, shut down and OS updates need it`);
 
-    const installCmd = isRoot
-        ? [
-            `mkdir -p /home/${serviceAccount}/.ssh`,
-            `echo '${publicKey}' >> /home/${serviceAccount}/.ssh/authorized_keys`,
-            `chmod 700 /home/${serviceAccount}/.ssh`,
-            `chmod 600 /home/${serviceAccount}/.ssh/authorized_keys`,
-            `chown -R ${serviceAccount}:${serviceAccount} /home/${serviceAccount}/.ssh`,
-        ].join(' && ')
-        : [
-            `echo '${escapedPassword}' | sudo -S mkdir -p /home/${serviceAccount}/.ssh 2>/dev/null`,
-            `echo '${publicKey}' | sudo -S tee -a /home/${serviceAccount}/.ssh/authorized_keys > /dev/null 2>/dev/null`,
-            `echo '${escapedPassword}' | sudo -S chmod 700 /home/${serviceAccount}/.ssh 2>/dev/null`,
-            `echo '${escapedPassword}' | sudo -S chmod 600 /home/${serviceAccount}/.ssh/authorized_keys 2>/dev/null`,
-            `echo '${escapedPassword}' | sudo -S chown -R ${serviceAccount}:${serviceAccount} /home/${serviceAccount}/.ssh 2>/dev/null`,
-        ].join(' && ');
-
-    const installResult = await sshExec(sshConfig, installCmd);
+    const installResult = await sshExec(sshConfig, asRoot(installKeyScript(serviceAccount, publicKey)));
     if (installResult.exitCode !== 0) {
         return { error: { message: `Failed to install key: ${stripSudo(installResult.stderr)}`, code: 'KEY_INSTALL_FAILED' } };
     }
@@ -285,6 +316,7 @@ export async function POST(request: NextRequest) {
             admin_password,
             platform = 'linux',
             service_account = 'bosun-svc',
+            replace_keys = true,
         } = await request.json();
 
         if (!hostname || !admin_username || !admin_password) {
@@ -348,10 +380,52 @@ export async function POST(request: NextRequest) {
             steps.push(`Key test failed: ${String(err)}`);
         }
 
+        // Step 5: Replace earlier Bosun keys. Only after the new key is proven to
+        // log in, so a host is never left without a working key.
+        let keysRemoved: number | null = null;
+        if (replace_keys !== false) {
+            if (isWindowsHost) {
+                steps.push(`${WARNING}Replacing earlier keys is not supported on Windows hosts yet; any earlier Bosun key is still authorized.`);
+            } else if (testSuccess) {
+                const pruned = await sshExec(sshConfig, asRootCommand(sshConfig, admin_password, pruneKeysScript(service_account, publicKey)));
+                const removed = pruned.stdout.match(/BOSUN_REMOVED=(\d+)/);
+                if (pruned.exitCode === 0 && removed) {
+                    keysRemoved = Number(removed[1]);
+                    steps.push(keysRemoved > 0
+                        ? `Removed ${keysRemoved} earlier Bosun key${keysRemoved === 1 ? '' : 's'} from ${service_account} (access for any other Bosun install using them is revoked)`
+                        : 'No earlier Bosun keys to remove');
+                } else {
+                    steps.push(`${WARNING}Could not remove earlier Bosun keys (${stripSudo(pruned.stderr) || `exit ${pruned.exitCode}`}); they are still authorized.`);
+                }
+            } else {
+                steps.push(`${WARNING}Earlier Bosun keys were not removed because the new key could not be verified.`);
+            }
+        }
+
+        // Step 6: A host already added to this Bosun keeps its record; point it at the new key
+        // (and drop the old key row if nothing else uses it) instead of creating a duplicate.
+        let existingServer: { id: string; name: string } | null = null;
+        if (testSuccess) {
+            const found = await rqlite.query(
+                'SELECT id, name, ssh_key_id FROM servers WHERE LOWER(hostname) = LOWER(?) AND COALESCE(ssh_port, 22) = ? LIMIT 1',
+                [hostname, Number(port) || 22]
+            );
+            const row = found.values?.[0] as (string | null)[] | undefined;
+            if (row) {
+                const [existingId, existingName, oldKeyId] = row as string[];
+                await rqlite.execute('UPDATE servers SET ssh_key_id = ?, ssh_user = ?, updated_at = ? WHERE id = ?', [keyId, service_account, now, existingId]);
+                if (oldKeyId && oldKeyId !== keyId) {
+                    await rqlite.execute('DELETE FROM ssh_keys WHERE id = ? AND NOT EXISTS (SELECT 1 FROM servers WHERE ssh_key_id = ?)', [oldKeyId, oldKeyId]);
+                }
+                existingServer = { id: existingId, name: existingName };
+                steps.push(`This host is already added as "${existingName}"; it now uses the new key`);
+            }
+        }
+
         // Log to audit
         await rqlite.execute(
             'INSERT INTO audit_log (id, user_id, action, category, details, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-            [crypto.randomUUID(), (auth as any).userId, 'server.provision', 'server', JSON.stringify({ steps, service_account, platform: isWindowsHost ? 'windows' : 'linux' }), now]
+            [crypto.randomUUID(), (auth as any).userId, 'server.provision', 'server', JSON.stringify({ steps, service_account, platform: isWindowsHost ? 'windows' : 'linux', replace_keys: replace_keys !== false, keys_removed: keysRemoved, existing_server: existingServer?.id ?? null }), now]
         );
 
         return NextResponse.json({
@@ -362,6 +436,8 @@ export async function POST(request: NextRequest) {
                 platform: isWindowsHost ? 'windows' : 'linux',
                 public_key: publicKey,
                 test_success: testSuccess,
+                existing_server: existingServer,
+                keys_removed: keysRemoved,
                 steps,
             },
         });
