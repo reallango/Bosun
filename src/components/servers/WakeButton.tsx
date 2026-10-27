@@ -25,16 +25,15 @@ interface WakeButtonProps {
  * configured sending host lacks the `wakeonlan` utility, admins are offered
  * to install it there.
  */
-export function WakeButton({ serverId, serverName, macAddress, size = 'sm', variant = 'outline', iconOnly, className }: WakeButtonProps) {
+/**
+ * Wake-on-LAN action plus its "install wakeonlan" prompt. Render `installDialog`
+ * next to whatever triggers `wake`.
+ */
+export function useWakeServer(serverId: string, serverName: string) {
   const { toast } = useToast();
   const { user } = useAuth();
   const [waking, setWaking] = useState(false);
   const [installHost, setInstallHost] = useState<string | null>(null);
-  const canWake = user?.role === 'admin' || user?.role === 'operator';
-  if (!canWake) return null;
-
-  const noMac = macAddress !== undefined && !macAddress;
-  const label = noMac ? 'Add a MAC address to enable Wake-on-LAN' : `Wake ${serverName || 'server'}`;
 
   const wake = async () => {
     setWaking(true);
@@ -56,6 +55,32 @@ export function WakeButton({ serverId, serverName, macAddress, size = 'sm', vari
     }
   };
 
+  const installDialog = (
+    <ConfirmActionDialog
+      open={!!installHost}
+      onOpenChange={o => { if (!o) setInstallHost(null); }}
+      title={`Install wakeonlan on ${installHost}?`}
+      description={<>The <code className="font-mono">wakeonlan</code> utility is missing on the host that sends Wake-on-LAN packets. Bosun can install it with the package manager (requires passwordless sudo for the SSH user).</>}
+      confirmLabel="Install"
+      onConfirm={async () => {
+        const r = await installWol(serverId);
+        toast(`wakeonlan installed on ${r.host}`, { variant: 'success', description: 'Try waking the server again.' });
+      }}
+    />
+  );
+
+  return { wake, waking, installDialog };
+}
+
+export function WakeButton({ serverId, serverName, macAddress, size = 'sm', variant = 'outline', iconOnly, className }: WakeButtonProps) {
+  const { user } = useAuth();
+  const { wake, waking, installDialog } = useWakeServer(serverId, serverName);
+  const canWake = user?.role === 'admin' || user?.role === 'operator';
+  if (!canWake) return null;
+
+  const noMac = macAddress !== undefined && !macAddress;
+  const label = noMac ? 'Add a MAC address to enable Wake-on-LAN' : `Wake ${serverName || 'server'}`;
+
   return (
     <>
       <Button
@@ -71,17 +96,7 @@ export function WakeButton({ serverId, serverName, macAddress, size = 'sm', vari
         {waking ? <Loader2 className="animate-spin" aria-hidden /> : <Power aria-hidden />}
         {!iconOnly && (waking ? 'Waking…' : 'Wake')}
       </Button>
-      <ConfirmActionDialog
-        open={!!installHost}
-        onOpenChange={o => { if (!o) setInstallHost(null); }}
-        title={`Install wakeonlan on ${installHost}?`}
-        description={<>The <code className="font-mono">wakeonlan</code> utility is missing on the host that sends Wake-on-LAN packets. Bosun can install it with the package manager (requires passwordless sudo for the SSH user).</>}
-        confirmLabel="Install"
-        onConfirm={async () => {
-          const r = await installWol(serverId);
-          toast(`wakeonlan installed on ${r.host}`, { variant: 'success', description: 'Try waking the server again.' });
-        }}
-      />
+      {installDialog}
     </>
   );
 }

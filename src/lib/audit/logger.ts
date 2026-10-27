@@ -65,4 +65,5 @@ export const AuditActions = {
   API_KEY_REVOKE: 'api_key.revoke',
   API_KEY_DELETE: 'api_key.delete',
   SERVER_EXEC: 'server.exec',
+  SERVER_POWER: 'server.power',
 } as const;

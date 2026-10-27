@@ -154,6 +154,16 @@ fixed server or the container.
 If `wakeonlan` is missing on the sending host, admins are offered to install it (needs
 passwordless sudo).
 
+### Shutdown and restart
+
+The power button on a server's dashboard toolbar opens a menu with **Wake**, **Restart** and
+**Shut down**; the last two ask for confirmation and are audited (`server.power`). They need
+*Read + actions* access. On Linux the SSH user needs passwordless sudo (`sudo -n`, the same
+requirement as OS updates and container actions); Bosun reports it clearly when that is missing.
+Windows hosts use `shutdown.exe`. The action is scheduled a few seconds out so the SSH command
+returns before the host drops the connection. A shut-down server stays off until it is woken
+(Wake-on-LAN) or started at the machine.
+
 ### Custom widgets
 
 Some widget types are defined in the database (`custom_widgets`) rather than compiled
@@ -255,7 +265,7 @@ Every user account and every API key has one of three access levels:
 | Level | Role | Can |
 | --- | --- | --- |
 | Read only | `viewer` | View dashboards, statistics, live widget data, server and cluster status. |
-| Read + actions | `operator` | Also run widget actions: container start/stop/restart and logs, Ollama pull/delete, OS update install, Wake-on-LAN, forced refreshes, dashboard and widget edits. No shells, terminals or arbitrary commands. |
+| Read + actions | `operator` | Also run widget actions: container start/stop/restart and logs, Ollama pull/delete, OS update install, Wake-on-LAN, restarting and shutting down servers, forced refreshes, dashboard and widget edits. No shells, terminals or arbitrary commands. |
 | Full access | `admin` | Everything: servers, SSH keys, host and container shells, command execution, custom commands, settings, alerts, users and API keys. |
 
 **Users** (Settings → Users, admins): create accounts, change their level, disable
