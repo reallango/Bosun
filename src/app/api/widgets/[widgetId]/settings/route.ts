@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireRole } from '@/lib/auth/middleware';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { resolveWidgetDefinition } from '@/components/widgets/registry-loader';
+import { COMMAND_CHANGE_FORBIDDEN, changesCommand, mayChangeCommand } from '@/lib/auth/widget-policy';
 
 /**
  * Widget settings. Polling is per server (one batched collection per host),
@@ -48,7 +49,7 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   const { widgetId } = await params;
 
   try {
-    const r = await rqlite.query('SELECT id, server_id, config FROM widgets WHERE id = ?', [widgetId]);
+    const r = await rqlite.query('SELECT id, server_id, widget_type, config FROM widgets WHERE id = ?', [widgetId]);
     const widget = rowsToObjects(r)[0];
     if (!widget) return NextResponse.json({ error: { message: 'Widget not found' } }, { status: 404 });
 
@@ -67,6 +68,12 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       // state in config (e.g. Metrics History) do not overwrite each other.
       let existing: Record<string, unknown> = {};
       try { existing = JSON.parse(String(widget.config || '{}')) || {}; } catch { existing = {}; }
+      // Unset fields count as their default (the dialog sends defaults back).
+      const defaults = Object.fromEntries(((await resolveWidgetDefinition(String(widget.widget_type)))?.configSchema || [])
+        .filter(f => f.default !== undefined).map(f => [f.key, f.default]));
+      if (changesCommand({ ...defaults, ...existing }, config) && !mayChangeCommand(auth.role)) {
+        return NextResponse.json({ error: { message: COMMAND_CHANGE_FORBIDDEN, code: 'FORBIDDEN' } }, { status: 403 });
+      }
       const merged = { ...existing, ...config };
       if (JSON.stringify(merged).length > 16 * 1024) return NextResponse.json({ error: { message: 'Widget config too large' } }, { status: 400 });
       sets.push('config = ?');

@@ -21,6 +21,10 @@ export interface TokenPayload extends JWTPayload {
   userId: string;
   username: string;
   role: string;
+  /** Set by requireAuth: 'session' (access_token cookie) or 'api_key' (Bearer key). */
+  authType?: 'session' | 'api_key';
+  /** For API keys: api_keys.id (userId is then `apikey:<id>`). */
+  apiKeyId?: string;
 }
 
 export async function createAccessToken(userId: string, username: string, role: string): Promise<string> {

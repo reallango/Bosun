@@ -47,7 +47,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ dashboardId: string }> }) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
-  const roleError = requireRole(auth as any, 'operator');
+  const roleError = requireRole(auth, 'operator');
   if (roleError) return roleError;
   const { dashboardId } = await params;
   try {
@@ -73,7 +73,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ dashboardId: string }> }) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
-  const roleError = requireRole(auth as any, 'operator');
+  const roleError = requireRole(auth, 'operator');
   if (roleError) return roleError;
   const { dashboardId } = await params;
   try {

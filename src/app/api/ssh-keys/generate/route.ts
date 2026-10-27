@@ -1,7 +1,7 @@
 import { getMasterKey } from '@/lib/secrets';
 import { internalError } from '@/lib/api/response';
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyAccessToken } from '@/lib/auth/jwt';
+import { requireLevel } from '@/lib/auth/middleware';
 import { rqlite } from '@/lib/db/rqlite-client';
 import { encrypt } from '@/lib/crypto/keys';
 import { logAudit, AuditActions } from '@/lib/audit/logger';
@@ -10,10 +10,8 @@ import crypto from 'crypto';
 
 export async function POST(request: NextRequest) {
   try {
-    const accessToken = request.cookies.get('access_token')?.value;
-    if (!accessToken) return NextResponse.json({ error: { message: 'Not authenticated' } }, { status: 401 });
-    const payload = await verifyAccessToken(accessToken);
-    if (!payload) return NextResponse.json({ error: { message: 'Invalid token' } }, { status: 401 });
+    const payload = await requireLevel(request, 'admin');
+    if (payload instanceof NextResponse) return payload;
 
     const { name: bodyName } = await request.json().catch(() => ({}));
     const keyName = bodyName || `bosun-${Date.now()}`;

@@ -1,17 +1,15 @@
 import { internalError } from '@/lib/api/response';
 import { formatMac } from '@/lib/network/wake-on-lan';
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyAccessToken } from '@/lib/auth/jwt';
+import { requireLevel } from '@/lib/auth/middleware';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { logAudit, AuditActions } from '@/lib/audit/logger';
 import crypto from 'crypto';
 
 export async function GET(request: NextRequest) {
   try {
-    const accessToken = request.cookies.get('access_token')?.value;
-    if (!accessToken) return NextResponse.json({ error: { message: 'Not authenticated' } }, { status: 401 });
-    const payload = await verifyAccessToken(accessToken);
-    if (!payload) return NextResponse.json({ error: { message: 'Invalid token' } }, { status: 401 });
+    const payload = await requireLevel(request, 'viewer');
+    if (payload instanceof NextResponse) return payload;
     const result = await rqlite.query('SELECT id, name, hostname, ssh_port, ssh_user, ssh_key_id, platform, os_type, os_version, cpu_model, cpu_cores, total_ram_mb, is_online, last_seen, last_error, poll_enabled, poll_interval_sec, capabilities, mac_address, mac_address_alt FROM servers ORDER BY name');
     const servers = rowsToObjects(result).map(s => ({ 
       id: s.id, 
@@ -44,10 +42,8 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const accessToken = request.cookies.get('access_token')?.value;
-    if (!accessToken) return NextResponse.json({ error: { message: 'Not authenticated' } }, { status: 401 });
-    const payload = await verifyAccessToken(accessToken);
-    if (!payload || payload.role !== 'admin') return NextResponse.json({ error: { message: 'Forbidden' } }, { status: 403 });
+    const payload = await requireLevel(request, 'admin');
+    if (payload instanceof NextResponse) return payload;
     const { name, hostname, ssh_port, ssh_user, ssh_key_id, notes, tags, platform, mac_address, mac_address_alt } = await request.json();
     // Unset MACs stay NULL so the poller fills them from the host's NICs.
     let mac: string | null = null;
