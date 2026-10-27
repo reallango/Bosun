@@ -1,29 +1,22 @@
+
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyAccessToken, authSecret } from '@/lib/auth/jwt';
+import { authSecret } from '@/lib/auth/jwt';
+import { requireUserLevel } from '@/lib/auth/middleware';
 import { rqlite } from '@/lib/db/rqlite-client';
 import { SignJWT } from 'jose';
 
+/**
+ * Short-lived token for the terminal WebSocket (host and container shells).
+ * Full access only, and only for a signed-in user: API keys are refused.
+ */
 export async function POST(request: NextRequest) {
   try {
-    const accessToken = request.cookies.get('access_token')?.value;
-    if (!accessToken) {
-      return NextResponse.json(
-        { error: { message: 'Not authenticated', code: 'NOT_AUTHENTICATED' } },
-        { status: 401 }
-      );
-    }
-
-    const payload = await verifyAccessToken(accessToken);
-    if (!payload) {
-      return NextResponse.json(
-        { error: { message: 'Invalid token', code: 'TOKEN_EXPIRED' } },
-        { status: 401 }
-      );
-    }
+    const payload = await requireUserLevel(request, 'admin');
+    if (payload instanceof NextResponse) return payload;
 
     // Get user info from database
     const r = await rqlite.query(
-      'SELECT id, username, role FROM users WHERE id = ?',
+      'SELECT id, username, role, disabled FROM users WHERE id = ?',
       [payload.userId]
     );
     if (!r.values || r.values.length === 0) {
@@ -36,11 +29,14 @@ export async function POST(request: NextRequest) {
     const userId = row[0] as string;
     const username = row[1] as string;
     const role = row[2] as string;
+    if (Number(row[3]) === 1 || role !== 'admin') {
+      return NextResponse.json({ error: { message: 'Insufficient permissions', code: 'FORBIDDEN' } }, { status: 403 });
+    }
 
     // Create a short-lived WebSocket token (5 minutes)
     const secret = authSecret();
     // ws-server verifies the signature, expiry, type and role of this token.
-    const wsToken = await new SignJWT({ userId, username, role, type: 'ws' })
+    const wsToken = await new SignJWT({ userId, username, role, type: 'ws', authType: 'session' })
       .setProtectedHeader({ alg: 'HS256' })
       .setIssuedAt()
       .setExpirationTime('5m')

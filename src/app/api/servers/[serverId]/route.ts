@@ -1,17 +1,15 @@
 import { internalError } from '@/lib/api/response';
 import { formatMac } from '@/lib/network/wake-on-lan';
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyAccessToken } from '@/lib/auth/jwt';
+import { requireLevel } from '@/lib/auth/middleware';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { sshPool } from '@/lib/ssh/connection-pool';
 import { logAudit, AuditActions } from '@/lib/audit/logger';
 
 export async function GET(request: NextRequest, { params }: { params: { serverId: string } }) {
   try {
-    const accessToken = request.cookies.get('access_token')?.value;
-    if (!accessToken) return NextResponse.json({ error: { message: 'Not authenticated' } }, { status: 401 });
-    const payload = await verifyAccessToken(accessToken);
-    if (!payload) return NextResponse.json({ error: { message: 'Invalid token' } }, { status: 401 });
+    const payload = await requireLevel(request, 'viewer');
+    if (payload instanceof NextResponse) return payload;
     const { serverId } = await params;
     const result = await rqlite.query('SELECT * FROM servers WHERE id = ?', [serverId]);
     const servers = rowsToObjects(result);
@@ -25,10 +23,8 @@ export async function GET(request: NextRequest, { params }: { params: { serverId
 
 export async function PATCH(request: NextRequest, { params }: { params: { serverId: string } }) {
   try {
-    const accessToken = request.cookies.get('access_token')?.value;
-    if (!accessToken) return NextResponse.json({ error: { message: 'Not authenticated' } }, { status: 401 });
-    const payload = await verifyAccessToken(accessToken);
-    if (!payload || payload.role !== 'admin') return NextResponse.json({ error: { message: 'Forbidden' } }, { status: 403 });
+    const payload = await requireLevel(request, 'admin');
+    if (payload instanceof NextResponse) return payload;
     const { serverId } = await params;
     const body = await request.json();
     const allowed = ['name','hostname','ssh_port','ssh_user','ssh_key_id','notes','tags','platform','os_type','os_version','os_codename','kernel_version',
@@ -74,10 +70,8 @@ export async function PATCH(request: NextRequest, { params }: { params: { server
 
 export async function DELETE(request: NextRequest, { params }: { params: { serverId: string } }) {
   try {
-    const accessToken = request.cookies.get('access_token')?.value;
-    if (!accessToken) return NextResponse.json({ error: { message: 'Not authenticated' } }, { status: 401 });
-    const payload = await verifyAccessToken(accessToken);
-    if (!payload || payload.role !== 'admin') return NextResponse.json({ error: { message: 'Forbidden' } }, { status: 403 });
+    const payload = await requireLevel(request, 'admin');
+    if (payload instanceof NextResponse) return payload;
     const { serverId } = await params;
     // Remove everything that hangs off the server in one transaction (does not
     // rely on SQLite foreign-key enforcement being enabled).
