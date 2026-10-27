@@ -1,7 +1,9 @@
 import { rqlite } from './rqlite-client';
 import { runMigrations } from './migrations';
 
-let initPromise: Promise<void> | null = null;
+// Kept on globalThis: instrumentation and route handlers are separate bundles
+// with separate module state, but must share one initialisation.
+const g = globalThis as unknown as { __bosunDbInit?: Promise<void> | null };
 
 export async function initializeDatabase(): Promise<void> {
   // Wait up to ~60 s for rqlite to be ready (it starts alongside the app).
@@ -18,13 +20,13 @@ export async function initializeDatabase(): Promise<void> {
  * failure clears it so the next caller retries.
  */
 export function ensureDatabase(): Promise<void> {
-  if (!initPromise) {
-    initPromise = initializeDatabase().catch(err => {
-      initPromise = null;
+  if (!g.__bosunDbInit) {
+    g.__bosunDbInit = initializeDatabase().catch(err => {
+      g.__bosunDbInit = null;
       throw err;
     });
   }
-  return initPromise;
+  return g.__bosunDbInit as Promise<void>;
 }
 
 export default initializeDatabase;

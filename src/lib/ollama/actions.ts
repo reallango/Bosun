@@ -2,6 +2,7 @@ import crypto from 'crypto';
 import { loadServerTarget, runOnServerId, sshPool } from '@/lib/ssh/connection-pool';
 import * as sshHelpers from '@/lib/collect/ssh';
 import { powershellCommand } from '@/lib/collect/windows';
+import { logAudit, AuditActions } from '@/lib/audit/logger';
 
 /**
  * Ollama model management on a monitored host, through the host's own
@@ -126,6 +127,8 @@ export async function startPull(serverId: string, model: string, userId: string)
       job.error = job.error || (exitCode === 0 ? 'pull ended without success' : `curl exited with ${exitCode} (is Ollama running?)`);
     }
     job.finishedAt = Date.now();
+    void logAudit({ userId, serverId, action: AuditActions.OLLAMA_PULL, status: job.status === 'success' ? 'success' : job.status === 'cancelled' ? 'cancelled' : 'failure',
+      details: JSON.stringify({ model, error: job.error }), durationMs: job.finishedAt - job.startedAt });
   }).catch((err: Error) => {
     job.status = 'error';
     job.error = err.message;
