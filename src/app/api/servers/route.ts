@@ -10,7 +10,7 @@ export async function GET(request: NextRequest) {
     if (!accessToken) return NextResponse.json({ error: { message: 'Not authenticated' } }, { status: 401 });
     const payload = await verifyAccessToken(accessToken);
     if (!payload) return NextResponse.json({ error: { message: 'Invalid token' } }, { status: 401 });
-    const result = await rqlite.query('SELECT id, name, hostname, ssh_port, ssh_user, ssh_key_id, os_type, is_online FROM servers ORDER BY name');
+    const result = await rqlite.query('SELECT id, name, hostname, ssh_port, ssh_user, ssh_key_id, platform, os_type, os_version, cpu_model, cpu_cores, total_ram_mb, is_online, last_seen, last_error, poll_enabled, poll_interval_sec, capabilities FROM servers ORDER BY name');
     const servers = rowsToObjects(result).map(s => ({ 
       id: s.id, 
       name: s.name, 
@@ -19,9 +19,18 @@ export async function GET(request: NextRequest) {
       ssh_user: s.ssh_user,
       ssh_key_id: s.ssh_key_id,
       os_type: s.os_type,
-      is_online: Boolean(s.is_online)
+      os_version: s.os_version,
+      platform: s.platform || 'linux',
+      cpu_model: s.cpu_model,
+      cpu_cores: s.cpu_cores,
+      total_ram_mb: s.total_ram_mb,
+      is_online: Boolean(s.is_online),
+      last_seen: s.last_seen,
+      last_error: s.last_error,
+      poll_enabled: Boolean(s.poll_enabled),
+      poll_interval_sec: s.poll_interval_sec,
+      capabilities: (() => { try { return JSON.parse(String(s.capabilities || '{}')); } catch { return {}; } })(),
     }));
-    console.log('[API] /api/servers returning', servers.length, 'servers');
     return NextResponse.json({ data: { servers } });
   } catch (error) {
     console.error('Servers list error:', error);

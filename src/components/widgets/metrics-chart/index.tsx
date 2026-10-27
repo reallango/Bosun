@@ -1,0 +1,1 @@
+export { MetricsChartWidget } from './MetricsChartWidget';
