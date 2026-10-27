@@ -2,85 +2,86 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireRole } from '@/lib/auth/middleware';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { randomUUID } from 'crypto';
+import { METRIC_RE } from '@/lib/metrics/query';
+import { ok, fail, failFrom } from '@/lib/api/response';
+
+const ALERT_CONDITIONS = ['gt', 'gte', 'lt', 'lte'];
+const ALERT_SEVERITIES = ['info', 'warning', 'critical'];
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+function serializeRule(r: any) {
+  let channels: unknown = [];
+  try { channels = r.channels ? JSON.parse(r.channels) : []; } catch { channels = []; }
+  return {
+    ...r,
+    threshold: Number(r.threshold),
+    enabled: Number(r.enabled) === 1,
+    channels,
+    // Field name the alerts page uses.
+    cooldown_seconds: Number(r.cooldown_sec),
+  };
+}
 
 export async function GET(request: NextRequest) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
-  const user = auth as any;
-
   try {
-    const { searchParams } = new URL(request.url);
-    const enabledOnly = searchParams.get('enabled') === 'true';
-    
-    let query = 'SELECT * FROM alert_rules WHERE 1=1';
-    const params: any[] = [];
-    
-    if (enabledOnly) {
-      query += ' AND enabled = 1';
-    }
-    
-    query += ' ORDER BY name';
-    
-    const result = await rqlite.query(query, params);
-    const rules = rowsToObjects(result).map((r: any) => ({
-      ...r,
-      channels: r.channels ? JSON.parse(r.channels) : [],
-      channel_config: r.channel_config ? JSON.parse(r.channel_config) : {}
-    }));
-
-    return NextResponse.json({ data: { rules } });
+    const enabledOnly = new URL(request.url).searchParams.get('enabled') === 'true';
+    const r = await rqlite.query(
+      `SELECT a.*, s.name AS server_name FROM alert_rules a LEFT JOIN servers s ON s.id = a.server_id ${enabledOnly ? 'WHERE a.enabled = 1' : ''} ORDER BY a.name`);
+    return ok({ rules: rowsToObjects(r).map(serializeRule) });
   } catch (error) {
-    return NextResponse.json({ error: { message: String(error) } }, { status: 500 });
+    return failFrom(error);
   }
 }
 
+/**
+ * Create a rule. Body: { name, metric, condition, threshold, server_id?,
+ * severity?, cooldown_sec | cooldown_seconds, channels?, enabled? }.
+ * Evaluated by the poller after every poll of each matching host.
+ */
 export async function POST(request: NextRequest) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
-  const roleError = requireRole(auth as any, 'admin');
+  const roleError = requireRole(auth, 'admin');
   if (roleError) return roleError;
 
   try {
-    const body = await request.json();
-    const { name, description, server_id, metric, condition, severity, channels, cooldown_sec, enabled } = body;
-    
-    if (!name || !metric || !condition) {
-      return NextResponse.json({ error: { message: 'Name, metric, and condition required' } }, { status: 400 });
-    }
+    const b = await request.json();
+    const name = typeof b.name === 'string' ? b.name.trim().slice(0, 100) : '';
+    if (!name) return fail('Name required');
+    if (typeof b.metric !== 'string' || !METRIC_RE.test(b.metric)) return fail('Invalid metric');
+    if (!ALERT_CONDITIONS.includes(b.condition)) return fail('condition must be gt, gte, lt or lte');
+    const threshold = Number(b.threshold);
+    if (!Number.isFinite(threshold)) return fail('threshold must be a number');
+    const severity = ALERT_SEVERITIES.includes(b.severity) ? b.severity : 'warning';
+    const cooldown = Math.max(30, Math.min(7 * 86400, Math.round(Number(b.cooldown_sec ?? b.cooldown_seconds ?? 300)) || 300));
+    const channels = Array.isArray(b.channels) ? b.channels.filter((c: unknown) => typeof c === 'string') : Array.isArray(b.channel_ids) ? b.channel_ids : [];
 
     const id = randomUUID();
-    const now = new Date().toISOString();
-    
     await rqlite.execute(
-      `INSERT INTO alert_rules (id, name, description, server_id, metric, condition, severity, channels, channel_config, cooldown_sec, enabled, trigger_count, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, ?, 0, ?, ?)`,
-      [id, name, description || null, server_id || null, metric, condition, severity || 'warning', JSON.stringify(channels || []), cooldown_sec || 300, enabled !== false ? 1 : 0, now, now]
+      `INSERT INTO alert_rules (id, name, description, server_id, metric, condition, threshold, severity, channels, channel_config, cooldown_sec, enabled)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '{}', ?, ?)`,
+      [id, name, b.description || null, b.server_id || null, b.metric, b.condition, threshold, severity, JSON.stringify(channels), cooldown, b.enabled === false ? 0 : 1]
     );
-
-    return NextResponse.json({ data: { id, message: 'Alert rule created' } }, { status: 201 });
+    return ok({ id }, { status: 201 });
   } catch (error) {
-    return NextResponse.json({ error: { message: String(error) } }, { status: 500 });
+    return failFrom(error);
   }
 }
 
+/** Legacy: DELETE /api/alert-rules?id=... (prefer /api/alert-rules/:id). */
 export async function DELETE(request: NextRequest) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
-  const roleError = requireRole(auth as any, 'admin');
+  const roleError = requireRole(auth, 'admin');
   if (roleError) return roleError;
-
+  const id = new URL(request.url).searchParams.get('id');
+  if (!id) return fail('ID required');
   try {
-    const { searchParams } = new URL(request.url);
-    const id = searchParams.get('id');
-    
-    if (!id) {
-      return NextResponse.json({ error: { message: 'ID required' } }, { status: 400 });
-    }
-
     await rqlite.execute('DELETE FROM alert_rules WHERE id = ?', [id]);
-
-    return NextResponse.json({ data: { message: 'Deleted' } });
+    return ok({ deleted: true });
   } catch (error) {
-    return NextResponse.json({ error: { message: String(error) } }, { status: 500 });
+    return failFrom(error);
   }
 }
