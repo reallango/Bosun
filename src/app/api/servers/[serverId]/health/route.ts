@@ -1,14 +1,12 @@
 import { internalError } from '@/lib/api/response';
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyAccessToken } from '@/lib/auth/jwt';
+import { requireLevel } from '@/lib/auth/middleware';
 import { rqlite } from '@/lib/db/rqlite-client';
 
 export async function GET(request: NextRequest, { params }: { params: { serverId: string } }) {
   try {
-    const accessToken = request.cookies.get('access_token')?.value;
-    if (!accessToken) return NextResponse.json({ error: { message: 'Not authenticated' } }, { status: 401 });
-    const payload = await verifyAccessToken(accessToken);
-    if (!payload) return NextResponse.json({ error: { message: 'Invalid token' } }, { status: 401 });
+    const payload = await requireLevel(request, 'viewer');
+    if (payload instanceof NextResponse) return payload;
     const r = await rqlite.query('SELECT is_online, last_seen FROM servers WHERE id=?', [params.serverId]);
     if (!r.values?.length) return NextResponse.json({ error: { message: 'Not found' } }, { status: 404 });
     return NextResponse.json({ data: { is_online: !!r.values[0][0], last_seen: r.values[0][1] } });

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth, requireRole } from '@/lib/auth/middleware';
+import { requireUserLevel } from '@/lib/auth/middleware';
 import { enableClustering, removeNode, convertToSingle, createJoinCode } from '@/lib/cluster/control';
 import { logAudit } from '@/lib/audit/logger';
 import { ok, fail, failFrom } from '@/lib/api/response';
@@ -14,10 +14,9 @@ export const dynamic = 'force-dynamic';
  *   { action: 'to_single' }                     make this node a one-node cluster
  */
 export async function POST(request: NextRequest) {
-  const auth = await requireAuth(request);
+  // Signed-in admins only: join codes carry the cluster secrets, so API keys are refused.
+  const auth = await requireUserLevel(request, 'admin');
   if (auth instanceof NextResponse) return auth;
-  const roleError = requireRole(auth, 'admin');
-  if (roleError) return roleError;
 
   let body: { action?: string; adv_host?: string; node_id?: string; confirm?: boolean };
   try { body = await request.json(); } catch { return fail('Invalid JSON body'); }

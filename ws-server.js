@@ -212,9 +212,11 @@ wss.on('connection', async (ws, req) => {
     return;
   }
 
-  // Interactive shells need at least operator; container shells need admin.
-  const roleLevel = { admin: 3, operator: 2, viewer: 1 }[payload.role] || 0;
-  if (roleLevel < (containerId ? 3 : 2)) {
+  // Host shells and container shells both need Full access (admin), and only
+  // for a signed-in user (tokens are never minted for API keys; refuse any
+  // that claim to be one).
+  const isApiKey = payload.authType === 'api_key' || String(payload.userId).startsWith('apikey:');
+  if (payload.role !== 'admin' || isApiKey) {
     ws.close(4003, 'Insufficient permissions');
     return;
   }

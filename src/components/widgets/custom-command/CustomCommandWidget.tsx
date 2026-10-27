@@ -6,6 +6,8 @@ import { useWidgetData } from '@/hooks/useWidgetData';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { WidgetLoading } from '@/components/widgets/WidgetLoading';
 import { WidgetError } from '@/components/widgets/WidgetError';
+import { useAuth } from '@/hooks/useAuth';
+import { hasRole } from '@/lib/auth/levels';
 
 interface CustomCommandWidgetProps {
   widgetId: string;
@@ -17,6 +19,9 @@ export function CustomCommandWidget({ widgetId, serverId }: CustomCommandWidgetP
   const [running, setRunning] = useState(false);
   const [command, setCommand] = useState('');
   const [execError, setExecError] = useState<string | null>(null);
+  const { user } = useAuth();
+  // Ad-hoc commands (/exec) need Full access; others see the configured command's output.
+  const canExec = hasRole(user?.role, 'admin');
 
   const execute = async () => {
     if (!command.trim() || running) return;
@@ -46,6 +51,7 @@ export function CustomCommandWidget({ widgetId, serverId }: CustomCommandWidgetP
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-2">
+      {canExec && (
       <form
         className="flex gap-1.5"
         onSubmit={e => {
@@ -76,6 +82,7 @@ export function CustomCommandWidget({ widgetId, serverId }: CustomCommandWidgetP
           <span className="hidden @[14rem]:inline">{running ? 'Running…' : 'Run'}</span>
         </button>
       </form>
+      )}
       {execError && <div role="alert" className="text-xs text-destructive">{execError}</div>}
       {error && !output?.output && <WidgetError error={error} onRetry={refresh} />}
       {output?.output && (

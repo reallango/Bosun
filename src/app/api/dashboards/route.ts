@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
-import { requireAuth } from '@/lib/auth/middleware';
+import { requireAuth, requireRole } from '@/lib/auth/middleware';
 import crypto from 'crypto';
 
 export async function GET(request: NextRequest) {
@@ -23,6 +23,8 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
+  const roleError = requireRole(auth, 'operator');
+  if (roleError) return roleError;
   try {
     const body = await request.json();
     const { name, icon } = body;

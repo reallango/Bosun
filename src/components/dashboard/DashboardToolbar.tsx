@@ -15,7 +15,8 @@ interface DashboardToolbarProps {
   name: string;
   serverName?: string;
   type?: string;
-  onAddWidget: () => void;
+  /** Omit to hide "Add widget" (read-only users). */
+  onAddWidget?: () => void;
   serverId?: string;
   widgetCount?: number;
   /** Layout edit mode (drag & resize). Omit onToggleEdit to hide the toggle. */
@@ -51,10 +52,12 @@ export function DashboardToolbar({ name, serverName, type, onAddWidget, serverId
             <span className="hidden xs:inline">{editing ? 'Done' : 'Edit layout'}</span>
           </Button>
         )}
+        {onAddWidget && (
         <Button size="lg" onClick={onAddWidget} aria-label="Add widget">
           <Plus />
           <span className="hidden xs:inline">Add widget</span>
         </Button>
+        )}
         {type === 'server' && serverId && (
           <WakeButton serverId={serverId} serverName={serverName || name} iconOnly className="size-9" />
         )}
@@ -66,10 +69,12 @@ export function DashboardToolbar({ name, serverName, type, onAddWidget, serverId
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent>
+              {onAddWidget && (
               <DropdownMenuItem onSelect={onAddWidget}>
                 <Plus />
                 Add widget
               </DropdownMenuItem>
+              )}
               <DropdownMenuItem onSelect={() => router.push(`/settings/servers/${serverId}`)}>
                 <Server />
                 Edit server
