@@ -1,3 +1,5 @@
+import type { WidgetLayouts } from './dashboard';
+
 export type WidgetCategory = 'system' | 'docker' | 'gpu' | 'ai' | 'network' | 'utility' | 'advanced';
 export type WidgetStorageMode = 'latest_ttl' | 'change_only';
 
@@ -34,6 +36,8 @@ export interface Widget {
   grid_h: number;
   grid_min_w: number;
   grid_min_h: number;
+  /** Per-breakpoint layouts other than lg (lg lives in grid_*). */
+  layouts?: WidgetLayouts;
   created_at: string;
   updated_at: string;
 }
