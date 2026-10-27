@@ -1,3 +1,4 @@
+import { internalError } from '@/lib/api/response';
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyAccessToken } from '@/lib/auth/jwt';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
@@ -28,7 +29,7 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     console.error('SSH keys error:', error);
-    return NextResponse.json({ error: { message: 'Internal server error', code: 'INTERNAL_ERROR' } }, { status: 500 });
+    return internalError(error);
   }
 }
 
@@ -50,6 +51,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ data: { id, name, fingerprint: fp, key_type: 'ed25519' } }, { status: 201 });
   } catch (error) {
     console.error('SSH key create error:', error);
-    return NextResponse.json({ error: { message: 'Internal server error', code: 'INTERNAL_ERROR' } }, { status: 500 });
+    return internalError(error);
   }
 }

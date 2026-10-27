@@ -1,3 +1,4 @@
+import { internalError } from '@/lib/api/response';
 import { formatMac } from '@/lib/network/wake-on-lan';
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyAccessToken } from '@/lib/auth/jwt';
@@ -37,7 +38,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ data: { servers } });
   } catch (error) {
     console.error('Servers list error:', error);
-    return NextResponse.json({ error: { message: 'Internal server error', code: 'INTERNAL_ERROR' } }, { status: 500 });
+    return internalError(error);
   }
 }
 
@@ -72,6 +73,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ data: { id: serverId, name, hostname } }, { status: 201 });
   } catch (error) {
     console.error('Server create error:', error);
-    return NextResponse.json({ error: { message: 'Internal server error', code: 'INTERNAL_ERROR' } }, { status: 500 });
+    return internalError(error);
   }
 }

@@ -1,3 +1,4 @@
+import { internalError } from '@/lib/api/response';
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyAccessToken } from '@/lib/auth/jwt';
 import { rqlite } from '@/lib/db/rqlite-client';
@@ -13,6 +14,6 @@ export async function GET(request: NextRequest, { params }: { params: { serverId
     return NextResponse.json({ data: { is_online: !!r.values[0][0], last_seen: r.values[0][1] } });
   } catch (error) {
     console.error('Health error:', error);
-    return NextResponse.json({ error: { message: 'Internal server error', code: 'INTERNAL_ERROR' } }, { status: 500 });
+    return internalError(error);
   }
 }

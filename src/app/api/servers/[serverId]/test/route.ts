@@ -1,3 +1,4 @@
+import { internalError } from '@/lib/api/response';
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyAccessToken } from '@/lib/auth/jwt';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
@@ -28,6 +29,6 @@ export async function POST(request: NextRequest, { params }: { params: { serverI
     return NextResponse.json({ data: { success: true, latencyMs: ms } });
   } catch (error) {
     console.error('SSH test error:', error);
-    return NextResponse.json({ error: { message: 'Internal server error', code: 'INTERNAL_ERROR' } }, { status: 500 });
+    return internalError(error);
   }
 }

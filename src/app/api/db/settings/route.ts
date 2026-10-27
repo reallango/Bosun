@@ -10,7 +10,7 @@ import { requireAuth, requireRole } from '@/lib/auth/middleware';
 import { getConfig, setConfig } from '@/lib/db/migrations';
 import { EDITABLE_SETTINGS, EDITABLE_SETTING_KEYS } from '@/lib/settings-schema';
 import { logAudit, AuditActions } from '@/lib/audit/logger';
-import { ok, fail } from '@/lib/api/response';
+import { ok, fail, internalError } from '@/lib/api/response';
 
 export async function GET(request: NextRequest) {
   const auth = await requireAuth(request);
@@ -26,7 +26,7 @@ export async function GET(request: NextRequest) {
     return ok({ settings: EDITABLE_SETTINGS, values });
   } catch (error) {
     console.error('Settings read error:', error);
-    return fail('Internal server error', 500, 'INTERNAL_ERROR');
+    return internalError(error);
   }
 }
 
@@ -75,6 +75,6 @@ export async function PUT(request: NextRequest) {
     return ok({ updated: updates.map(u => u.key), values });
   } catch (error) {
     console.error('Settings update error:', error);
-    return fail('Internal server error', 500, 'INTERNAL_ERROR');
+    return internalError(error);
   }
 }

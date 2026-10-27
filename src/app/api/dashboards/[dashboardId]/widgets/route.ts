@@ -1,3 +1,4 @@
+import { internalError } from '@/lib/api/response';
 import { findFreeSpot } from '@/lib/widgets/placement';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireRole } from '@/lib/auth/middleware';
@@ -18,7 +19,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
         return NextResponse.json({ data: { widgets } });
     } catch (error) {
         console.error('Get dashboard widgets error:', error);
-        return NextResponse.json({ error: { message: 'Internal server error', code: 'INTERNAL_ERROR' } }, { status: 500 });
+        return internalError(error);
     }
 }
 

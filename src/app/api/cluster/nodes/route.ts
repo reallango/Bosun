@@ -1,21 +1,24 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { verifyAccessToken } from '@/lib/auth/jwt';
+import { requireAuth } from '@/lib/auth/middleware';
 import { rqlite } from '@/lib/db/rqlite-client';
+import { ok, failFrom } from '@/lib/api/response';
 
+/** Cluster members with real reachability (rqlite /nodes), in the shape the cluster page uses. */
 export async function GET(request: NextRequest) {
+  const auth = await requireAuth(request);
+  if (auth instanceof NextResponse) return auth;
   try {
-    const accessToken = request.cookies.get('access_token')?.value;
-    if (!accessToken) return NextResponse.json({ error: { message: 'Not authenticated' } }, { status: 401 });
-    const payload = await verifyAccessToken(accessToken);
-    if (!payload) return NextResponse.json({ error: { message: 'Invalid token' } }, { status: 401 });
-    const port = process.env.RQLITE_HTTP_PORT || '4001';
-    const res = await fetch(`http://localhost:${port}/status`);
-    const d = await res.json();
-    const nodes = Object.entries(d?.store?.raft?.servers||{}).map(([id,n]:[string,any]) => ({ id, address: n.addr||id, is_leader: !!n.leader, reachable: true }));
-    if (!nodes.length) nodes.push({ id: d?.store?.node_id||'local', address: `localhost:${port}`, is_leader: true, reachable: true });
-    return NextResponse.json({ data: nodes });
+    const nodes = await rqlite.getNodes();
+    return ok(nodes.map(n => ({
+      id: n.id,
+      address: n.api_addr || n.addr,
+      raft_address: n.addr,
+      voter: n.voter,
+      is_leader: n.leader,
+      reachable: n.reachable,
+      error: n.error ?? null,
+    })));
   } catch (error) {
-    console.error('Cluster nodes error:', error);
-    return NextResponse.json({ error: { message: 'Internal server error', code: 'INTERNAL_ERROR' } }, { status: 500 });
+    return failFrom(error);
   }
 }

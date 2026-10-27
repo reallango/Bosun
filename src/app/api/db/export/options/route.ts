@@ -3,7 +3,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireRole } from '@/lib/auth/middleware';
 import { BACKUP_TABLES, LARGE_TABLES, BACKUP_FORMAT_VERSION } from '@/lib/db/backup';
 import { SCHEMA_VERSION } from '@/lib/db/migrations';
-import { ok, fail } from '@/lib/api/response';
+import { ok, fail, internalError } from '@/lib/api/response';
 
 export async function GET(request: NextRequest) {
   const auth = await requireAuth(request);
@@ -25,6 +25,6 @@ export async function GET(request: NextRequest) {
     });
   } catch (error) {
     console.error('Export options error:', error);
-    return fail('Internal server error', 500, 'INTERNAL_ERROR');
+    return internalError(error);
   }
 }
