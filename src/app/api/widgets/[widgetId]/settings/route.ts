@@ -64,11 +64,9 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
       stmts.push({ sql: `UPDATE widgets SET ${sets.join(', ')} WHERE id = ?`, params: [...values, widgetId] });
     }
 
-    // Server polling settings changed from a widget dialog: admin only.
-    if (poll_interval_sec !== undefined || enabled !== undefined) {
-      if (auth.role !== 'admin') {
-        return NextResponse.json({ error: { message: 'Only admins can change server polling' } }, { status: 403 });
-      }
+    // Server polling settings from a widget dialog: applied for admins only,
+    // ignored for other roles so they can still rename/resize widgets.
+    if ((poll_interval_sec !== undefined || enabled !== undefined) && auth.role === 'admin') {
       if (poll_interval_sec !== undefined && poll_interval_sec !== null) {
         stmts.push({ sql: 'UPDATE servers SET poll_interval_sec = ? WHERE id = ?',
           params: [Math.min(3600, Math.max(5, Math.round(Number(poll_interval_sec) || 15))), widget.server_id] });

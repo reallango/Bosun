@@ -58,7 +58,8 @@ export function WidgetSettingsDialog({ widgetId, open, onOpenChange, onSave }: W
     setSaving(true);
     setError(null);
     try {
-      const payload = { ...data };
+      // Only widget-level fields; polling is configured per server.
+      const payload: Record<string, unknown> = { display_name: data?.display_name ?? null };
       // Always include grid_w and grid_h - use selectedSize if available, otherwise use current values from data
       if (selectedSize) {
         payload.grid_w = selectedSize.gridW;
@@ -114,53 +115,10 @@ export function WidgetSettingsDialog({ widgetId, open, onOpenChange, onSave }: W
                 />
               </div>
 
-              <div className="grid gap-4 xs:grid-cols-2">
-                <div className="space-y-1.5">
-                  <Label htmlFor={`ws-poll-${widgetId}`}>Poll interval (s)</Label>
-                  <Input
-                    id={`ws-poll-${widgetId}`}
-                    type="number"
-                    inputMode="numeric"
-                    value={data?.poll_interval_sec || ''}
-                    onChange={e => setData({ ...data, poll_interval_sec: parseInt(e.target.value) || null })}
-                    placeholder="30"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label htmlFor={`ws-ttl-${widgetId}`}>TTL (s)</Label>
-                  <Input
-                    id={`ws-ttl-${widgetId}`}
-                    type="number"
-                    inputMode="numeric"
-                    value={data?.ttl_sec || ''}
-                    onChange={e => setData({ ...data, ttl_sec: parseInt(e.target.value) || null })}
-                    placeholder="300"
-                  />
-                </div>
-              </div>
+              <p className="text-xs text-muted-foreground">
+                Data is collected once per server; the poll interval is set under Settings → Servers.
+              </p>
 
-              <div className="space-y-1.5">
-                <Label htmlFor={`ws-storage-${widgetId}`}>Storage mode</Label>
-                <select
-                  id={`ws-storage-${widgetId}`}
-                  className="form-select"
-                  value={data?.storage_mode || 'latest_ttl'}
-                  onChange={e => setData({ ...data, storage_mode: e.target.value })}
-                >
-                  <option value="latest_ttl">Latest TTL</option>
-                  <option value="change_only">Change Only</option>
-                </select>
-              </div>
-
-              <label className="flex items-center gap-2 text-sm font-medium">
-                <input
-                  type="checkbox"
-                  className="size-4 accent-primary"
-                  checked={data?.enabled !== 0}
-                  onChange={e => setData({ ...data, enabled: e.target.checked ? 1 : 0 })}
-                />
-                Enable polling
-              </label>
 
               <div className="space-y-1.5">
                 <Label htmlFor={`ws-size-${widgetId}`}>Size</Label>
