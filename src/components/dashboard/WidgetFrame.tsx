@@ -10,6 +10,7 @@ import { SystemServicesWidget } from '@/components/widgets/system-services';
 import { ServerSummaryWidget } from '@/components/widgets/server-summary';
 import { GPUMonitoringWidget } from '@/components/widgets/gpu-monitoring';
 import { OllamaStatusWidget } from '@/components/widgets/ollama-status';
+import { MetricsChartWidget } from '@/components/widgets/metrics-chart';
 import { SSHTerminalWidget } from '@/components/widgets/ssh-terminal';
 import { DockerContainersWidget } from '@/components/widgets/docker-containers';
 import { CustomCommandWidget } from '@/components/widgets/custom-command';
@@ -68,6 +69,8 @@ function WidgetContent({ widgetId, widgetType, serverId, serverName }: { widgetI
       return <DockerContainersWidget widgetId={widgetId} serverId={serverId} />;
     case 'custom_command':
       return <CustomCommandWidget widgetId={widgetId} serverId={serverId} />;
+    case 'metrics_chart':
+      return <MetricsChartWidget widgetId={widgetId} serverId={serverId} />;
     case 'os_update_check':
       return <OSUpdateCheckWidget widgetId={widgetId} serverId={serverId} />;
     default:

@@ -9,6 +9,8 @@ import { getTerminalSessionManager } from '@/lib/terminal-session-manager';
 interface SSHTerminalWidgetProps {
   widgetId: string;
   serverId: string;
+  /** When set, open `docker exec` into this container instead of a login shell (admin only). */
+  containerId?: string;
 }
 
 type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'error' | 'disconnected';
@@ -97,7 +99,7 @@ function ensureXtermCss() {
   }
 }
 
-export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps) {
+export function SSHTerminalWidget({ widgetId, serverId, containerId }: SSHTerminalWidgetProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -264,6 +266,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       const url = new URL(getWsUrl());
       url.searchParams.set('sessionId', sessionId);
       url.searchParams.set('serverId', serverId);
+      if (containerId) url.searchParams.set('containerId', containerId);
       url.searchParams.set('token', tokenJson.data.token);
       // Username is needed to match reattached sessions; the password is sent
       // as the first WebSocket frame so it never lands in URLs or access logs.
@@ -364,7 +367,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       setStatus('error');
       statusRef.current = 'error';
     }
-  }, [username, sessionId, serverId, cleanup, resetToLogin, widgetId]);
+  }, [username, sessionId, serverId, containerId, cleanup, resetToLogin, widgetId]);
 
   // Disconnect from WebSocket server - FULL destroy (user clicked disconnect)
   const disconnect = useCallback(() => {
