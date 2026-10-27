@@ -90,6 +90,8 @@ export function DashboardGrid({
   // Layouts for every breakpoint: saved per-breakpoint rects, otherwise derived from lg.
   const derived = useMemo(() => buildResponsiveLayouts(safeWidgets), [safeWidgets]);
   const [layouts, setLayouts] = useState<Layouts>(derived);
+  const layoutsRef = useRef(layouts);
+  layoutsRef.current = layouts;
   useEffect(() => {
     setLayouts(derived);
   }, [derived]);
@@ -114,6 +116,11 @@ export function DashboardGrid({
   const persist = useCallback(
     (layout: Layout[]) => {
       if (!onLayoutChange) return;
+      // A click on the handle without movement also ends a "drag": skip no-op saves.
+      const before = layoutsRef.current[breakpointRef.current] ?? [];
+      const key = (l: { i: string; x: number; y: number; w: number; h: number }) => `${l.i}:${l.x},${l.y},${l.w},${l.h}`;
+      const prev = new Set(before.map(key));
+      if (before.length === layout.length && layout.every(l => prev.has(key(l)))) return;
       const ids = new Set(safeWidgets.map(w => w.id));
       const items: LayoutItem[] = layout
         .filter(l => ids.has(l.i))
