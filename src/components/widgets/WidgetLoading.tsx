@@ -1,11 +1,11 @@
 // src/components/widgets/WidgetLoading.tsx
 'use client';
 
-export function WidgetLoading() {
+export function WidgetLoading({ label = 'Loading data…' }: { label?: string }) {
     return (
-        <div className="flex flex-col items-center justify-center h-full p-4">
-            <div className="w-8 h-8 border-2 border-blue-200 border-t-blue-600 rounded-full animate-spin mb-3"></div>
-            <div className="text-xs text-gray-500">Loading data...</div>
+        <div className="flex h-full min-h-16 flex-col items-center justify-center gap-2 p-2" role="status">
+            <div className="size-6 animate-spin rounded-full border-2 border-muted border-t-primary motion-reduce:animate-none" />
+            <div className="text-xs text-muted-foreground">{label}</div>
         </div>
     );
 }

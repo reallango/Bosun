@@ -75,6 +75,9 @@ function WidgetContent({ widgetId, widgetType, serverId, serverName }: { widgetI
   }
 }
 
+/** Widgets that manage their own scrolling/padding (edge-to-edge content). */
+const FULL_BLEED = new Set(['ssh_terminal']);
+
 /** Human title for a raw widget type ("cpu_memory" -> "Cpu memory") when no name is set. */
 function prettyType(type: string) {
   const s = type.replace(/[_-]+/g, ' ').trim();
@@ -222,7 +225,12 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName,
           </DropdownMenuContent>
         </DropdownMenu>
       </header>
-      <div className="@container relative min-h-0 flex-1 overflow-auto overscroll-contain p-3">
+      <div
+        className={cn(
+          '@container relative min-h-0 flex-1',
+          FULL_BLEED.has(widgetType) ? 'overflow-hidden' : 'overflow-auto overscroll-contain p-3'
+        )}
+      >
         <WidgetFrameContext.Provider value={frameContext}>
           <WidgetErrorBoundary widgetId={widgetId}>
             <WidgetContent widgetId={widgetId} widgetType={widgetType} serverId={serverId} serverName={serverName} />

@@ -1,6 +1,7 @@
 'use client';
 
 import { Component, ReactNode } from 'react';
+import { WidgetError } from './WidgetError';
 
 interface WidgetErrorBoundaryProps {
   children: ReactNode;
@@ -28,15 +29,7 @@ export class WidgetErrorBoundary extends Component<WidgetErrorBoundaryProps, Wid
 
   render() {
     if (this.state.hasError) {
-      return (
-        <div className="flex flex-col items-center justify-center h-full p-4 text-center">
-          <div className="text-red-500 mb-2">Widget Error</div>
-          <div className="text-sm text-gray-500 mb-3">{this.state.error?.message}</div>
-          <button onClick={this.handleRetry} className="px-3 py-1 text-sm border rounded hover:bg-gray-50">
-            Retry
-          </button>
-        </div>
-      );
+      return <WidgetError error={`Widget error: ${this.state.error?.message ?? 'unknown'}`} onRetry={this.handleRetry} />;
     }
 
     return this.props.children;

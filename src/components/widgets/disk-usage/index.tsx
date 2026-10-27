@@ -2,32 +2,39 @@
 import { useWidgetData } from '@/hooks/useWidgetData';
 import { WidgetError } from '@/components/widgets/WidgetError';
 import { WidgetLoading } from '@/components/widgets/WidgetLoading';
-import { WidgetPlaceholder } from '@/components/widgets/WidgetPlaceholder';
+import { WidgetEmpty, WidgetPlaceholder } from '@/components/widgets/WidgetPlaceholder';
+import { UsageBar } from '@/components/widgets/UsageBar';
+import { formatMB, pct } from '@/components/widgets/format';
 
+/* eslint-disable @typescript-eslint/no-explicit-any */
 export function DiskUsageWidget({ widgetId }: { widgetId: string }) {
     const { data, isLoading, error, refresh } = useWidgetData(widgetId, 30);
     if (isLoading) return <WidgetLoading />;
     if (error) return <WidgetError error={error} onRetry={refresh} />;
     if ((data as any)?.source === 'placeholder') return <WidgetPlaceholder />;
     const disks = (Array.isArray(data) ? data : []) as any[];
+    if (disks.length === 0) return <WidgetEmpty>No disk data</WidgetEmpty>;
     return (
-        <div className="p-4 space-y-3 text-sm">
+        <ul className="grid grid-cols-1 gap-x-6 gap-y-3 text-sm @2xl:grid-cols-2 @5xl:grid-cols-3">
             {disks.map((d, i) => {
-                const pct = d.usagePercent || 0;
-                const color = pct > 85 ? 'bg-red-500' : pct > 70 ? 'bg-yellow-500' : 'bg-green-500';
+                const p = pct(d.usagePercent);
                 return (
-                    <div key={i}>
-                        <div className="flex justify-between text-xs mb-1">
-                            <span>{d.mountPoint}</span>
-                            <span>{d.usedMB} / {d.sizeMB} MB ({pct}%)</span>
+                    <li key={d.mountPoint ?? i} className="min-w-0">
+                        <div className="mb-1 flex items-baseline justify-between gap-2 text-xs">
+                            <span className="min-w-0 truncate font-medium" title={d.mountPoint}>
+                                {d.mountPoint}
+                            </span>
+                            <span className="shrink-0 tabular-nums text-muted-foreground">
+                                <span className="hidden @[16rem]:inline">
+                                    {formatMB(d.usedMB)} / {formatMB(d.sizeMB)} ·{' '}
+                                </span>
+                                {Math.round(p)}%
+                            </span>
                         </div>
-                        <div className="w-full h-2 bg-gray-200 dark:bg-gray-700 rounded">
-                            <div className={`h-full rounded ${color}`} style={{ width: `${pct}%` }} />
-                        </div>
-                    </div>
+                        <UsageBar value={p} className="h-2" />
+                    </li>
                 );
             })}
-            {disks.length === 0 && <div className="text-muted-foreground">No disk data</div>}
-        </div>
+        </ul>
     );
 }

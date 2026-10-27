@@ -1,8 +1,11 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
+import { ChevronDown, ChevronUp, CircleCheck, Package, RotateCcw, ShieldAlert, TriangleAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
+import { useWidgetFrame } from '@/components/dashboard/widget-context';
+import { cn } from '@/lib/utils';
 
 interface OSUpdateCheckWidgetProps {
   widgetId: string;
@@ -36,6 +39,7 @@ function timeAgo(dateString: string): string {
   return `${days}d ago`;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function OSUpdateCheckWidget({ widgetId, serverId }: OSUpdateCheckWidgetProps) {
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState<OSUpdateData | null>(null);
@@ -44,29 +48,36 @@ export function OSUpdateCheckWidget({ widgetId, serverId }: OSUpdateCheckWidgetP
   const [installResult, setInstallResult] = useState<string | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
   const [showPackages, setShowPackages] = useState(false);
+  const frame = useWidgetFrame();
 
-  // Load data on mount
-  useEffect(() => {
-    checkForUpdates();
-  }, [widgetId]);
-
-  const checkForUpdates = async () => {
+  const checkForUpdates = useCallback(async (force = false) => {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetchWithAuth(`/api/widgets/${widgetId}/data`);
+      const res = await fetchWithAuth(`/api/widgets/${widgetId}/data${force ? '?force=true' : ''}`);
       const json = await res.json();
       if (json.data) {
         setData(json.data);
       } else if (json.error) {
         setError(json.error.message || 'Failed to check for updates');
       }
-    } catch (err) {
+    } catch {
       setError('Failed to check for updates');
     } finally {
       setLoading(false);
     }
-  };
+  }, [widgetId]);
+
+  // Load data on mount
+  useEffect(() => {
+    checkForUpdates();
+  }, [checkForUpdates]);
+
+  // The frame's Refresh action forces a re-check.
+  useEffect(() => {
+    if (!frame) return;
+    return frame.registerRefresh(() => checkForUpdates(true));
+  }, [frame, checkForUpdates]);
 
   const handleInstall = async () => {
     setShowConfirm(false);
@@ -83,11 +94,11 @@ export function OSUpdateCheckWidget({ widgetId, serverId }: OSUpdateCheckWidgetP
         setInstallResult(json.data.message || 'Updates installed successfully');
         setData(null);
         // Refresh after install
-        setTimeout(checkForUpdates, 3000);
+        setTimeout(() => checkForUpdates(true), 3000);
       } else {
         setInstallResult(json.error?.message || 'Failed to install updates');
       }
-    } catch (err) {
+    } catch {
       setInstallResult('Failed to install updates');
     } finally {
       setInstalling(false);
@@ -96,107 +107,106 @@ export function OSUpdateCheckWidget({ widgetId, serverId }: OSUpdateCheckWidgetP
 
   if (!data) {
     return (
-      <div className="flex flex-col items-center justify-center h-full p-4">
-        <div className="text-gray-500 text-sm mb-3">No data yet</div>
-        <Button onClick={checkForUpdates} disabled={loading} className="w-full">
-          {loading ? 'Checking...' : 'Check for Updates'}
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-2 text-center">
+        <div className="text-sm text-muted-foreground">{loading ? 'Checking…' : 'No data yet'}</div>
+        {error && <div role="alert" className="text-xs text-destructive">{error}</div>}
+        {installResult && <div className="text-xs">{installResult}</div>}
+        <Button onClick={() => checkForUpdates(true)} disabled={loading} className="w-full max-w-xs">
+          {loading ? 'Checking…' : 'Check for updates'}
         </Button>
       </div>
     );
   }
 
   return (
-    <div className="space-y-3 p-2">
-      {/* Update count with color coding */}
-      {data.updates_available === 0 ? (
-        <div className="text-green-600 font-medium text-sm">✅ System up to date</div>
-      ) : (
-        <div className="space-y-1">
-          <div className="text-yellow-600 font-medium text-sm">
-            📦 {data.updates_available} updates available
-          </div>
-          {data.security_updates > 0 && (
-            <div className="text-red-500 text-sm">
-              🔒 {data.security_updates} security updates
+    <div className="flex h-full min-h-0 flex-col gap-3">
+      <div className="grid grid-cols-1 gap-3 @xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <div className="space-y-1.5 text-sm">
+          {data.updates_available === 0 ? (
+            <div className="flex items-center gap-1.5 font-medium text-success">
+              <CircleCheck className="size-4" aria-hidden /> System up to date
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 font-medium text-warning">
+              <Package className="size-4" aria-hidden /> {data.updates_available} updates available
             </div>
           )}
-        </div>
-      )}
-
-      {/* Reboot required indicator */}
-      {data.reboot_required && (
-        <div className="text-yellow-500 text-sm font-medium">⚠️ Reboot required</div>
-      )}
-
-      {/* Last checked relative timestamp */}
-      {data.last_checked && (
-        <div className="text-xs text-gray-500">Last checked: {timeAgo(data.last_checked)}</div>
-      )}
-
-      {/* Install button - only when updates available */}
-      {data.updates_available > 0 && !showConfirm && (
-        <Button onClick={() => setShowConfirm(true)} className="w-full">
-          Install Updates
-        </Button>
-      )}
-
-      {/* Styled confirmation dialog */}
-      {showConfirm && (
-        <div className="absolute inset-0 bg-black/70 flex items-center justify-center p-4 z-10 rounded-lg">
-          <div className="bg-gray-800 border border-red-600 rounded-lg p-4 max-w-sm">
-            <p className="text-red-400 font-medium text-sm">⚠️ Install OS Updates?</p>
-            <p className="text-gray-300 text-xs mt-2">
-              This will install {data.updates_available} updates.
-              The server may require a reboot afterward.
-            </p>
-            <p className="text-gray-400 text-xs mt-1">This action will be logged.</p>
-            <div className="flex gap-2 mt-3 justify-end">
-              <button
-                onClick={() => setShowConfirm(false)}
-                className="px-3 py-1 text-xs bg-gray-700 text-gray-300 rounded hover:bg-gray-600"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleInstall}
-                disabled={installing}
-                className="px-3 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-500"
-              >
-                {installing ? 'Installing...' : 'Install'}
-              </button>
+          {data.security_updates > 0 && (
+            <div className="flex items-center gap-1.5 text-destructive">
+              <ShieldAlert className="size-4" aria-hidden /> {data.security_updates} security updates
             </div>
-          </div>
+          )}
+          {data.reboot_required && (
+            <div className="flex items-center gap-1.5 font-medium text-warning">
+              <RotateCcw className="size-4" aria-hidden /> Reboot required
+            </div>
+          )}
+          {data.last_checked && <div className="text-xs text-muted-foreground">Last checked: {timeAgo(data.last_checked)}</div>}
         </div>
-      )}
+
+        <div className="flex flex-col gap-2 @xl:items-end">
+          {data.updates_available > 0 && (
+            <Button onClick={() => setShowConfirm(true)} disabled={installing} className="w-full @xl:w-auto">
+              {installing ? 'Installing…' : 'Install updates'}
+            </Button>
+          )}
+          <Button onClick={() => checkForUpdates(true)} disabled={loading} variant="outline" className="w-full @xl:w-auto">
+            {loading ? 'Checking…' : 'Check for updates'}
+          </Button>
+        </div>
+      </div>
+
+      {error && <div role="alert" className="text-xs text-destructive">{error}</div>}
+      {installResult && <div className="text-xs">{installResult}</div>}
 
       {/* Expandable package list */}
       {data.packages && data.packages.length > 0 && (
-        <div className="mt-2">
+        <div className="flex min-h-0 flex-col">
           <button
+            type="button"
             onClick={() => setShowPackages(!showPackages)}
-            className="text-xs text-gray-500 hover:text-gray-400"
+            aria-expanded={showPackages}
+            className="inline-flex w-fit items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
           >
-            {showPackages ? `Hide ${data.packages.length} packages ▲` : `Show ${data.packages.length} packages ▼`}
+            {showPackages ? <ChevronUp className="size-3.5" /> : <ChevronDown className="size-3.5" />}
+            {showPackages ? 'Hide' : 'Show'} {data.packages.length} packages
           </button>
           {showPackages && (
-            <div className="mt-1 max-h-24 overflow-auto text-xs space-y-1">
+            <ul className="mt-1 min-h-0 flex-1 space-y-0.5 overflow-auto text-xs">
               {data.packages.map((pkg, i) => (
-                <div key={i} className={pkg.is_security ? 'text-red-400' : 'text-gray-400'}>
-                  {pkg.name} {pkg.current_version} → {pkg.new_version}
-                </div>
+                <li key={i} className={cn('flex flex-wrap gap-x-1', pkg.is_security ? 'text-destructive' : 'text-muted-foreground')}>
+                  <span className="font-medium">{pkg.name}</span>
+                  <span className="break-all">
+                    {pkg.current_version} → {pkg.new_version}
+                  </span>
+                </li>
               ))}
-            </div>
+            </ul>
           )}
         </div>
       )}
 
-      {/* Check button */}
-      <Button onClick={checkForUpdates} disabled={loading} variant="outline" className="w-full mt-2">
-        {loading ? 'Checking...' : 'Check for Updates'}
-      </Button>
-
-      {error && <div className="text-red-500 text-sm">{error}</div>}
-      {installResult && <div className="text-sm">{installResult}</div>}
+      {/* Confirmation overlay, scoped to the widget body */}
+      {showConfirm && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-background/80 p-3 backdrop-blur-sm">
+          <div role="alertdialog" aria-modal="true" aria-labelledby={`osu-confirm-${widgetId}`} className="w-full max-w-sm rounded-lg border border-destructive/50 bg-popover p-4 shadow-lg">
+            <p id={`osu-confirm-${widgetId}`} className="flex items-center gap-1.5 text-sm font-medium text-destructive">
+              <TriangleAlert className="size-4" aria-hidden /> Install OS updates?
+            </p>
+            <p className="mt-2 text-xs text-muted-foreground">
+              This will install {data.updates_available} updates. The server may require a reboot afterward. This action will be logged.
+            </p>
+            <div className="mt-3 flex flex-wrap justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => setShowConfirm(false)}>
+                Cancel
+              </Button>
+              <Button variant="destructive" size="sm" onClick={handleInstall} disabled={installing}>
+                {installing ? 'Installing…' : 'Install'}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -1,7 +1,12 @@
 'use client';
 
+import { Fan, Thermometer, Zap } from 'lucide-react';
 import { useWidgetData } from '@/hooks/useWidgetData';
-import { StatusBadge } from '@/components/shared/StatusBadge';
+import { WidgetLoading } from '@/components/widgets/WidgetLoading';
+import { WidgetError } from '@/components/widgets/WidgetError';
+import { WidgetEmpty, WidgetPlaceholder } from '@/components/widgets/WidgetPlaceholder';
+import { UsageBar } from '@/components/widgets/UsageBar';
+import { formatMB, pct } from '@/components/widgets/format';
 
 interface GPUInfo {
   name: string;
@@ -10,64 +15,95 @@ interface GPUInfo {
   utilization_percent: number;
   temperature_c: number;
   power_watts: number;
+  index?: number;
+  fan_percent?: number;
 }
 
-export function GPUMonitoringWidget({ widgetId, serverId }: { widgetId: string; serverId: string }) {
-  const { data, isLoading, error } = useWidgetData(widgetId, 10);
-
-  if (isLoading) {
-    return <div className="flex items-center justify-center h-full">Loading GPU info...</div>;
+/** Data may be a single GPU object, an array of GPUs, or { gpus: [...] }. */
+function toGpuList(data: unknown): GPUInfo[] {
+  if (!data) return [];
+  if (Array.isArray(data)) return data.filter(g => g && typeof g === 'object') as GPUInfo[];
+  if (typeof data === 'object') {
+    const obj = data as Record<string, unknown>;
+    if (Array.isArray(obj.gpus)) return toGpuList(obj.gpus);
+    if (obj.source === 'placeholder') return [];
+    if ('name' in obj || 'vram_total_mb' in obj || 'utilization_percent' in obj) return [obj as unknown as GPUInfo];
   }
+  return [];
+}
 
-  if (error) {
-    return <div className="text-red-500 text-sm p-2">Error: {error}</div>;
-  }
-
-  const gpuData = data as GPUInfo | null;
-
-  if (!gpuData) {
-    return <div className="text-gray-500 text-sm p-2">No GPU detected</div>;
-  }
-
-  const vramPercent = gpuData.vram_total_mb > 0 
-    ? Math.round((gpuData.vram_used_mb / gpuData.vram_total_mb) * 100) 
-    : 0;
+function GPURow({ gpu, index, multi }: { gpu: GPUInfo; index: number; multi: boolean }) {
+  const vramTotal = Number(gpu.vram_total_mb) || 0;
+  const vramUsed = Number(gpu.vram_used_mb) || 0;
+  const vramPercent = vramTotal > 0 ? Math.round((vramUsed / vramTotal) * 100) : 0;
+  const util = pct(gpu.utilization_percent);
 
   return (
-    <div className="flex flex-col gap-2 p-2 text-sm">
-      <div className="flex items-center justify-between">
-        <span className="font-medium">{gpuData.name}</span>
-        <StatusBadge status={gpuData.utilization_percent > 80 ? 'running' : 'online'} />
+    <li className="min-w-0 space-y-2 rounded-lg border bg-muted/30 p-2.5">
+      <div className="flex items-center justify-between gap-2">
+        <span className="min-w-0 truncate text-sm font-medium" title={gpu.name}>
+          {multi && <span className="mr-1 text-muted-foreground">#{gpu.index ?? index}</span>}
+          {gpu.name || 'GPU'}
+        </span>
+        <span className="flex shrink-0 items-center gap-2 text-xs tabular-nums text-muted-foreground">
+          {Number.isFinite(gpu.temperature_c) && (
+            <span className="inline-flex items-center gap-0.5" title="Temperature">
+              <Thermometer className="size-3" aria-hidden />
+              {gpu.temperature_c}°C
+            </span>
+          )}
+          {Number.isFinite(gpu.power_watts) && (
+            <span className="hidden items-center gap-0.5 @[14rem]:inline-flex" title="Power">
+              <Zap className="size-3" aria-hidden />
+              {Math.round(gpu.power_watts)}W
+            </span>
+          )}
+          {Number.isFinite(gpu.fan_percent) && (
+            <span className="hidden items-center gap-0.5 @[20rem]:inline-flex" title="Fan">
+              <Fan className="size-3" aria-hidden />
+              {gpu.fan_percent}%
+            </span>
+          )}
+        </span>
       </div>
-      
-      <div className="grid grid-cols-2 gap-2">
-        <div>
-          <div className="text-xs text-gray-500">VRAM</div>
-          <div className="text-sm">{gpuData.vram_used_mb} / {gpuData.vram_total_mb} MB</div>
-          <div className="w-full bg-gray-200 dark:bg-gray-700 rounded h-1.5 mt-1">
-            <div 
-              className="bg-blue-500 h-1.5 rounded" 
-              style={{ width: `${vramPercent}%` }}
-            />
+      <div className="grid grid-cols-1 gap-2 @[14rem]:grid-cols-2">
+        <div className="min-w-0">
+          <div className="mb-1 flex justify-between gap-2 text-xs">
+            <span className="text-muted-foreground">GPU</span>
+            <span className="tabular-nums">{Math.round(util)}%</span>
           </div>
+          <UsageBar value={util} colorClass="bg-green-500" />
         </div>
-        
-        <div>
-          <div className="text-xs text-gray-500">GPU</div>
-          <div className="text-sm">{gpuData.utilization_percent}%</div>
-          <div className="w-full bg-gray-200 dark:bg-gray-700 rounded h-1.5 mt-1">
-            <div 
-              className="bg-green-500 h-1.5 rounded" 
-              style={{ width: `${gpuData.utilization_percent}%` }}
-            />
+        <div className="min-w-0">
+          <div className="mb-1 flex justify-between gap-2 text-xs">
+            <span className="text-muted-foreground">VRAM</span>
+            <span className="truncate tabular-nums">
+              {formatMB(vramUsed)} / {formatMB(vramTotal)}
+            </span>
           </div>
+          <UsageBar value={vramPercent} colorClass="bg-blue-500" />
         </div>
       </div>
+    </li>
+  );
+}
 
-      <div className="flex gap-4 mt-1 text-xs text-gray-500">
-        <span>Temp: {gpuData.temperature_c}°C</span>
-        <span>Power: {gpuData.power_watts}W</span>
-      </div>
-    </div>
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function GPUMonitoringWidget({ widgetId, serverId }: { widgetId: string; serverId: string }) {
+  const { data, isLoading, error, refresh } = useWidgetData(widgetId, 10);
+
+  if (isLoading) return <WidgetLoading label="Loading GPU info…" />;
+  if (error) return <WidgetError error={error} onRetry={refresh} />;
+  if ((data as { source?: string } | null)?.source === 'placeholder') return <WidgetPlaceholder />;
+
+  const gpus = toGpuList(data);
+  if (gpus.length === 0) return <WidgetEmpty>No GPU detected</WidgetEmpty>;
+
+  return (
+    <ul className="grid grid-cols-1 gap-2 @2xl:grid-cols-2 @5xl:grid-cols-3">
+      {gpus.map((gpu, i) => (
+        <GPURow key={`${gpu.index ?? i}-${gpu.name}`} gpu={gpu} index={i} multi={gpus.length > 1} />
+      ))}
+    </ul>
   );
 }
