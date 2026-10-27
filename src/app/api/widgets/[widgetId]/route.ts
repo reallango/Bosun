@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireRole } from '@/lib/auth/middleware';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
+import { COMMAND_CHANGE_FORBIDDEN, mayChangeCommand, replacesCommand } from '@/lib/auth/widget-policy';
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ widgetId: string }> }) {
   const auth = await requireAuth(request);
@@ -21,13 +22,23 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ widgetId: string }> }) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
-  const roleError = requireRole(auth as any, 'operator');
+  const roleError = requireRole(auth, 'operator');
   if (roleError) return roleError;
   const { widgetId } = await params;
   try {
     const { config, title_override, grid_x, grid_y, grid_w, grid_h } = await request.json();
     const u: string[]=[]; const v: any[]=[];
-    if (config!==undefined) { u.push('config=?'); v.push(JSON.stringify(config)); }
+    if (config!==undefined) {
+      if (!mayChangeCommand(auth.role)) {
+        const cur = await rqlite.query('SELECT config FROM widgets WHERE id=?', [widgetId]);
+        let existing: unknown = {};
+        try { existing = JSON.parse(String(cur.values?.[0]?.[0] || '{}')); } catch { existing = {}; }
+        if (replacesCommand(existing, config)) {
+          return NextResponse.json({ error: { message: COMMAND_CHANGE_FORBIDDEN, code: 'FORBIDDEN' } }, { status: 403 });
+        }
+      }
+      u.push('config=?'); v.push(JSON.stringify(config));
+    }
     if (title_override!==undefined) { u.push('title_override=?'); v.push(title_override); }
     if (grid_x!==undefined) { u.push('grid_x=?'); v.push(grid_x); }
     if (grid_y!==undefined) { u.push('grid_y=?'); v.push(grid_y); }
@@ -46,7 +57,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ widgetId: string }> }) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
-  const roleError = requireRole(auth as any, 'operator');
+  const roleError = requireRole(auth, 'operator');
   if (roleError) return roleError;
   const { widgetId } = await params;
   try {

@@ -6,8 +6,6 @@ import { randomUUID } from 'crypto';
 export async function GET(request: NextRequest) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
-  const user = auth as any;
-
   try {
     const { searchParams } = new URL(request.url);
     const unreadOnly = searchParams.get('unread') === 'true';
@@ -15,12 +13,7 @@ export async function GET(request: NextRequest) {
     let query = 'SELECT * FROM notifications WHERE 1=1';
     const params: any[] = [];
     
-    // Filter by user if not admin
-    if (user.role !== 'admin') {
-      query += ' AND (user_id = ? OR user_id IS NULL)';
-      params.push(user.id);
-    }
-    
+    // Notifications are global (the table has no per-user column).
     if (unreadOnly) {
       query += ' AND is_read = 0';
     }

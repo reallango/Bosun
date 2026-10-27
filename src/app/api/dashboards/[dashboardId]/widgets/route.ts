@@ -3,6 +3,7 @@ import { findFreeSpot } from '@/lib/widgets/placement';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireRole } from '@/lib/auth/middleware';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
+import { COMMAND_CHANGE_FORBIDDEN, changesCommand, mayChangeCommand } from '@/lib/auth/widget-policy';
 import { resolveWidgetDefinition, supportsPlatform } from '@/components/widgets/registry-loader';
 import crypto from 'crypto';
 
@@ -27,7 +28,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ dashboardId: string }> }) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
-  const roleError = requireRole(auth as any, 'operator');
+  const roleError = requireRole(auth, 'operator');
   if (roleError) return roleError;
   const { dashboardId } = await params;
   try {
@@ -49,8 +50,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       }
     }
     // Seed config from the definition's field defaults; explicit values win.
+    const defaults = Object.fromEntries((def.configSchema || []).filter(f => f.default !== undefined).map(f => [f.key, f.default]));
+    // Operators may add a Custom Command widget, but only with its default command.
+    if (changesCommand(defaults, config) && !mayChangeCommand(auth.role)) {
+      return NextResponse.json({ error: { message: COMMAND_CHANGE_FORBIDDEN, code: 'FORBIDDEN' } }, { status: 403 });
+    }
     const initialConfig = {
-      ...Object.fromEntries((def.configSchema || []).filter(f => f.default !== undefined).map(f => [f.key, f.default])),
+      ...defaults,
       ...(config && typeof config === 'object' ? config : {}),
     };
     const wid = crypto.randomUUID();

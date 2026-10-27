@@ -7,13 +7,13 @@ import { logAudit, AuditActions } from '@/lib/audit/logger';
 import { ok, fail, failFrom } from '@/lib/api/response';
 
 /**
- * Delete a model. Admin only. Body: { name, confirm: true } (the UI asks the
+ * Delete a model. Read + actions (operator) or higher. Body: { name, confirm: true } (the UI asks the
  * user to type the model name before sending confirm).
  */
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ serverId: string }> }) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
-  const roleError = requireRole(auth, 'admin');
+  const roleError = requireRole(auth, 'operator');
   if (roleError) return roleError;
   const { serverId } = await params;
   let body: { name?: unknown; confirm?: unknown };

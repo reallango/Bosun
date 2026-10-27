@@ -7,13 +7,13 @@ import { ok, fail, failFrom } from '@/lib/api/response';
 
 /**
  * Run an ad-hoc command as the server's service account (custom command
- * widget). Operator or admin; rate limited and audited. Windows hosts run it
+ * widget). Full access (admin) only; rate limited and audited. Windows hosts run it
  * as PowerShell.
  */
 export async function POST(request: NextRequest, { params }: { params: Promise<{ serverId: string }> }) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
-  const roleError = requireRole(auth, 'operator');
+  const roleError = requireRole(auth, 'admin');
   if (roleError) return roleError;
   const { serverId } = await params;
 
