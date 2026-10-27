@@ -1,5 +1,5 @@
 import { SSHConnectionPool, SSHConnectionConfig, CommandResult } from './connection-pool';
-import { powershellCommand } from '../windows/collectors';
+import { powershellCommand } from '../collect/windows';
 
 /**
  * Platform branching helpers.
@@ -9,7 +9,7 @@ import { powershellCommand } from '../windows/collectors';
  * the OpenSSH server. This module is the single place that decides which of the
  * two a given server needs.
  *
- * The PowerShell quoting itself lives in the shared `windows/collectors`
+ * The PowerShell encoding itself lives in the shared `collect/windows`
  * module (the poller, which cannot import TypeScript, needs it too), so there
  * is exactly one quoter.
  */

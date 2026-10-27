@@ -5,7 +5,7 @@ import { rqlite } from '@/lib/db/rqlite-client';
 import { Client } from 'ssh2';
 import { encrypt } from '@/lib/crypto/keys';
 import { generateSSHKeyPair } from '@/lib/ssh/keygen';
-import { powershellCommand } from '@/lib/windows/collectors';
+import { powershellCommand } from '@/lib/collect/windows';
 import crypto from 'crypto';
 
 interface SshAuth {
