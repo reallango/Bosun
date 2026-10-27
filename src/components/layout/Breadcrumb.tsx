@@ -9,6 +9,9 @@ interface BreadcrumbItem {
   href: string;
 }
 
+// Path prefixes that have no index page of their own.
+const NON_ROUTES = new Set(['/servers', '/dashboards']);
+
 const ID_LIKE = /^[0-9a-f-]{16,}$/i;
 
 function labelFor(part: string) {
@@ -28,7 +31,7 @@ export function Breadcrumb({ currentLabel }: { currentLabel?: string }) {
   }
   if (currentLabel && items.length > 1) items[items.length - 1].label = currentLabel;
   // Only show ancestors; the page title already names the current page.
-  const trail = items.slice(0, -1);
+  const trail = items.slice(0, -1).filter(item => !NON_ROUTES.has(item.href));
   if (trail.length === 0) return null;
 
   return (
