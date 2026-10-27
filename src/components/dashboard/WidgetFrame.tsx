@@ -30,6 +30,8 @@ import { cn } from '@/lib/utils';
 import { RefreshHandler, WidgetFrameContext } from './widget-context';
 import { customWidgetComponents } from '@/components/widgets/custom-registry';
 import { WidgetLoading } from '@/components/widgets/WidgetLoading';
+import { useAuth } from '@/hooks/useAuth';
+import { hasRole } from '@/lib/auth/levels';
 
 // xterm and its addons are ~390 kB of JS. Loading the terminal lazily keeps
 // them out of every dashboard route's first load; the chunk is fetched only
@@ -48,6 +50,20 @@ interface WidgetFrameProps {
   editable?: boolean;
   onRemoved?: () => void;
   onRefresh?: () => void;
+}
+
+function TerminalLocked() {
+  return (
+    <div className="flex h-full items-center justify-center p-4 text-center text-sm text-muted-foreground">
+      Terminals need Full access. Ask an admin if you need a shell on this server.
+    </div>
+  );
+}
+
+function SSHTerminalGate({ widgetId, serverId }: { widgetId: string; serverId: string }) {
+  const { user } = useAuth();
+  if (!hasRole(user?.role, 'admin')) return <TerminalLocked />;
+  return <SSHTerminalGate widgetId={widgetId} serverId={serverId} />;
 }
 
 function WidgetContent({ widgetId, widgetType, serverId, serverName }: { widgetId: string; widgetType: string; serverId: string; serverName?: string }) {
@@ -105,6 +121,9 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName,
   const [refreshing, setRefreshing] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const { user } = useAuth();
+  // Settings and removal edit the dashboard: Read + actions or higher.
+  const canEdit = hasRole(user?.role, 'operator');
 
   // Refresh handlers registered by the widget inside (via useWidgetData).
   const handlers = useRef(new Set<RefreshHandler>());
@@ -204,6 +223,8 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName,
               <RefreshCw />
               Refresh
             </DropdownMenuItem>
+            {canEdit && (
+              <>
             <DropdownMenuItem onSelect={() => setSettingsOpen(true)}>
               <Settings2 />
               Settings
@@ -213,6 +234,8 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName,
               <Trash2 />
               {removing ? 'Removing…' : 'Remove'}
             </DropdownMenuItem>
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       </header>

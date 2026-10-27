@@ -5,6 +5,7 @@ import { Dialog } from 'radix-ui';
 import { Play, Square, RotateCw, TerminalSquare, ScrollText, Search, X, Loader2 } from 'lucide-react';
 import { useWidgetData } from '@/hooks/useWidgetData';
 import { useAuth } from '@/hooks/useAuth';
+import { hasRole } from '@/lib/auth/levels';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { WidgetLoading } from '@/components/widgets/WidgetLoading';
 import { WidgetError } from '@/components/widgets/WidgetError';
@@ -52,8 +53,9 @@ interface Props {
 export function DockerContainersWidget({ widgetId, serverId }: Props) {
   const { data, isLoading, error, refresh } = useWidgetData(widgetId, 15);
   const { user } = useAuth();
-  const isAdmin = user?.role === 'admin';
-  const canLogs = isAdmin || user?.role === 'operator';
+  // Read + actions: logs and start/stop/restart. Shells need Full access.
+  const canAct = hasRole(user?.role, 'operator');
+  const canShell = hasRole(user?.role, 'admin');
   const [query, setQuery] = useState('');
   const [showStopped, setShowStopped] = useState(true);
   const [pending, setPending] = useState<{ c: Container; action: Action } | null>(null);
@@ -148,17 +150,17 @@ export function DockerContainersWidget({ widgetId, serverId }: Props) {
             </div>
             <div className="flex shrink-0 items-center gap-0.5">
               {busy === c.id && <Loader2 className="size-4 animate-spin text-gray-400" aria-label="Working" />}
-              {canLogs && (
+              {canAct && (
                 <IconBtn label={`Logs for ${c.name}`} onClick={() => openLogs(c)}><ScrollText /></IconBtn>
               )}
-              {isAdmin && c.state === 'running' && (
+              {canAct && c.state === 'running' && (
                 <>
-                  <IconBtn label={`Shell in ${c.name}`} onClick={() => setShellFor(c)}><TerminalSquare /></IconBtn>
+                  {canShell && <IconBtn label={`Shell in ${c.name}`} onClick={() => setShellFor(c)}><TerminalSquare /></IconBtn>}
                   <IconBtn label={`Restart ${c.name}`} onClick={() => setPending({ c, action: 'restart' })} disabled={!!busy}><RotateCw /></IconBtn>
                   <IconBtn label={`Stop ${c.name}`} onClick={() => setPending({ c, action: 'stop' })} disabled={!!busy} danger><Square /></IconBtn>
                 </>
               )}
-              {isAdmin && c.state !== 'running' && (
+              {canAct && c.state !== 'running' && (
                 <IconBtn label={`Start ${c.name}`} onClick={() => setPending({ c, action: 'start' })} disabled={!!busy}><Play /></IconBtn>
               )}
             </div>

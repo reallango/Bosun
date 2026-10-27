@@ -15,6 +15,7 @@ import { cn } from '@/lib/utils';
 import { NotificationBell } from './NotificationBell';
 import { Breadcrumb } from './Breadcrumb';
 import { useShell } from './ShellContext';
+import { roleLabel } from '@/lib/auth/levels';
 
 interface HeaderProps {
   title: string;
@@ -98,7 +99,7 @@ export default function Header({ title, currentLabel }: HeaderProps) {
             <DropdownMenuContent className="w-56">
               <DropdownMenuLabel className="text-foreground">
                 <div className="truncate text-sm font-medium">{user?.username ?? 'Signed in'}</div>
-                {user?.role && <div className="text-xs font-normal capitalize text-muted-foreground">{user.role}</div>}
+                {user?.role && <div className="text-xs font-normal text-muted-foreground">{roleLabel(user.role)}</div>}
               </DropdownMenuLabel>
               <DropdownMenuSeparator />
               <DropdownMenuLabel>Theme</DropdownMenuLabel>
