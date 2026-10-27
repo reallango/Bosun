@@ -2,6 +2,7 @@ import fs from 'fs';
 import os from 'os';
 import { rqlite } from '@/lib/db/rqlite-client';
 import { getConfig, setConfig } from '@/lib/db/migrations';
+import { effectiveClusterConfig } from '@/lib/cluster/config';
 
 /**
  * Which managed server is this Bosun node's container running on?
@@ -18,7 +19,9 @@ import { getConfig, setConfig } from '@/lib/db/migrations';
  */
 
 export function nodeName(): string {
-  return (process.env.NODE_NAME || os.hostname()).trim();
+  // The rqlite node id (UI cluster settings over NODE_NAME), so WoL mappings
+  // follow the node even when its id was set from the UI.
+  return String(effectiveClusterConfig().node_id || os.hostname()).trim();
 }
 
 function mappingKey(node = nodeName()): string {
