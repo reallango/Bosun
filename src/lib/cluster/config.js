@@ -74,7 +74,8 @@ function effectiveClusterConfig(env = process.env) {
     raft_addr: `${advHost.value}:${RAFT_PORT}`,
     join: join.value,
     join_source: join.source,
-    bootstrap_expect: f.bootstrap_expect || env.RQLITE_BOOTSTRAP_EXPECT || null,
+    // Only for env-configured clusters formed together; UI joins never bootstrap.
+    bootstrap_expect: join.source === 'env' ? env.RQLITE_BOOTSTRAP_EXPECT || null : null,
     pending: f.pending || null,
     /** Reachable by other machines (not just this container)? */
     cluster_ready: advHost.value !== 'localhost' && advHost.value !== '127.0.0.1',
