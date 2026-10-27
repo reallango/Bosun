@@ -1,7 +1,20 @@
 import { SignJWT, jwtVerify, JWTPayload } from 'jose';
 import crypto from 'crypto';
 
-const secret = new TextEncoder().encode(process.env.AUTH_SECRET || 'fallback-secret-change-me');
+const DEV_FALLBACK_SECRET = 'fallback-secret-change-me';
+
+/**
+ * JWT signing key. Production refuses to sign or verify with the well-known
+ * development fallback (anyone could forge tokens with it).
+ */
+export function authSecret(): Uint8Array {
+  const value = process.env.AUTH_SECRET;
+  if (!value) {
+    if (process.env.NODE_ENV === 'production') throw new Error('AUTH_SECRET is not set');
+    return new TextEncoder().encode(DEV_FALLBACK_SECRET);
+  }
+  return new TextEncoder().encode(value);
+}
 
 export interface TokenPayload extends JWTPayload {
   userId: string;
@@ -14,12 +27,12 @@ export async function createAccessToken(userId: string, username: string, role: 
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime('15m')
-    .sign(secret);
+    .sign(authSecret());
 }
 
 export async function verifyAccessToken(token: string): Promise<TokenPayload | null> {
   try {
-    const { payload } = await jwtVerify(token, secret);
+    const { payload } = await jwtVerify(token, authSecret());
     return payload as TokenPayload;
   } catch {
     return null;

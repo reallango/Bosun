@@ -8,6 +8,10 @@ const { Client } = require('ssh2');
 
 const PORT = process.env.WS_PORT || 3002;
 const AUTH_SECRET = process.env.AUTH_SECRET || 'fallback-secret-change-me';
+if (!process.env.AUTH_SECRET && process.env.NODE_ENV === 'production') {
+  console.error('[WS] AUTH_SECRET is not set; refusing to start with the development fallback.');
+  process.exit(1);
+}
 const RQLITE_HOST = process.env.RQLITE_HOST || '127.0.0.1:4001';
 
 // WebSocket path for terminal (Cloudflare-compatible)
