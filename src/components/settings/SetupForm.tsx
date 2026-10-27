@@ -50,7 +50,7 @@ export default function SetupForm() {
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
           {error && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded-md text-red-600 text-sm">
+            <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
               {error}
             </div>
           )}
@@ -82,7 +82,7 @@ export default function SetupForm() {
               onChange={(e) => setEmail(e.target.value)}
             />
           </div>
-          <Button type="submit" className="w-full" disabled={loading}>
+          <Button type="submit" size="lg" className="w-full" disabled={loading}>
             {loading ? 'Setting up...' : 'Complete Setup'}
           </Button>
         </form>
