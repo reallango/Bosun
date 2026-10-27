@@ -81,18 +81,33 @@ export class RqliteClient {
     }
 
 
-    async executeBatch(statements: { sql: string; params?: any[] }[]): Promise<ExecuteResult[]> {
+    /**
+     * Execute several statements in one request. With `transaction: true`
+     * rqlite applies them atomically (all or nothing). Throws if any
+     * statement reports an error.
+     */
+    async executeBatch(
+        statements: { sql: string; params?: any[] }[],
+        options: { transaction?: boolean } = {},
+    ): Promise<ExecuteResult[]> {
+        if (statements.length === 0) return [];
         // rqlite expects: [[sql1, p1], [sql2, p2], ...]
         const body = statements.map(s =>
             s.params && s.params.length > 0 ? [s.sql, ...s.params] : [s.sql]
         );
-        const res = await fetch(`${this.baseUrl}/db/execute`, {
+        const qs = options.transaction ? '?transaction' : '';
+        const res = await fetch(`${this.baseUrl}/db/execute${qs}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
         });
         if (!res.ok) throw new Error(`rqlite batch failed: ${res.status}`);
         const json = await res.json();
+        if (json.error) throw new Error(`rqlite batch error: ${json.error}`);
+        const failed = (json.results || []).findIndex((r: any) => r?.error);
+        if (failed >= 0) {
+            throw new Error(`rqlite batch error in statement ${failed + 1}: ${json.results[failed].error}`);
+        }
         return (json.results || []).map((r: any) => ({
             last_insert_id: r?.last_insert_id || '',
             rows_affected: r?.rows_affected || 0,

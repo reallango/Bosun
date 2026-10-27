@@ -40,7 +40,10 @@ export async function POST(request: NextRequest) {
     const serverId = crypto.randomUUID();
     const now = new Date().toISOString();
     const platformValue = platform === 'windows' ? 'windows' : 'linux';
-    await rqlite.execute("INSERT INTO servers (id,name,hostname,ssh_port,ssh_user,ssh_key_id,notes,tags,platform,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)", [serverId, name, hostname, ssh_port||22, ssh_user, ssh_key_id||null, notes||null, JSON.stringify(tags||[]), platformValue, now, now]);
+    // Windows runs PowerShell per poll, which costs more than a sh script; poll it less often.
+    const configured = Number((await rqlite.query("SELECT value FROM app_config WHERE key = 'poller.default_interval_sec'")).values?.[0]?.[0]) || 15;
+    const pollInterval = platformValue === 'windows' ? Math.max(30, configured) : configured;
+    await rqlite.execute("INSERT INTO servers (id,name,hostname,ssh_port,ssh_user,ssh_key_id,notes,tags,platform,poll_interval_sec,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)", [serverId, name, hostname, ssh_port||22, ssh_user, ssh_key_id||null, notes||null, JSON.stringify(tags||[]), platformValue, pollInterval, now, now]);
     await rqlite.execute("INSERT INTO dashboards (id,name,type,server_id,sort_order,created_at,updated_at) VALUES (?,?,'server',?,(SELECT COALESCE(MAX(sort_order),0)+1 FROM dashboards WHERE type='server'),?,?)", [crypto.randomUUID(), name, serverId, now, now]);
     await logAudit({ userId: payload.userId, serverId, action: AuditActions.SERVER_CREATE, status: 'success' });
     return NextResponse.json({ data: { id: serverId, name, hostname } }, { status: 201 });

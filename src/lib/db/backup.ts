@@ -40,12 +40,13 @@ export const BACKUP_TABLES: string[] = [
   'users',
   'sessions',
   'audit_log',
-  'widget_polling_config',
-  'widget_data_cache',
+  'host_snapshots',
+  'metric_rollups',
+  'metric_samples',
 ];
 
 // Tables excluded by default because they can grow very large.
-export const LARGE_TABLES: string[] = ['widget_data_cache', 'audit_log'];
+export const LARGE_TABLES: string[] = ['metric_samples', 'metric_rollups', 'host_snapshots', 'audit_log'];
 
 // Columns that hold encrypted credentials. Redacted by default in JSON exports.
 const SECRET_COLUMNS = ['private_key_enc', 'passphrase_enc', 'password_hash', 'totp_secret'];
@@ -119,7 +120,7 @@ function buildMeta(
 ): BackupMeta {
   const schemaVersion = migrationIds.length
     ? migrationIds[migrationIds.length - 1]
-    : SCHEMA_VERSION;
+    : String(SCHEMA_VERSION);
   return {
     format,
     formatVersion: BACKUP_FORMAT_VERSION,
