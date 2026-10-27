@@ -1,4 +1,5 @@
 // src/app/api/servers/provision/route.ts
+import { getMasterKey } from '@/lib/secrets';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireRole } from '@/lib/auth/middleware';
 import { rqlite } from '@/lib/db/rqlite-client';
@@ -284,7 +285,7 @@ export async function POST(request: NextRequest) {
         // Step 2: Generate and store the SSH key pair
         const keyName = `${hostname}-${service_account}`;
         const { privateKey, publicKey, fingerprint } = generateSSHKeyPair(keyName, 'ed25519');
-        const encryptedPrivateKey = encrypt(privateKey, process.env.MASTER_KEY || '');
+        const encryptedPrivateKey = encrypt(privateKey, getMasterKey());
 
         const keyId = crypto.randomUUID();
         const now = new Date().toISOString();

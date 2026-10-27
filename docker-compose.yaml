@@ -8,9 +8,9 @@ services:
       - NODE_NAME=${NODE_NAME:-server-a}
       - RQLITE_JOIN=${RQLITE_JOIN:-}
       - COOKIE_SECURE=${COOKIE_SECURE:-false}
-      # Both are required; generate with: openssl rand -base64 48
-      - MASTER_KEY=${MASTER_KEY:?set MASTER_KEY}
-      - AUTH_SECRET=${AUTH_SECRET:?set AUTH_SECRET}
+      # Optional: if unset, Bosun generates both and keeps them in the data volume.
+      - MASTER_KEY=${MASTER_KEY:-}
+      - AUTH_SECRET=${AUTH_SECRET:-}
       - WS_PORT=3002
       - APP_URL=${APP_URL:-http://localhost:3042}
     volumes:

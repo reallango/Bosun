@@ -1,3 +1,4 @@
+import { getMasterKey } from '@/lib/secrets';
 import { internalError } from '@/lib/api/response';
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyAccessToken } from '@/lib/auth/jwt';
@@ -20,7 +21,7 @@ export async function POST(request: NextRequest) {
     // Generate key using ssh-keygen (produces OpenSSH format)
     const { privateKey, publicKey, fingerprint } = generateSSHKeyPair(keyName, 'ed25519');
 
-    const mk = process.env.MASTER_KEY || '';
+    const mk = getMasterKey();
     const enc = encrypt(privateKey, mk);
 
     const id = crypto.randomUUID();

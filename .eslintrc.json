@@ -7,7 +7,7 @@
   },
   "overrides": [
     {
-      "files": ["src/lib/collect/**/*.js"],
+      "files": ["src/lib/collect/**/*.js", "src/lib/secrets.js"],
       "rules": { "@typescript-eslint/no-require-imports": "off" }
     }
   ]

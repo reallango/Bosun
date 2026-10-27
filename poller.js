@@ -22,7 +22,7 @@
  *
  * Environment:
  *   RQLITE_HOST          rqlite address (default 127.0.0.1:4001)
- *   MASTER_KEY           key used to decrypt stored SSH private keys (required)
+ *   MASTER_KEY           decrypts stored SSH keys (env, else the data-volume secrets file)
  *   POLLER_HEALTH_PORT   health endpoint port (default 3003)
  *   POLLER_MAX_PARALLEL  hosts polled concurrently (default 8)
  */
@@ -35,7 +35,7 @@ const store = require('./src/lib/collect/store');
 const alerts = require('./src/lib/collect/alerts');
 
 const RQLITE_HOST = process.env.RQLITE_HOST || '127.0.0.1:4001';
-const MASTER_KEY = process.env.MASTER_KEY || '';
+const { getMasterKey } = require('./src/lib/secrets');
 const HEALTH_PORT = parseInt(process.env.POLLER_HEALTH_PORT, 10) || 3003;
 const MAX_PARALLEL = parseInt(process.env.POLLER_MAX_PARALLEL, 10) || 8;
 const TICK_MS = 1000;
@@ -181,8 +181,8 @@ class HostAgent {
       if (!this.row.ssh_key_id) throw new Error('no SSH key assigned');
       const keys = await query('SELECT private_key_enc, passphrase_enc FROM ssh_keys WHERE id = ?', [this.row.ssh_key_id]);
       if (!keys.length) throw new Error('SSH key not found');
-      const privateKey = ssh.decryptSecret(keys[0].private_key_enc, MASTER_KEY);
-      const passphrase = keys[0].passphrase_enc ? ssh.decryptSecret(keys[0].passphrase_enc, MASTER_KEY) : undefined;
+      const privateKey = ssh.decryptSecret(keys[0].private_key_enc, getMasterKey());
+      const passphrase = keys[0].passphrase_enc ? ssh.decryptSecret(keys[0].passphrase_enc, getMasterKey()) : undefined;
       const client = await ssh.connect({
         host: this.row.hostname,
         port: this.row.ssh_port || 22,
@@ -454,8 +454,8 @@ function startHealthServer() {
 }
 
 async function main() {
-  if (!MASTER_KEY) {
-    console.error('[Poller] MASTER_KEY is not set; cannot decrypt SSH keys. Exiting.');
+  if (!getMasterKey()) {
+    console.error('[Poller] no MASTER_KEY (env or secrets file); cannot decrypt SSH keys. Exiting.');
     process.exit(1);
   }
   log('starting; rqlite at', RQLITE_HOST);

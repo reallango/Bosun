@@ -1,3 +1,4 @@
+import { getMasterKey } from '@/lib/secrets';
 import { internalError } from '@/lib/api/response';
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyAccessToken } from '@/lib/auth/jwt';
@@ -41,7 +42,7 @@ export async function POST(request: NextRequest) {
     if (!payload) return NextResponse.json({ error: { message: 'Invalid token' } }, { status: 401 });
     const { name, public_key, private_key, passphrase } = await request.json();
     if (!name||!public_key||!private_key) return NextResponse.json({ error: { message: 'name, public_key, private_key required' } }, { status: 400 });
-    const mk = process.env.MASTER_KEY || '';
+    const mk = getMasterKey();
     const enc = encrypt(private_key, mk);
     const ppEnc = passphrase ? encrypt(passphrase, mk) : null;
     const fp = generateFingerprint(public_key);

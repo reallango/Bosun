@@ -1,3 +1,4 @@
+import { getMasterKey } from '@/lib/secrets';
 import { internalError } from '@/lib/api/response';
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyAccessToken } from '@/lib/auth/jwt';
@@ -19,7 +20,7 @@ export async function POST(request: NextRequest, { params }: { params: { serverI
     if (!s.ssh_key_id) return NextResponse.json({ error: { message: 'No SSH key assigned' } }, { status: 400 });
     const keyR = await rqlite.query('SELECT private_key_enc FROM ssh_keys WHERE id=?', [s.ssh_key_id]);
     if (!keyR.values?.length) return NextResponse.json({ error: { message: 'Key not found' } }, { status: 404 });
-    const pk = decrypt(keyR.values[0][0] as string, process.env.MASTER_KEY || '');
+    const pk = decrypt(keyR.values[0][0] as string, getMasterKey());
     const cfg: SSHConnectionConfig = { host: s.hostname, port: s.ssh_port||22, username: s.ssh_user, privateKey: pk };
     const t0 = Date.now();
     const res = await sshPool.executeCommand(serverId, cfg, 'echo ok');

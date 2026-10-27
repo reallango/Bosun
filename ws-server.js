@@ -7,9 +7,11 @@ const crypto = require('crypto');
 const { Client } = require('ssh2');
 
 const PORT = process.env.WS_PORT || 3002;
-const AUTH_SECRET = process.env.AUTH_SECRET || 'fallback-secret-change-me';
-if (!process.env.AUTH_SECRET && process.env.NODE_ENV === 'production') {
-  console.error('[WS] AUTH_SECRET is not set; refusing to start with the development fallback.');
+const { getAuthSecret } = require('./src/lib/secrets');
+// Signing secret: env AUTH_SECRET, else the data-volume secrets file (re-read
+// when it changes, e.g. after this node joins a cluster).
+if (!getAuthSecret()) {
+  console.error('[WS] no AUTH_SECRET (env or secrets file); refusing to start.');
   process.exit(1);
 }
 const RQLITE_HOST = process.env.RQLITE_HOST || '127.0.0.1:4001';
@@ -155,7 +157,7 @@ function verifyToken(token) {
     if (parts.length !== 3) return null;
     const header = JSON.parse(Buffer.from(parts[0], 'base64url').toString());
     if (header.alg !== 'HS256') return null;
-    const expected = crypto.createHmac('sha256', AUTH_SECRET).update(parts[0] + '.' + parts[1]).digest();
+    const expected = crypto.createHmac('sha256', getAuthSecret()).update(parts[0] + '.' + parts[1]).digest();
     const actual = Buffer.from(parts[2], 'base64url');
     if (actual.length !== expected.length || !crypto.timingSafeEqual(actual, expected)) return null;
     const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString());

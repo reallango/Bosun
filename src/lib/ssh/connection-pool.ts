@@ -1,3 +1,4 @@
+import { getMasterKey } from '@/lib/secrets';
 import type { Client } from 'ssh2';
 import { rqlite } from '@/lib/db/rqlite-client';
 import { decrypt } from '@/lib/crypto/keys';
@@ -163,7 +164,7 @@ export async function loadServerTarget(serverId: string): Promise<ServerTarget> 
   if (!row) throw Object.assign(new Error('Server not found'), { status: 404 });
   const [id, name, hostname, port, user, platform, keyEnc, passEnc] = row as (string | number | null)[];
   if (!keyEnc) throw Object.assign(new Error('No SSH key assigned to this server'), { status: 400 });
-  const masterKey = process.env.MASTER_KEY || '';
+  const masterKey = getMasterKey();
   return {
     id: String(id),
     name: String(name),
