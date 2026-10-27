@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireRole } from '@/lib/auth/middleware';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
+import { resolveWidgetDefinition } from '@/components/widgets/registry-loader';
 
 /**
  * Widget settings. Polling is per server (one batched collection per host),
@@ -19,10 +20,16 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       [widgetId]);
     const widget = rowsToObjects(r)[0];
     if (!widget) return NextResponse.json({ error: { message: 'Widget not found' } }, { status: 404 });
+    const def = await resolveWidgetDefinition(String(widget.widget_type));
+    let config: unknown = {};
+    try { config = typeof widget.config === 'string' ? JSON.parse(widget.config || '{}') : widget.config || {}; } catch { config = {}; }
     return NextResponse.json({
       data: {
         ...widget,
         enabled: widget.poll_enabled,
+        config,
+        // Fields the settings dialog renders into widgets.config.
+        config_schema: def?.configSchema || [],
         storage_mode: 'server',
         ttl_sec: null,
         display_name: widget.title_override,
@@ -55,9 +62,15 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     if (name !== undefined) { sets.push('title_override = ?'); values.push(name ? String(name).slice(0, 100) : null); }
     if (grid_w !== undefined) { sets.push('grid_w = ?'); values.push(Math.max(1, Math.min(48, Number(grid_w) || 4))); }
     if (grid_h !== undefined) { sets.push('grid_h = ?'); values.push(Math.max(1, Math.min(48, Number(grid_h) || 3))); }
-    if (config !== undefined && typeof config === 'object' && config !== null) {
+    if (config !== undefined && typeof config === 'object' && config !== null && !Array.isArray(config)) {
+      // Merge so the dialog (schema fields) and widgets that keep their own
+      // state in config (e.g. Metrics History) do not overwrite each other.
+      let existing: Record<string, unknown> = {};
+      try { existing = JSON.parse(String(widget.config || '{}')) || {}; } catch { existing = {}; }
+      const merged = { ...existing, ...config };
+      if (JSON.stringify(merged).length > 16 * 1024) return NextResponse.json({ error: { message: 'Widget config too large' } }, { status: 400 });
       sets.push('config = ?');
-      values.push(JSON.stringify(config));
+      values.push(JSON.stringify(merged));
     }
     if (sets.length) {
       sets.push('updated_at = CURRENT_TIMESTAMP');

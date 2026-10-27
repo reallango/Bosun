@@ -1,7 +1,21 @@
 import type { WidgetLayouts } from './dashboard';
 
-export type WidgetCategory = 'system' | 'docker' | 'gpu' | 'ai' | 'network' | 'utility' | 'advanced';
+export type WidgetCategory = 'system' | 'docker' | 'gpu' | 'ai' | 'network' | 'utility' | 'advanced' | 'custom';
 export type WidgetStorageMode = 'latest_ttl' | 'change_only';
+
+/** Field types a widget can declare in its config schema. */
+export type WidgetConfigFieldType = 'string' | 'number' | 'boolean' | 'select';
+
+/** One setting rendered in the widget settings dialog, stored in widgets.config. */
+export interface WidgetConfigField {
+  key: string;
+  label: string;
+  type: WidgetConfigFieldType;
+  description?: string;
+  placeholder?: string;
+  default?: string | number | boolean;
+  options?: string[];
+}
 
 export interface WidgetDefinition {
   type: string;
@@ -19,6 +33,13 @@ export interface WidgetDefinition {
   defaultPollInterval?: number;  // seconds
   defaultTTL?: number;        // seconds
   storageMode?: WidgetStorageMode;
+  /** Database-defined (custom_widgets) rather than compiled into the registry. */
+  isCustom?: boolean;
+  /** Platform support; both default to true. */
+  supportsLinux?: boolean;
+  supportsWindows?: boolean;
+  /** Declarative settings rendered in the widget settings dialog. */
+  configSchema?: WidgetConfigField[];
 }
 
 export interface Widget {

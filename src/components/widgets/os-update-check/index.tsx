@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { ChevronDown, ChevronUp, CircleCheck, Package, RotateCcw, ShieldAlert, TriangleAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
+import { readJson } from '@/lib/api/readJson';
 import { useWidgetFrame } from '@/components/dashboard/widget-context';
 import { cn } from '@/lib/utils';
 
@@ -27,6 +28,28 @@ interface OSUpdateData {
   last_checked: string;
   os_type: string;
 }
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/**
+ * The poller stores camelCase fields (updatesAvailable, securityUpdates,
+ * rebootRequired, packages[]) and the route reports collectedAt; map them to
+ * the view model. Package entries may also be bare names.
+ */
+function normalize(raw: any, collectedAt: string | null): OSUpdateData {
+  const pkgs: any[] = Array.isArray(raw?.packages) ? raw.packages : [];
+  const packages: Package[] = pkgs.map(p => typeof p === 'string'
+    ? { name: p, current_version: '', new_version: '', is_security: false }
+    : { name: String(p.name ?? ''), current_version: p.current_version ?? '', new_version: p.new_version ?? '', is_security: !!p.is_security });
+  return {
+    updates_available: Number(raw?.updatesAvailable ?? raw?.updates_available ?? packages.length) || 0,
+    security_updates: Number(raw?.securityUpdates ?? raw?.security_updates ?? packages.filter(p => p.is_security).length) || 0,
+    packages,
+    reboot_required: !!(raw?.rebootRequired ?? raw?.reboot_required),
+    last_checked: collectedAt || raw?.lastCheck || raw?.last_checked || '',
+    os_type: raw?.manager || '',
+  };
+}
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 function timeAgo(dateString: string): string {
   const diff = Date.now() - new Date(dateString).getTime();
@@ -54,15 +77,19 @@ export function OSUpdateCheckWidget({ widgetId, serverId }: OSUpdateCheckWidgetP
     setLoading(true);
     setError(null);
     try {
-      const res = await fetchWithAuth(`/api/widgets/${widgetId}/data${force ? '?force=true' : ''}`);
-      const json = await res.json();
-      if (json.data) {
-        setData(json.data);
-      } else if (json.error) {
+      // force=updates asks the poller to run the (normally 6-hourly) check now.
+      const res = await fetchWithAuth(`/api/widgets/${widgetId}/data${force ? '?force=updates' : ''}`);
+      const json = await readJson<{ data?: unknown; collectedAt?: string | null; error?: { message?: string } }>(res);
+      if (json.error) {
         setError(json.error.message || 'Failed to check for updates');
+      } else if (json.data) {
+        setData(normalize(json.data, json.collectedAt ?? null));
+      } else if (force) {
+        // Nothing collected yet; the poller runs the check within a few seconds.
+        setTimeout(() => checkForUpdates(false), 15000);
       }
-    } catch {
-      setError('Failed to check for updates');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to check for updates');
     } finally {
       setLoading(false);
     }
@@ -89,7 +116,7 @@ export function OSUpdateCheckWidget({ widgetId, serverId }: OSUpdateCheckWidgetP
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'install' }),
       });
-      const json = await res.json();
+      const json = await readJson<{ data?: { success?: boolean; message?: string }; error?: { message?: string } }>(res);
       if (json.data?.success) {
         setInstallResult(json.data.message || 'Updates installed successfully');
         setData(null);

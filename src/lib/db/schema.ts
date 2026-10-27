@@ -12,11 +12,14 @@ export interface DBServer {
   kernel_version: string | null;
   notes: string | null;
   is_online: number;
+  poll_enabled: number;
+  poll_interval_sec: number;
   last_seen: string | null;
   cpu_model: string | null;
   cpu_cores: number | null;
   total_ram_mb: number | null;
   tags: string;
+  mac_address: string | null;
   created_at: string;
   updated_at: string;
 }

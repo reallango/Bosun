@@ -43,6 +43,7 @@ export const BACKUP_TABLES: string[] = [
   'host_snapshots',
   'metric_rollups',
   'metric_samples',
+  'custom_widgets',
 ];
 
 // Tables excluded by default because they can grow very large.

@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { Dashboard, GridBreakpoint, LayoutItem } from '@/types/dashboard';
 import { Widget } from '@/types/widget';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
+import { readJson } from '@/lib/api/readJson';
 import { ensureArray } from '@/lib/api/ensureArray';
 
 export function useDashboard(dashboardId: string) {
@@ -17,7 +18,8 @@ export function useDashboard(dashboardId: string) {
         if (!dashboardId) return;
         try {
             const res = await fetchWithAuth(`/api/dashboards/${dashboardId}`);
-            const json = await res.json();
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const json = await readJson<any>(res);
             if (!res.ok || json?.error) throw new Error(json?.error?.message || `HTTP ${res.status}`);
             const dashboard = json?.data?.dashboard ?? json?.dashboard ?? null;
             const widgets = ensureArray<Widget>(json?.data?.widgets ?? json?.widgets);

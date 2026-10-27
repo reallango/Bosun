@@ -12,6 +12,11 @@ export interface Server {
   kernel_version: string | null;
   notes: string | null;
   is_online: boolean;
+  /** When false the poller skips this host (no background collection). */
+  poll_enabled?: boolean;
+  poll_interval_sec?: number;
+  /** NIC to wake with Wake-on-LAN. */
+  mac_address?: string | null;
   last_seen: string | null;
   cpu_model: string | null;
   cpu_cores: number | null;

@@ -31,6 +31,8 @@ interface Server {
   ssh_key_id: string | null;
   notes?: string;
   platform?: string;
+  mac_address?: string | null;
+  poll_enabled?: boolean;
 }
 
 interface EditServerModalProps {
@@ -40,7 +42,7 @@ interface EditServerModalProps {
   onSave: () => void;
 }
 
-const EMPTY_FORM = { name: '', hostname: '', ssh_port: 22, ssh_user: '', ssh_key_id: '', notes: '', platform: 'linux' };
+const EMPTY_FORM = { name: '', hostname: '', ssh_port: 22, ssh_user: '', ssh_key_id: '', notes: '', platform: 'linux', mac_address: '', poll_enabled: true };
 
 export function EditServerModal({ isOpen, onClose, server, onSave }: EditServerModalProps) {
   const [form, setForm] = useState(EMPTY_FORM);
@@ -60,6 +62,8 @@ export function EditServerModal({ isOpen, onClose, server, onSave }: EditServerM
         ssh_key_id: server.ssh_key_id || '',
         notes: server.notes || '',
         platform: server.platform || 'linux',
+        mac_address: server.mac_address || '',
+        poll_enabled: server.poll_enabled !== false,
       });
       setError('');
 
@@ -209,6 +213,19 @@ export function EditServerModal({ isOpen, onClose, server, onSave }: EditServerM
                   ))}
                 </select>
               </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-4 xs:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor={field('mac_address')}>MAC address</Label>
+                <Input id={field('mac_address')} value={form.mac_address} placeholder="AA:BB:CC:DD:EE:FF" className="font-mono"
+                  onChange={e => setForm(f => ({ ...f, mac_address: e.target.value }))} />
+                <p className="text-xs text-muted-foreground">For Wake-on-LAN; use the NIC enabled for wake.</p>
+              </div>
+              <label className="flex items-center gap-2 self-center text-sm">
+                <input type="checkbox" checked={form.poll_enabled} onChange={e => setForm(f => ({ ...f, poll_enabled: e.target.checked }))} />
+                Monitoring enabled
+              </label>
             </div>
 
             <div className="space-y-1.5">

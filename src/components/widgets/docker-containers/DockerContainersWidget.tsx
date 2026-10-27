@@ -8,8 +8,14 @@ import { useAuth } from '@/hooks/useAuth';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { WidgetLoading } from '@/components/widgets/WidgetLoading';
 import { WidgetError } from '@/components/widgets/WidgetError';
-import { SSHTerminalWidget } from '@/components/widgets/ssh-terminal';
+import dynamic from 'next/dynamic';
 import { ConfirmActionDialog, apiAction } from '@/components/widgets/shared/ConfirmActionDialog';
+
+// The terminal (xterm) loads only when a container shell is opened.
+const SSHTerminalWidget = dynamic(
+  () => import('@/components/widgets/ssh-terminal').then(m => m.SSHTerminalWidget),
+  { ssr: false, loading: () => <WidgetLoading /> },
+);
 
 interface Container {
   id: string;

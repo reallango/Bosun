@@ -136,7 +136,8 @@ export default function NewServerPage() {
           ssh_user: formData.get('ssh_user'),
           ssh_key_id: formData.get('ssh_key_id') || null,
           notes: formData.get('notes'),
-          platform: formData.get('platform') || 'linux'
+          platform: formData.get('platform') || 'linux',
+          mac_address: formData.get('mac_address') || null
         })
       });
 
@@ -322,6 +323,11 @@ export default function NewServerPage() {
                     <option value="windows">Windows</option>
                   </select>
                   <p className="text-xs text-muted-foreground">Windows hosts use PowerShell over OpenSSH.</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="mac_address">MAC Address</Label>
+                  <Input id="mac_address" name="mac_address" placeholder="AA:BB:CC:DD:EE:FF" className="font-mono" />
+                  <p className="text-xs text-muted-foreground">Optional. Needed for Wake-on-LAN; use the NIC enabled for wake.</p>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="notes">Notes</Label>

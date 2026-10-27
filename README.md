@@ -124,13 +124,37 @@ Bosun runs PowerShell over the host's OpenSSH server, the same way
 A Windows poll starts a PowerShell process. The fast tier takes well under a second
 of CPU, but it is costlier than the Linux script, so Windows hosts poll every 30 s by default.
 
+### Wake-on-LAN
+
+Give a server its MAC address (Add/Edit server), then use **Wake** on the servers list,
+the server's edit page or its dashboard toolbar. A magic packet only reaches a sleeping
+host from the same L2 segment, which the Bosun container usually is not. Under
+Settings → General → Wake-on-LAN you can pick a managed "local server" (typically the
+Docker host) that sends the packet with the `wakeonlan` utility over SSH instead.
+If the utility is missing, admins are offered to install it (needs passwordless sudo).
+
+### Custom widgets
+
+Some widget types are defined in the database (`custom_widgets`) rather than compiled
+in. Ollama Status is the first. Under Settings → Custom Widgets an admin can rename them,
+change their default size and refresh interval, restrict them to Linux or Windows, or
+disable them, without a rebuild. A new type still needs a data source (a snapshot-section
+mapping in `src/lib/widgets/snapshot-data.ts`) and a component
+(`src/components/widgets/custom-registry.tsx`). Widgets can also declare settings fields
+(`configSchema`), which the widget settings dialog renders and stores in the widget's config.
+For example, Custom Command's command and Services' filter work this way.
+
+**OS Update Check** shows the poller's package check: count, security updates, pending
+reboot and versions. "Check for updates" makes the poller run the check right away
+instead of waiting for the 6-hour schedule.
+
 ## Management actions and permissions
 
 | Role | Can |
 | --- | --- |
 | viewer | View dashboards, statistics, container and model lists. |
-| operator | Edit dashboards and widgets, container logs, custom commands, host terminals. |
-| admin | Everything, including container start/stop/restart and shells, Ollama pull/delete, OS update install, servers, keys and settings. |
+| operator | Edit dashboards and widgets, container logs, custom commands, host terminals, Wake-on-LAN. |
+| admin | Everything, including container start/stop/restart and shells, Ollama pull/delete, OS update install, installing wakeonlan, custom widget types, servers, keys and settings. |
 
 Destructive actions require a confirmation in the UI, which the API enforces with
 `confirm: true`. Deleting a model also requires typing its name. These actions are
@@ -154,6 +178,7 @@ Shared collector code lives in `src/lib/collect/` as dependency-free CommonJS so
 ## Upgrading and rolling back
 
 - Back up first: Settings → Database → Export, or copy the `bosun-data` volume.
-- The 2.0 schema is a fresh start (see *Schema management*). To roll back, run the
+- The 2.0 schema is a fresh start (see *Schema management*); version 2 (Wake-on-LAN, custom
+  widgets) upgrades version 1 in place automatically. To roll back, run the
   previous image against the previous volume or backup. The old image cannot read
   a 2.0 database.

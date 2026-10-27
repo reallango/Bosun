@@ -11,6 +11,8 @@ import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { EditServerModal } from '@/components/settings/EditServerModal';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import { cn } from '@/lib/utils';
+import { WakeButton } from '@/components/servers/WakeButton';
+import { readJson } from '@/lib/api/readJson';
 
 interface Server {
   id: string;
@@ -23,6 +25,9 @@ interface Server {
   is_online: boolean;
   hostname?: string;
   notes?: string;
+  mac_address?: string | null;
+  poll_enabled?: boolean;
+  platform?: string;
 }
 
 function KeyBadge({ configured }: { configured: boolean }) {
@@ -33,7 +38,15 @@ function KeyBadge({ configured }: { configured: boolean }) {
   );
 }
 
-function OnlineStatus({ online }: { online: boolean }) {
+function OnlineStatus({ online, monitored = true }: { online: boolean; monitored?: boolean }) {
+  if (!monitored) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-sm text-yellow-700 dark:text-yellow-400">
+        <span className="size-2 rounded-full bg-yellow-500" aria-hidden />
+        Not monitored
+      </span>
+    );
+  }
   return (
     <span className={cn('inline-flex items-center gap-1.5 text-sm', online ? 'text-success' : 'text-muted-foreground')}>
       <span className={cn('size-2 rounded-full', online ? 'bg-green-500' : 'bg-gray-400')} aria-hidden />
@@ -51,7 +64,8 @@ export default function ServersPage() {
   const fetchServers = useCallback(async () => {
     try {
       const res = await fetchWithAuth('/api/servers');
-      const data = await res.json();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const data = await readJson<any>(res);
       if (data.data) setServers(data.data.servers || data.data);
     } catch (err) {
       console.error('Failed to fetch servers:', err);
@@ -99,7 +113,7 @@ export default function ServersPage() {
                           <Link href={`/settings/servers/${server.id}`} className="truncate font-medium hover:underline">
                             {server.name}
                           </Link>
-                          <OnlineStatus online={!!server.is_online} />
+                          <OnlineStatus online={!!server.is_online} monitored={server.poll_enabled !== false} />
                         </div>
                         <div className="truncate font-mono text-xs text-muted-foreground">
                           {server.host}:{server.ssh_port}
@@ -109,6 +123,7 @@ export default function ServersPage() {
                           {server.os_type && <span>{server.os_type}</span>}
                         </div>
                       </div>
+                      <WakeButton serverId={server.id} serverName={server.name} macAddress={server.mac_address} iconOnly />
                       <Button variant="outline" size="icon-lg" onClick={() => handleEditServer(server)} aria-label={`Edit ${server.name}`}>
                         <Pencil />
                       </Button>
@@ -125,6 +140,7 @@ export default function ServersPage() {
                         <TableHead>Hostname</TableHead>
                         <TableHead>SSH</TableHead>
                         <TableHead>OS</TableHead>
+                        <TableHead>MAC</TableHead>
                         <TableHead>Status</TableHead>
                         <TableHead className="text-right">Actions</TableHead>
                       </TableRow>
@@ -144,14 +160,18 @@ export default function ServersPage() {
                             <KeyBadge configured={!!server.ssh_key_id} />
                           </TableCell>
                           <TableCell>{server.os_type || '-'}</TableCell>
+                          <TableCell className="font-mono text-xs">{server.mac_address || <span className="text-muted-foreground">-</span>}</TableCell>
                           <TableCell>
-                            <OnlineStatus online={!!server.is_online} />
+                            <OnlineStatus online={!!server.is_online} monitored={server.poll_enabled !== false} />
                           </TableCell>
                           <TableCell className="text-right">
+                            <div className="flex justify-end gap-2">
+                            <WakeButton serverId={server.id} serverName={server.name} macAddress={server.mac_address} />
                             <Button variant="outline" size="sm" onClick={() => handleEditServer(server)}>
                               <Pencil />
                               Edit
                             </Button>
+                            </div>
                           </TableCell>
                         </TableRow>
                       ))}

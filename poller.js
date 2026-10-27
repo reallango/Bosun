@@ -212,14 +212,14 @@ class HostAgent {
   }
 
   /** Probes due this poll; marks their tiers as run. */
-  dueProbes(now, forceAll) {
+  dueProbes(now, forceAll, forceUpdates = false) {
     const probes = [];
     for (const tier of TIERS[this.platform]) {
       const last = this.tierLast[tier.name];
       let due;
       // Forced/initial polls refresh everything except tiers with an initial
       // delay (package updates), which keep their own schedule.
-      if (tier.periodMs === 0 || (forceAll && !tier.initialDelayMs)) due = true;
+      if (tier.periodMs === 0 || (forceAll && !tier.initialDelayMs) || (forceUpdates && tier.name === 'updates')) due = true;
       else if (last === undefined) due = now - this.started >= (tier.initialDelayMs || 0);
       else due = now - last >= tier.periodMs;
       if (due) {
@@ -230,14 +230,14 @@ class HostAgent {
     return probes;
   }
 
-  async poll({ forceAll = false } = {}) {
+  async poll({ forceAll = false, forceUpdates = false } = {}) {
     this.busy = true;
     const started = Date.now();
     const lib = this.platform === 'windows' ? windows : linux;
     try {
       const client = await this.ensureConnected();
       // First poll after (re)connecting collects everything so widgets fill in.
-      const probes = this.dueProbes(started, forceAll || this.polls === 0);
+      const probes = this.dueProbes(started, forceAll || this.polls === 0, forceUpdates);
       const cmd = lib.buildCommand(probes);
       const r = await ssh.exec(client, cmd, {
         stdin: this.platform === 'windows' ? undefined : linux.SCRIPT,
@@ -328,7 +328,7 @@ let ticking = false;
 async function syncServers() {
   const rows = await query(
     'SELECT id, name, hostname, ssh_port, ssh_user, ssh_key_id, platform, poll_enabled, poll_interval_sec, ' +
-    'host_key_fingerprint, poll_requested_at, capabilities FROM servers');
+    'host_key_fingerprint, poll_requested_at, updates_requested_at, capabilities FROM servers');
   const seen = new Set();
   for (const row of rows) {
     if (Number(row.poll_enabled) !== 1) continue;
@@ -342,9 +342,16 @@ async function syncServers() {
         a.forceNext = true;
         a.nextDue = Math.min(a.nextDue, Date.now());
       }
+      // "Check for updates" sets updates_requested_at: run the update probe once.
+      if (row.updates_requested_at && row.updates_requested_at > (a.lastUpdatesRequest || 0)) {
+        a.lastUpdatesRequest = row.updates_requested_at;
+        a.forceUpdatesNext = true;
+        a.nextDue = Math.min(a.nextDue, Date.now());
+      }
     } else {
       const agent = new HostAgent(row);
       agent.lastRequest = row.poll_requested_at || 0;
+      agent.lastUpdatesRequest = row.updates_requested_at || 0;
       try { agent.caps = JSON.parse(row.capabilities || '{}'); } catch { agent.caps = {}; }
       agents.set(row.id, agent);
       log(`${row.name}: added (${row.platform || 'linux'} ${row.hostname})`);
@@ -386,7 +393,9 @@ async function tick() {
       running++;
       const forceAll = !!a.forceNext;
       a.forceNext = false;
-      a.poll({ forceAll }); // runs concurrently; errors handled inside
+      const forceUpdates = !!a.forceUpdatesNext;
+      a.forceUpdatesNext = false;
+      a.poll({ forceAll, forceUpdates }); // runs concurrently; errors handled inside
     }
 
     if (now - lastAlertSync > 30000) {
