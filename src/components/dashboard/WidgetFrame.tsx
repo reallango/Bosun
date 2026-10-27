@@ -1,6 +1,7 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { EllipsisVertical, GripVertical, RefreshCw, Settings2, Trash2 } from 'lucide-react';
 import { OSInfoWidget } from '@/components/widgets/os-info';
 import { CPUMemoryWidget } from '@/components/widgets/cpu-memory';
 import { DiskUsageWidget } from '@/components/widgets/disk-usage';
@@ -13,10 +14,20 @@ import { SSHTerminalWidget } from '@/components/widgets/ssh-terminal';
 import { DockerContainersWidget } from '@/components/widgets/docker-containers';
 import { CustomCommandWidget } from '@/components/widgets/custom-command';
 import { OSUpdateCheckWidget } from '@/components/widgets/os-update-check';
+import { WidgetErrorBoundary } from '@/components/widgets/WidgetErrorBoundary';
 import { WidgetSettingsDialog } from '@/components/dialogs/WidgetSettingsDialog';
 import { DeleteConfirmDialog } from '@/components/dialogs/DeleteConfirmDialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { useToast } from '@/components/ui/toast';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
-import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+import { cn } from '@/lib/utils';
+import { RefreshHandler, WidgetFrameContext } from './widget-context';
 
 interface WidgetFrameProps {
   widgetId: string;
@@ -60,120 +71,166 @@ function WidgetContent({ widgetId, widgetType, serverId, serverName }: { widgetI
     case 'os_update_check':
       return <OSUpdateCheckWidget widgetId={widgetId} serverId={serverId} />;
     default:
-      return <div className="text-gray-500 text-sm">Unknown widget: {widgetType}</div>;
+      return <div className="text-sm text-muted-foreground">Unknown widget: {widgetType}</div>;
   }
 }
 
+/** Human title for a raw widget type ("cpu_memory" -> "Cpu memory") when no name is set. */
+function prettyType(type: string) {
+  const s = type.replace(/[_-]+/g, ' ').trim();
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
 export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName, editable = false, onRemoved, onRefresh }: WidgetFrameProps) {
+  const { toast } = useToast();
   const [removing, setRemoving] = useState(false);
-  const [widgetData, setWidgetData] = useState<any>(null);
-  
+  const [refreshing, setRefreshing] = useState(false);
+  const [displayName, setDisplayName] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+
+  // Refresh handlers registered by the widget inside (via useWidgetData).
+  const handlers = useRef(new Set<RefreshHandler>());
+  const frameContext = useMemo(
+    () => ({
+      registerRefresh: (handler: RefreshHandler) => {
+        handlers.current.add(handler);
+        return () => {
+          handlers.current.delete(handler);
+        };
+      },
+    }),
+    []
+  );
+
   // Fetch widget to get display_name - with error handling to avoid infinite retries
   useEffect(() => {
     let ignore = false;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 5000);
-    
+
     fetchWithAuth(`/api/widgets/${widgetId}`, { signal: controller.signal })
       .then(res => {
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         return res.json();
       })
       .then(json => {
-        if (!ignore && json.data) setWidgetData(json.data);
+        if (!ignore && json.data) setDisplayName(json.data.display_name || null);
       })
       .catch(() => {
         // Silently ignore errors - don't retry infinitely
       });
-    
+
     return () => {
       ignore = true;
       clearTimeout(timeoutId);
     };
   }, [widgetId]);
-  
-  const displayTitle = widgetData?.display_name || title;
 
-  const handleRemove = async () => {
-    setDeleteOpen(true);
-  };
+  const displayTitle = displayName || (title === widgetType ? prettyType(widgetType) : title);
 
   const doRemove = async () => {
     setRemoving(true);
     try {
       const res = await fetchWithAuth(`/api/widgets/${widgetId}`, { method: 'DELETE' });
-      const json = await res.json();
-      if (json.success && onRemoved) {
-        onRemoved();
-      } else if (json.error) {
-        alert('Failed to remove widget: ' + json.error.message);
+      const json = await res.json().catch(() => null);
+      if (res.ok && json?.success !== false && !json?.error) {
+        toast(`Removed “${displayTitle}”`, { variant: 'success' });
+        onRemoved?.();
+      } else {
+        toast('Failed to remove widget', { variant: 'error', description: json?.error?.message || `HTTP ${res.status}` });
       }
     } catch (err) {
-      alert('Failed to remove widget');
+      toast('Failed to remove widget', { variant: 'error', description: err instanceof Error ? err.message : undefined });
     } finally {
       setRemoving(false);
     }
   };
 
-  const handleRefresh = async () => {
-    await fetch(`/api/widgets/${widgetId}/data?force=true`);
-  };
-
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [deleteOpen, setDeleteOpen] = useState(false);
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      if (handlers.current.size > 0) {
+        // Forced, authenticated fetch whose result lands in the widget's state.
+        await Promise.all(Array.from(handlers.current).map(fn => fn()));
+      } else {
+        // Widget manages its own data: still bust the server-side cache.
+        const res = await fetchWithAuth(`/api/widgets/${widgetId}/data?force=true`);
+        if (!res.ok) {
+          const json = await res.json().catch(() => null);
+          throw new Error(json?.error?.message || `HTTP ${res.status}`);
+        }
+      }
+    } catch (err) {
+      toast('Refresh failed', { variant: 'error', description: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setRefreshing(false);
+    }
+  }, [widgetId, toast]);
 
   return (
-    <div className="h-full bg-white dark:bg-gray-800 rounded-lg shadow-md border border-gray-200 dark:border-gray-700 flex flex-col">
-      <div className={`flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-gray-700 ${editable ? 'cursor-move drag-handle' : ''}`}>
-        <span className="font-medium text-sm truncate">{displayTitle}</span>
-        <div className="flex items-center gap-1">
-          {serverName && <span className="text-xs text-gray-500 mr-1">{serverName}</span>}
-          <DropdownMenu.Root open={menuOpen} onOpenChange={setMenuOpen}>
-            <DropdownMenu.Trigger asChild>
-              <button className="p-1 rounded hover:bg-gray-100 dark:hover:bg-gray-700">
-                <span className="text-lg">⋮</span>
-              </button>
-            </DropdownMenu.Trigger>
-            <DropdownMenu.Content className="min-w-[140px] bg-white dark:bg-gray-800 border rounded shadow-lg z-10">
-              <DropdownMenu.Item 
-                className="px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer outline-none"
-                onSelect={() => {
-                  setMenuOpen(false);
-                  setSettingsOpen(true);
-                }}
-              >
-                Settings
-              </DropdownMenu.Item>
-              <DropdownMenu.Item 
-                className="px-4 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer outline-none"
-                onSelect={() => {
-                  setMenuOpen(false);
-                  handleRefresh();
-                }}
-              >
-                Refresh
-              </DropdownMenu.Item>
-              <DropdownMenu.Separator className="h-px bg-gray-200 dark:bg-gray-700 my-1" />
-              <DropdownMenu.Item 
-                className="px-4 py-2 text-sm text-red-600 hover:bg-gray-100 dark:hover:bg-gray-700 cursor-pointer outline-none disabled:opacity-50"
-                disabled={removing}
-                onSelect={() => {
-                  setMenuOpen(false);
-                  handleRemove();
-                }}
-              >
-                {removing ? 'Removing...' : 'Remove'}
-              </DropdownMenu.Item>
-            </DropdownMenu.Content>
-          </DropdownMenu.Root>
-        </div>
-      </div>
-      <div className="flex-1 p-3 overflow-auto">
-        <WidgetContent widgetId={widgetId} widgetType={widgetType} serverId={serverId} serverName={serverName} />
+    <section
+      className={cn(
+        '@container/frame flex h-full min-h-0 flex-col overflow-hidden rounded-xl border bg-card text-card-foreground shadow-sm',
+        editable && 'ring-1 ring-primary/30'
+      )}
+      aria-label={displayTitle}
+    >
+      <header
+        className={cn(
+          'flex h-9 shrink-0 items-center gap-1.5 border-b px-2.5',
+          editable && 'drag-handle cursor-move select-none touch-none bg-muted/40'
+        )}
+      >
+        {editable && <GripVertical className="size-4 shrink-0 text-muted-foreground" aria-hidden />}
+        <h2 className="min-w-0 flex-1 truncate text-sm font-medium" title={displayTitle}>
+          {displayTitle}
+        </h2>
+        {serverName && (
+          <span
+            className="hidden max-w-[40%] shrink truncate rounded-full bg-muted px-2 py-0.5 text-[11px] leading-4 text-muted-foreground @[16rem]/frame:inline-block"
+            title={serverName}
+          >
+            {serverName}
+          </span>
+        )}
+        {refreshing && <RefreshCw className="size-3.5 shrink-0 animate-spin text-muted-foreground" aria-label="Refreshing" />}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="no-drag -mr-1 inline-flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              aria-label={`Widget actions for ${displayTitle}`}
+            >
+              <EllipsisVertical className="size-4" />
+            </button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent>
+            <DropdownMenuItem onSelect={() => handleRefresh()} disabled={refreshing}>
+              <RefreshCw />
+              Refresh
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => setSettingsOpen(true)}>
+              <Settings2 />
+              Settings
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem variant="destructive" disabled={removing} onSelect={() => setDeleteOpen(true)}>
+              <Trash2 />
+              {removing ? 'Removing…' : 'Remove'}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </header>
+      <div className="@container relative min-h-0 flex-1 overflow-auto overscroll-contain p-3">
+        <WidgetFrameContext.Provider value={frameContext}>
+          <WidgetErrorBoundary widgetId={widgetId}>
+            <WidgetContent widgetId={widgetId} widgetType={widgetType} serverId={serverId} serverName={serverName} />
+          </WidgetErrorBoundary>
+        </WidgetFrameContext.Provider>
       </div>
       <WidgetSettingsDialog widgetId={widgetId} open={settingsOpen} onOpenChange={setSettingsOpen} onSave={onRefresh} />
       <DeleteConfirmDialog widgetTitle={displayTitle} open={deleteOpen} onOpenChange={setDeleteOpen} onConfirm={doRemove} loading={removing} />
-    </div>
+    </section>
   );
 }

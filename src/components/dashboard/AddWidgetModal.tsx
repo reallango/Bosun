@@ -1,8 +1,36 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import {
+  Activity,
+  Box,
+  Bot,
+  Cpu,
+  Gauge,
+  HardDrive,
+  Info,
+  ListChecks,
+  Network,
+  PackageCheck,
+  SquareTerminal,
+  Terminal,
+  type LucideIcon,
+} from 'lucide-react';
 import { ensureArray } from '@/lib/api/ensureArray';
+import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { SIZE_PRESETS, SizePreset } from '@/lib/widget-sizes';
+import { cn } from '@/lib/utils';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 
 interface Server {
   id: string;
@@ -15,29 +43,44 @@ interface AddWidgetModalProps {
   onClose: () => void;
   dashboardId: string;
   serverId?: string;
-  onAdd: (widgetType: string, serverId: string, gridW?: number, gridH?: number) => void;
+  onAdd: (widgetType: string, serverId: string, gridW?: number, gridH?: number) => void | Promise<void>;
 }
 
-export function AddWidgetModal({ isOpen, onClose, dashboardId, serverId, onAdd }: AddWidgetModalProps) {
+const WIDGETS: { type: string; name: string; desc: string; icon: LucideIcon }[] = [
+  { type: 'server_summary', name: 'Server Summary', desc: 'Compact server overview', icon: Activity },
+  { type: 'os_info', name: 'OS Info', desc: 'OS, kernel, hostname', icon: Info },
+  { type: 'cpu_memory', name: 'CPU/Memory', desc: 'Usage gauges', icon: Gauge },
+  { type: 'disk_usage', name: 'Disk Usage', desc: 'Per-mount usage', icon: HardDrive },
+  { type: 'network', name: 'Network', desc: 'Interfaces', icon: Network },
+  { type: 'system_services', name: 'Services', desc: 'Running services', icon: ListChecks },
+  { type: 'gpu_monitoring', name: 'GPU Monitoring', desc: 'NVIDIA GPU stats', icon: Cpu },
+  { type: 'ollama_status', name: 'Ollama Status', desc: 'LLM runtime status', icon: Bot },
+  { type: 'ssh_terminal', name: 'SSH Terminal', desc: 'Command terminal', icon: SquareTerminal },
+  { type: 'os_update_check', name: 'OS Update Check', desc: 'System updates', icon: PackageCheck },
+  { type: 'docker_containers', name: 'Docker Containers', desc: 'Container management', icon: Box },
+  { type: 'custom_command', name: 'Custom Command', desc: 'Run custom SSH command', icon: Terminal },
+];
+
+export function AddWidgetModal({ isOpen, onClose, serverId, onAdd }: AddWidgetModalProps) {
   const [selected, setSelected] = useState<string | null>(null);
   const [targetServer, setTargetServer] = useState(serverId || '');
   const [selectedSize, setSelectedSize] = useState<SizePreset>(SIZE_PRESETS[2]); // Default to Medium (S)
   const [servers, setServers] = useState<Server[]>([]);
   const [loadingServers, setLoadingServers] = useState(true);
   const [serversError, setServersError] = useState<string | null>(null);
+  const [adding, setAdding] = useState(false);
 
   useEffect(() => {
     if (isOpen && !serverId) {
       setLoadingServers(true);
       setServersError(null);
-      fetch('/api/servers')
+      fetchWithAuth('/api/servers')
         .then(res => {
           if (!res.ok) throw new Error('Failed to fetch servers');
           return res.json();
         })
         .then(data => {
-          const servers = ensureArray<Server>(data?.data?.servers ?? data?.servers);
-          setServers(servers);
+          setServers(ensureArray<Server>(data?.data?.servers ?? data?.servers));
           setLoadingServers(false);
         })
         .catch(err => {
@@ -56,114 +99,113 @@ export function AddWidgetModal({ isOpen, onClose, dashboardId, serverId, onAdd }
       setServers([]);
       setLoadingServers(true);
       setServersError(null);
+      setAdding(false);
     }
   }, [isOpen, serverId]);
 
-  if (!isOpen) return null;
-
-  const widgets = [
-    { type: 'server_summary', name: 'Server Summary', desc: 'Compact server overview' },
-    { type: 'os_info', name: 'OS Info', desc: 'OS, kernel, hostname' },
-    { type: 'cpu_memory', name: 'CPU/Memory', desc: 'Usage gauges' },
-    { type: 'disk_usage', name: 'Disk Usage', desc: 'Per-mount usage' },
-    { type: 'network', name: 'Network', desc: 'Interfaces' },
-    { type: 'system_services', name: 'Services', desc: 'Running services' },
-    { type: 'gpu_monitoring', name: 'GPU Monitoring', desc: 'NVIDIA GPU stats' },
-    { type: 'ollama_status', name: 'Ollama Status', desc: 'LLM runtime status' },
-    { type: 'ssh_terminal', name: 'SSH Terminal', desc: 'Command terminal' },
-    { type: 'os_update_check', name: 'OS Update Check', desc: 'System updates' },
-    { type: 'docker_containers', name: 'Docker Containers', desc: 'Container management' },
-    { type: 'custom_command', name: 'Custom Command', desc: 'Run custom SSH command' },
-  ];
-
-  const handleAdd = () => {
-    if (selected && targetServer) {
-      onAdd(selected, targetServer, selectedSize.gridW, selectedSize.gridH);
+  const handleAdd = async () => {
+    if (!selected || !targetServer) return;
+    setAdding(true);
+    try {
+      await onAdd(selected, targetServer, selectedSize.gridW, selectedSize.gridH);
       onClose();
+    } finally {
+      setAdding(false);
     }
   };
 
-  const canSubmit = selected && targetServer && servers.length > 0 && !loadingServers && !serversError;
+  const canSubmit = !!selected && !!targetServer && (!!serverId || (servers.length > 0 && !loadingServers && !serversError));
 
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full max-h-[80vh] overflow-y-auto">
-        <h3 className="text-lg font-semibold mb-4">Add Widget</h3>
-        
-        <div className="space-y-2 mb-4 max-h-60 overflow-y-auto">
-          {widgets.map(w => (
-            <button
-              key={w.type}
-              onClick={() => setSelected(w.type)}
-              className={`w-full text-left p-3 rounded border ${selected === w.type ? 'border-blue-500 bg-blue-50 dark:bg-blue-900' : 'hover:bg-gray-50 dark:hover:bg-gray-700'}`}
-            >
-              <div className="font-medium">{w.name}</div>
-              <div className="text-sm text-gray-500">{w.desc}</div>
-            </button>
-          ))}
-        </div>
+    <Dialog open={isOpen} onOpenChange={open => !open && onClose()}>
+      <DialogContent size="xl">
+        <DialogHeader>
+          <DialogTitle>Add widget</DialogTitle>
+          <DialogDescription>Pick a widget type{serverId ? '' : ', a server'} and a starting size.</DialogDescription>
+        </DialogHeader>
 
-        {!serverId && (
-          <div className="mb-4">
-            <label className="block text-sm font-medium mb-1">Server</label>
-            {loadingServers ? (
-              <select disabled className="w-full px-3 py-2 border rounded bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400">
-                <option>Loading servers...</option>
-              </select>
-            ) : serversError ? (
-              <select disabled className="w-full px-3 py-2 border rounded bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400">
-                <option>{serversError}</option>
-              </select>
-            ) : servers.length === 0 ? (
-              <select disabled className="w-full px-3 py-2 border rounded bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400">
-                <option>No servers available. Please add a server first.</option>
-              </select>
-            ) : (
-              <select
-                value={targetServer}
-                onChange={e => setTargetServer(e.target.value)}
-                className="w-full px-3 py-2 border rounded max-h-24 overflow-y-auto bg-white dark:bg-gray-800 text-gray-900 dark:text-white border-gray-300 dark:border-gray-600"
+        <DialogBody className="space-y-4">
+          <div role="radiogroup" aria-label="Widget type" className="grid grid-cols-1 gap-2 xs:grid-cols-2 lg:grid-cols-3">
+            {WIDGETS.map(w => (
+              <button
+                key={w.type}
+                type="button"
+                role="radio"
+                aria-checked={selected === w.type}
+                onClick={() => setSelected(w.type)}
+                className={cn(
+                  'flex items-start gap-3 rounded-lg border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
+                  selected === w.type ? 'border-primary bg-primary/10' : 'hover:bg-accent'
+                )}
               >
-                <option value="">-- Select a Server --</option>
-                {servers.map(s => (
-                  <option key={s.id} value={s.id}>
-                    {s.name} ({s.host})
+                <w.icon className={cn('mt-0.5 size-5 shrink-0', selected === w.type ? 'text-primary' : 'text-muted-foreground')} aria-hidden />
+                <span className="min-w-0">
+                  <span className="block text-sm font-medium">{w.name}</span>
+                  <span className="block text-xs text-muted-foreground">{w.desc}</span>
+                </span>
+              </button>
+            ))}
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            {!serverId && (
+              <div className="space-y-1.5">
+                <Label htmlFor="add-widget-server">Server</Label>
+                {loadingServers ? (
+                  <select id="add-widget-server" disabled className="form-select">
+                    <option>Loading servers…</option>
+                  </select>
+                ) : serversError ? (
+                  <select id="add-widget-server" disabled className="form-select text-destructive">
+                    <option>{serversError}</option>
+                  </select>
+                ) : servers.length === 0 ? (
+                  <select id="add-widget-server" disabled className="form-select">
+                    <option>No servers available. Please add a server first.</option>
+                  </select>
+                ) : (
+                  <select id="add-widget-server" value={targetServer} onChange={e => setTargetServer(e.target.value)} className="form-select">
+                    <option value="">-- Select a server --</option>
+                    {servers.map(s => (
+                      <option key={s.id} value={s.id}>
+                        {s.name} ({s.host})
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            )}
+
+            <div className="space-y-1.5">
+              <Label htmlFor="add-widget-size">Size</Label>
+              <select
+                id="add-widget-size"
+                value={selectedSize.id}
+                onChange={e => {
+                  const preset = SIZE_PRESETS.find(p => p.id === e.target.value);
+                  if (preset) setSelectedSize(preset);
+                }}
+                className="form-select"
+              >
+                {SIZE_PRESETS.map(preset => (
+                  <option key={preset.id} value={preset.id}>
+                    {preset.name} ({preset.description})
                   </option>
                 ))}
               </select>
-            )}
+            </div>
           </div>
-        )}
+        </DialogBody>
 
-        <div className="mb-4">
-          <label className="block text-sm font-medium mb-1">Size</label>
-          <select
-            value={selectedSize.id}
-            onChange={e => {
-              const preset = SIZE_PRESETS.find(p => p.id === e.target.value);
-              if (preset) setSelectedSize(preset);
-            }}
-            className="w-full px-3 py-2 border rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-white border-gray-300 dark:border-gray-600"
-          >
-            {SIZE_PRESETS.map(preset => (
-              <option key={preset.id} value={preset.id}>
-                {preset.name} ({preset.description})
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="flex gap-2">
-          <button onClick={onClose} className="flex-1 px-4 py-2 border rounded">Cancel</button>
-          <button 
-            onClick={handleAdd} 
-            disabled={!selected || !targetServer || (servers.length === 0 && !serverId)} 
-            className="flex-1 px-4 py-2 bg-blue-600 text-white rounded disabled:opacity-50"
-          >
-            Add
-          </button>
-        </div>
-      </div>
-    </div>
+        <DialogFooter>
+          <Button variant="outline" size="lg" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button size="lg" onClick={handleAdd} disabled={!canSubmit || adding}>
+            {adding ? 'Adding…' : 'Add widget'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
