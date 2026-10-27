@@ -297,8 +297,11 @@ function parseUpdates(text) {
  * on the remote host. Returns { sections, metrics, state }.
  */
 function buildSnapshot(raw, prev, now = Date.now()) {
+  /** @type {Record<string, any>} */
   const sections = {};
+  /** @type {Record<string, number>} */
   const metrics = {};
+  /** @type {Record<string, any>} */
   const state = { ...(prev || {}) };
 
   if (raw.stat !== undefined || raw.mem !== undefined) {
