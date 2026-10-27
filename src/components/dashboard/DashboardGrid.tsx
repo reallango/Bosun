@@ -16,6 +16,7 @@ import {
   buildResponsiveLayouts,
 } from '@/lib/widget-sizes';
 import { WidgetFrame } from './WidgetFrame';
+import { getWidgetDefinition } from '@/components/widgets/registry';
 import { EmptyState } from '@/components/shared/EmptyState';
 import { ensureArray } from '@/lib/api/ensureArray';
 
@@ -168,7 +169,7 @@ export function DashboardGrid({
             <WidgetFrame
               widgetId={widget.id}
               widgetType={widget.widget_type}
-              title={widget.title_override || widget.widget_type}
+              title={widget.title_override || getWidgetDefinition(widget.widget_type)?.displayName || widget.widget_type}
               serverId={widget.server_id}
               serverName={widget.server_name}
               editable={interactive}
