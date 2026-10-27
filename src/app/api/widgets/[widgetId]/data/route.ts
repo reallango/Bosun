@@ -1,134 +1,140 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { requireAuth, requireRole } from '@/lib/auth/middleware';
-import { SSHConnectionPool } from '@/lib/ssh/connection-pool';
-import { isWindows } from '@/lib/ssh/platform';
-import { getLinuxWidgetData } from '@/lib/linux/collectors';
-import { getWindowsWidgetData, powershellCommand } from '@/lib/windows/collectors';
+import { runOnServerId } from '@/lib/ssh/connection-pool';
+import { WIDGET_SECTIONS, widgetDataFromSnapshots, collectedAtFor, Sections, ServerRow } from '@/lib/widgets/snapshot-data';
+import { consumeActionRateLimit } from '@/lib/utils/rate-limiter';
+import { logAudit } from '@/lib/audit/logger';
 
-const pool = new SSHConnectionPool();
+/* eslint-disable @typescript-eslint/no-explicit-any */
+
+// custom_command runs live; cache its result briefly so several open
+// dashboards do not each run it on every refresh.
+const customCache = new Map<string, { at: number; data: unknown }>();
+const CUSTOM_TTL_MS = 10_000;
+
+function parseJson(v: unknown, fallback: any = {}) {
+  if (typeof v !== 'string') return v ?? fallback;
+  try { return JSON.parse(v); } catch { return fallback; }
+}
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ widgetId: string }> }) {
-    const auth = await requireAuth(request);
-    if (auth instanceof NextResponse) return auth;
-    const { widgetId } = await params;
-    const searchParams = new URL(request.url).searchParams;
-    const forceRefresh = searchParams.get('force') === 'true';
+  const auth = await requireAuth(request);
+  if (auth instanceof NextResponse) return auth;
+  const { widgetId } = await params;
+  const force = new URL(request.url).searchParams.get('force') === 'true';
+
   try {
     const widgetRes = await rqlite.query('SELECT * FROM widgets WHERE id = ?', [widgetId]);
     if (!widgetRes.values?.length) return NextResponse.json({ error: { message: 'Widget not found' } }, { status: 404 });
     const widget = rowsToObjects(widgetRes)[0] as any;
-    const wCfg = widget.config ? (typeof widget.config==='string'?JSON.parse(widget.config||'{}'):widget.config) : {};
-    const srvR = await rqlite.query('SELECT * FROM servers WHERE id=?', [widget.server_id]);
-    if (!srvR.values?.length) return NextResponse.json({ error: { message: 'Server not found' } }, { status: 404 });
-    const srv = rowsToObjects(srvR)[0] as any;
+    const cfg = parseJson(widget.config);
+    const srvRes = await rqlite.query(
+      'SELECT id, name, hostname, platform, os_type, os_version, is_online, last_seen, last_error, poll_interval_sec FROM servers WHERE id = ?',
+      [widget.server_id]);
+    if (!srvRes.values?.length) return NextResponse.json({ error: { message: 'Server not found' } }, { status: 404 });
+    const server = rowsToObjects(srvRes)[0] as unknown as ServerRow;
 
-    // Server Summary is served live from the servers row so it always reflects
-    // the current is_online / os_type (the poller no longer caches it).
-    if (widget.widget_type === 'server_summary') {
-      return NextResponse.json({ data: { is_online: !!srv.is_online, hostname: srv.hostname, os_type: srv.os_type, os_version: srv.os_version, name: srv.name } });
+    if (widget.widget_type === 'custom_command') {
+      const cached = customCache.get(widgetId);
+      if (!force && cached && Date.now() - cached.at < CUSTOM_TTL_MS) {
+        return NextResponse.json({ data: cached.data, collectedAt: new Date(cached.at).toISOString() });
+      }
+      const r = await runOnServerId(server.id, cfg.command || 'uptime', { timeoutMs: 20_000 });
+      const data = { output: (r.stdout + r.stderr).slice(0, 64 * 1024), exitCode: r.exitCode, timedOut: !!r.timedOut };
+      customCache.set(widgetId, { at: Date.now(), data });
+      return NextResponse.json({ data, collectedAt: new Date().toISOString() });
     }
 
-    // Try cache first (unless forceRefresh)
-    if (!forceRefresh) {
-      const cacheRes = await rqlite.query(`
-        SELECT data, collected_at, expires_at, storage_mode 
-        FROM widget_data_cache 
-        WHERE widget_type = ? AND server_id = ? AND (expires_at IS NULL OR expires_at > datetime('now'))
-        ORDER BY collected_at DESC LIMIT 1
-      `, [widget.widget_type, widget.server_id]);
-      
-      if (cacheRes.values?.length) {
-        const [data, collectedAt, expiresAt, storageMode] = cacheRes.values[0];
-        const isStale = expiresAt && new Date(expiresAt as string) < new Date();
-        return NextResponse.json({ 
-          data: JSON.parse(data as string), 
-          cachedAt: collectedAt,
-          stale: isStale 
-        });
+    const sections = WIDGET_SECTIONS[widget.widget_type];
+    if (!sections) {
+      return NextResponse.json({ error: { message: `Unknown widget type: ${widget.widget_type}` } }, { status: 400 });
+    }
+
+    if (force) {
+      // Ask the poller for an immediate full poll of this host; it picks the
+      // request up within ~2 s. No SSH from the web process.
+      await rqlite.execute('UPDATE servers SET poll_requested_at = ? WHERE id = ?', [Date.now(), server.id]);
+    }
+
+    const snaps: Sections = {};
+    if (sections.length) {
+      const placeholders = sections.map(() => '?').join(',');
+      const snapRes = await rqlite.query(
+        `SELECT section, data, collected_at FROM host_snapshots WHERE server_id = ? AND section IN (${placeholders})`,
+        [server.id, ...sections]);
+      for (const [section, data, collectedAt] of snapRes.values) {
+        snaps[String(section)] = { data: parseJson(data, null), collectedAt: Number(collectedAt) };
       }
     }
 
-    // Fall back to live SSH (original logic continues...)
-
-    if (!srv.ssh_key_id) return NextResponse.json({ error: { message: 'No SSH key' } }, { status: 400 });
-    const kR = await rqlite.query('SELECT private_key_enc FROM ssh_keys WHERE id=?', [srv.ssh_key_id]);
-    if (!kR.values?.length) return NextResponse.json({ error: { message: 'Key not found' } }, { status: 404 });
-    const { decrypt } = await import('@/lib/crypto/keys');
-    const pk = decrypt(kR.values[0][0] as string, process.env.MASTER_KEY||'');
-    const sshCfg = { host: srv.hostname, port: srv.ssh_port||22, username: srv.ssh_user, privateKey: pk };
-    const run = async (cmd: string) => pool.executeCommand(srv.id, sshCfg, cmd);
-    const runPS = async (script: string) => pool.executeCommand(srv.id, sshCfg, powershellCommand(script));
-    const cfg = { ...wCfg, server: srv };
-
-    const data = isWindows(srv)
-        ? await getWindowsWidgetData(widget.widget_type, runPS, cfg)
-        : await getLinuxWidgetData(widget.widget_type, run, cfg);
-
-    if (data === undefined) {
-        return NextResponse.json({ error: { message: `Unknown type: ${widget.widget_type}` } }, { status: 400 });
-    }
-    return NextResponse.json({ data });
+    const data = widgetDataFromSnapshots(widget.widget_type, snaps, server, cfg);
+    const collectedAt = collectedAtFor(widget.widget_type, snaps);
+    const interval = Number(server.poll_interval_sec) || 15;
+    // Slow-tier sections (services, updates) are refreshed less often than the
+    // poll interval; only call data stale when it is far behind.
+    const staleAfterMs = Math.max(interval * 4 * 1000, 10 * 60 * 1000) * (widget.widget_type === 'os_update_check' ? 80 : 1);
+    return NextResponse.json({
+      data,
+      pending: data === null,
+      collectedAt: collectedAt ? new Date(collectedAt).toISOString() : null,
+      stale: collectedAt ? Date.now() - collectedAt > staleAfterMs : false,
+      server: { is_online: !!server.is_online, last_error: server.last_error ?? null },
+    });
   } catch (error) {
     console.error('Widget data error:', error);
-    // Return placeholder data instead of 500 error so dashboard loads
-    return NextResponse.json({ data: { source: 'placeholder', error: String(error).substring(0, 100) } });
+    const status = (error as any)?.status;
+    return NextResponse.json(
+      { error: { message: error instanceof Error ? error.message : String(error) } },
+      { status: typeof status === 'number' ? status : 500 });
   }
 }
 
-// POST handler for os_update_check actions
+// POST: os_update_check "install updates" (admin only, audited, rate limited).
 export async function POST(request: NextRequest, { params }: { params: Promise<{ widgetId: string }> }) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
-  const roleError = requireRole(auth as any, 'operator');
+  const roleError = requireRole(auth, 'admin');
   if (roleError) return roleError;
+  const limited = consumeActionRateLimit(auth.userId);
+  if (!limited.allowed) return NextResponse.json({ error: { message: 'Too many actions, slow down' } }, { status: 429 });
   const { widgetId } = await params;
-  
+
   try {
     const widgetRes = await rqlite.query('SELECT * FROM widgets WHERE id = ?', [widgetId]);
-    if (!widgetRes.values?.length) {
-      return NextResponse.json({ error: { message: 'Widget not found' } }, { status: 404 });
-    }
+    if (!widgetRes.values?.length) return NextResponse.json({ error: { message: 'Widget not found' } }, { status: 404 });
     const widget = rowsToObjects(widgetRes)[0] as any;
-    
     if (widget.widget_type !== 'os_update_check') {
       return NextResponse.json({ error: { message: 'Invalid widget type for POST' } }, { status: 400 });
     }
-    
     const { action } = await request.json();
-    
-    if (action === 'install') {
-      const srvR = await rqlite.query('SELECT * FROM servers WHERE id=?', [widget.server_id]);
-      const srv = rowsToObjects(srvR)[0] as any;
-      
-      if (!srv.ssh_key_id) {
-        return NextResponse.json({ error: { message: 'No SSH key' } }, { status: 400 });
-      }
-      
-      const kR = await rqlite.query('SELECT private_key_enc FROM ssh_keys WHERE id=?', [srv.ssh_key_id]);
-      const { decrypt } = await import('@/lib/crypto/keys');
-      const pk = decrypt(kR.values[0][0] as string, process.env.MASTER_KEY || '');
-      const sshCfg = { host: srv.hostname, port: srv.ssh_port || 22, username: srv.ssh_user, privateKey: pk };
-      
-      const osType = srv.os_type || 'ubuntu';
-      let installCmd = 'apt-get update && apt-get upgrade -y';
-      if (osType.includes('rhel') || osType.includes('centos') || osType.includes('fedora')) {
-        installCmd = 'yum update -y';
-      }
-      
-      const r = await pool.executeCommand(srv.id, sshCfg, `(${installCmd} && echo "REBOOT_NEEDED") || echo "FAILED: $?"`);
-      const needsReboot = r.stdout.includes('REBOOT_NEEDED');
-      
-      return NextResponse.json({
-        data: {
-          success: !r.stdout.includes('FAILED'),
-          message: needsReboot ? 'Updates installed. System needs reboot.' : 'Updates installed'
-        }
-      });
-    }
-    
-    return NextResponse.json({ error: { message: 'Invalid action' } }, { status: 400 });
+    if (action !== 'install') return NextResponse.json({ error: { message: 'Invalid action' } }, { status: 400 });
+
+    const srvRes = await rqlite.query('SELECT os_type, platform FROM servers WHERE id = ?', [widget.server_id]);
+    const [osType, platform] = (srvRes.values?.[0] || []) as string[];
+    if (platform === 'windows') return NextResponse.json({ error: { message: 'Not supported on Windows' } }, { status: 400 });
+    const rhel = /rhel|centos|fedora|rocky|alma/.test(osType || '');
+    // Non-interactive sudo: fails fast instead of hanging on a password prompt.
+    const cmd = rhel
+      ? 'sudo -n dnf -y upgrade 2>&1 || sudo -n yum -y update 2>&1'
+      : 'sudo -n env DEBIAN_FRONTEND=noninteractive apt-get -y -o Dpkg::Options::=--force-confold upgrade 2>&1';
+    const started = Date.now();
+    const r = await runOnServerId(widget.server_id, `${cmd}; echo "BOSUN_EXIT=$?"; [ -f /var/run/reboot-required ] && echo REBOOT_REQUIRED`, { timeoutMs: 30 * 60 * 1000 });
+    const exit = Number((r.stdout.match(/BOSUN_EXIT=(\d+)/) || [])[1] ?? r.exitCode);
+    const success = exit === 0;
+    await logAudit({ userId: auth.userId, serverId: widget.server_id, action: 'server.updates_install', category: 'server',
+      status: success ? 'success' : 'failure', durationMs: Date.now() - started });
+    await rqlite.execute('UPDATE servers SET poll_requested_at = ? WHERE id = ?', [Date.now(), widget.server_id]);
+    return NextResponse.json({
+      data: {
+        success,
+        message: !success
+          ? (/a password is required|sudo:/.test(r.stdout) ? 'Passwordless sudo is required for the SSH user' : `Update failed (exit ${exit})`)
+          : r.stdout.includes('REBOOT_REQUIRED') ? 'Updates installed. System needs a reboot.' : 'Updates installed',
+        output: r.stdout.slice(-4000),
+      },
+    });
   } catch (error) {
-    return NextResponse.json({ error: { message: String(error) } }, { status: 500 });
+    return NextResponse.json({ error: { message: error instanceof Error ? error.message : String(error) } }, { status: 500 });
   }
 }
