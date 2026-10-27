@@ -2,6 +2,7 @@
 
 import Header from '@/components/layout/Header';
 import { useAuth } from '@/hooks/useAuth';
+import { roleLabel } from '@/lib/auth/levels';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -14,7 +15,7 @@ export default function SettingsPage() {
   const fields = [
     { id: 'app-name', label: 'Application name', value: 'Bosun' },
     { id: 'current-user', label: 'Current user', value: user?.username || '' },
-    { id: 'user-role', label: 'Role', value: user?.role || '' },
+    { id: 'user-role', label: 'Access level', value: user?.role ? roleLabel(user.role) : '' },
   ];
 
   return (

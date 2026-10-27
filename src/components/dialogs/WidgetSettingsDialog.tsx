@@ -18,6 +18,11 @@ import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { SIZE_PRESETS, SizePreset } from '@/lib/widget-sizes';
 import { readJson } from '@/lib/api/readJson';
 import { WidgetConfigField } from '@/types/widget';
+import { useAuth } from '@/hooks/useAuth';
+import { hasRole } from '@/lib/auth/levels';
+import { COMMAND_CONFIG_KEYS } from '@/lib/auth/widget-policy';
+
+const isCommandField = (key: string) => (COMMAND_CONFIG_KEYS as readonly string[]).includes(key);
 
 interface WidgetSettingsDialogProps {
   widgetId: string;
@@ -37,6 +42,8 @@ export function WidgetSettingsDialog({ widgetId, open, onOpenChange, onSave }: W
   const [configSchema, setConfigSchema] = useState<WidgetConfigField[]>([]);
   const setConfigValue = (key: string, value: unknown) => setConfig(prev => ({ ...prev, [key]: value }));
   const { toast } = useToast();
+  const { user } = useAuth();
+  const canEditCommand = hasRole(user?.role, 'admin');
 
   useEffect(() => {
     if (open && widgetId) {
@@ -67,7 +74,9 @@ export function WidgetSettingsDialog({ widgetId, open, onOpenChange, onSave }: W
     try {
       // Only widget-level fields; polling is configured per server.
       const payload: Record<string, unknown> = { display_name: data?.display_name ?? null };
-      if (configSchema.length) payload.config = Object.fromEntries(configSchema.map(f => [f.key, config[f.key] ?? f.default ?? null]));
+      // Command fields are read-only below Full access; do not send them back.
+      const editable = configSchema.filter(f => canEditCommand || !isCommandField(f.key));
+      if (editable.length) payload.config = Object.fromEntries(editable.map(f => [f.key, config[f.key] ?? f.default ?? null]));
       // Always include grid_w and grid_h - use selectedSize if available, otherwise use current values from data
       if (selectedSize) {
         payload.grid_w = selectedSize.gridW;
@@ -145,11 +154,16 @@ export function WidgetSettingsDialog({ widgetId, open, onOpenChange, onSave }: W
                         ) : (
                           <Input id={id} type={field.type === 'number' ? 'number' : 'text'} value={String(value)} placeholder={field.placeholder}
                             className={field.key === 'command' ? 'font-mono' : undefined}
+                            readOnly={isCommandField(field.key) && !canEditCommand}
+                            disabled={isCommandField(field.key) && !canEditCommand}
                             onChange={e => setConfigValue(field.key, field.type === 'number' ? Number(e.target.value) : e.target.value)} />
                         )}
                       </>
                     )}
                     {field.description && <p className="text-xs text-muted-foreground">{field.description}</p>}
+                    {isCommandField(field.key) && !canEditCommand && (
+                      <p className="text-xs text-muted-foreground">Only users with Full access can change the command.</p>
+                    )}
                   </div>
                 );
               })}

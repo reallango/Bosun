@@ -11,6 +11,8 @@ import { useDashboard } from '@/hooks/useDashboard';
 import { DashboardGrid } from './DashboardGrid';
 import { DashboardToolbar } from './DashboardToolbar';
 import { AddWidgetModal } from './AddWidgetModal';
+import { useAuth } from '@/hooks/useAuth';
+import { hasRole } from '@/lib/auth/levels';
 
 interface DashboardViewProps {
   dashboardId: string;
@@ -28,6 +30,9 @@ export function DashboardView({ dashboardId, name, type, serverId, serverName, o
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState(false);
   const { toast } = useToast();
+  const { user } = useAuth();
+  // Adding widgets and editing the layout: Read + actions or higher.
+  const canEdit = hasRole(user?.role, 'operator');
 
   useEffect(() => {
     if (!isLoading) onDashboardLoaded?.(dashboard);
@@ -53,9 +58,9 @@ export function DashboardView({ dashboardId, name, type, serverId, serverName, o
         type={type}
         serverId={serverId}
         widgetCount={widgets.length}
-        onAddWidget={() => setModal(true)}
+        onAddWidget={canEdit ? () => setModal(true) : undefined}
         editing={editing}
-        onToggleEdit={widgets.length > 0 ? () => setEditing(e => !e) : undefined}
+        onToggleEdit={canEdit && widgets.length > 0 ?() => setEditing(e => !e) : undefined}
       />
       {layoutError && (
         <div role="alert" className="mb-3 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
@@ -75,15 +80,15 @@ export function DashboardView({ dashboardId, name, type, serverId, serverName, o
         dashboardId={dashboardId}
         widgets={widgets}
         onLayoutChange={updateLayout}
-        editable={editing}
+        editable={editing && canEdit}
         onWidgetRemoved={refresh}
         onRefresh={refresh}
-        emptyAction={
+        emptyAction={canEdit ? (
           <Button onClick={() => setModal(true)}>
             <Plus />
             Add widget
           </Button>
-        }
+        ) : undefined}
       />
       <AddWidgetModal isOpen={modal} onClose={() => setModal(false)} dashboardId={dashboardId} serverId={serverId} onAdd={handleAdd} />
     </>
