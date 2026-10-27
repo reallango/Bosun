@@ -20,9 +20,13 @@ export default function EditServerPage() {
     const [sshKeys, setSSHKeys] = useState<{ id: string; name: string; fingerprint: string }[]>([]);
     const [confirmDelete, setConfirmDelete] = useState(false);
     const [busy, setBusy] = useState<'test' | 'detect' | null>(null);
+    // Pinned SSH host key and the poller's last error (read-only status).
+    const [hostKey, setHostKey] = useState<string | null>(null);
+    const [lastError, setLastError] = useState<string | null>(null);
     const { toast } = useToast();
     const [form, setForm] = useState({
         name: '', hostname: '', ssh_port: 22, ssh_user: '', ssh_key_id: '', notes: '', platform: 'linux',
+        poll_enabled: true, poll_interval_sec: 15,
     });
 
     useEffect(() => {
@@ -37,7 +41,13 @@ export default function EditServerPage() {
                     ssh_key_id: j.data.ssh_key_id || '',
                     notes: j.data.notes || '',
                     platform: j.data.platform || 'linux',
+                    poll_enabled: j.data.poll_enabled === undefined ? true : Number(j.data.poll_enabled) === 1,
+                    poll_interval_sec: Number(j.data.poll_interval_sec) || 15,
                 });
+                if (j.data) {
+                    setHostKey(j.data.host_key_fingerprint || null);
+                    setLastError(j.data.last_error || null);
+                }
             })
             .finally(() => setLoading(false));
 
@@ -167,6 +177,40 @@ RAM: ${d.data.total_ram_mb} MB`,
                                     On Windows, place this key in <code>C:\ProgramData\ssh\administrators_authorized_keys</code>.
                                 </p>
                             )}
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-4 xs:grid-cols-2">
+                            <div>
+                                <Label htmlFor="poll_interval">Poll interval (seconds)</Label>
+                                <Input id="poll_interval" type="number" min={5} max={3600} value={form.poll_interval_sec}
+                                    onChange={e => setForm(f => ({ ...f, poll_interval_sec: parseInt(e.target.value) || 15 }))} />
+                                <p className="mt-1 text-xs text-muted-foreground">One batched collection per poll over a persistent connection.</p>
+                            </div>
+                            <label className="flex items-center gap-2 self-center text-sm">
+                                <input type="checkbox" checked={form.poll_enabled}
+                                    onChange={e => setForm(f => ({ ...f, poll_enabled: e.target.checked }))} />
+                                Monitoring enabled
+                            </label>
+                        </div>
+
+                        <div className="rounded-md border p-3 text-sm">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                                <span className="font-medium">SSH host key</span>
+                                {hostKey && (
+                                    <Button variant="outline" size="sm" onClick={async () => {
+                                        const r = await fetchWithAuth(`/api/servers/${serverId}`, {
+                                            method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({ host_key_fingerprint: null }),
+                                        });
+                                        if (r.ok) { setHostKey(null); toast('Host key cleared', { variant: 'success', description: 'The next connection trusts and pins the key the host presents.' }); }
+                                        else toast('Could not clear host key', { variant: 'error' });
+                                    }}>Reset pinned key</Button>
+                                )}
+                            </div>
+                            <p className="mt-1 break-all font-mono text-xs text-muted-foreground">
+                                {hostKey || 'Not pinned yet (pinned on first connection)'}
+                            </p>
+                            {lastError && <p className="mt-2 break-words text-xs text-destructive">Last poll error: {lastError}</p>}
                         </div>
 
                         <div>

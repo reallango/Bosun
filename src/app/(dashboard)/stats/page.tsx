@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { LineChart, formatValue, SERIES_COLORS } from '@/components/charts/LineChart';
 import { RANGE_OPTIONS, MetricsResult } from '@/hooks/useMetrics';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
+import Header from '@/components/layout/Header';
 
 interface ServerItem {
   id: string;
@@ -99,10 +100,12 @@ export default function StatsPage() {
   const toggle = (id: string) => setSelected(sel => (sel.includes(id) ? sel.filter(x => x !== id) : [...sel, id]));
 
   return (
-    <div className="mx-auto w-full max-w-[1800px] space-y-4 p-3 sm:p-6">
+    <>
+    <Header title="Statistics" />
+    <div className="page max-w-[1800px] space-y-4">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold">Statistics</h1>
+
           <p className="text-sm text-gray-500">Compare history across hosts. Raw samples are kept for 48 h, 5-minute averages for 30 days, hourly averages for about a year.</p>
         </div>
         <div className="flex flex-wrap gap-1" role="group" aria-label="Time range">
@@ -185,5 +188,6 @@ export default function StatsPage() {
         </section>
       </div>
     </div>
+    </>
   );
 }
