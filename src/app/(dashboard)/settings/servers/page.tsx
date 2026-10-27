@@ -1,18 +1,16 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { Pencil, Plus } from 'lucide-react';
 import Header from '@/components/layout/Header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { EditServerModal } from '@/components/settings/EditServerModal';
-
-interface SSHKey {
-  id: string;
-  name: string;
-}
+import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
+import { cn } from '@/lib/utils';
 
 interface Server {
   id: string;
@@ -27,17 +25,30 @@ interface Server {
   notes?: string;
 }
 
+function KeyBadge({ configured }: { configured: boolean }) {
+  return configured ? (
+    <span className="rounded bg-green-500/15 px-2 py-0.5 text-xs text-green-700 dark:text-green-400">Configured</span>
+  ) : (
+    <span className="rounded bg-yellow-500/15 px-2 py-0.5 text-xs text-yellow-700 dark:text-yellow-400">No SSH key</span>
+  );
+}
+
+function OnlineStatus({ online }: { online: boolean }) {
+  return (
+    <span className={cn('inline-flex items-center gap-1.5 text-sm', online ? 'text-success' : 'text-muted-foreground')}>
+      <span className={cn('size-2 rounded-full', online ? 'bg-green-500' : 'bg-gray-400')} aria-hidden />
+      {online ? 'Online' : 'Offline'}
+    </span>
+  );
+}
+
 export default function ServersPage() {
   const [servers, setServers] = useState<Server[]>([]);
   const [loading, setLoading] = useState(true);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [selectedServer, setSelectedServer] = useState<Server | null>(null);
 
-  useEffect(() => {
-    fetchServers();
-  }, []);
-
-  const fetchServers = async () => {
+  const fetchServers = useCallback(async () => {
     try {
       const res = await fetchWithAuth('/api/servers');
       const data = await res.json();
@@ -47,7 +58,11 @@ export default function ServersPage() {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    fetchServers();
+  }, [fetchServers]);
 
   const handleEditServer = (server: Server) => {
     setSelectedServer(server);
@@ -57,69 +72,93 @@ export default function ServersPage() {
   return (
     <>
       <Header title="Servers" />
-      <div className="p-8">
-        <div className="flex justify-between items-center mb-6">
-          <h2 className="text-lg font-semibold">Managed Servers</h2>
-          <Link href="/settings/servers/new">
-            <Button>Add Server</Button>
-          </Link>
-        </div>
+      <div className="page max-w-6xl">
         <Card>
-          <CardHeader>
-            <CardTitle>Servers</CardTitle>
+          <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
+            <CardTitle>Managed servers</CardTitle>
+            <Button asChild size="lg">
+              <Link href="/settings/servers/new">
+                <Plus />
+                Add server
+              </Link>
+            </Button>
           </CardHeader>
           <CardContent>
             {loading ? (
-              <p className="text-gray-500">Loading...</p>
+              <LoadingSpinner />
             ) : servers.length === 0 ? (
-              <p className="text-gray-500">No servers added yet.</p>
+              <p className="py-6 text-center text-sm text-muted-foreground">No servers added yet.</p>
             ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Hostname</TableHead>
-                    <TableHead>SSH</TableHead>
-                    <TableHead>OS</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {servers.map((server) => (
-                    <TableRow key={server.id}>
-                      <TableCell>
-                        <Link href={`/settings/servers/${server.id}`} className="hover:underline">
-                          {server.name}
-                        </Link>
-                      </TableCell>
-                      <TableCell>{server.host}:{server.ssh_port}</TableCell>
-                      <TableCell>
-                        {server.ssh_key_id ? (
-                          <span className="text-xs px-2 py-1 bg-green-100 text-green-700 rounded">Configured</span>
-                        ) : (
-                          <span className="text-xs px-2 py-1 bg-yellow-100 text-yellow-700 rounded">No SSH Key</span>
-                        )}
-                      </TableCell>
-                      <TableCell>{server.os_type || '-'}</TableCell>
-                      <TableCell>
-                        <span className={`inline-flex items-center ${server.is_online ? 'text-green-600' : 'text-gray-400'}`}>
-                          <span className={`w-2 h-2 rounded-full mr-2 ${server.is_online ? 'bg-green-500' : 'bg-gray-400'}`} />
-                          {server.is_online ? 'Online' : 'Offline'}
-                        </span>
-                      </TableCell>
-                      <TableCell>
-                        <button
-                          onClick={() => handleEditServer(server)}
-                          className="text-xs px-2 py-1 bg-blue-100 text-blue-700 rounded hover:bg-blue-200 transition-colors"
-                        >
-                          Edit
-                        </button>
-                      </TableCell>
-                    </TableRow>
+              <>
+                {/* Phones: stacked cards */}
+                <ul className="divide-y md:hidden">
+                  {servers.map(server => (
+                    <li key={server.id} className="flex items-start gap-3 py-3">
+                      <div className="min-w-0 flex-1 space-y-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <Link href={`/settings/servers/${server.id}`} className="truncate font-medium hover:underline">
+                            {server.name}
+                          </Link>
+                          <OnlineStatus online={!!server.is_online} />
+                        </div>
+                        <div className="truncate font-mono text-xs text-muted-foreground">
+                          {server.host}:{server.ssh_port}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                          <KeyBadge configured={!!server.ssh_key_id} />
+                          {server.os_type && <span>{server.os_type}</span>}
+                        </div>
+                      </div>
+                      <Button variant="outline" size="icon-lg" onClick={() => handleEditServer(server)} aria-label={`Edit ${server.name}`}>
+                        <Pencil />
+                      </Button>
+                    </li>
                   ))}
-                </TableBody>
-              </Table>
+                </ul>
+
+                {/* md+: table */}
+                <div className="hidden md:block">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Name</TableHead>
+                        <TableHead>Hostname</TableHead>
+                        <TableHead>SSH</TableHead>
+                        <TableHead>OS</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead className="text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {servers.map(server => (
+                        <TableRow key={server.id}>
+                          <TableCell>
+                            <Link href={`/settings/servers/${server.id}`} className="font-medium hover:underline">
+                              {server.name}
+                            </Link>
+                          </TableCell>
+                          <TableCell className="font-mono text-xs">
+                            {server.host}:{server.ssh_port}
+                          </TableCell>
+                          <TableCell>
+                            <KeyBadge configured={!!server.ssh_key_id} />
+                          </TableCell>
+                          <TableCell>{server.os_type || '-'}</TableCell>
+                          <TableCell>
+                            <OnlineStatus online={!!server.is_online} />
+                          </TableCell>
+                          <TableCell className="text-right">
+                            <Button variant="outline" size="sm" onClick={() => handleEditServer(server)}>
+                              <Pencil />
+                              Edit
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </>
             )}
           </CardContent>
         </Card>

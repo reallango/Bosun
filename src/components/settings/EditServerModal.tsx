@@ -2,6 +2,18 @@
 
 import { useEffect, useState } from 'react';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import {
+  Dialog,
+  DialogBody,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { useToast } from '@/components/ui/toast';
 
 interface SSHKey {
   id: string;
@@ -28,14 +40,15 @@ interface EditServerModalProps {
   onSave: () => void;
 }
 
+const EMPTY_FORM = { name: '', hostname: '', ssh_port: 22, ssh_user: '', ssh_key_id: '', notes: '', platform: 'linux' };
+
 export function EditServerModal({ isOpen, onClose, server, onSave }: EditServerModalProps) {
-  const [form, setForm] = useState({
-    name: '', hostname: '', ssh_port: 22, ssh_user: '', ssh_key_id: '', notes: '', platform: 'linux',
-  });
+  const [form, setForm] = useState(EMPTY_FORM);
   const [sshKeys, setSSHKeys] = useState<SSHKey[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
+  const { toast } = useToast();
 
   useEffect(() => {
     if (server && isOpen) {
@@ -59,12 +72,10 @@ export function EditServerModal({ isOpen, onClose, server, onSave }: EditServerM
 
   useEffect(() => {
     if (!isOpen) {
-      setForm({ name: '', hostname: '', ssh_port: 22, ssh_user: '', ssh_key_id: '', notes: '', platform: 'linux' });
+      setForm(EMPTY_FORM);
       setError('');
     }
   }, [isOpen]);
-
-  if (!isOpen) return null;
 
   const save = async () => {
     if (!server) return;
@@ -81,6 +92,7 @@ export function EditServerModal({ isOpen, onClose, server, onSave }: EditServerM
         setError(d.error?.message || 'Failed to save');
         return;
       }
+      toast('Server saved', { variant: 'success' });
       onSave();
       onClose();
     } catch {
@@ -96,129 +108,128 @@ export function EditServerModal({ isOpen, onClose, server, onSave }: EditServerM
     try {
       const r = await fetchWithAuth(`/api/servers/${server.id}/test`, { method: 'POST' });
       const d = await r.json();
-      alert(d.data?.success
-        ? `✅ Connection OK! Latency: ${d.data.latencyMs}ms`
-        : `❌ Failed: ${d.error?.message}`);
+      if (d.data?.success) toast('Connection OK', { variant: 'success', description: `Latency: ${d.data.latencyMs}ms` });
+      else toast('Connection failed', { variant: 'error', description: d.error?.message });
     } catch {
-      alert('❌ Network error');
+      toast('Connection failed', { variant: 'error', description: 'Network error' });
     } finally {
       setLoading(false);
     }
   };
 
+  const field = (key: keyof typeof EMPTY_FORM) => `edit-server-${key}`;
+
   return (
-    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-      <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full max-h-[90vh] overflow-y-auto">
-        <h3 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">Edit Server</h3>
-        
-        {error && (
-          <div className="text-red-500 text-sm p-2 bg-red-50 dark:bg-red-950 rounded mb-4">{error}</div>
-        )}
+    <Dialog open={isOpen} onOpenChange={open => !open && onClose()}>
+      <DialogContent size="lg">
+        <DialogHeader>
+          <DialogTitle>Edit server</DialogTitle>
+        </DialogHeader>
 
-        <div className="space-y-4">
-          <div>
-            <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Name *</label>
-            <input
-              type="text"
-              value={form.name}
-              onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-              className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm"
-            />
-          </div>
+        <DialogBody>
+          <form
+            id="edit-server-form"
+            className="space-y-4"
+            onSubmit={e => {
+              e.preventDefault();
+              save();
+            }}
+          >
+            {error && (
+              <div role="alert" className="rounded-md bg-destructive/10 p-2 text-sm text-destructive">{error}</div>
+            )}
 
-          <div>
-            <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Hostname / IP *</label>
-            <input
-              type="text"
-              value={form.hostname}
-              onChange={e => setForm(f => ({ ...f, hostname: e.target.value }))}
-              className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm"
-            />
-          </div>
+            <div className="space-y-1.5">
+              <Label htmlFor={field('name')}>Name *</Label>
+              <Input id={field('name')} value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} />
+            </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">SSH Port</label>
-              <input
-                type="number"
-                value={form.ssh_port}
-                onChange={e => setForm(f => ({ ...f, ssh_port: parseInt(e.target.value) || 22 }))}
-                className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm"
+            <div className="space-y-1.5">
+              <Label htmlFor={field('hostname')}>Hostname / IP *</Label>
+              <Input
+                id={field('hostname')}
+                value={form.hostname}
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                onChange={e => setForm(f => ({ ...f, hostname: e.target.value }))}
               />
             </div>
-            <div>
-              <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">SSH User *</label>
-              <input
-                type="text"
-                value={form.ssh_user}
-                onChange={e => setForm(f => ({ ...f, ssh_user: e.target.value }))}
-                className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm"
-              />
+
+            <div className="grid grid-cols-1 gap-4 xs:grid-cols-[8rem_1fr]">
+              <div className="space-y-1.5">
+                <Label htmlFor={field('ssh_port')}>SSH port</Label>
+                <Input
+                  id={field('ssh_port')}
+                  type="number"
+                  inputMode="numeric"
+                  value={form.ssh_port}
+                  onChange={e => setForm(f => ({ ...f, ssh_port: parseInt(e.target.value) || 22 }))}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor={field('ssh_user')}>SSH user *</Label>
+                <Input
+                  id={field('ssh_user')}
+                  value={form.ssh_user}
+                  autoCapitalize="off"
+                  autoCorrect="off"
+                  onChange={e => setForm(f => ({ ...f, ssh_user: e.target.value }))}
+                />
+              </div>
             </div>
-          </div>
 
-          <div>
-            <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Platform</label>
-            <select
-              value={form.platform}
-              onChange={e => setForm(f => ({ ...f, platform: e.target.value }))}
-              className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm"
-            >
-              <option value="linux">Linux</option>
-              <option value="windows">Windows</option>
-            </select>
-          </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor={field('platform')}>Platform</Label>
+                <select
+                  id={field('platform')}
+                  value={form.platform}
+                  onChange={e => setForm(f => ({ ...f, platform: e.target.value }))}
+                  className="form-select"
+                >
+                  <option value="linux">Linux</option>
+                  <option value="windows">Windows</option>
+                </select>
+              </div>
 
-          <div>
-            <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">SSH Key</label>
-            <select
-              value={form.ssh_key_id}
-              onChange={e => setForm(f => ({ ...f, ssh_key_id: e.target.value }))}
-              className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm"
-            >
-              <option value="">-- No key selected --</option>
-              {sshKeys.map(k => (
-                <option key={k.id} value={k.id}>
-                  {k.name} ({k.fingerprint?.substring(0, 16)}...)
-                </option>
-              ))}
-            </select>
-          </div>
+              <div className="space-y-1.5">
+                <Label htmlFor={field('ssh_key_id')}>SSH key</Label>
+                <select
+                  id={field('ssh_key_id')}
+                  value={form.ssh_key_id}
+                  onChange={e => setForm(f => ({ ...f, ssh_key_id: e.target.value }))}
+                  className="form-select"
+                >
+                  <option value="">-- No key selected --</option>
+                  {sshKeys.map(k => (
+                    <option key={k.id} value={k.id}>
+                      {k.name} ({k.fingerprint?.substring(0, 16)}...)
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
 
-          <div>
-            <label className="block text-sm font-medium mb-1 text-gray-700 dark:text-gray-300">Notes</label>
-            <input
-              type="text"
-              value={form.notes}
-              onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
-              className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm"
-            />
-          </div>
-        </div>
+            <div className="space-y-1.5">
+              <Label htmlFor={field('notes')}>Notes</Label>
+              <Input id={field('notes')} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
+            </div>
+          </form>
+        </DialogBody>
 
-        <div className="flex gap-2 mt-6">
-          <button
-            onClick={save}
-            disabled={saving}
-            className="flex-1 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 transition-colors"
-          >
-            {saving ? 'Saving...' : 'Save'}
-          </button>
-          <button
-            onClick={testConnection}
-            disabled={loading}
-            className="flex-1 px-4 py-2 border rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-          >
-            {loading ? 'Testing...' : 'Test'}
-          </button>
-          <button
-            onClick={onClose}
-            className="flex-1 px-4 py-2 border rounded hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
-          >
+        <DialogFooter>
+          <Button variant="outline" size="lg" onClick={onClose}>
             Cancel
-          </button>
-        </div>
-      </div>
-    </div>
+          </Button>
+          <Button variant="outline" size="lg" onClick={testConnection} disabled={loading}>
+            {loading ? 'Testing…' : 'Test connection'}
+          </Button>
+          <Button size="lg" type="submit" form="edit-server-form" disabled={saving}>
+            {saving ? 'Saving…' : 'Save'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

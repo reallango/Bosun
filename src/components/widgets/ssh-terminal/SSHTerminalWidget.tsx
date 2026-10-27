@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { useEffect, useRef, useState, useCallback, type MutableRefObject } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
@@ -13,11 +13,11 @@ interface SSHTerminalWidgetProps {
 
 type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'error' | 'disconnected';
 
-function createTerminal(): Terminal {
+function createTerminal(fontSize = 13): Terminal {
   return new Terminal({
     cursorBlink: true,
     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-    fontSize: 13,
+    fontSize,
     theme: {
       background: '#0b1020',
       foreground: '#e0e0e0',
@@ -43,6 +43,48 @@ function createTerminal(): Terminal {
     },
     allowProposedApi: true
   });
+}
+
+/** Smaller font on narrow containers so phones still get ~40+ columns. */
+function fontSizeFor(width: number): number {
+  if (width > 0 && width < 360) return 11;
+  if (width > 0 && width < 560) return 12;
+  return 13;
+}
+
+/**
+ * ResizeObserver callback: adapts the font size to the container, re-fits on
+ * the next animation frame (avoids ResizeObserver loop warnings) and tells the
+ * server about new dimensions only when cols/rows actually changed.
+ */
+function createResizeHandler(
+  termRef: MutableRefObject<Terminal | null>,
+  fitAddonRef: MutableRefObject<FitAddon | null>,
+  wsRef: MutableRefObject<WebSocket | null>
+) {
+  let frame = 0;
+  let last = '';
+  return () => {
+    if (frame) cancelAnimationFrame(frame);
+    frame = requestAnimationFrame(() => {
+      frame = 0;
+      const term = termRef.current;
+      const fit = fitAddonRef.current;
+      if (!term || !fit) return;
+      const host = term.element?.parentElement;
+      if (host && host.clientWidth > 0) {
+        const size = fontSizeFor(host.clientWidth);
+        if (term.options.fontSize !== size) term.options.fontSize = size;
+      }
+      if (!host || host.clientWidth === 0 || host.clientHeight === 0) return;
+      try { fit.fit(); } catch {}
+      const key = `${term.cols}x${term.rows}`;
+      if (key !== last && wsRef.current?.readyState === WebSocket.OPEN) {
+        last = key;
+        wsRef.current.send(JSON.stringify({ type: 'resize', cols: term.cols, rows: term.rows }));
+      }
+    });
+  };
 }
 
 function ensureXtermCss() {
@@ -183,7 +225,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
     cleanup();
     ensureXtermCss();
 
-    const term = createTerminal();
+    const term = createTerminal(fontSizeFor(terminalRef.current?.clientWidth ?? 0));
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
     term.open(terminalRef.current!);
@@ -193,20 +235,11 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
     fitAddonRef.current = fitAddon;
     tsm.setSessionTerminal(widgetId, term);
 
-    const handleResize = () => {
-      if (!fitAddonRef.current) return;
-      try { fitAddonRef.current.fit(); } catch {}
-      if (wsRef.current?.readyState === WebSocket.OPEN) {
-        wsRef.current.send(JSON.stringify({
-          type: 'resize',
-          cols: termRef.current?.cols,
-          rows: termRef.current?.rows
-        }));
-      }
-    };
+    const handleResize = createResizeHandler(termRef, fitAddonRef, wsRef);
     resizeObserverRef.current = new ResizeObserver(handleResize);
     if (terminalRef.current?.parentElement) {
       resizeObserverRef.current.observe(terminalRef.current.parentElement);
+      handleResize();
     }
 
     term.onData((data) => {
@@ -366,7 +399,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       console.log('[TSM] Found existing session, reattaching:', widgetId);
       ensureXtermCss();
 
-      const term = createTerminal();
+      const term = createTerminal(fontSizeFor(terminalRef.current?.clientWidth ?? 0));
       const fitAddon = new FitAddon();
       term.loadAddon(fitAddon);
       term.open(terminalRef.current!);
@@ -395,20 +428,11 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
         }
       });
 
-      const handleResize = () => {
-        if (!fitAddonRef.current) return;
-        try { fitAddonRef.current.fit(); } catch {}
-        if (wsRef.current?.readyState === WebSocket.OPEN) {
-          wsRef.current.send(JSON.stringify({
-            type: 'resize',
-            cols: termRef.current?.cols,
-            rows: termRef.current?.rows
-          }));
-        }
-      };
+      const handleResize = createResizeHandler(termRef, fitAddonRef, wsRef);
       resizeObserverRef.current = new ResizeObserver(handleResize);
       if (terminalRef.current?.parentElement) {
         resizeObserverRef.current.observe(terminalRef.current.parentElement);
+      handleResize();
       }
 
       // Re-wire handlers to THIS component's refs (React creates new refs on
@@ -459,53 +483,57 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
   };
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[#0b1020]">
       {/* Terminal container */}
-      <div className="flex-1 relative">
+      <div className="relative min-h-[120px] flex-1">
         <div
           ref={terminalRef}
-          className="absolute inset-0"
-          style={{ minHeight: '150px' }}
+          className="no-drag absolute inset-0 p-1"
         />
 
         {/* Idle state - login form */}
         {status === 'idle' && (
-          <div className="absolute inset-0 bg-gray-900/90 flex items-center justify-center p-4">
-            <div className="text-center w-full max-w-xs">
-              <p className="text-gray-300 text-sm mb-4">Sign in to this server</p>
+          <div className="absolute inset-0 flex items-center justify-center overflow-auto bg-gray-900/90 p-3">
+            <form className="w-full max-w-xs text-center" onSubmit={(e) => { e.preventDefault(); handleConnect(); }}>
+              <p className="mb-3 text-sm text-gray-300">Sign in to this server</p>
               <input
                 type="text"
                 value={username}
                 onChange={(e) => handleUsernameChange(e.target.value)}
                 placeholder="Username"
-                className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded text-gray-200 text-sm mb-3"
-                onKeyDown={(e) => e.key === 'Enter' && handleConnect()}
+                aria-label="SSH username"
+                autoComplete="username"
+                autoCapitalize="off"
+                autoCorrect="off"
+                spellCheck={false}
+                className="no-drag mb-2 w-full rounded border border-gray-600 bg-gray-800 px-3 py-2 text-base text-gray-200 sm:text-sm"
               />
               <input
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 placeholder="Password"
-                className="w-full px-3 py-2 bg-gray-800 border border-gray-600 rounded text-gray-200 text-sm mb-3"
-                onKeyDown={(e) => e.key === 'Enter' && handleConnect()}
+                aria-label="SSH password"
+                autoComplete="current-password"
+                className="no-drag mb-3 w-full rounded border border-gray-600 bg-gray-800 px-3 py-2 text-base text-gray-200 sm:text-sm"
               />
               <button
-                onClick={handleConnect}
+                type="submit"
                 disabled={!username || !password}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-sm rounded disabled:opacity-50 disabled:cursor-not-allowed w-full"
+                className="no-drag w-full rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Connect
               </button>
-            </div>
+            </form>
           </div>
         )}
 
         {/* Error overlay */}
         {error && status !== 'idle' && (
-          <div className="absolute inset-0 bg-red-900/80 flex items-center justify-center p-4">
-            <div className="text-center">
+          <div className="absolute inset-0 flex items-center justify-center overflow-auto bg-red-900/80 p-3">
+            <div className="max-w-full text-center">
               <p className="text-red-200 text-sm mb-2">Connection Error</p>
-              <p className="text-red-100 text-xs mb-3">{error}</p>
+              <p className="mb-3 break-words text-xs text-red-100">{error}</p>
               <button
                 onClick={handleReconnect}
                 className="px-3 py-1 bg-red-700 hover:bg-red-600 text-white text-xs rounded"
@@ -525,7 +553,7 @@ export function SSHTerminalWidget({ widgetId, serverId }: SSHTerminalWidgetProps
       </div>
 
       {/* Control bar */}
-      <div className="flex items-center justify-between px-2 py-1 bg-gray-900 border-t border-gray-700">
+      <div className="flex shrink-0 items-center justify-between gap-2 border-t border-gray-700 bg-gray-900 px-2 py-1">
         {/* Status indicator */}
         <div className="flex items-center gap-2">
           <span

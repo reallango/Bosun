@@ -11,6 +11,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 
 interface ImportResult {
@@ -32,8 +33,6 @@ export function DatabaseImportDialog({ open, onOpenChange, onImported }: Databas
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<ImportResult | null>(null);
-
-  if (!open) return null;
 
   const reset = () => {
     setFile(null);
@@ -69,12 +68,13 @@ export function DatabaseImportDialog({ open, onOpenChange, onImported }: Databas
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="fixed inset-0 bg-black/50" onClick={close} />
-      <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 w-full max-w-lg mx-4 max-h-[85vh] overflow-y-auto">
-        <h2 className="text-lg font-semibold mb-4">Import Database</h2>
+    <Dialog open={open} onOpenChange={o => { if (!o) close(); }}>
+      <DialogContent size="lg" className="overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Import Database</DialogTitle>
+        </DialogHeader>
 
-        {error && <div className="mb-4 text-sm text-red-600 dark:text-red-400">{error}</div>}
+        {error && <div className="mb-4 text-sm text-destructive">{error}</div>}
 
         {result ? (
           <div className="space-y-3">
@@ -85,7 +85,7 @@ export function DatabaseImportDialog({ open, onOpenChange, onImported }: Databas
             {Object.keys(result.counts).length > 0 && (
               <div className="text-sm">
                 <p className="font-medium mb-1">Rows imported</p>
-                <ul className="list-disc list-inside text-gray-600 dark:text-gray-400">
+                <ul className="list-disc list-inside text-muted-foreground">
                   {Object.entries(result.counts).map(([table, count]) => (
                     <li key={table}>
                       <span className="font-mono text-xs">{table}</span>: {count}
@@ -95,7 +95,7 @@ export function DatabaseImportDialog({ open, onOpenChange, onImported }: Databas
               </div>
             )}
             {result.warnings.length > 0 && (
-              <div className="text-sm text-amber-600 dark:text-amber-400">
+              <div className="text-sm text-warning">
                 <p className="font-medium mb-1">Warnings</p>
                 <ul className="list-disc list-inside">
                   {result.warnings.map((w, i) => (
@@ -117,7 +117,7 @@ export function DatabaseImportDialog({ open, onOpenChange, onImported }: Databas
                 accept=".json,.sqlite,.sqlite3,.sql,application/json,application/octet-stream,text/plain"
                 onChange={e => setFile(e.target.files?.[0] ?? null)}
               />
-              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              <p className="mt-1 text-xs text-muted-foreground">
                 Format is detected automatically (JSON, SQLite snapshot, or SQL dump).
               </p>
             </div>
@@ -131,14 +131,14 @@ export function DatabaseImportDialog({ open, onOpenChange, onImported }: Databas
               />
               <span>
                 <span className="font-medium">Replace existing data</span>
-                <span className="block text-gray-500 dark:text-gray-400">
+                <span className="block text-muted-foreground">
                   Clears each table before importing. Required for SQLite/SQL restores.
                 </span>
               </span>
             </label>
 
             {replace && (
-              <p className="text-xs text-red-600 dark:text-red-400">
+              <p className="text-xs text-destructive">
                 This permanently deletes existing rows in the imported tables and cannot be undone.
               </p>
             )}
@@ -146,7 +146,7 @@ export function DatabaseImportDialog({ open, onOpenChange, onImported }: Databas
         )}
 
         {!result && (
-          <div className="flex justify-end gap-2 mt-6">
+          <div className="mt-2 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <Button variant="outline" onClick={close} disabled={busy}>
               Cancel
             </Button>
@@ -159,7 +159,7 @@ export function DatabaseImportDialog({ open, onOpenChange, onImported }: Databas
             </Button>
           </div>
         )}
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
