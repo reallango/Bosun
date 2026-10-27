@@ -1,5 +1,6 @@
 import Sidebar from '@/components/layout/Sidebar';
 import { ShellProvider } from '@/components/layout/ShellContext';
+import { ClusterBanner } from '@/components/layout/ClusterBanner';
 
 export default function DashboardLayout({
   children,
@@ -11,6 +12,7 @@ export default function DashboardLayout({
       <div className="flex min-h-dvh w-full">
         <Sidebar />
         <div className="flex min-w-0 flex-1 flex-col">
+          <ClusterBanner />
           <main className="flex min-w-0 flex-1 flex-col">{children}</main>
         </div>
       </div>
