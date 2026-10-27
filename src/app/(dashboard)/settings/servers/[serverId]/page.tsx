@@ -7,6 +7,9 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
+import { useToast } from '@/components/ui/toast';
+import { DeleteConfirmDialog } from '@/components/dialogs/DeleteConfirmDialog';
+import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 
 export default function EditServerPage() {
     const { serverId } = useParams<{ serverId: string }>();
@@ -15,6 +18,9 @@ export default function EditServerPage() {
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState('');
     const [sshKeys, setSSHKeys] = useState<{ id: string; name: string; fingerprint: string }[]>([]);
+    const [confirmDelete, setConfirmDelete] = useState(false);
+    const [busy, setBusy] = useState<'test' | 'detect' | null>(null);
+    const { toast } = useToast();
     const [form, setForm] = useState({
         name: '', hostname: '', ssh_port: 22, ssh_user: '', ssh_key_id: '', notes: '', platform: 'linux',
     });
@@ -56,39 +62,60 @@ export default function EditServerPage() {
     };
 
     const del = async () => {
-        if (!confirm('Delete this server? This cannot be undone.')) return;
         await fetchWithAuth(`/api/servers/${serverId}`, { method: 'DELETE' });
         router.push('/settings/servers');
     };
 
     const test = async () => {
-        const r = await fetchWithAuth(`/api/servers/${serverId}/test`, { method: 'POST' });
-        const d = await r.json();
-        alert(d.data?.success
-            ? `✅ Connection OK! Latency: ${d.data.latencyMs}ms`
-            : `❌ Failed: ${d.error?.message}`);
+        setBusy('test');
+        try {
+            const r = await fetchWithAuth(`/api/servers/${serverId}/test`, { method: 'POST' });
+            const d = await r.json();
+            if (d.data?.success) toast('Connection OK', { variant: 'success', description: `Latency: ${d.data.latencyMs}ms` });
+            else toast('Connection failed', { variant: 'error', description: d.error?.message });
+        } catch {
+            toast('Connection failed', { variant: 'error', description: 'Network error' });
+        } finally {
+            setBusy(null);
+        }
     };
 
     const detect = async () => {
-        const r = await fetchWithAuth(`/api/servers/${serverId}/detect`, { method: 'POST' });
-        const d = await r.json();
-        alert(d.data
-            ? `✅ Detected:\nOS: ${d.data.os_type} ${d.data.os_version}\nKernel: ${d.data.kernel_version}\nCPU: ${d.data.cpu_model} (${d.data.cpu_cores} cores)\nRAM: ${d.data.total_ram_mb} MB`
-            : `❌ Failed: ${d.error?.message}`);
+        setBusy('detect');
+        try {
+            const r = await fetchWithAuth(`/api/servers/${serverId}/detect`, { method: 'POST' });
+            const d = await r.json();
+            if (d.data) {
+                toast('OS detected', {
+                    variant: 'success',
+                    duration: 10000,
+                    description: `OS: ${d.data.os_type} ${d.data.os_version}
+Kernel: ${d.data.kernel_version}
+CPU: ${d.data.cpu_model} (${d.data.cpu_cores} cores)
+RAM: ${d.data.total_ram_mb} MB`,
+                });
+            } else {
+                toast('Detection failed', { variant: 'error', description: d.error?.message });
+            }
+        } catch {
+            toast('Detection failed', { variant: 'error', description: 'Network error' });
+        } finally {
+            setBusy(null);
+        }
     };
 
     if (loading) {
-        return <><Header title="Edit Server" /><div className="p-6 text-muted-foreground">Loading...</div></>;
+        return <><Header title="Edit Server" /><div className="page"><LoadingSpinner /></div></>;
     }
 
     return (
         <>
             <Header title={`Edit: ${form.name}`} />
-            <div className="p-6 max-w-2xl">
+            <div className="page max-w-2xl">
                 <Card>
                     <CardHeader><CardTitle>Server Configuration</CardTitle></CardHeader>
                     <CardContent className="space-y-4">
-                        {error && <div className="text-red-500 text-sm p-2 bg-red-50 dark:bg-red-950 rounded">{error}</div>}
+                        {error && <div role="alert" className="rounded-md bg-destructive/10 p-2 text-sm text-destructive">{error}</div>}
 
                         <div>
                             <Label htmlFor="name">Name *</Label>
@@ -100,7 +127,7 @@ export default function EditServerPage() {
                             <Input id="hostname" value={form.hostname} onChange={e => setForm(f => ({ ...f, hostname: e.target.value }))} />
                         </div>
 
-                        <div className="grid grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 gap-4 xs:grid-cols-[8rem_1fr]">
                             <div>
                                 <Label htmlFor="ssh_port">SSH Port</Label>
                                 <Input id="ssh_port" type="number" value={form.ssh_port}
@@ -117,7 +144,7 @@ export default function EditServerPage() {
                             <Label htmlFor="platform">Platform</Label>
                             <select id="platform" value={form.platform}
                                 onChange={e => setForm(f => ({ ...f, platform: e.target.value }))}
-                                className="w-full h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm">
+                                className="form-select">
                                 <option value="linux">Linux</option>
                                 <option value="windows">Windows</option>
                             </select>
@@ -127,7 +154,7 @@ export default function EditServerPage() {
                             <Label htmlFor="ssh_key">SSH Key</Label>
                             <select id="ssh_key" value={form.ssh_key_id}
                                 onChange={e => setForm(f => ({ ...f, ssh_key_id: e.target.value }))}
-                                className="w-full h-8 rounded-lg border border-input bg-transparent px-2.5 text-sm">
+                                className="form-select">
                                 <option value="">-- No key selected --</option>
                                 {sshKeys.map(k => (
                                     <option key={k.id} value={k.id}>
@@ -148,18 +175,30 @@ export default function EditServerPage() {
                                 onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} />
                         </div>
 
-                        <div className="flex gap-2 pt-4 border-t">
-                            <Button onClick={save} disabled={saving}>
-                                {saving ? 'Saving...' : 'Save Changes'}
+                        <div className="flex flex-col gap-2 border-t pt-4 sm:flex-row sm:flex-wrap">
+                            <Button size="lg" onClick={save} disabled={saving}>
+                                {saving ? 'Saving…' : 'Save changes'}
                             </Button>
-                            <Button variant="outline" onClick={test}>Test Connection</Button>
-                            <Button variant="outline" onClick={detect}>Detect OS</Button>
-                            <div className="flex-1" />
-                            <Button variant="destructive" onClick={del}>Delete Server</Button>
+                            <Button size="lg" variant="outline" onClick={test} disabled={busy !== null}>
+                                {busy === 'test' ? 'Testing…' : 'Test connection'}
+                            </Button>
+                            <Button size="lg" variant="outline" onClick={detect} disabled={busy !== null}>
+                                {busy === 'detect' ? 'Detecting…' : 'Detect OS'}
+                            </Button>
+                            <div className="hidden flex-1 sm:block" />
+                            <Button size="lg" variant="destructive" onClick={() => setConfirmDelete(true)}>Delete server</Button>
                         </div>
                     </CardContent>
                 </Card>
             </div>
+            <DeleteConfirmDialog
+                title="Delete server?"
+                confirmLabel="Delete"
+                widgetTitle={form.name || 'this server'}
+                open={confirmDelete}
+                onOpenChange={setConfirmDelete}
+                onConfirm={del}
+            />
         </>
     );
 }

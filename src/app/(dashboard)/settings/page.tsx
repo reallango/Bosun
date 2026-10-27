@@ -1,53 +1,40 @@
 'use client';
 
-import { useState } from 'react';
 import Header from '@/components/layout/Header';
 import { useAuth } from '@/hooks/useAuth';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import AppSettingsCard from '@/components/settings/AppSettingsCard';
 
 export default function SettingsPage() {
   const { user } = useAuth();
-  const [appName] = useState('Bosun');
+
+  const fields = [
+    { id: 'app-name', label: 'Application name', value: 'Bosun' },
+    { id: 'current-user', label: 'Current user', value: user?.username || '' },
+    { id: 'user-role', label: 'Role', value: user?.role || '' },
+  ];
 
   return (
     <>
       <Header title="Settings" />
-      <div className="p-8 space-y-6 max-w-4xl">
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-          <h2 className="text-lg font-semibold mb-4">General Settings</h2>
-          
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">Application Name</label>
-              <input
-                type="text"
-                value={appName}
-                readOnly
-                className="w-full px-3 py-2 border rounded bg-gray-50 dark:bg-gray-700"
-              />
+      <div className="page max-w-4xl space-y-4 sm:space-y-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>General</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              {fields.map(f => (
+                <div key={f.id} className="space-y-1.5">
+                  <Label htmlFor={f.id}>{f.label}</Label>
+                  <Input id={f.id} value={f.value} readOnly className="bg-muted/50" />
+                </div>
+              ))}
             </div>
-            
-            <div>
-              <label className="block text-sm font-medium mb-1">Current User</label>
-              <input
-                type="text"
-                value={user?.username || ''}
-                readOnly
-                className="w-full px-3 py-2 border rounded bg-gray-50 dark:bg-gray-700"
-              />
-            </div>
-            
-            <div>
-              <label className="block text-sm font-medium mb-1">Role</label>
-              <input
-                type="text"
-                value={user?.role || ''}
-                readOnly
-                className="w-full px-3 py-2 border rounded bg-gray-50 dark:bg-gray-700"
-              />
-            </div>
-          </div>
-        </div>
+          </CardContent>
+        </Card>
 
         <AppSettingsCard />
       </div>

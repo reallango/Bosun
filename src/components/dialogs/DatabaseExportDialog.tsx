@@ -11,6 +11,7 @@ import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 
 interface ExportOptions {
@@ -50,8 +51,6 @@ export function DatabaseExportDialog({ open, onOpenChange }: DatabaseExportDialo
       }
     })();
   }, [open]);
-
-  if (!open) return null;
 
   const isJson = format === 'json';
 
@@ -98,12 +97,13 @@ export function DatabaseExportDialog({ open, onOpenChange }: DatabaseExportDialo
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center">
-      <div className="fixed inset-0 bg-black/50" onClick={() => onOpenChange(false)} />
-      <div className="relative bg-white dark:bg-gray-800 rounded-lg shadow-lg p-6 w-full max-w-lg mx-4 max-h-[85vh] overflow-y-auto">
-        <h2 className="text-lg font-semibold mb-4">Export Database</h2>
+    <Dialog open={open} onOpenChange={o => { if (!o) onOpenChange(false); }}>
+      <DialogContent size="lg" className="overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Export Database</DialogTitle>
+        </DialogHeader>
 
-        {error && <div className="mb-4 text-sm text-red-600 dark:text-red-400">{error}</div>}
+        {error && <div className="mb-4 text-sm text-destructive">{error}</div>}
 
         <div className="space-y-4">
           <div>
@@ -121,7 +121,7 @@ export function DatabaseExportDialog({ open, onOpenChange }: DatabaseExportDialo
                   />
                   <span>
                     <span className="font-medium">{f.label}</span>
-                    <span className="block text-gray-500 dark:text-gray-400">{f.description}</span>
+                    <span className="block text-muted-foreground">{f.description}</span>
                   </span>
                 </label>
               ))}
@@ -132,7 +132,7 @@ export function DatabaseExportDialog({ open, onOpenChange }: DatabaseExportDialo
             <>
               <div>
                 <Label className="mb-2">Tables</Label>
-                <div className="grid grid-cols-2 gap-1 max-h-40 overflow-y-auto">
+                <div className="grid max-h-40 grid-cols-1 gap-1 overflow-y-auto xs:grid-cols-2">
                   {(options?.tables || []).map(t => (
                     <label key={t} className="flex items-center gap-2 text-sm">
                       <input
@@ -165,7 +165,7 @@ export function DatabaseExportDialog({ open, onOpenChange }: DatabaseExportDialo
               </label>
 
               {includeSecrets && (
-                <p className="text-xs text-amber-600 dark:text-amber-400">
+                <p className="text-xs text-warning">
                   Secrets are exported encrypted with this host&apos;s MASTER_KEY. They can only
                   be restored on a host using the same MASTER_KEY. Plaintext is never exported.
                 </p>
@@ -173,12 +173,12 @@ export function DatabaseExportDialog({ open, onOpenChange }: DatabaseExportDialo
             </>
           )}
 
-          <p className="text-xs text-gray-500 dark:text-gray-400">
+          <p className="text-xs text-muted-foreground">
             Format version {options?.formatVersion ?? '—'} · schema version {options?.schemaVersion ?? '—'}
           </p>
         </div>
 
-        <div className="flex justify-end gap-2 mt-6">
+        <div className="mt-2 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
             Cancel
           </Button>
@@ -186,7 +186,7 @@ export function DatabaseExportDialog({ open, onOpenChange }: DatabaseExportDialo
             {busy ? 'Exporting...' : 'Export'}
           </Button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   );
 }
