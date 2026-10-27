@@ -3,6 +3,10 @@ import { fetchWithAuth } from './fetchWithAuth';
 export interface WakeServerResult {
   success: boolean;
   via: 'container' | 'local_server';
+  /** How the sending host was chosen: mapping, detected or local_server. */
+  source?: string | null;
+  macs?: string[];
+  note?: string;
   host?: string;
   mac: string;
   broadcast: string;
@@ -65,11 +69,18 @@ export async function installWol(serverId: string): Promise<{ success: boolean; 
   return json.data as { success: boolean; host: string };
 }
 
+export interface ServerBrief { id: string; name: string; hostname: string }
+
 export interface WolSettings {
+  sender: 'auto' | 'local_server' | 'container';
+  /** NODE_NAME of the Bosun node that answered. */
+  node_name: string;
+  node_host_mapped: ServerBrief | null;
+  node_host_detected: ServerBrief | null;
   local_server_id: string | null;
-  use_local_server: boolean;
+  local_server: ServerBrief | null;
+  effective_sender: (ServerBrief & { source: string | null }) | null;
   remote_wol_installed: boolean;
-  local_server?: { id: string; name: string; hostname: string } | null;
 }
 
 /** Read the Wake-on-LAN configuration (local server + install cache). */
@@ -82,7 +93,7 @@ export async function getWolSettings(): Promise<WolSettings> {
 
 /** Update the Wake-on-LAN configuration (admin only). */
 export async function saveWolSettings(
-  patch: { local_server_id?: string | null; use_local_server?: boolean }
+  patch: { sender?: WolSettings['sender']; local_server_id?: string | null; node_host_server_id?: string | null }
 ): Promise<WolSettings> {
   const res = await fetchWithAuth('/api/settings/wol', {
     method: 'PUT',
