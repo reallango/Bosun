@@ -26,6 +26,7 @@ interface Server {
   hostname?: string;
   notes?: string;
   mac_address?: string | null;
+  mac_address_alt?: string | null;
   poll_enabled?: boolean;
   platform?: string;
 }
@@ -123,7 +124,7 @@ export default function ServersPage() {
                           {server.os_type && <span>{server.os_type}</span>}
                         </div>
                       </div>
-                      <WakeButton serverId={server.id} serverName={server.name} macAddress={server.mac_address} iconOnly />
+                      <WakeButton serverId={server.id} serverName={server.name} macAddress={server.mac_address || server.mac_address_alt || null} iconOnly />
                       <Button variant="outline" size="icon-lg" onClick={() => handleEditServer(server)} aria-label={`Edit ${server.name}`}>
                         <Pencil />
                       </Button>
@@ -160,13 +161,13 @@ export default function ServersPage() {
                             <KeyBadge configured={!!server.ssh_key_id} />
                           </TableCell>
                           <TableCell>{server.os_type || '-'}</TableCell>
-                          <TableCell className="font-mono text-xs">{server.mac_address || <span className="text-muted-foreground">-</span>}</TableCell>
+                          <TableCell className="font-mono text-xs">{server.mac_address || server.mac_address_alt ? <>{server.mac_address}{server.mac_address_alt && <div className="text-muted-foreground">{server.mac_address_alt}</div>}</> : <span className="text-muted-foreground">-</span>}</TableCell>
                           <TableCell>
                             <OnlineStatus online={!!server.is_online} monitored={server.poll_enabled !== false} />
                           </TableCell>
                           <TableCell className="text-right">
                             <div className="flex justify-end gap-2">
-                            <WakeButton serverId={server.id} serverName={server.name} macAddress={server.mac_address} />
+                            <WakeButton serverId={server.id} serverName={server.name} macAddress={server.mac_address || server.mac_address_alt || null} />
                             <Button variant="outline" size="sm" onClick={() => handleEditServer(server)}>
                               <Pencil />
                               Edit

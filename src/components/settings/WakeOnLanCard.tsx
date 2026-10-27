@@ -1,157 +1,124 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { Power } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import { useToast } from '@/components/ui/toast';
+import { useAuth } from '@/hooks/useAuth';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
-import { getWolSettings, saveWolSettings, installWol, WakeError } from '@/lib/api/wake';
+import { readJson } from '@/lib/api/readJson';
+import { getWolSettings, saveWolSettings, WolSettings } from '@/lib/api/wake';
 
-interface ServerOption {
-  id: string;
-  name: string;
-  host: string;
-}
+interface ServerOption { id: string; name: string; host: string }
+
+const SENDER_HELP: Record<WolSettings['sender'], string> = {
+  auto: 'Send from the server this Bosun node runs on (over SSH), so each node in a cluster uses its own host. Falls back to the container if that host is unknown or unreachable.',
+  local_server: 'Always send from one chosen server over SSH.',
+  container: 'Send from the Bosun container itself. Only reaches machines on the same network segment as the container (host networking).',
+};
 
 /**
- * Wake-on-LAN settings.
- *
- * A magic packet only reaches a powered-off host from the same L2 segment, which
- * the Bosun container usually is not. This card picks a managed server (normally
- * the Docker host) whose SSH credentials Bosun uses to run `wakeonlan`, and can
- * install the utility on that host.
+ * Wake-on-LAN sender settings. A magic packet only reaches a sleeping machine
+ * from the same L2 segment, so it is normally sent over SSH from a managed
+ * host rather than from the (bridged) Bosun container.
  */
 export default function WakeOnLanCard() {
+  const { toast } = useToast();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
+  const [s, setS] = useState<WolSettings | null>(null);
   const [servers, setServers] = useState<ServerOption[]>([]);
-  const [localServerId, setLocalServerId] = useState('');
-  const [useLocalServer, setUseLocalServer] = useState(false);
-  const [installed, setInstalled] = useState(false);
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [installing, setInstalling] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
     try {
-      const [settings, serversRes] = await Promise.all([
-        getWolSettings(),
-        fetchWithAuth('/api/servers').then(r => r.json()),
-      ]);
-      setLocalServerId(settings.local_server_id || '');
-      setUseLocalServer(settings.use_local_server);
-      setInstalled(settings.remote_wol_installed);
-      if (serversRes.data) {
-        const raw: ServerOption[] = serversRes.data.servers || serversRes.data;
-        setServers(raw.map(s => ({ id: s.id, name: s.name, host: s.host })));
-      }
+      setS(await getWolSettings());
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load Wake-on-LAN settings');
-    } finally {
-      setLoading(false);
+      toast('Failed to load Wake-on-LAN settings', { variant: 'error', description: err instanceof Error ? err.message : undefined });
     }
-  }, []);
+  }, [toast]);
 
   useEffect(() => {
     load();
+    fetchWithAuth('/api/servers')
+      .then(r => readJson<{ data?: { servers?: ServerOption[] } }>(r))
+      .then(j => setServers(j.data?.servers || []))
+      .catch(() => undefined);
   }, [load]);
 
-  const handleSave = async () => {
+  const save = async (patch: Parameters<typeof saveWolSettings>[0]) => {
     setSaving(true);
-    setMessage(null);
-    setError(null);
     try {
-      const next = await saveWolSettings({ local_server_id: localServerId || null, use_local_server: useLocalServer });
-      setInstalled(next.remote_wol_installed);
-      setMessage('Saved');
+      setS(await saveWolSettings(patch));
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to save');
+      toast('Could not save', { variant: 'error', description: err instanceof Error ? err.message : undefined });
     } finally {
       setSaving(false);
-    }
-  };
-
-  const handleInstall = async () => {
-    if (!localServerId) {
-      setError('Pick a local server first.');
-      return;
-    }
-    setInstalling(true);
-    setMessage(null);
-    setError(null);
-    try {
-      const res = await installWol(localServerId);
-      setInstalled(true);
-      setMessage(`wakeonlan installed on ${res.host}`);
-    } catch (err) {
-      const msg = err instanceof WakeError ? err.message : err instanceof Error ? err.message : 'Install failed';
-      setError(msg);
-    } finally {
-      setInstalling(false);
     }
   };
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Wake-on-LAN</CardTitle>
+        <CardTitle className="flex items-center gap-2"><Power className="size-4" aria-hidden /> Wake-on-LAN</CardTitle>
       </CardHeader>
-      <CardContent className="space-y-4">
-        {loading ? (
-          <p className="text-sm text-muted-foreground">Loading...</p>
+      <CardContent className="space-y-4 text-sm">
+        {!s ? (
+          <p className="text-muted-foreground">Loading…</p>
         ) : (
-          <>
-            {error && (
-              <div role="alert" className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">{error}</div>
+          <fieldset disabled={!isAdmin || saving} className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="wol-sender">Send magic packets from</Label>
+              <select id="wol-sender" className="form-select" value={s.sender}
+                onChange={e => save({ sender: e.target.value as WolSettings['sender'] })}>
+                <option value="auto">The host this Bosun node runs on (recommended)</option>
+                <option value="local_server">A fixed server</option>
+                <option value="container">The Bosun container</option>
+              </select>
+              <p className="text-xs text-muted-foreground">{SENDER_HELP[s.sender]}</p>
+            </div>
+
+            {s.sender === 'auto' && (
+              <div className="space-y-1.5 rounded-md border p-3">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <span className="font-medium">Host of node <code className="rounded bg-muted px-1 text-xs">{s.node_name}</code></span>
+                  <span className="text-xs text-muted-foreground">
+                    Detected: {s.node_host_detected ? s.node_host_detected.name : 'not found (add the Docker host as a server)'}
+                  </span>
+                </div>
+                <select aria-label="Host of this node" className="form-select" value={s.node_host_mapped?.id || ''}
+                  onChange={e => save({ node_host_server_id: e.target.value || null })}>
+                  <option value="">Detect automatically{s.node_host_detected ? ` (${s.node_host_detected.name})` : ''}</option>
+                  {servers.map(o => <option key={o.id} value={o.id}>{o.name} ({o.host})</option>)}
+                </select>
+                <p className="text-xs text-muted-foreground">
+                  Detection matches this container against the Docker containers Bosun sees on each server. Set it here if the
+                  host is not monitored by Docker or detection picks the wrong one. Each node of a cluster keeps its own setting.
+                </p>
+              </div>
             )}
-            {message && <div className="text-sm text-success">{message}</div>}
 
-            <div>
-              <Label className="mb-1">Local server</Label>
-              <select
-                value={localServerId}
-                onChange={e => setLocalServerId(e.target.value)}
-                className="form-select"
-              >
-                <option value="">-- None --</option>
-                {servers.map(s => (
-                  <option key={s.id} value={s.id}>{s.name} ({s.host})</option>
-                ))}
-              </select>
-              <p className="mt-1 text-xs text-muted-foreground">
-                The host that sends magic packets on its own subnet (usually the Docker host).
-              </p>
-            </div>
+            {s.sender === 'local_server' && (
+              <div className="space-y-1.5">
+                <Label htmlFor="wol-local">Server that sends the packets</Label>
+                <select id="wol-local" className="form-select" value={s.local_server_id || ''}
+                  onChange={e => save({ local_server_id: e.target.value || null })}>
+                  <option value="">-- Select a server --</option>
+                  {servers.map(o => <option key={o.id} value={o.id}>{o.name} ({o.host})</option>)}
+                </select>
+              </div>
+            )}
 
-            <div>
-              <Label className="mb-1">Use the local server</Label>
-              <select
-                value={useLocalServer ? 'true' : 'false'}
-                onChange={e => setUseLocalServer(e.target.value === 'true')}
-                className="form-select"
-              >
-                <option value="false">Disabled - send from the Bosun container</option>
-                <option value="true">Enabled - run wakeonlan on the local server</option>
-              </select>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Enable when the Bosun container is not on the same L2 segment as the target.
-              </p>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-3">
-              <Button onClick={handleSave} disabled={saving}>
-                {saving ? 'Saving...' : 'Save Settings'}
-              </Button>
-              <Button variant="outline" onClick={handleInstall} disabled={installing || !localServerId}>
-                {installing ? 'Installing...' : 'Install wakeonlan'}
-              </Button>
-              <span className={`text-xs px-2 py-1 rounded ${installed ? 'bg-green-500/15 text-green-700 dark:text-green-400' : 'bg-muted text-muted-foreground'}`}>
-                {installed ? 'wakeonlan installed' : 'not installed'}
+            <p className="text-xs text-muted-foreground">
+              Currently sending from:{' '}
+              <span className="font-medium text-foreground">
+                {s.effective_sender ? `${s.effective_sender.name} (${s.effective_sender.source})` : 'the Bosun container'}
               </span>
-            </div>
-          </>
+              {s.effective_sender && (s.remote_wol_installed ? ' · wakeonlan found' : ' · wakeonlan not confirmed yet (the first wake checks it)')}
+            </p>
+          </fieldset>
         )}
       </CardContent>
     </Card>

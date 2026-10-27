@@ -137,7 +137,8 @@ export default function NewServerPage() {
           ssh_key_id: formData.get('ssh_key_id') || null,
           notes: formData.get('notes'),
           platform: formData.get('platform') || 'linux',
-          mac_address: formData.get('mac_address') || null
+          mac_address: formData.get('mac_address') || null,
+          mac_address_alt: formData.get('mac_address_alt') || null
         })
       });
 
@@ -324,10 +325,18 @@ export default function NewServerPage() {
                   </select>
                   <p className="text-xs text-muted-foreground">Windows hosts use PowerShell over OpenSSH.</p>
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="mac_address">MAC Address</Label>
-                  <Input id="mac_address" name="mac_address" placeholder="AA:BB:CC:DD:EE:FF" className="font-mono" />
-                  <p className="text-xs text-muted-foreground">Optional. Needed for Wake-on-LAN; use the NIC enabled for wake.</p>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="mac_address">Wake-on-LAN MAC</Label>
+                    <Input id="mac_address" name="mac_address" placeholder="Detected automatically" className="font-mono" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="mac_address_alt">Alternate MAC (wired/wireless)</Label>
+                    <Input id="mac_address_alt" name="mac_address_alt" placeholder="Detected automatically" className="font-mono" />
+                  </div>
+                  <p className="text-xs text-muted-foreground sm:col-span-2">
+                    Leave empty: Bosun reads both from the network interfaces of the host on the first poll. Only fill them in to override.
+                  </p>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="notes">Notes</Label>

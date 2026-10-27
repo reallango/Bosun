@@ -126,12 +126,31 @@ of CPU, but it is costlier than the Linux script, so Windows hosts poll every 30
 
 ### Wake-on-LAN
 
-Give a server its MAC address (Add/Edit server), then use **Wake** on the servers list,
-the server's edit page or its dashboard toolbar. A magic packet only reaches a sleeping
-host from the same L2 segment, which the Bosun container usually is not. Under
-Settings → General → Wake-on-LAN you can pick a managed "local server" (typically the
-Docker host) that sends the packet with the `wakeonlan` utility over SSH instead.
-If the utility is missing, admins are offered to install it (needs passwordless sudo).
+Use **Wake** on the servers list, the server's edit page or its dashboard toolbar.
+
+**MAC addresses are detected.** When a server is added (manually or through automatic
+setup), its first poll reads the host's physical network interfaces:
+- *Primary MAC*: the NIC that carries the address Bosun's SSH connection arrived on.
+- *Alternate MAC*: the wired/wireless counterpart, for machines that move between
+  Ethernet and Wi-Fi.
+
+Both fields only need editing if detection picked the wrong NIC or the hardware changed.
+The edit form shows what the host currently reports, with one-click "use detected" and
+"auto-detect" actions. A wake sends packets to the primary and alternate MACs and to
+whatever the host last reported.
+
+**Packets are sent from the right host.** A magic packet only reaches a sleeping machine
+from the same L2 segment, which a bridged container is not. Under Settings → General →
+Wake-on-LAN the default sender is *the host this Bosun node runs on*, over SSH with
+`wakeonlan`. Bosun detects that host by finding its own container among the Docker
+containers it monitors on each server, so the Docker host must be added as a server. You
+can also map it by hand. The mapping is per node (`NODE_NAME`), so in a multi-node setup
+every node sends from its own host, which is up whenever that node is. If that host
+cannot be reached, the packet is sent from the container instead. You can also choose a
+fixed server or the container.
+
+If `wakeonlan` is missing on the sending host, admins are offered to install it (needs
+passwordless sudo).
 
 ### Custom widgets
 
@@ -179,6 +198,6 @@ Shared collector code lives in `src/lib/collect/` as dependency-free CommonJS so
 
 - Back up first: Settings → Database → Export, or copy the `bosun-data` volume.
 - The 2.0 schema is a fresh start (see *Schema management*); version 2 (Wake-on-LAN, custom
-  widgets) upgrades version 1 in place automatically. To roll back, run the
+  widgets) and version 3 (second MAC, per-node WoL sender) upgrade earlier versions in place automatically. To roll back, run the
   previous image against the previous volume or backup. The old image cannot read
   a 2.0 database.
