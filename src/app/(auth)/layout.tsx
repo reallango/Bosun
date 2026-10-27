@@ -3,6 +3,7 @@
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/hooks/useAuth';
+import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 
 export default function AuthLayout({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
@@ -16,8 +17,8 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
 
   if (loading) {
     return (
-      <div className="flex items-center justify-center min-h-screen">
-        <p>Loading...</p>
+      <div className="flex min-h-dvh items-center justify-center">
+        <LoadingSpinner />
       </div>
     );
   }
@@ -25,10 +26,8 @@ export default function AuthLayout({ children }: { children: React.ReactNode }) 
   if (user) return null;
 
   return (
-    <div className="flex items-center justify-center min-h-screen bg-background">
-      <div className="w-full max-w-md p-6">
-        {children}
-      </div>
-    </div>
+    <main className="flex min-h-dvh items-center justify-center bg-background px-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] pt-[max(1.5rem,env(safe-area-inset-top))] sm:px-6">
+      <div className="w-full max-w-sm sm:max-w-md">{children}</div>
+    </main>
   );
 }

@@ -85,7 +85,7 @@ export default function ServerForm() {
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
           {error && (
-            <div className="p-3 bg-red-50 border border-red-200 rounded-md text-red-600 text-sm">
+            <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
               {error}
             </div>
           )}
@@ -131,7 +131,7 @@ export default function ServerForm() {
               id="ssh_key_id"
               value={formData.ssh_key_id}
               onChange={(e) => handleChange('ssh_key_id', e.target.value)}
-              className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm"
+              className="form-select"
             >
               <option value="">-- No key selected --</option>
               {sshKeys.map(k => (
@@ -140,7 +140,7 @@ export default function ServerForm() {
                 </option>
               ))}
             </select>
-            <p className="text-xs text-gray-500">Required for widgets, Detect OS, and the terminal.</p>
+            <p className="text-xs text-muted-foreground">Required for widgets, Detect OS, and the terminal.</p>
           </div>
           <div className="space-y-2">
             <Label htmlFor="platform">Platform</Label>
@@ -148,7 +148,7 @@ export default function ServerForm() {
               id="platform"
               value={formData.platform}
               onChange={(e) => handleChange('platform', e.target.value)}
-              className="w-full h-9 px-3 rounded-lg border border-input bg-background text-sm"
+              className="form-select"
             >
               <option value="linux">Linux</option>
               <option value="windows">Windows</option>
@@ -162,7 +162,7 @@ export default function ServerForm() {
               onChange={(e) => handleChange('notes', e.target.value)}
             />
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-col-reverse gap-2 xs:flex-row">
             <Button type="submit" disabled={loading}>
               {loading ? 'Creating...' : 'Create Server'}
             </Button>

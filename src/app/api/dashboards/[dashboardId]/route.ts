@@ -2,6 +2,19 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireRole } from '@/lib/auth/middleware';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 
+/** widgets.layouts holds per-breakpoint rects as JSON; always return an object. */
+function parseLayouts(value: unknown): Record<string, unknown> {
+  if (!value) return {};
+  if (typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
+  if (typeof value !== 'string') return {};
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 export async function GET(request: NextRequest, { params }: { params: Promise<{ dashboardId: string }> }) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
@@ -19,7 +32,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     );
 
     const dashboard = rowsToObjects(dashResult)[0];
-    const widgets = rowsToObjects(widgetsResult).map((w:any) => ({ ...w, config: w.config ? (typeof w.config==='string' ? JSON.parse(w.config||'{}') : w.config) : {} }));
+    const widgets = rowsToObjects(widgetsResult).map((w: any) => ({
+      ...w,
+      config: w.config ? (typeof w.config === 'string' ? JSON.parse(w.config || '{}') : w.config) : {},
+      layouts: parseLayouts(w.layouts),
+    }));
 
     return NextResponse.json({ data: { dashboard, widgets } });
   } catch (error) {

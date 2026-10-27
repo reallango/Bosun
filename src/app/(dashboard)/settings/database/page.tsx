@@ -75,15 +75,15 @@ export default function DatabaseSettingsPage() {
   return (
     <>
       <Header title="Database" />
-      <div className="p-8 space-y-6 max-w-4xl">
+      <div className="page max-w-4xl space-y-4 sm:space-y-6">
         {error && (
-          <div className="p-3 rounded bg-red-50 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-sm">
+          <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
             {error}
           </div>
         )}
 
         <Card>
-          <CardHeader className="flex flex-row items-center justify-between">
+          <CardHeader className="flex flex-row items-center justify-between gap-2">
             <CardTitle>Health</CardTitle>
             <span className={`px-3 py-1 text-sm rounded-full ${STATUS_STYLES[status]}`}>
               {status}
@@ -91,25 +91,25 @@ export default function DatabaseSettingsPage() {
           </CardHeader>
           <CardContent className="space-y-4">
             {loading || !health ? (
-              <p className="text-gray-500">Loading...</p>
+              <p className="text-sm text-muted-foreground">Loading…</p>
             ) : (
               <>
                 <div className="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4">
                   <div>
-                    <div className="text-gray-500 dark:text-gray-400">Ready</div>
+                    <div className="text-muted-foreground">Ready</div>
                     <div>{health.ready ? 'Yes' : 'No'}</div>
                   </div>
                   <div>
-                    <div className="text-gray-500 dark:text-gray-400">Schema version</div>
+                    <div className="text-muted-foreground">Schema version</div>
                     <div>{health.schemaVersion}</div>
                   </div>
                   <div>
-                    <div className="text-gray-500 dark:text-gray-400">Node</div>
-                    <div className="font-mono text-xs">{health.nodeId || '—'}</div>
+                    <div className="text-muted-foreground">Node</div>
+                    <div className="break-all font-mono text-xs">{health.nodeId || '—'}</div>
                   </div>
                   <div>
-                    <div className="text-gray-500 dark:text-gray-400">Leader</div>
-                    <div className="font-mono text-xs">{health.leader || '—'}</div>
+                    <div className="text-muted-foreground">Leader</div>
+                    <div className="break-all font-mono text-xs">{health.leader || '—'}</div>
                   </div>
                 </div>
 
@@ -129,7 +129,7 @@ export default function DatabaseSettingsPage() {
                           <TableRow key={id}>
                             <TableCell className="font-mono text-xs">{id}</TableCell>
                             <TableCell>
-                              <span className={applied ? 'text-green-600' : 'text-red-600'}>
+                              <span className={applied ? 'text-success' : 'text-destructive'}>
                                 {applied ? 'Applied' : 'Missing'}
                               </span>
                             </TableCell>
@@ -139,30 +139,30 @@ export default function DatabaseSettingsPage() {
                     </TableBody>
                   </Table>
                   {(health.migrations?.pending.length ?? 0) > 0 && (
-                    <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+                    <p className="mt-2 text-xs text-warning">
                       Unknown migrations applied: {health.migrations?.pending.join(', ')}
                     </p>
                   )}
                 </div>
 
                 {health.tables.missing.length > 0 && (
-                  <p className="text-sm text-red-600 dark:text-red-400">
+                  <p className="text-sm text-destructive">
                     Missing tables: {health.tables.missing.join(', ')}
                   </p>
                 )}
 
                 {health.missingConfigKeys.length > 0 && (
-                  <p className="text-sm text-amber-600 dark:text-amber-400">
+                  <p className="text-sm text-warning">
                     Missing config keys: {health.missingConfigKeys.join(', ')}
                   </p>
                 )}
 
                 <div>
                   <div className="text-sm font-medium mb-2">Row counts</div>
-                  <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm sm:grid-cols-3">
+                  <div className="grid grid-cols-1 gap-x-6 gap-y-1 text-sm xs:grid-cols-2 sm:grid-cols-3">
                     {Object.entries(health.counts).map(([table, count]) => (
-                      <div key={table} className="flex justify-between">
-                        <span className="font-mono text-xs text-gray-500 dark:text-gray-400">{table}</span>
+                      <div key={table} className="flex justify-between gap-2">
+                        <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">{table}</span>
                         <span>{count < 0 ? '—' : count}</span>
                       </div>
                     ))}
@@ -182,10 +182,10 @@ export default function DatabaseSettingsPage() {
             <CardTitle>Backup</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <p className="text-sm text-gray-500 dark:text-gray-400">
+            <p className="text-sm text-muted-foreground">
               Export the database to a portable backup, or restore from a previous backup file.
             </p>
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2">
               <Button variant="outline" onClick={() => setShowExport(true)}>Export</Button>
               <Button variant="outline" onClick={() => setShowImport(true)}>Import</Button>
             </div>

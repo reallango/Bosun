@@ -4,6 +4,8 @@ import { useEffect, useState } from 'react';
 import Header from '@/components/layout/Header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
+import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 
 interface Node {
   id: string;
@@ -17,35 +19,35 @@ export default function ClusterPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    const fetchNodes = async () => {
+      try {
+        const res = await fetchWithAuth('/api/cluster/nodes');
+        const data = await res.json();
+        if (data.data) setNodes(data.data);
+      } catch (err) {
+        console.error('Failed to fetch nodes:', err);
+      } finally {
+        setLoading(false);
+      }
+    };
     fetchNodes();
   }, []);
-
-  const fetchNodes = async () => {
-    try {
-      const res = await fetch('/api/cluster/nodes');
-      const data = await res.json();
-      if (data.data) setNodes(data.data);
-    } catch (err) {
-      console.error('Failed to fetch nodes:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   return (
     <>
       <Header title="Cluster" />
-      <div className="p-8">
+      <div className="page max-w-5xl">
         <Card>
           <CardHeader>
-            <CardTitle>Cluster Nodes</CardTitle>
+            <CardTitle>Cluster nodes</CardTitle>
           </CardHeader>
           <CardContent>
             {loading ? (
-              <p className="text-gray-500">Loading...</p>
+              <LoadingSpinner />
             ) : nodes.length === 0 ? (
-              <p className="text-gray-500">No cluster nodes found.</p>
+              <p className="py-6 text-center text-sm text-muted-foreground">No cluster nodes found.</p>
             ) : (
+              // Scrolls horizontally inside the card on narrow screens.
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -58,17 +60,17 @@ export default function ClusterPage() {
                 <TableBody>
                   {nodes.map((node) => (
                     <TableRow key={node.id}>
-                      <TableCell className="font-mono text-sm">{node.id}</TableCell>
-                      <TableCell>{node.address}</TableCell>
+                      <TableCell className="font-mono text-xs">{node.id}</TableCell>
+                      <TableCell className="font-mono text-xs">{node.address}</TableCell>
                       <TableCell>
                         {node.is_leader ? (
-                          <span className="text-green-600">Leader</span>
+                          <span className="font-medium text-success">Leader</span>
                         ) : (
-                          <span className="text-gray-500">Follower</span>
+                          <span className="text-muted-foreground">Follower</span>
                         )}
                       </TableCell>
                       <TableCell>
-                        <span className={node.reachable ? 'text-green-600' : 'text-red-600'}>
+                        <span className={node.reachable ? 'text-success' : 'text-destructive'}>
                           {node.reachable ? 'Online' : 'Offline'}
                         </span>
                       </TableCell>
