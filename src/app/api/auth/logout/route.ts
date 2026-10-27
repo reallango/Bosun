@@ -1,3 +1,4 @@
+import { internalError } from '@/lib/api/response';
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyAccessToken, hashToken } from '@/lib/auth/jwt';
 import { rqlite } from '@/lib/db/rqlite-client';
@@ -17,6 +18,6 @@ export async function POST(request: NextRequest) {
     return response;
   } catch (error) {
     console.error('Logout error:', error);
-    return NextResponse.json({ error: { message: 'Internal server error', code: 'INTERNAL_ERROR' } }, { status: 500 });
+    return internalError(error);
   }
 }

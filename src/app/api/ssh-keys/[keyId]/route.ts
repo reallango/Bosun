@@ -1,3 +1,4 @@
+import { internalError } from '@/lib/api/response';
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyAccessToken } from '@/lib/auth/jwt';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
@@ -15,7 +16,7 @@ export async function GET(request: NextRequest, { params }: { params: { keyId: s
     return NextResponse.json({ data: rowsToObjects(r)[0] });
   } catch (error) {
     console.error('SSH key get error:', error);
-    return NextResponse.json({ error: { message: 'Internal server error', code: 'INTERNAL_ERROR' } }, { status: 500 });
+    return internalError(error);
   }
 }
 
@@ -33,6 +34,6 @@ export async function DELETE(request: NextRequest, { params }: { params: { keyId
     return NextResponse.json({ data: { success: true } });
   } catch (error) {
     console.error('SSH key delete error:', error);
-    return NextResponse.json({ error: { message: 'Internal server error', code: 'INTERNAL_ERROR' } }, { status: 500 });
+    return internalError(error);
   }
 }

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { rqlite } from '@/lib/db/rqlite-client';
+import { rqlite, isNoQuorumError } from '@/lib/db/rqlite-client';
 import { hashPassword, verifyPassword } from '@/lib/auth/password';
 import { createAccessToken, generateRefreshToken, hashToken } from '@/lib/auth/jwt';
 import { logAudit, AuditActions } from '@/lib/audit/logger';
@@ -46,6 +46,9 @@ export async function POST(request: NextRequest) {
     response.cookies.set('refresh_token', refreshToken, { httpOnly: true, secure: process.env.COOKIE_SECURE === 'true', sameSite: 'strict', path: '/', maxAge: 7 * 24 * 60 * 60 });
     return response;
   } catch (error) {
+    if (isNoQuorumError(error)) {
+      return NextResponse.json({ error: { message: error.message, code: error.code } }, { status: 503 });
+    }
     console.error('Login error:', error);
     return NextResponse.json({ error: { message: 'Internal server error', code: 'INTERNAL_ERROR' } }, { status: 500 });
   }
