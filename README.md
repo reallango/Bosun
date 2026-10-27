@@ -36,7 +36,7 @@ The poller is built to be unnoticeable on the hosts it watches:
   A host is marked offline after two consecutive failures and its last error is shown.
 - **Host keys** are pinned on first use. A changed key is refused until you clear the
   stored fingerprint (Edit server → reset host key).
-- In a cluster, only the Raft leader polls.
+- In a cluster, only the database leader polls (see *Clustering*).
 
 Widgets read the latest snapshot from the database, so opening dashboards costs the
 hosts nothing. "Refresh" on a widget asks the poller for an immediate full poll.
@@ -79,7 +79,8 @@ Open `http://<host>:3042`. The first visit runs setup and creates the admin acco
 | `MASTER_KEY` | **Required.** Encrypts stored SSH private keys. Changing it makes stored keys unreadable. |
 | `AUTH_SECRET` | **Required.** Signs login and terminal tokens. Production refuses to start without it. |
 | `COOKIE_SECURE` | `true` when served over HTTPS (e.g. behind Cloudflare). |
-| `NODE_NAME`, `RQLITE_JOIN`, `RQLITE_HTTP_ADV`, `RQLITE_RAFT_ADV` | rqlite clustering (optional). |
+| `NODE_NAME`, `RQLITE_ADV_HOST`, `RQLITE_JOIN`, `RQLITE_BOOTSTRAP_EXPECT` | Clustering (see *Clustering*). |
+| `RQLITE_FORCE_SINGLE` | `1` = disaster recovery: make this node a single-node cluster (see *Clustering*). |
 | `BOSUN_PORT` | Published port (default 3042). |
 | `BOSUN_DB_RESET` | `1` drops a legacy (pre-2.0) schema once. |
 
@@ -166,6 +167,56 @@ For example, Custom Command's command and Services' filter work this way.
 **OS Update Check** shows the poller's package check: count, security updates, pending
 reboot and versions. "Check for updates" makes the poller run the check right away
 instead of waiting for the 6-hour schedule.
+
+## Clustering
+
+Bosun can run as several nodes that share one replicated database (rqlite/Raft).
+Every node serves the full UI and API; any node can be used.
+
+- **One master.** The nodes elect a database leader. Only the leader's poller
+  collects data. The others idle, checking every 3 s whether they have become leader,
+  and serve the same data from the shared database. Writes made on any node are
+  forwarded to the leader.
+- **Failover.** If the leader dies, the remaining nodes elect a new one, normally
+  within a few seconds, and its poller takes over. In testing, polling resumed 3 s
+  after the leader was killed. A returning node rejoins as a follower and catches up.
+- **Use three nodes.** Raft needs a majority of voting nodes to have a leader: 2 of 3,
+  3 of 5. A 2-node cluster stops when either node fails, so it is worse than one node.
+  With 3 nodes, any one can fail.
+- **Only one node left (no majority).** By design there is no automatic failover to
+  one node. A node cannot tell "the others are dead" from "I am cut off from them",
+  and two halves both carrying on would diverge. Instead the isolated node goes
+  **read-only**:
+  - it serves the last replicated data, read from its local copy;
+  - polling stops;
+  - saves and logins answer `503 NO_QUORUM` with an explanation (signed-in users keep
+    access, since token refresh is read-only);
+  - a red banner explains the state, and `/api/health` reports `degraded`.
+
+  When any other node comes back, a leader is elected and everything resumes
+  automatically. Settings → Cluster shows the leader, reachable nodes, quorum and which
+  node is polling. An amber banner appears whenever a node is down.
+- **Disaster recovery.** Use this only if the other nodes are permanently gone and you
+  need this one writable again. Restart it with `RQLITE_FORCE_SINGLE=1`; it rewrites the
+  Raft membership to just itself and becomes leader with all its data. Then add fresh
+  nodes (empty data volumes) with the usual join settings to get back to three. The
+  switch is applied once per data volume, so leaving it set cannot undo the rebuilt
+  cluster, but remove it anyway.
+
+Setting up three nodes: run `docker-compose.cluster.yaml` on each machine with an
+`.env` like this:
+
+```bash
+NODE_NAME=n1                         # n2, n3 on the other machines
+RQLITE_ADV_HOST=192.168.1.161        # this machine's LAN address
+RQLITE_JOIN=192.168.1.161:4002,192.168.1.131:4002,192.168.1.171:4002
+MASTER_KEY=...                       # identical on all nodes
+AUTH_SECRET=...                      # identical on all nodes
+```
+
+All three start with the same join list and `RQLITE_BOOTSTRAP_EXPECT=3`, and form the
+cluster together once all are up. Ports 4001 and 4002 must be reachable between the
+nodes and should be firewalled from everything else.
 
 ## Management actions and permissions
 
