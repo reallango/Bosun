@@ -1,5 +1,6 @@
 'use client';
 
+import { MacAddressFields, MacValue } from '@/components/servers/MacAddressFields';
 import { useEffect, useState } from 'react';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { Button } from '@/components/ui/button';
@@ -32,6 +33,7 @@ interface Server {
   notes?: string;
   platform?: string;
   mac_address?: string | null;
+  mac_address_alt?: string | null;
   poll_enabled?: boolean;
 }
 
@@ -42,7 +44,7 @@ interface EditServerModalProps {
   onSave: () => void;
 }
 
-const EMPTY_FORM = { name: '', hostname: '', ssh_port: 22, ssh_user: '', ssh_key_id: '', notes: '', platform: 'linux', mac_address: '', poll_enabled: true };
+const EMPTY_FORM = { name: '', hostname: '', ssh_port: 22, ssh_user: '', ssh_key_id: '', notes: '', platform: 'linux', mac_address: null as MacValue, mac_address_alt: null as MacValue, poll_enabled: true };
 
 export function EditServerModal({ isOpen, onClose, server, onSave }: EditServerModalProps) {
   const [form, setForm] = useState(EMPTY_FORM);
@@ -62,7 +64,8 @@ export function EditServerModal({ isOpen, onClose, server, onSave }: EditServerM
         ssh_key_id: server.ssh_key_id || '',
         notes: server.notes || '',
         platform: server.platform || 'linux',
-        mac_address: server.mac_address || '',
+        mac_address: server.mac_address ?? null,
+        mac_address_alt: server.mac_address_alt ?? null,
         poll_enabled: server.poll_enabled !== false,
       });
       setError('');
@@ -215,18 +218,12 @@ export function EditServerModal({ isOpen, onClose, server, onSave }: EditServerM
               </div>
             </div>
 
-            <div className="grid grid-cols-1 gap-4 xs:grid-cols-2">
-              <div className="space-y-1.5">
-                <Label htmlFor={field('mac_address')}>MAC address</Label>
-                <Input id={field('mac_address')} value={form.mac_address} placeholder="AA:BB:CC:DD:EE:FF" className="font-mono"
-                  onChange={e => setForm(f => ({ ...f, mac_address: e.target.value }))} />
-                <p className="text-xs text-muted-foreground">For Wake-on-LAN; use the NIC enabled for wake.</p>
-              </div>
-              <label className="flex items-center gap-2 self-center text-sm">
-                <input type="checkbox" checked={form.poll_enabled} onChange={e => setForm(f => ({ ...f, poll_enabled: e.target.checked }))} />
-                Monitoring enabled
-              </label>
-            </div>
+            <MacAddressFields serverId={server?.id} mac={form.mac_address} macAlt={form.mac_address_alt} idPrefix={field('mac_address')}
+              onChange={(mac, alt) => setForm(f => ({ ...f, mac_address: mac, mac_address_alt: alt }))} />
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={form.poll_enabled} onChange={e => setForm(f => ({ ...f, poll_enabled: e.target.checked }))} />
+              Monitoring enabled
+            </label>
 
             <div className="space-y-1.5">
               <Label htmlFor={field('notes')}>Notes</Label>
