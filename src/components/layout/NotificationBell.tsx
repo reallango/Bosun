@@ -1,8 +1,18 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { Popover } from 'radix-ui';
+import { Bell, CircleAlert, CircleCheck, Info, TriangleAlert } from 'lucide-react';
 import { useNotifications } from '@/providers/NotificationProvider';
 import { formatDistanceToNow } from '@/lib/utils/date';
+import { cn } from '@/lib/utils';
+
+const TYPE_ICON = {
+  error: { icon: CircleAlert, className: 'text-destructive' },
+  warning: { icon: TriangleAlert, className: 'text-warning' },
+  success: { icon: CircleCheck, className: 'text-success' },
+  info: { icon: Info, className: 'text-primary' },
+} as const;
 
 export function NotificationBell() {
   const { notifications, unreadCount, loading, fetchNotifications, markAsRead, markAllAsRead } = useNotifications();
@@ -13,59 +23,69 @@ export function NotificationBell() {
   }, [fetchNotifications]);
 
   return (
-    <div className="relative">
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="relative p-2 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md"
-      >
-        🔔
-        {unreadCount > 0 && (
-          <span className="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white text-xs rounded-full flex items-center justify-center">
-            {unreadCount > 9 ? '9+' : unreadCount}
-          </span>
-        )}
-      </button>
-
-      {isOpen && (
-        <div className="absolute right-0 top-full mt-1 w-80 bg-white dark:bg-gray-900 border rounded-md shadow-lg z-50">
-          <div className="p-2 border-b flex justify-between items-center">
-            <span className="font-medium">Notifications</span>
+    <Popover.Root open={isOpen} onOpenChange={setIsOpen}>
+      <Popover.Trigger asChild>
+        <button
+          type="button"
+          className="relative inline-flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label={unreadCount > 0 ? `Notifications (${unreadCount} unread)` : 'Notifications'}
+        >
+          <Bell className="size-[18px]" />
+          {unreadCount > 0 && (
+            <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold leading-none text-white">
+              {unreadCount > 9 ? '9+' : unreadCount}
+            </span>
+          )}
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content
+          align="end"
+          sideOffset={6}
+          collisionPadding={8}
+          className="z-50 w-[min(22rem,calc(100vw-1rem))] overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-lg"
+        >
+          <div className="flex items-center justify-between border-b px-3 py-2">
+            <span className="text-sm font-medium">Notifications</span>
             {unreadCount > 0 && (
-              <button onClick={markAllAsRead} className="text-xs text-blue-500 hover:underline">
+              <button type="button" onClick={markAllAsRead} className="text-xs text-primary hover:underline">
                 Mark all read
               </button>
             )}
           </div>
-          <div className="max-h-80 overflow-auto">
+          <div className="max-h-[min(24rem,60dvh)] overflow-y-auto">
             {loading ? (
-              <div className="p-4 text-center text-gray-500">Loading...</div>
+              <div className="p-4 text-center text-sm text-muted-foreground">Loading…</div>
             ) : notifications.length === 0 ? (
-              <div className="p-4 text-center text-gray-500">No notifications</div>
+              <div className="p-4 text-center text-sm text-muted-foreground">No notifications</div>
             ) : (
-              notifications.slice(0, 10).map(n => (
-                <div
-                  key={n.id}
-                  className={`p-3 border-b last:border-b-0 cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-800 ${!n.read ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
-                  onClick={() => !n.read && markAsRead(n.id)}
-                >
-                  <div className="flex items-start gap-2">
-                    <span className="text-lg">
-                      {n.type === 'error' ? '❌' : n.type === 'warning' ? '⚠️' : n.type === 'success' ? '✅' : 'ℹ️'}
-                    </span>
-                    <div className="flex-1 min-w-0">
-                      <div className="font-medium text-sm truncate">{n.title}</div>
-                      <div className="text-xs text-gray-500 line-clamp-2">{n.message}</div>
-                      <div className="text-xs text-gray-400 mt-1">
+              notifications.slice(0, 10).map(n => {
+                const t = TYPE_ICON[n.type as keyof typeof TYPE_ICON] ?? TYPE_ICON.info;
+                return (
+                  <button
+                    type="button"
+                    key={n.id}
+                    className={cn(
+                      'flex w-full items-start gap-2 border-b p-3 text-left last:border-b-0 hover:bg-accent/60',
+                      !n.read && 'bg-primary/5'
+                    )}
+                    onClick={() => !n.read && markAsRead(n.id)}
+                  >
+                    <t.icon className={cn('mt-0.5 size-4 shrink-0', t.className)} aria-hidden />
+                    <div className="min-w-0 flex-1">
+                      <div className="truncate text-sm font-medium">{n.title}</div>
+                      <div className="line-clamp-2 text-xs text-muted-foreground">{n.message}</div>
+                      <div className="mt-1 text-xs text-muted-foreground/80">
                         {formatDistanceToNow(new Date(n.created_at))}
                       </div>
                     </div>
-                  </div>
-                </div>
-              ))
+                  </button>
+                );
+              })
             )}
           </div>
-        </div>
-      )}
-    </div>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }
