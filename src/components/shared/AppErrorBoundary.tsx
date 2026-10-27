@@ -40,7 +40,7 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
         <div className="flex flex-col items-center justify-center min-h-[50vh] p-8 text-center">
           <div className="text-4xl mb-4">⚠️</div>
           <h2 className="text-xl font-semibold mb-2">Something went wrong</h2>
-          <p className="text-gray-500 mb-4 text-sm max-w-md">
+          <p className="text-muted-foreground mb-4 text-sm max-w-md">
             {this.state.error?.message || 'An unexpected error occurred'}
           </p>
           <div className="flex gap-2">
@@ -52,7 +52,7 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
             </button>
             <button
               onClick={this.handleGoToLogin}
-              className="px-4 py-2 border rounded hover:bg-gray-50"
+              className="px-4 py-2 border rounded hover:bg-accent"
             >
               Go to Login
             </button>

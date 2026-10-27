@@ -104,6 +104,13 @@
   textarea {
     @apply bg-background text-foreground;
   }
+  /* The dropdown list is drawn by the OS from the option's own colors; without
+     these it can fall back to the browser's light default (the selects use a
+     transparent background) and leave light text on a white list in dark mode. */
+  select option,
+  select optgroup {
+    @apply bg-popover text-popover-foreground;
+  }
 }
 
 @layer components {
