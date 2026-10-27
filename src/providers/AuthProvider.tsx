@@ -28,7 +28,7 @@ function redirectToLogin() {
   if (typeof window === 'undefined') return;
   const path = window.location.pathname;
   // Don't redirect if already on login or setup pages
-  if (path === '/login' || path === '/setup') return;
+  if (path === '/login' || path === '/setup' || path === '/forgot-password' || path === '/reset-password') return;
   // Use window.location.href - more reliable than router.push
   window.location.href = '/login';
 }
