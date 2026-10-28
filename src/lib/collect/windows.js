@@ -11,6 +11,7 @@
  * nothing sleeps on the host. The process runs at BelowNormal priority.
  */
 
+const zlib = require('zlib');
 const linux = require('./linux');
 const macs = require('./macs');
 const { splitSections } = linux;
@@ -70,17 +71,44 @@ foreach ($p in $Probes) {
 M 'end'
 `;
 
+// Windows OpenSSH runs an exec request through cmd.exe by default, and cmd.exe refuses
+// command lines over 8191 characters ("The command line is too long."): the command
+// never runs, there is no output, and the poller sees a failed poll every time. A
+// UTF-16 + base64 -EncodedCommand is about 2.7x the script, so scripts over ~2.5 KB
+// (the collector is 3.6 KB) need a more compact encoding.
+const MAX_ENCODED_COMMAND_CHARS = 7000;
+const MAX_COMMAND_CHARS = 8000;
+
+/**
+ * Build the `powershell.exe` command line that runs `script`.
+ * Short scripts use -EncodedCommand (UTF-16, base64). Longer ones are gzipped
+ * and base64-encoded inside a small bootstrap that decompresses and runs them;
+ * base64 contains only characters that are safe for cmd.exe.
+ */
+function execScript(script, flags = '') {
+  const text = String(script);
+  const prefix = `powershell.exe -NoLogo -NoProfile -NonInteractive${flags ? ` ${flags}` : ''}`;
+  const plain = `${prefix} -EncodedCommand ${Buffer.from(text, 'utf16le').toString('base64')}`;
+  if (plain.length <= MAX_ENCODED_COMMAND_CHARS) return plain;
+  const gz = zlib.gzipSync(Buffer.from(text, 'utf8')).toString('base64');
+  const boot = "iex (New-Object IO.StreamReader((New-Object IO.Compression.GZipStream((New-Object IO.MemoryStream(,[Convert]::FromBase64String('"
+    + gz + "'))),[IO.Compression.CompressionMode]::Decompress)),[Text.Encoding]::UTF8)).ReadToEnd()";
+  const command = `${prefix} -Command "${boot}"`;
+  if (command.length > MAX_COMMAND_CHARS) {
+    throw new Error(`PowerShell script is too large to send to a Windows host (${command.length} characters after compression)`);
+  }
+  return command;
+}
+
 /** Build the remote command for the given probes (names are validated). */
 function buildCommand(probes) {
   const list = probes.filter(p => PROBES.includes(p)).map(p => `'${p}'`).join(',');
-  const script = `$Probes = @(${list})\n${SCRIPT}`;
-  const encoded = Buffer.from(script, 'utf16le').toString('base64');
-  return `powershell.exe -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand ${encoded}`;
+  return execScript(`$Probes = @(${list})\n${SCRIPT}`, '-ExecutionPolicy Bypass');
 }
 
 /** Wrap an arbitrary PowerShell script for exec (custom commands, actions). */
 function powershellCommand(script) {
-  return `powershell.exe -NoLogo -NoProfile -NonInteractive -EncodedCommand ${Buffer.from(String(script), 'utf16le').toString('base64')}`;
+  return execScript(script);
 }
 
 const jsonOf = t => {
@@ -212,4 +240,4 @@ function buildSnapshot(raw, prev, now = Date.now()) {
   return { sections, metrics, state };
 }
 
-module.exports = { PROBES, SCRIPT, buildCommand, powershellCommand, splitSections, buildSnapshot };
+module.exports = { PROBES, SCRIPT, buildCommand, powershellCommand, execScript, splitSections, buildSnapshot };
