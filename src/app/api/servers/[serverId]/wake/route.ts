@@ -13,6 +13,14 @@ import { consumeActionRateLimit } from '@/lib/utils/rate-limiter';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
+/**
+ * Status for "the wake could not be carried out" (sender unreachable, wakeonlan
+ * missing, send failed). Not 502: Cloudflare replaces an origin 502/504 with
+ * its own HTML error page, so the JSON error never reaches the browser when
+ * Bosun is served through a tunnel.
+ */
+const WAKE_FAILED = 424;
+
 interface SenderCtx {
   server: { id: string; name: string; hostname: string; os_type: string | null };
   platform: 'linux' | 'windows';
@@ -117,7 +125,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       if (sender.mode === 'auto') return await wakeFromContainer(auth, serverId, formatted, broadcast, `host unreachable: ${message}`);
       await logAudit({ userId: auth.userId, serverId, action: AuditActions.SERVER_WAKE, status: 'failure',
         details: JSON.stringify({ via: 'local_server', sender: sender.serverId, error: message }) });
-      return NextResponse.json({ error: { message: `Could not reach the sending server over SSH: ${message}`, code: 'WOL_HOST_UNREACHABLE' } }, { status: 502 });
+      return NextResponse.json({ error: { message: `Could not reach the sending server over SSH: ${message}`, code: 'WOL_HOST_UNREACHABLE' } }, { status: WAKE_FAILED });
     }
 
     const sent = formatted.filter((_, i) => outcomes[i].ok);
@@ -139,7 +147,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         needs_install: needsInstall,
         host: ctx.server.name,
       },
-    }, { status: 502 });
+    }, { status: WAKE_FAILED });
   } catch (error) {
     console.error('Wake-on-LAN error:', error);
     return NextResponse.json({ error: { message: error instanceof Error ? error.message : 'Internal server error', code: 'INTERNAL_ERROR' } }, { status: 500 });
@@ -161,7 +169,7 @@ async function wakeFromContainer(auth: any, serverId: string, macs: string[], br
   await logAudit({ userId: auth.userId, serverId, action: AuditActions.SERVER_WAKE, status: sent.length ? 'success' : 'failure',
     details: JSON.stringify({ via: 'container', macs, sent, broadcast, note, error: lastError || undefined }) });
   if (!sent.length) {
-    return NextResponse.json({ error: { message: `Failed to send magic packet: ${lastError}`, code: 'WOL_SEND_FAILED' } }, { status: 502 });
+    return NextResponse.json({ error: { message: `Failed to send magic packet: ${lastError}`, code: 'WOL_SEND_FAILED' } }, { status: WAKE_FAILED });
   }
   return NextResponse.json({ data: { success: true, via: 'container', note, mac: sent.join(', '), macs: sent, broadcast, port: WOL_PORT } });
 }
@@ -178,14 +186,14 @@ async function installWol(auth: any, ctx: SenderCtx) {
   if (r.exitCode !== 0) {
     const detail = (r.stderr || r.stdout).trim() || `exit code ${r.exitCode}`;
     await logAudit({ userId: auth.userId, action: AuditActions.SERVER_WOL_INSTALL, status: 'failure', details: JSON.stringify({ host: ctx.server.hostname, error: detail }) });
-    return NextResponse.json({ error: { message: `Install failed on ${ctx.server.name}: ${detail}. You can also install wakeonlan manually on the host.`, code: 'WOL_INSTALL_FAILED' } }, { status: 502 });
+    return NextResponse.json({ error: { message: `Install failed on ${ctx.server.name}: ${detail}. You can also install wakeonlan manually on the host.`, code: 'WOL_INSTALL_FAILED' } }, { status: WAKE_FAILED });
   }
   const installed = (await ctx.run('command -v wakeonlan >/dev/null 2>&1 && echo INSTALLED || echo MISSING')).stdout.includes('INSTALLED');
   await setConfig(`wol.installed.${ctx.server.id}`, installed ? 'true' : 'false');
   await logAudit({ userId: auth.userId, action: AuditActions.SERVER_WOL_INSTALL, status: installed ? 'success' : 'failure',
     details: JSON.stringify({ host: ctx.server.hostname, command: plan.command, installed }) });
   if (!installed) {
-    return NextResponse.json({ error: { message: `Install finished on ${ctx.server.name} but wakeonlan is still missing.`, code: 'WOL_INSTALL_FAILED' } }, { status: 502 });
+    return NextResponse.json({ error: { message: `Install finished on ${ctx.server.name} but wakeonlan is still missing.`, code: 'WOL_INSTALL_FAILED' } }, { status: WAKE_FAILED });
   }
   return NextResponse.json({ data: { success: true, host: ctx.server.name, installed: true } });
 }
