@@ -1,4 +1,6 @@
 import { describe, it, expect } from 'vitest';
+import { gunzipSync } from 'zlib';
+import { randomBytes } from 'crypto';
 import * as linux from './linux';
 import * as windows from './windows';
 import * as store from './store';
@@ -92,12 +94,53 @@ describe('linux collector', () => {
   });
 });
 
+/** The script a powershell.exe command line will run, whichever encoding was used. */
+function scriptOf(cmd: string): string {
+  const encoded = cmd.match(/ -EncodedCommand ([A-Za-z0-9+/=]+)$/);
+  if (encoded) return Buffer.from(encoded[1], 'base64').toString('utf16le');
+  const gz = cmd.match(/FromBase64String\('([A-Za-z0-9+/=]+)'\)/);
+  return gunzipSync(Buffer.from((gz as RegExpMatchArray)[1], 'base64')).toString('utf8');
+}
+
+// Windows OpenSSH runs exec requests through cmd.exe, which refuses command lines over 8191 characters.
+const CMD_EXE_LIMIT = 8191;
+
 describe('windows collector', () => {
   it('encodes the script and validates probe names', () => {
     const cmd = windows.buildCommand(['stat', "x'; Remove-Item C:\\"]);
-    expect(cmd).toMatch(/^powershell\.exe .* -EncodedCommand [A-Za-z0-9+/=]+$/);
-    const script = Buffer.from(cmd.split(' ').pop() as string, 'base64').toString('utf16le');
+    expect(cmd).toMatch(/^powershell\.exe /);
+    const script = scriptOf(cmd);
     expect(script.startsWith("$Probes = @('stat')")).toBe(true);
+    expect(script).toContain(windows.SCRIPT);
+  });
+
+  it('keeps every poll command under the cmd.exe command-line limit', () => {
+    for (const probes of [windows.PROBES, ['stat', 'mem', 'netdev'], ['stat']]) {
+      const cmd = windows.buildCommand(probes);
+      expect(cmd.length).toBeLessThan(CMD_EXE_LIMIT);
+      // the bootstrap must not contain anything cmd.exe would interpret
+      const withoutQuotedPayload = cmd.replace(/'[A-Za-z0-9+/=]+'/, "''");
+      expect(withoutQuotedPayload).not.toMatch(/[&|<>^%!]/);
+    }
+  });
+
+  it('keeps short scripts on plain -EncodedCommand and long ones under the limit', () => {
+    const short = windows.powershellCommand('Write-Output connected');
+    expect(short).toMatch(/ -EncodedCommand [A-Za-z0-9+/=]+$/);
+    expect(scriptOf(short)).toBe('Write-Output connected');
+
+    const longScript = `Write-Output '${'x'.repeat(4000)}'`;   // the exec route allows 4000 characters of command
+    const long = windows.powershellCommand(longScript);
+    expect(long.length).toBeLessThan(CMD_EXE_LIMIT);
+    expect(scriptOf(long)).toBe(longScript);
+
+    const unicode = `Write-Output 'caf\u00e9 \u2713 ${'y'.repeat(4000)}'`;
+    expect(scriptOf(windows.powershellCommand(unicode))).toBe(unicode);
+  });
+
+  it('refuses a script that cannot fit rather than sending a command that will fail', () => {
+    const incompressible = randomBytes(9000).toString('base64');   // random data does not compress
+    expect(() => windows.powershellCommand(`Write-Output '${incompressible}'`)).toThrow(/too large/);
   });
 
   it('normalises Windows probes to the Linux shapes', () => {
