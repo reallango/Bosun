@@ -43,3 +43,29 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: { message: String(error) } }, { status: 500 });
   }
 }
+
+/** Reorder the custom dashboards: body { order: [id, ...] }, first id shown first. */
+export async function PATCH(request: NextRequest) {
+  const auth = await requireAuth(request);
+  if (auth instanceof NextResponse) return auth;
+  const roleError = requireRole(auth, 'operator');
+  if (roleError) return roleError;
+  try {
+    const { order } = await request.json();
+    if (!Array.isArray(order) || order.length === 0 || !order.every(id => typeof id === 'string') || new Set(order).size !== order.length) {
+      return NextResponse.json({ error: { message: 'order must be a list of unique dashboard ids' } }, { status: 400 });
+    }
+    const existing = await rqlite.query("SELECT id FROM dashboards WHERE type = 'custom'");
+    const known = new Set(existing.values.map(r => String(r[0])));
+    if (order.some(id => !known.has(id))) {
+      return NextResponse.json({ error: { message: 'Unknown dashboard in order' } }, { status: 400 });
+    }
+    await rqlite.executeBatch(
+      order.map((id, i) => ({ sql: "UPDATE dashboards SET sort_order = ? WHERE id = ? AND type = 'custom'", params: [i + 1, id] })),
+      { transaction: true }
+    );
+    return NextResponse.json({ data: { success: true } });
+  } catch (error) {
+    return NextResponse.json({ error: { message: String(error) } }, { status: 500 });
+  }
+}

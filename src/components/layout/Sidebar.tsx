@@ -20,6 +20,8 @@ import {
   ChevronsLeft,
   ChevronsRight,
   Plus,
+  Check,
+  Pencil,
   Server as ServerIcon,
   Settings,
   UserCog,
@@ -34,8 +36,9 @@ import { ensureArray } from '@/lib/api/ensureArray';
 import { useShell } from './ShellContext';
 import { useAuth } from '@/hooks/useAuth';
 import { hasRole } from '@/lib/auth/levels';
-import { DASHBOARDS_CHANGED } from '@/lib/dashboards/events';
+import { DASHBOARDS_CHANGED, notifyDashboardsChanged } from '@/lib/dashboards/events';
 import { DashboardNameDialog } from '@/components/dashboard/DashboardNameDialog';
+import { EditableDashboardRow } from './EditableDashboardRow';
 
 interface Server {
   id: string;
@@ -123,7 +126,7 @@ function useNavData() {
     };
   }, [dashboardsVersion]);
 
-  return { servers, dashboards: dashboards.filter(d => d.type === 'custom') };
+  return { servers, dashboards: dashboards.filter(d => d.type === 'custom'), setDashboards };
 }
 
 function SectionLabel({ children, collapsed }: { children: React.ReactNode; collapsed: boolean }) {
@@ -174,10 +177,34 @@ function NavLink({
 function SidebarNav({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: () => void }) {
   const pathname = usePathname() || '/';
   const router = useRouter();
-  const { servers, dashboards } = useNavData();
+  const { servers, dashboards, setDashboards } = useNavData();
   const { user } = useAuth();
-  const canCreate = hasRole(user?.role, 'operator');
+  const canEdit = hasRole(user?.role, 'operator');
+  const [editing, setEditing] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
+  const [orderError, setOrderError] = useState('');
+
+  // Move a custom dashboard one place up or down and save the new order.
+  const moveDashboard = async (index: number, direction: -1 | 1) => {
+    const target = index + direction;
+    if (target < 0 || target >= dashboards.length) return;
+    const next = [...dashboards];
+    [next[index], next[target]] = [next[target], next[index]];
+    setDashboards(prev => [...prev.filter(d => d.type !== 'custom'), ...next]);
+    setOrderError('');
+    try {
+      const res = await fetchWithAuth('/api/dashboards', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order: next.map(d => d.id) }),
+      });
+      if (!res.ok) throw new Error((await res.json().catch(() => null))?.error?.message || `HTTP ${res.status}`);
+    } catch (err) {
+      setOrderError(err instanceof Error ? err.message : 'Could not save the order');
+      notifyDashboardsChanged();
+    }
+  };
 
   return (
     <nav
@@ -189,41 +216,69 @@ function SidebarNav({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?
     >
       {MAIN_NAV.map(item => (
         <div key={item.href} className="space-y-0.5">
-          <NavLink
-            href={item.href}
-            label={item.label}
-            icon={item.icon}
-            active={isActive(pathname, item.href, item.exact)}
-            collapsed={collapsed}
-          />
+          <div className="flex items-center gap-1">
+            <div className="min-w-0 flex-1">
+              <NavLink
+                href={item.href}
+                label={item.label}
+                icon={item.icon}
+                active={isActive(pathname, item.href, item.exact)}
+                collapsed={collapsed}
+              />
+            </div>
+            {item.href === '/' && canEdit && !collapsed && (
+              <button
+                type="button"
+                onClick={() => setEditing(e => !e)}
+                aria-pressed={editing}
+                aria-label={editing ? 'Finish editing dashboards' : 'Edit dashboards'}
+                title={editing ? 'Done' : 'Edit dashboards'}
+                className={cn(
+                  'inline-flex size-8 shrink-0 items-center justify-center rounded-md transition-colors',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                  editing ? 'bg-primary text-primary-foreground' : 'text-sidebar-muted hover:bg-sidebar-accent/60 hover:text-white'
+                )}
+              >
+                {editing ? <Check className="size-4" aria-hidden /> : <Pencil className="size-4" aria-hidden />}
+              </button>
+            )}
+          </div>
           {/* Custom dashboards live under Home. */}
-          {item.href === '/' && (
+          {item.href === '/' && (dashboards.length > 0 || editing) && (
             <div className={cn('space-y-0.5', !collapsed && 'ml-4 border-l border-sidebar-border pl-2')}>
-              {dashboards.map(d => (
-                <NavLink
-                  key={d.id}
-                  href={`/dashboards/${d.id}`}
-                  label={d.name}
-                  icon={LayoutDashboard}
-                  active={isActive(pathname, `/dashboards/${d.id}`)}
-                  collapsed={collapsed}
-                />
-              ))}
-              {canCreate && (
-                <button
-                  type="button"
-                  onClick={() => setCreating(true)}
-                  title={collapsed ? 'New dashboard' : undefined}
-                  aria-label={collapsed ? 'New dashboard' : undefined}
-                  className={cn(
-                    'flex min-h-9 w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-sidebar-muted transition-colors',
-                    'hover:bg-sidebar-accent/60 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-                    collapsed && 'justify-center px-0'
-                  )}
-                >
-                  <Plus className="size-4 shrink-0" aria-hidden />
-                  {!collapsed && <span className="truncate">New dashboard</span>}
-                </button>
+              {editing && !collapsed ? (
+                <>
+                  {dashboards.map((d, i) => (
+                    <EditableDashboardRow
+                      key={d.id}
+                      name={d.name}
+                      isFirst={i === 0}
+                      isLast={i === dashboards.length - 1}
+                      onRename={() => setRenaming({ id: d.id, name: d.name })}
+                      onMove={dir => moveDashboard(i, dir)}
+                    />
+                  ))}
+                  <button
+                    type="button"
+                    onClick={() => setCreating(true)}
+                    className="flex min-h-9 w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-sidebar-muted transition-colors hover:bg-sidebar-accent/60 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+                  >
+                    <Plus className="size-4 shrink-0" aria-hidden />
+                    <span className="truncate">Add dashboard</span>
+                  </button>
+                  {orderError && <p role="alert" className="px-3 text-xs text-destructive">{orderError}</p>}
+                </>
+              ) : (
+                dashboards.map(d => (
+                  <NavLink
+                    key={d.id}
+                    href={`/dashboards/${d.id}`}
+                    label={d.name}
+                    icon={LayoutDashboard}
+                    active={isActive(pathname, `/dashboards/${d.id}`)}
+                    collapsed={collapsed}
+                  />
+                ))
               )}
             </div>
           )}
@@ -267,6 +322,11 @@ function SidebarNav({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?
       />
 
       <DashboardNameDialog open={creating} onOpenChange={setCreating} onSaved={d => router.push(`/dashboards/${d.id}`)} />
+      <DashboardNameDialog
+        open={!!renaming}
+        onOpenChange={open => !open && setRenaming(null)}
+        dashboard={renaming ?? undefined}
+      />
     </nav>
   );
 }
