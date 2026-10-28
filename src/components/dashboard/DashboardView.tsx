@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import type { Dashboard } from '@/types/dashboard';
 import { Plus, TriangleAlert, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -11,6 +12,10 @@ import { useDashboard } from '@/hooks/useDashboard';
 import { DashboardGrid } from './DashboardGrid';
 import { DashboardToolbar } from './DashboardToolbar';
 import { AddWidgetModal } from './AddWidgetModal';
+import { DashboardNameDialog } from './DashboardNameDialog';
+import { DeleteConfirmDialog } from '@/components/dialogs/DeleteConfirmDialog';
+import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
+import { notifyDashboardsChanged } from '@/lib/dashboards/events';
 import { useAuth } from '@/hooks/useAuth';
 import { hasRole } from '@/lib/auth/levels';
 
@@ -29,6 +34,9 @@ export function DashboardView({ dashboardId, name, type, serverId, serverName, o
   const { dashboard, widgets, isLoading, error, layoutError, clearLayoutError, addWidget, updateLayout, refresh } = useDashboard(dashboardId);
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const router = useRouter();
   const { toast } = useToast();
   const { user } = useAuth();
   // Adding widgets and editing the layout: Read + actions or higher.
@@ -47,6 +55,21 @@ export function DashboardView({ dashboardId, name, type, serverId, serverName, o
     }
   };
 
+  const handleDelete = async () => {
+    try {
+      const res = await fetchWithAuth(`/api/dashboards/${dashboardId}`, { method: 'DELETE' });
+      if (!res.ok) {
+        const json = await res.json().catch(() => null);
+        throw new Error(json?.error?.message || `HTTP ${res.status}`);
+      }
+      notifyDashboardsChanged();
+      toast('Dashboard deleted', { variant: 'success' });
+      router.push('/');
+    } catch (err) {
+      toast('Could not delete dashboard', { variant: 'error', description: err instanceof Error ? err.message : String(err) });
+    }
+  };
+
   if (isLoading) return <LoadingSpinner />;
   if (error) return <ErrorState message={error} onRetry={refresh} />;
 
@@ -61,6 +84,8 @@ export function DashboardView({ dashboardId, name, type, serverId, serverName, o
         onAddWidget={canEdit ? () => setModal(true) : undefined}
         editing={editing}
         onToggleEdit={canEdit && widgets.length > 0 ?() => setEditing(e => !e) : undefined}
+        onRename={canEdit && type === 'custom' ? () => setRenaming(true) : undefined}
+        onDelete={canEdit && type === 'custom' ? () => setDeleting(true) : undefined}
       />
       {layoutError && (
         <div role="alert" className="mb-3 flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 p-3 text-sm text-destructive">
@@ -91,6 +116,19 @@ export function DashboardView({ dashboardId, name, type, serverId, serverName, o
         ) : undefined}
       />
       <AddWidgetModal isOpen={modal} onClose={() => setModal(false)} dashboardId={dashboardId} serverId={serverId} onAdd={handleAdd} />
+      {type === 'custom' && (
+        <>
+          <DashboardNameDialog open={renaming} onOpenChange={setRenaming} dashboard={{ id: dashboardId, name }} onSaved={() => refresh()} />
+          <DeleteConfirmDialog
+            title="Delete dashboard?"
+            confirmLabel="Delete"
+            widgetTitle={name}
+            open={deleting}
+            onOpenChange={setDeleting}
+            onConfirm={handleDelete}
+          />
+        </>
+      )}
     </>
   );
 }
