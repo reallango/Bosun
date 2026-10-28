@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireRole } from '@/lib/auth/middleware';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
+import { DASHBOARD_NAME_MAX } from '@/lib/dashboards/events';
 
 /** widgets.layouts holds per-breakpoint rects as JSON; always return an object. */
 function parseLayouts(value: unknown): Record<string, unknown> {
@@ -52,7 +53,11 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const { dashboardId } = await params;
   try {
     const body = await request.json();
-    const { name, icon, sort_order } = body;
+    const { icon, sort_order } = body;
+    const name = typeof body.name === 'string' ? body.name.trim() : body.name;
+    if (name !== undefined && (typeof name !== 'string' || !name || name.length > DASHBOARD_NAME_MAX)) {
+      return NextResponse.json({ error: { message: `Name must be 1-${DASHBOARD_NAME_MAX} characters` } }, { status: 400 });
+    }
     const ex = await rqlite.query('SELECT type FROM dashboards WHERE id=?', [dashboardId]);
     if (!ex.values?.length) return NextResponse.json({ error: { message: 'Not found' } }, { status: 404 });
     if (['home','server'].includes(ex.values[0][0] as string) && name) return NextResponse.json({ error: { message: 'Cannot rename' } }, { status: 400 });

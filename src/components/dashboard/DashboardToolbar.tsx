@@ -2,7 +2,7 @@
 
 import { ServerPowerMenu } from '@/components/servers/ServerPowerMenu';
 import { useRouter } from 'next/navigation';
-import { Check, EllipsisVertical, LayoutGrid, Pencil, Plus, Server } from 'lucide-react';
+import { Check, EllipsisVertical, LayoutGrid, Pencil, Plus, Server, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
@@ -22,9 +22,12 @@ interface DashboardToolbarProps {
   /** Layout edit mode (drag & resize). Omit onToggleEdit to hide the toggle. */
   editing?: boolean;
   onToggleEdit?: () => void;
+  /** Custom dashboards only: change the display name / delete the dashboard. Omit to hide. */
+  onRename?: () => void;
+  onDelete?: () => void;
 }
 
-export function DashboardToolbar({ name, serverName, type, onAddWidget, serverId, widgetCount, editing, onToggleEdit }: DashboardToolbarProps) {
+export function DashboardToolbar({ name, serverName, type, onAddWidget, serverId, widgetCount, editing, onToggleEdit, onRename, onDelete }: DashboardToolbarProps) {
   const router = useRouter();
 
   return (
@@ -57,6 +60,29 @@ export function DashboardToolbar({ name, serverName, type, onAddWidget, serverId
           <Plus />
           <span className="hidden xs:inline">Add widget</span>
         </Button>
+        )}
+        {type === 'custom' && (onRename || onDelete) && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="icon-lg" aria-label="Dashboard actions">
+                <EllipsisVertical />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              {onRename && (
+                <DropdownMenuItem onSelect={onRename}>
+                  <Pencil />
+                  Rename
+                </DropdownMenuItem>
+              )}
+              {onDelete && (
+                <DropdownMenuItem onSelect={onDelete} variant="destructive">
+                  <Trash2 />
+                  Delete dashboard
+                </DropdownMenuItem>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
         {type === 'server' && serverId && (
           <ServerPowerMenu serverId={serverId} serverName={serverName || name} />

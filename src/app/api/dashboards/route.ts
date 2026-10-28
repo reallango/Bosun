@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { requireAuth, requireRole } from '@/lib/auth/middleware';
 import crypto from 'crypto';
+import { DASHBOARD_NAME_MAX } from '@/lib/dashboards/events';
 
 export async function GET(request: NextRequest) {
   const auth = await requireAuth(request);
@@ -27,8 +28,10 @@ export async function POST(request: NextRequest) {
   if (roleError) return roleError;
   try {
     const body = await request.json();
-    const { name, icon } = body;
+    const { icon } = body;
+    const name = typeof body.name === 'string' ? body.name.trim() : '';
     if (!name) return NextResponse.json({ error: { message: 'Name required' } }, { status: 400 });
+    if (name.length > DASHBOARD_NAME_MAX) return NextResponse.json({ error: { message: `Name must be at most ${DASHBOARD_NAME_MAX} characters` } }, { status: 400 });
     const id = crypto.randomUUID();
     const now = new Date().toISOString();
     await rqlite.execute(

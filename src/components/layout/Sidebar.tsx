@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import { Dialog as DialogPrimitive } from 'radix-ui';
 import {
   Bell,
@@ -32,6 +32,10 @@ import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { readJson } from '@/lib/api/readJson';
 import { ensureArray } from '@/lib/api/ensureArray';
 import { useShell } from './ShellContext';
+import { useAuth } from '@/hooks/useAuth';
+import { hasRole } from '@/lib/auth/levels';
+import { DASHBOARDS_CHANGED } from '@/lib/dashboards/events';
+import { DashboardNameDialog } from '@/components/dashboard/DashboardNameDialog';
 
 interface Server {
   id: string;
@@ -83,6 +87,14 @@ function isActive(pathname: string, href: string, exact?: boolean) {
 function useNavData() {
   const [servers, setServers] = useState<Server[]>([]);
   const [dashboards, setDashboards] = useState<Dashboard[]>([]);
+  // Bumped when a dashboard is created, renamed or deleted elsewhere in the app.
+  const [dashboardsVersion, setDashboardsVersion] = useState(0);
+
+  useEffect(() => {
+    const bump = () => setDashboardsVersion(v => v + 1);
+    window.addEventListener(DASHBOARDS_CHANGED, bump);
+    return () => window.removeEventListener(DASHBOARDS_CHANGED, bump);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -109,7 +121,7 @@ function useNavData() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [dashboardsVersion]);
 
   return { servers, dashboards: dashboards.filter(d => d.type === 'custom') };
 }
@@ -161,7 +173,11 @@ function NavLink({
 
 function SidebarNav({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: () => void }) {
   const pathname = usePathname() || '/';
+  const router = useRouter();
   const { servers, dashboards } = useNavData();
+  const { user } = useAuth();
+  const canCreate = hasRole(user?.role, 'operator');
+  const [creating, setCreating] = useState(false);
 
   return (
     <nav
@@ -172,14 +188,46 @@ function SidebarNav({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?
       }}
     >
       {MAIN_NAV.map(item => (
-        <NavLink
-          key={item.href}
-          href={item.href}
-          label={item.label}
-          icon={item.icon}
-          active={isActive(pathname, item.href, item.exact)}
-          collapsed={collapsed}
-        />
+        <div key={item.href} className="space-y-0.5">
+          <NavLink
+            href={item.href}
+            label={item.label}
+            icon={item.icon}
+            active={isActive(pathname, item.href, item.exact)}
+            collapsed={collapsed}
+          />
+          {/* Custom dashboards live under Home. */}
+          {item.href === '/' && (
+            <div className={cn('space-y-0.5', !collapsed && 'ml-4 border-l border-sidebar-border pl-2')}>
+              {dashboards.map(d => (
+                <NavLink
+                  key={d.id}
+                  href={`/dashboards/${d.id}`}
+                  label={d.name}
+                  icon={LayoutDashboard}
+                  active={isActive(pathname, `/dashboards/${d.id}`)}
+                  collapsed={collapsed}
+                />
+              ))}
+              {canCreate && (
+                <button
+                  type="button"
+                  onClick={() => setCreating(true)}
+                  title={collapsed ? 'New dashboard' : undefined}
+                  aria-label={collapsed ? 'New dashboard' : undefined}
+                  className={cn(
+                    'flex min-h-9 w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-sidebar-muted transition-colors',
+                    'hover:bg-sidebar-accent/60 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
+                    collapsed && 'justify-center px-0'
+                  )}
+                >
+                  <Plus className="size-4 shrink-0" aria-hidden />
+                  {!collapsed && <span className="truncate">New dashboard</span>}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
       ))}
 
       <SectionLabel collapsed={collapsed}>Servers</SectionLabel>
@@ -218,22 +266,7 @@ function SidebarNav({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?
         collapsed={collapsed}
       />
 
-      {dashboards.length > 0 && (
-        <>
-          <SectionLabel collapsed={collapsed}>Dashboards</SectionLabel>
-          {dashboards.map(d => (
-            <NavLink
-              key={d.id}
-              href={`/dashboards/${d.id}`}
-              label={d.name}
-              icon={LayoutDashboard}
-              active={isActive(pathname, `/dashboards/${d.id}`)}
-              collapsed={collapsed}
-            />
-          ))}
-        </>
-      )}
-
+      <DashboardNameDialog open={creating} onOpenChange={setCreating} onSaved={d => router.push(`/dashboards/${d.id}`)} />
     </nav>
   );
 }
