@@ -171,3 +171,10 @@ describe('getting nssm on Windows', () => {
     expect(windowsScript({ mode: 'update', service: 'Ollama', exe: String.raw`C:\Ollama\bin\ollama.exe` })).not.toContain('winget');
   });
 });
+
+describe('stopping a systemd unit', () => {
+  it('does not treat the "inactive" report after a successful stop as a failure', () => {
+    const c = systemdCommand('stop', 'ollama');
+    expect(c).toContain("sudo -n systemctl stop 'ollama' && { systemctl is-active 'ollama' || true; }");
+  });
+});
