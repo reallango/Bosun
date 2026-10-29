@@ -37,6 +37,17 @@ function windowsStartMode(kv) {
  * @param {string} text the lines after `@@INSTALL`
  * @param {boolean} apiUp whether the Ollama API answered
  */
+/** The settings Bosun manages that are configured for the install (`ENV_NAME=value` lines; whole numbers only). */
+const SETTING_ENV_NAMES = ['OLLAMA_CONTEXT_LENGTH', 'OLLAMA_MAX_LOADED_MODELS'];
+function readEnv(kv) {
+  const env = {};
+  for (const name of SETTING_ENV_NAMES) {
+    const v = kv['ENV_' + name];
+    if (v !== undefined && /^\d{1,9}$/.test(v)) env[name] = v;
+  }
+  return env;
+}
+
 function parseInstall(text, apiUp) {
   const kv = keyValues(text);
   const dockerAvailable = kv.DOCKER_AVAILABLE === '1';
@@ -45,20 +56,20 @@ function parseInstall(text, apiUp) {
   if (kv.DOCKER_NAME && CONTAINER_RE.test(kv.DOCKER_NAME) && !(kv.UNIT && kv.UNIT_ACTIVE === 'active' && kv.DOCKER_STATE !== 'running')) {
     return {
       ...base, kind: 'docker', container: kv.DOCKER_NAME, image: kv.DOCKER_IMAGE || '', state: kv.DOCKER_STATE || 'unknown',
-      restartPolicy: kv.DOCKER_RESTART || 'no',
+      restartPolicy: kv.DOCKER_RESTART || 'no', env: readEnv(kv),
     };
   }
   if (kv.UNIT && SERVICE_NAME_RE.test(kv.UNIT)) {
     const enabled = kv.UNIT_ENABLED || '';
     return {
-      ...base, kind: 'service', manager: 'systemd', name: kv.UNIT,
+      ...base, kind: 'service', manager: 'systemd', name: kv.UNIT, env: readEnv(kv),
       state: kv.UNIT_ACTIVE === 'active' ? 'running' : kv.UNIT_ACTIVE === 'failed' ? 'failed' : 'stopped',
       startMode: enabled === 'enabled' ? 'enabled' : enabled === 'disabled' ? 'disabled' : enabled || 'unknown',
     };
   }
   if (kv.SVC_NAME && SERVICE_NAME_RE.test(kv.SVC_NAME)) {
     return {
-      ...base, kind: 'service', manager: kv.SVC_WRAPPER === 'nssm' ? 'nssm' : 'windows', name: kv.SVC_NAME,
+      ...base, kind: 'service', manager: kv.SVC_WRAPPER === 'nssm' ? 'nssm' : 'windows', name: kv.SVC_NAME, env: readEnv(kv),
       state: /^running$/i.test(kv.SVC_STATE || '') ? 'running' : 'stopped', startMode: windowsStartMode(kv), exe: kv.SVC_EXE || '',
     };
   }

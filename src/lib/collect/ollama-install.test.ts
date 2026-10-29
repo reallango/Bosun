@@ -18,7 +18,7 @@ describe('parseInstall', () => {
 
   it('reads a Docker container with its restart policy', () => {
     const i = parseInstall('DOCKER_AVAILABLE=1\nDOCKER_NAME=ollama\nDOCKER_STATE=running\nDOCKER_RESTART=unless-stopped\nDOCKER_IMAGE=ollama/ollama:latest', true);
-    expect(i).toEqual({ dockerAvailable: true, kind: 'docker', container: 'ollama', image: 'ollama/ollama:latest', state: 'running', restartPolicy: 'unless-stopped' });
+    expect(i).toEqual({ dockerAvailable: true, kind: 'docker', container: 'ollama', image: 'ollama/ollama:latest', state: 'running', restartPolicy: 'unless-stopped', env: {} });
   });
 
   it('reads a systemd unit on the host', () => {
@@ -75,5 +75,16 @@ describe('nothing installed', () => {
     expect(o.status).toBe('stopped');
     expect(o.install).toEqual({ dockerAvailable: false, kind: 'none' });
     expect(parseOllama('DOWN\r\n@@INSTALL\r\n').install).toEqual({ dockerAvailable: false, kind: 'none' });
+  });
+});
+
+describe('configured settings', () => {
+  it('reads the settings Bosun manages from each kind of install, and ignores anything that is not a number', () => {
+    const win = parseInstall('SVC_NAME=Ollama\nSVC_STATE=Running\nSVC_START=Auto\nSVC_WRAPPER=nssm\nENV_OLLAMA_CONTEXT_LENGTH=16384\nENV_OLLAMA_MAX_LOADED_MODELS=1', true);
+    expect(win.env).toEqual({ OLLAMA_CONTEXT_LENGTH: '16384', OLLAMA_MAX_LOADED_MODELS: '1' });
+    expect(parseInstall('UNIT=ollama\nUNIT_ACTIVE=active\nENV_OLLAMA_CONTEXT_LENGTH=8192', true).env).toEqual({ OLLAMA_CONTEXT_LENGTH: '8192' });
+    expect(parseInstall('DOCKER_NAME=ollama\nDOCKER_STATE=running\nENV_OLLAMA_MAX_LOADED_MODELS=2', true).env).toEqual({ OLLAMA_MAX_LOADED_MODELS: '2' });
+    expect(parseInstall('UNIT=ollama\nUNIT_ACTIVE=active\nENV_OLLAMA_CONTEXT_LENGTH=abc;rm', true).env).toEqual({});
+    expect(parseInstall('UNIT=ollama\nUNIT_ACTIVE=active', true).env).toEqual({});
   });
 });

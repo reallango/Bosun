@@ -74,6 +74,7 @@ ollama) m ollama
       echo "DOCKER_STATE=$($D inspect -f '{{.State.Status}}' "$c" 2>/dev/null)"
       echo "DOCKER_RESTART=$($D inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$c" 2>/dev/null)"
       echo "DOCKER_IMAGE=$($D inspect -f '{{.Config.Image}}' "$c" 2>/dev/null)"
+      $D inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$c" 2>/dev/null | grep -E '^(OLLAMA_CONTEXT_LENGTH|OLLAMA_MAX_LOADED_MODELS)=' | sed 's/^/ENV_/'
     fi
   else echo DOCKER_AVAILABLE=0; fi
   have ollama && echo "HOST_BIN=$(command -v ollama)"
@@ -81,6 +82,7 @@ ollama) m ollama
     echo UNIT=ollama
     echo "UNIT_ACTIVE=$(systemctl is-active ollama 2>/dev/null)"
     echo "UNIT_ENABLED=$(systemctl is-enabled ollama 2>/dev/null)"
+    systemctl show ollama -p Environment 2>/dev/null | tr ' ' '\n' | tr -d '"' | sed 's/^Environment=//' | grep -E '^(OLLAMA_CONTEXT_LENGTH|OLLAMA_MAX_LOADED_MODELS)=' | sed 's/^/ENV_/'
   fi ;;
 services) m services
   if have systemctl; then systemctl list-units --type=service --all --no-pager --plain --no-legend 2>/dev/null | head -n 400

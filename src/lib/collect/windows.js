@@ -75,6 +75,11 @@ foreach ($p in $Probes) {
           if ($app) { $exe = $app }
         }
         Write-Output ('SVC_EXE=' + $exe)
+        # The settings Bosun manages: nssm keeps them in AppEnvironmentExtra, a plain service in its Environment value.
+        $envKey = 'HKLM:\SYSTEM\CurrentControlSet\Services\' + $s.Name
+        if ($s.PathName -match 'nssm') { $envList = @((Get-ItemProperty ($envKey + '\Parameters') -ErrorAction SilentlyContinue).AppEnvironmentExtra) }
+        else { $envList = @((Get-ItemProperty $envKey -ErrorAction SilentlyContinue).Environment) }
+        foreach ($e in $envList) { if ($e -match '^(OLLAMA_CONTEXT_LENGTH|OLLAMA_MAX_LOADED_MODELS)=') { Write-Output ('ENV_' + $e) } }
       } else {
         $p = Get-Process -Name ollama -ErrorAction SilentlyContinue | Select-Object -First 1
         $std = Get-ChildItem 'C:\Users\*\AppData\Local\Programs\Ollama\ollama.exe' -ErrorAction SilentlyContinue | Select-Object -First 1

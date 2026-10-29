@@ -6,9 +6,9 @@ import { consumeActionRateLimit } from '@/lib/utils/rate-limiter';
 import { logAudit, AuditActions } from '@/lib/audit/logger';
 import { ok, fail, failFrom } from '@/lib/api/response';
 
-const ACTIONS: OllamaAction[] = ['start', 'stop', 'restart', 'set_startup', 'set_restart_policy', 'install', 'update'];
+const ACTIONS: OllamaAction[] = ['start', 'stop', 'restart', 'set_startup', 'set_restart_policy', 'set_setting', 'install', 'update'];
 /** Actions that interrupt Ollama or change the host a lot: the caller has to confirm them. */
-const NEEDS_CONFIRM: OllamaAction[] = ['stop', 'restart', 'install', 'update'];
+const NEEDS_CONFIRM: OllamaAction[] = ['stop', 'restart', 'set_setting', 'install', 'update'];
 
 /** How Ollama is installed on this server, whether a newer release exists, and the install or update job in progress. */
 export async function GET(request: NextRequest, { params }: { params: Promise<{ serverId: string }> }) {
@@ -27,8 +27,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 
 /**
  * Install, update or control Ollama on the server. Needs `ollama.service` (Full access by default).
- * Body: { action, value?, method?, version?, confirm? }. `value` is the startup method (set_startup) or the
- * restart policy (set_restart_policy). Install and update answer 202 and run as a job; poll GET for it.
+ * Body: { action, name?, value?, method?, version?, confirm? }. `value` is the startup method (set_startup), the
+ * restart policy (set_restart_policy) or the setting value (set_setting, with `name`; empty = default). Install and update answer 202 and run as a job; poll GET for it.
  */
 export async function POST(request: NextRequest, { params }: { params: Promise<{ serverId: string }> }) {
   const auth = await requireAuth(request);
@@ -36,7 +36,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const { serverId } = await params;
   const denied = await requirePermission(auth, 'ollama.service', serverId);
   if (denied) return denied;
-  let body: { action?: unknown; value?: unknown; method?: unknown; version?: unknown; confirm?: unknown };
+  let body: { action?: unknown; name?: unknown; value?: unknown; method?: unknown; version?: unknown; confirm?: unknown };
   try { body = await request.json(); } catch { return fail('Invalid JSON body'); }
   const action = body.action as OllamaAction;
   if (!ACTIONS.includes(action)) return fail('Unknown action');
@@ -44,10 +44,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const limit = consumeActionRateLimit(auth.userId);
   if (!limit.allowed) return fail('Too many actions, slow down', 429, 'RATE_LIMITED');
   try {
-    const result = await runOllamaAction(serverId, auth.userId, action, { value: body.value, method: body.method, version: body.version });
+    const result = await runOllamaAction(serverId, auth.userId, action, { name: body.name, value: body.value, method: body.method, version: body.version });
     if (!result.job) {
       await logAudit({ userId: auth.userId, serverId, action: AuditActions.OLLAMA_SERVICE, status: 'success',
-        details: JSON.stringify({ action, value: typeof body.value === 'string' ? body.value : undefined }) });
+        details: JSON.stringify({ action, name: typeof body.name === 'string' ? body.name : undefined, value: typeof body.value === 'string' ? body.value : undefined }) });
       return ok({ message: result.message });
     }
     await logAudit({ userId: auth.userId, serverId, action: AuditActions.OLLAMA_SERVICE, status: 'pending', details: JSON.stringify({ action, started: true }) });

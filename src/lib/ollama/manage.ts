@@ -4,8 +4,9 @@ import { logAudit, AuditActions } from '@/lib/audit/logger';
 import {
   RESTART_POLICIES, SYSTEMD_STARTUP, WINDOWS_STARTUP, VERSION_RE,
   dockerControlCommand, dockerInstallCommand, dockerUpdateCommand, hostInstallCommand, isNewerVersion, recreateRunCommand,
-  systemdCommand, windowsScript, windowsServiceScript,
+  systemdCommand, systemdEnvCommand, windowsEnvScript, windowsScript, windowsServiceScript,
 } from '@/lib/ollama/scripts';
+import { validateSetting } from '@/lib/ollama/settings';
 
 /**
  * Install, update and control Ollama on a monitored host. What to do depends on how it is installed (the poller
@@ -24,6 +25,8 @@ export interface OllamaInstall {
   image?: string;
   state?: string;
   restartPolicy?: string;
+  /** The managed settings that are configured (see settings.ts); a setting that is not listed is not set. */
+  env?: Record<string, string>;
   startMode?: string;
   exe?: string;
   path?: string;
@@ -37,7 +40,7 @@ export interface OllamaState {
   collectedAt: string | null;
 }
 
-export type OllamaAction = 'start' | 'stop' | 'restart' | 'set_startup' | 'set_restart_policy' | 'install' | 'update';
+export type OllamaAction = 'start' | 'stop' | 'restart' | 'set_startup' | 'set_restart_policy' | 'set_setting' | 'install' | 'update';
 
 export class OllamaManageError extends Error {
   status: number;
@@ -166,6 +169,8 @@ function startJob(serverId: string, action: 'install' | 'update', command: strin
 
 export interface ActionParams {
   value?: unknown;
+  /** set_setting: which setting (OLLAMA_CONTEXT_LENGTH, OLLAMA_MAX_LOADED_MODELS). */
+  name?: unknown;
   /** Linux install: where to install it. Docker by default. */
   method?: unknown;
   /** Install or update a specific release instead of the latest. */
@@ -187,10 +192,16 @@ function versionParam(v: unknown): string | undefined {
 async function runQuick(serverId: string, command: string, what: string): Promise<string> {
   const r = await runOnServerId(serverId, command, { timeoutMs: 120_000 });
   if (r.exitCode !== 0 || r.timedOut) {
-    const why = (r.timedOut ? 'It timed out' : lastLines(r.stderr || r.stdout, 3).join(' ')) || `exit ${r.exitCode}`;
+    const why = (r.timedOut ? 'It timed out' : failureMessage(r.stdout, r.stderr)) || `exit ${r.exitCode}`;
     throw new OllamaManageError(`${what} failed: ${why}`, 502, 'ACTION_FAILED');
   }
   return lastLines(r.stdout, 2).join(' ');
+}
+
+/** `docker inspect` of the container, parsed (the container is recreated from its own settings). */
+async function inspectContainer(serverId: string, container: string): Promise<unknown> {
+  const insp = await runOnServerId(serverId, `docker inspect ${container} 2>/dev/null || sudo -n docker inspect ${container}`, { timeoutMs: 30_000 });
+  try { return JSON.parse(insp.stdout)[0]; } catch { throw new OllamaManageError('Could not read the container settings', 502, 'INSPECT_FAILED'); }
 }
 
 /** Docker image of a container with a new tag (same repository). */
@@ -222,14 +233,32 @@ export async function runOllamaAction(serverId: string, userId: string, action: 
     throw new OllamaManageError('This is a standard install, not a service or container, so Bosun cannot control it. Install Ollama as a service (or container) to manage it from here.', 409, 'STANDARD_INSTALL');
   }
 
+  if (action === 'set_setting') {
+    const v = validateSetting(p.name, p.value);
+    if (!v.ok) throw new OllamaManageError(v.error, 400, 'BAD_VALUE');
+    if (inst.kind === 'docker') {
+      if (!inst.container) throw new OllamaManageError('The container could not be identified', 409, 'NO_CONTAINER');
+      const parsed = await inspectContainer(serverId, inst.container);
+      const image = inst.image || 'ollama/ollama:latest';
+      let runCmd: string;
+      try { runCmd = recreateRunCommand(parsed as Parameters<typeof recreateRunCommand>[0], image, inst.container, { env: { [v.name]: v.value } }); }
+      catch (e) { throw new OllamaManageError(e instanceof Error ? e.message : String(e), 409, 'CANNOT_RECREATE'); }
+      // Recreated from the image it already has (no pull), so only this setting changes.
+      return { message: await runQuick(serverId, dockerUpdateCommand(inst.container, image, runCmd, { pull: false }), 'Changing the setting') || 'Done' };
+    }
+    if (!inst.name) throw new OllamaManageError('The service could not be identified', 409, 'NO_SERVICE');
+    if (windows) {
+      return { message: await runQuick(serverId, windowsEnvScript(inst.manager === 'nssm' ? 'nssm' : 'windows', inst.name, v.name, v.value), 'Changing the setting') || 'Done' };
+    }
+    return { message: await runQuick(serverId, systemdEnvCommand(inst.name, v.name, v.value), 'Changing the setting') || 'Done' };
+  }
+
   if (action === 'update') {
     const version = versionParam(p.version) ?? (await latestOllamaVersion());
     if (inst.kind === 'docker') {
       if (!inst.container) throw new OllamaManageError('The container could not be identified', 409, 'NO_CONTAINER');
       // The container is recreated from its own settings, so read them first.
-      const insp = await runOnServerId(serverId, `docker inspect ${inst.container} 2>/dev/null || sudo -n docker inspect ${inst.container}`, { timeoutMs: 30_000 });
-      let parsed: unknown;
-      try { parsed = JSON.parse(insp.stdout)[0]; } catch { throw new OllamaManageError('Could not read the container settings', 502, 'INSPECT_FAILED'); }
+      const parsed = await inspectContainer(serverId, inst.container);
       const image = imageWithTag(inst.image || 'ollama/ollama', version ?? 'latest');
       let runCmd: string;
       try { runCmd = recreateRunCommand(parsed as Parameters<typeof recreateRunCommand>[0], image, inst.container); }
