@@ -4,6 +4,8 @@
  * sends is ever pasted into a shell without passing one of the patterns below.
  */
 
+import { validateSetting } from './settings';
+
 export const SERVICE_NAME_RE = /^[A-Za-z0-9_.-]{1,64}$/;
 export const CONTAINER_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
 export const VERSION_RE = /^\d{1,3}\.\d{1,3}\.\d{1,3}$/;
@@ -288,6 +290,68 @@ export function systemdCommand(action: 'start' | 'stop' | 'restart' | 'set_start
   return `sudo -n systemctl ${action} ${shq(unit)} && { systemctl is-active ${shq(unit)} || true; }`;
 }
 
+/**
+ * PowerShell that sets (or, with an empty value, removes) one of the managed settings on a Windows service and
+ * restarts the service if it was running. nssm keeps the settings in AppEnvironmentExtra, a plain service in its
+ * Environment value; the other variables the service already has (OLLAMA_HOST, OLLAMA_MODELS, ...) are kept.
+ */
+export function windowsEnvScript(manager: 'nssm' | 'windows', service: string, name: string, value: string): string {
+  assert(SERVICE_NAME_RE.test(service), 'Invalid service name');
+  const v = validateSetting(name, value);
+  assert(v.ok, v.ok ? '' : v.error);
+  if (!v.ok) throw new Error(v.error);
+  const body = [
+    `$ErrorActionPreference = 'Stop'`,
+    `$svc = ${psq(service)}; $name = ${psq(v.name)}; $val = ${psq(v.value)}`,
+    `$key = 'HKLM:\\SYSTEM\\CurrentControlSet\\Services\\' + $svc`,
+  ];
+  if (manager === 'nssm') {
+    body.push(
+      `$wmi = Get-CimInstance Win32_Service -Filter ("Name='" + $svc + "'")`,
+      `$nssm = ($wmi.PathName -replace '^"?([^"]+?)"?(\\s.*)?$', '$1')`,
+      `if (-not (Test-Path $nssm)) { throw 'nssm was not found where the service says it is' }`,
+      `$cur = @((Get-ItemProperty ($key + '\\Parameters')).AppEnvironmentExtra)`,
+      `$new = @($cur | Where-Object { $_ -and ($_ -notlike ($name + '=*')) })`,
+      `if ($val -ne '') { $new += ($name + '=' + $val) }`,
+      `if ($new.Count -gt 0) { $o = & $nssm set $svc AppEnvironmentExtra @new 2>&1 } else { $o = & $nssm reset $svc AppEnvironmentExtra 2>&1 }`,
+      `if ($LASTEXITCODE -ne 0) { throw ('nssm: ' + (($o | Out-String).Trim())) }`,
+    );
+  } else {
+    body.push(
+      `$cur = @((Get-ItemProperty $key).Environment)`,
+      `$new = @($cur | Where-Object { $_ -and ($_ -notlike ($name + '=*')) })`,
+      `if ($val -ne '') { $new += ($name + '=' + $val) }`,
+      `if ($new.Count -gt 0) { Set-ItemProperty -Path $key -Name Environment -Value $new -Type MultiString } else { Remove-ItemProperty -Path $key -Name Environment -ErrorAction SilentlyContinue }`,
+    );
+  }
+  body.push(
+    `if ((Get-Service -Name $svc).Status -eq 'Running') { Restart-Service -Name $svc -Force; (Get-Service -Name $svc).WaitForStatus('Running', [TimeSpan]::FromSeconds(60)); Write-Output ('Applied and restarted: ' + $name + ($(if ($val -ne '') { '=' + $val } else { ' removed' }))) } else { Write-Output ('Saved (the service is stopped): ' + $name) }`,
+  );
+  return ['try {', ...body, `} catch { Write-Output ('ERROR: ' + $_.Exception.Message); exit 1 }`].join('\n');
+}
+
+/**
+ * Sets (or removes) one of the managed settings of a systemd service in a drop-in that sorts last, so it wins over
+ * the other files, then reloads systemd and restarts the unit. The drop-in holds only Bosun's settings.
+ */
+export function systemdEnvCommand(unit: string, name: string, value: string): string {
+  assert(SERVICE_NAME_RE.test(unit), 'Invalid unit name');
+  const v = validateSetting(name, value);
+  assert(v.ok, v.ok ? '' : v.error);
+  if (!v.ok) throw new Error(v.error);
+  const dir = `/etc/systemd/system/${unit}.service.d`;
+  const file = `${dir}/zz-bosun-settings.conf`;
+  return [
+    `sudo -n true 2>/dev/null || { echo 'This account needs passwordless sudo to change the service' >&2; exit 3; }`,
+    `sudo -n mkdir -p ${shq(dir)}`,
+    `tmp=$(mktemp)`,
+    `{ echo '[Service]'; if sudo -n test -f ${shq(file)}; then sudo -n cat ${shq(file)} | grep '^Environment=' | grep -v '^Environment="${v.name}=' || true; fi;` +
+      (v.value !== '' ? ` echo 'Environment="${v.name}=${v.value}"';` : '') + ` } > "$tmp"`,
+    `sudo -n cp "$tmp" ${shq(file)} && rm -f "$tmp"`,
+    `sudo -n systemctl daemon-reload && sudo -n systemctl restart ${shq(unit)} && { systemctl is-active ${shq(unit)} || true; }`,
+  ].join('\n');
+}
+
 // ---- Recreating a container with a newer image ------------------------------------------------------------
 
 interface InspectJson {
@@ -308,8 +372,15 @@ interface InspectJson {
  * published ports, volumes and bind mounts, Ollama and NVIDIA environment, GPU access, restart policy and network.
  * Containers that belong to a Compose project are refused (update those with Compose).
  */
-export function recreateRunCommand(inspect: InspectJson, image: string, name: string): string {
+export function recreateRunCommand(inspect: InspectJson, image: string, name: string, opts: { env?: Record<string, string> } = {}): string {
   assert(CONTAINER_NAME_RE.test(name), 'Invalid container name');
+  // Settings to change: an empty value removes the variable from the new container.
+  const overrides: Record<string, string> = {};
+  for (const [k, v] of Object.entries(opts.env ?? {})) {
+    const s = validateSetting(k, v);
+    assert(s.ok, s.ok ? '' : s.error);
+    if (s.ok) overrides[s.name] = s.value;
+  }
   assert(/^[a-z0-9][a-z0-9._/-]{0,100}:[A-Za-z0-9._-]{1,60}$/.test(image), 'Invalid image');
   const labels = inspect.Config?.Labels ?? {};
   assert(!labels['com.docker.compose.project'], 'This container is managed by Docker Compose; update it with Compose');
@@ -339,8 +410,11 @@ export function recreateRunCommand(inspect: InspectJson, image: string, name: st
     args.push('-v', shq(`${src}:${m.Destination}${m.RW === false ? ':ro' : ''}`));
   }
   for (const e of inspect.Config?.Env ?? []) {
-    if (/^(OLLAMA_[A-Z0-9_]+|NVIDIA_[A-Z0-9_]+|CUDA_VISIBLE_DEVICES)=/.test(e)) args.push('-e', shq(e));
+    if (!/^(OLLAMA_[A-Z0-9_]+|NVIDIA_[A-Z0-9_]+|CUDA_VISIBLE_DEVICES)=/.test(e)) continue;
+    if (e.split('=')[0] in overrides) continue;   // replaced (or removed) below
+    args.push('-e', shq(e));
   }
+  for (const [k, v] of Object.entries(overrides)) if (v !== '') args.push('-e', shq(`${k}=${v}`));
   for (const d of hc.DeviceRequests ?? []) {
     const gpu = (d.Capabilities ?? []).some(c => c.includes('gpu'));
     if (!gpu) continue;
@@ -356,15 +430,16 @@ export function recreateRunCommand(inspect: InspectJson, image: string, name: st
  * remove the old one; if the new one fails to start the old one is put back. `runCommand` comes from
  * `recreateRunCommand`.
  */
-export function dockerUpdateCommand(container: string, image: string, runCommand: string): string {
+export function dockerUpdateCommand(container: string, image: string, runCommand: string, opts: { pull?: boolean } = {}): string {
   assert(CONTAINER_NAME_RE.test(container), 'Invalid container name');
   const c = shq(container);
   const old = shq(`${container}-bosun-old`);
   const run = runCommand.replace(/^docker /, '$D ');
+  // Changing a setting recreates the container from the image it already has: no pull, so nothing else changes.
+  const pull = opts.pull === false ? [] : [`echo '[step] pulling ${image}'`, `$D pull ${image} || exit 6`];
   return [
     dockerPick(),
-    `echo '[step] pulling ${image}'`,
-    `$D pull ${image} || exit 6`,
+    ...pull,
     `echo '[step] replacing the container'`,
     `$D rm -f ${old} >/dev/null 2>&1`,
     `$D stop ${c} >/dev/null && $D rename ${c} ${old} || exit 7`,

@@ -5,6 +5,7 @@ import { ArrowUpCircle, ChevronDown, ChevronRight, Loader2, Play, RotateCw, Squa
 import { useAuth } from '@/hooks/useAuth';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { ConfirmActionDialog, apiAction } from '@/components/widgets/shared/ConfirmActionDialog';
+import { OLLAMA_SETTINGS, validateSetting } from '@/lib/ollama/settings';
 
 interface Install {
   kind: 'docker' | 'service' | 'standard' | 'none';
@@ -15,6 +16,7 @@ interface Install {
   image?: string;
   state?: string;
   restartPolicy?: string;
+  env?: Record<string, string>;
   startMode?: string;
   path?: string;
 }
@@ -36,7 +38,54 @@ interface Info {
   job: Job | null;
 }
 
-type Pending = { action: 'stop' | 'restart' | 'update' | 'install'; method?: 'docker' | 'host' } | null;
+type Pending = { action: 'stop' | 'restart' | 'update' | 'install' | 'set_setting'; method?: 'docker' | 'host'; name?: string; value?: string; label?: string } | null;
+
+/** The managed settings (context length, max loaded models): what is configured now, and a field to change each. */
+function SettingsBlock({ inst, canManage, disabled, onApply }: {
+  inst: Install; canManage: boolean; disabled: boolean; onApply: (name: string, value: string, label: string) => void;
+}) {
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const known = !!inst.env;   // older poller data has no settings yet
+  return (
+    <div className="space-y-1.5 border-t border-gray-100 pt-1.5 dark:border-gray-800" aria-label="Ollama settings">
+      <div className="font-medium text-gray-900 dark:text-gray-100">Settings</div>
+      {!known && <p className="text-gray-500">Waiting for the next poll to read the current settings…</p>}
+      {known && OLLAMA_SETTINGS.map(s => {
+        const current = inst.env?.[s.name];
+        const draft = drafts[s.name];
+        const shown = draft ?? current ?? '';
+        const check = validateSetting(s.name, shown);
+        const changed = check.ok && check.value !== (current ?? '');
+        return (
+          <div key={s.name}>
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+              <label htmlFor={`ollama-${s.name}`} className="font-medium">{s.label}</label>
+              <span className="text-gray-500">now: {current !== undefined ? <span className="font-mono text-gray-900 dark:text-gray-100">{current}</span> : s.defaultText}</span>
+              {canManage && (
+                <>
+                  <input id={`ollama-${s.name}`} inputMode="numeric" value={shown} placeholder={s.placeholder} disabled={disabled}
+                    onChange={e => setDrafts(d => ({ ...d, [s.name]: e.target.value }))}
+                    aria-invalid={!check.ok}
+                    className="w-28 rounded border border-gray-200 bg-transparent px-1.5 py-0.5 font-mono outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 dark:border-gray-700" />
+                  <button type="button" disabled={disabled || !changed}
+                    onClick={() => { if (check.ok) { onApply(s.name, check.value, s.label); setDrafts(d => { const n = { ...d }; delete n[s.name]; return n; }); } }}
+                    className="rounded-md border border-gray-200 px-2 py-0.5 hover:bg-gray-100 disabled:opacity-50 dark:border-gray-700 dark:hover:bg-gray-800">Apply</button>
+                  {current !== undefined && (
+                    <button type="button" disabled={disabled}
+                      onClick={() => { onApply(s.name, '', s.label); setDrafts(d => { const n = { ...d }; delete n[s.name]; return n; }); }}
+                      className="text-gray-500 underline hover:text-gray-900 disabled:opacity-50 dark:hover:text-gray-100">Reset to default</button>
+                  )}
+                </>
+              )}
+            </div>
+            {!check.ok && draft !== undefined && <p role="alert" className="text-red-600">{check.error}</p>}
+            <p className="text-gray-500">{s.description}</p>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 const STARTUP_LABEL: Record<string, string> = {
   auto: 'Automatic', delayed: 'Automatic (delayed)', manual: 'Manual', disabled: 'Disabled', enabled: 'Enabled at boot',
@@ -92,7 +141,7 @@ export function OllamaServicePanel({ serverId, onChanged }: { serverId: string; 
     setBusy(label);
     setMessage(null);
     try {
-      const needsConfirm = ['stop', 'restart', 'install', 'update'].includes(action);
+      const needsConfirm = ['stop', 'restart', 'set_setting', 'install', 'update'].includes(action);
       const d = await apiAction(fetchWithAuth, `/api/servers/${serverId}/ollama/service`, 'POST', { action, ...extra, ...(needsConfirm ? { confirm: true } : {}) }) as { message?: string };
       if (d?.message) setMessage({ text: d.message });
       await load();
@@ -182,6 +231,11 @@ export function OllamaServicePanel({ serverId, onChanged }: { serverId: string; 
         </div>
       )}
 
+      {manageable && !jobRunning && (
+        <SettingsBlock inst={inst} canManage={canManage} disabled={busy !== null}
+          onApply={(name, value, label) => setPending({ action: 'set_setting', name, value, label })} />
+      )}
+
       {inst.kind === 'standard' && (
         <p className="text-gray-500">
           Bosun cannot start, stop or update a standard install.
@@ -230,16 +284,26 @@ export function OllamaServicePanel({ serverId, onChanged }: { serverId: string; 
       <ConfirmActionDialog
         open={!!pending}
         onOpenChange={o => { if (!o) setPending(null); }}
-        title={pending ? ({ stop: 'Stop Ollama?', restart: 'Restart Ollama?', update: `Update Ollama to v${info.latestVersion ?? 'latest'}?`, install: 'Install Ollama?' })[pending.action] : ''}
+        title={pending ? ({
+          stop: 'Stop Ollama?', restart: 'Restart Ollama?', update: `Update Ollama to v${info.latestVersion ?? 'latest'}?`, install: 'Install Ollama?',
+          set_setting: pending.value ? `Set ${pending.label} to ${pending.value}?` : `Reset ${pending.label} to its default?`,
+        })[pending.action] : ''}
         description={pending ? ({
+          set_setting: inst.kind === 'docker'
+            ? 'The container is recreated from the image it already has, with its ports, volumes, GPU access and restart policy and this one setting changed. Ollama is unavailable for a few seconds and loaded models are unloaded.'
+            : 'The service is restarted so that it picks the setting up. Loaded models are unloaded and requests in flight fail for a few seconds.',
           stop: 'Models stop answering requests, and anything using Ollama on this host loses it until it is started again.',
           restart: 'Loaded models are unloaded and requests in flight fail while it restarts.',
           update: inst.kind === 'docker' ? 'The container is recreated from the new image with the same settings (ports, volumes, GPU access, restart policy). Ollama is unavailable while that happens.' : 'The service is stopped, its files are replaced and it is started again. Ollama is unavailable meanwhile.',
           install: info.platform === 'windows' ? 'Downloads about 1.5 GB, unpacks it into C:\\Ollama and creates a Windows service with nssm (installed with winget when it is missing). Ollama will be reachable from your network on port 11434, with a firewall rule for private networks.' : pending.method === 'host' ? 'Runs the official install script with sudo. It adds the ollama user and a systemd service, and makes Ollama reachable from your network on port 11434.' : 'Pulls the ollama/ollama image and starts a container that keeps its models in a Docker volume, reachable from your network on port 11434.',
         })[pending.action] : ''}
-        confirmLabel={pending ? ({ stop: 'Stop', restart: 'Restart', update: 'Update', install: 'Install' })[pending.action] : ''}
+        confirmLabel={pending ? ({ stop: 'Stop', restart: 'Restart', update: 'Update', install: 'Install', set_setting: pending.value ? 'Apply and restart' : 'Reset and restart' })[pending.action] : ''}
         destructive={pending?.action === 'stop' || pending?.action === 'restart'}
-        onConfirm={async () => { if (pending) await call(pending.action, pending.method ? { method: pending.method } : {}, pending.action); }}
+        onConfirm={async () => {
+          if (!pending) return;
+          const extra = pending.action === 'set_setting' ? { name: pending.name, value: pending.value } : pending.method ? { method: pending.method } : {};
+          await call(pending.action, extra, pending.action);
+        }}
       />
     </div>
   );
