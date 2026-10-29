@@ -151,7 +151,10 @@ describe('getting nssm on Windows', () => {
   const s = windowsScript({ mode: 'install' });
   it('checks that winget works, tries to install it when it does not, and installs nssm with it', () => {
     expect(s).toContain("Step 'checking that winget works'");
-    expect(s).toContain("Step 'winget is not working; trying to install it'");
+    expect(s).toContain("Step 'winget is not available; trying to install it'");
+    expect(s).toContain("Step 'the winget package source is not working; repairing it'");
+    expect(s).toContain('https://cdn.winget.microsoft.com/cache/source.msix');
+    expect(s).toContain('function Test-WingetSource');
     expect(s).toContain('--id NSSM.NSSM --exact --silent');
     expect(s).toContain('--accept-package-agreements --accept-source-agreements');
     expect(s).toContain('Add-AppxPackage');
