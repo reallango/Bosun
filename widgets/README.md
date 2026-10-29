@@ -116,3 +116,25 @@ installs and live commands); their packages carry the permissions, size, setting
 - `data.also` and `data.server` combine several sections and the server row; templates reach them by name (`{system.prettyName}`, `{server.name}`, `{metrics.cpu.usage}`). The `metrics` section holds the latest value of every tracked number.
 - `metrics` lists the statistics the widget tracks. A name the built-in collectors produce (`cpu.usage`, `mem.used_pct`, `net.rx_bps`, `disk.root_used_pct`, `gpu*.util`, ...) only sets how long its history is kept. A name that starts with the package id and has `from` is computed from the widget's data on every collection (`count`, `sum`, `avg`, `min`, `max` or `first`, optionally over the rows matching `where`). `rawHours` (up to 2160), `rollup5mDays` (up to 365) and `rollup1hDays` (up to 3650) override the global retention; when several widgets name one metric the longest wins. Computed metrics are recorded for the servers that have the widget on a dashboard.
 - View types: `list`, `table` (columns may use `bar`, `mb`, `duration`, `temp` formats), `fields` (labelled values, optional gauges), `text`, and `chart` (history lines of `chart.metrics`). List rows can carry `fields` too.
+
+## Managing the Ollama installation
+
+The Ollama Status widget shows how Ollama is installed and, with the `ollama.service` permission (Full access by
+default), manages it:
+
+| Host | Detected as | Controls |
+| --- | --- | --- |
+| Windows | service run by nssm, a plain Windows service, or a standard install | start, stop, restart, startup method (automatic, automatic delayed, manual, disabled), update; standard installs are shown but not managed |
+| Linux | Docker container, systemd service, or a standard install | container: start, stop, restart, restart policy (never, always, unless stopped, on failure), update by recreating it with the same ports, volumes, GPU access and policy; systemd: start, stop, restart, enable or disable at boot, update |
+
+When Ollama is not installed the widget offers to install it. On Windows that is a service run by nssm in
+`C:\Ollama` (`bin`, `models`, `logs`, `nssm.exe`, the layout of existing installs), listening on localhost only and
+started at boot; the Windows archive is checked against the SHA-256 GitHub publishes for the release. On Linux the
+default is a Docker container (`ollama/ollama`, models in the `ollama` volume, published on 127.0.0.1:11434, restart
+policy "unless stopped", GPU access when the NVIDIA runtime is present); without Docker the widget warns and offers the
+official install script on the host instead (needs passwordless sudo). Install and update run as a job the widget
+follows. A newer release (from GitHub, checked every six hours) shows as "Update available". Containers started by
+Docker Compose are not recreated; update those with Compose.
+
+API: `GET /api/servers/:serverId/ollama/service` (state, latest version, job) and
+`POST /api/servers/:serverId/ollama/service` with `{ "action": "start|stop|restart|set_startup|set_restart_policy|install|update", "value", "method", "version", "confirm": true }`.
