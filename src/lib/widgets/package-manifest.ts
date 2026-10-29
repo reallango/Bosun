@@ -33,7 +33,7 @@ export interface PackagePermission {
   label: string;
   description: string;
   group: string;
-  defaultLevel: 'operator' | 'admin';
+  defaultLevel: 'viewer' | 'operator' | 'admin';
   risk: 'low' | 'medium' | 'high';
   scope: 'server' | 'global';
   implies: string[];
@@ -108,7 +108,7 @@ export function validateManifest(
       const desc = str(p.description, 400);
       const group = str(p.group, 60);
       if (!label || !desc || !group) return fail(`permission "${pid}" needs a label, description and group`);
-      if (p.defaultLevel !== 'operator' && p.defaultLevel !== 'admin') return fail(`permission "${pid}": defaultLevel must be "operator" or "admin"`);
+      if (p.defaultLevel !== 'viewer' && p.defaultLevel !== 'operator' && p.defaultLevel !== 'admin') return fail(`permission "${pid}": defaultLevel must be "viewer" (everyone), "operator" or "admin"`);
       if (p.risk !== 'low' && p.risk !== 'medium' && p.risk !== 'high') return fail(`permission "${pid}": risk must be low, medium or high`);
       if (p.scope !== 'server' && p.scope !== 'global') return fail(`permission "${pid}": scope must be "server" or "global"`);
       const implies = p.implies === undefined ? [] : p.implies;

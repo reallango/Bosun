@@ -11,6 +11,7 @@ import { invalidatePermissionCache } from '@/lib/permissions/store';
 import { invalidateRuntimeCache } from '@/lib/widgets/runtime/execute';
 import { compareVersions, validateManifest, manifestToJson, type PackageManifest, type PackageFiles } from '@/lib/widgets/package-manifest';
 import { reservedPackageNames } from '@/lib/widgets/system-packages';
+import { markBundledRemoved, unmarkBundledRemoved, isBundledId } from '@/lib/widgets/bundled';
 
 export class PackageError extends Error {
   status: number;
@@ -28,7 +29,7 @@ export interface InstalledPackage {
   version: string;
   description: string;
   author: string;
-  source: 'github' | 'upload';
+  source: 'github' | 'upload' | 'bundled';
   sourceRef: string | null;
   installedAt: string;
   updatedAt: string;
@@ -46,7 +47,7 @@ function toInstalled(row: Record<string, unknown>): InstalledPackage | null {
   if (!v.ok) return null;
   return {
     id: String(row.id), name: String(row.name), version: String(row.version), description: String(row.description ?? ''),
-    author: String(row.author ?? ''), source: row.source === 'github' ? 'github' : 'upload', sourceRef: row.source_ref ? String(row.source_ref) : null,
+    author: String(row.author ?? ''), source: row.source === 'github' ? 'github' : row.source === 'bundled' ? 'bundled' : 'upload', sourceRef: row.source_ref ? String(row.source_ref) : null,
     installedAt: String(row.installed_at), updatedAt: String(row.updated_at),
     widgetTypes: v.value.widgets.map(w => w.type), permissions: v.value.permissions.map(p => p.id), manifest: v.value,
   };
@@ -79,7 +80,7 @@ async function instanceCount(types: string[]): Promise<number> {
 export interface InstallOptions {
   manifest: PackageManifest;
   files: PackageFiles;
-  source: 'github' | 'upload';
+  source: 'github' | 'upload' | 'bundled';
   sourceRef?: string | null;
   userId?: string | null;
   /** Allow replacing an installed package with an older or equal version (re-import). Off by default. */
@@ -110,8 +111,10 @@ export async function installPackage(opts: InstallOptions): Promise<InstallResul
   // Widget types may not collide with ones the admin created by hand or with another package.
   const newTypes = manifest.widgets.map(w => w.type);
   const clash = await rqlite.query(
-    `SELECT type, package_id FROM custom_widgets WHERE type IN (${placeholders(newTypes.length)})`, newTypes);
+    `SELECT type, package_id, builtin FROM custom_widgets WHERE type IN (${placeholders(newTypes.length)})`, newTypes);
   for (const row of rowsToObjects(clash)) {
+    // A bundled package takes over the seeded row of the widget it replaces (the old built-in).
+    if (opts.source === 'bundled' && !row.package_id && Number(row.builtin) === 1) continue;
     if (row.package_id !== manifest.id) throw new PackageError(`Widget type "${row.type}" already exists`, 409, 'TYPE_EXISTS');
   }
   // Permissions may not collide with another package's.
@@ -150,7 +153,7 @@ export async function installPackage(opts: InstallOptions): Promise<InstallResul
               category = excluded.category, default_size = excluded.default_size, min_size = excluded.min_size,
               refresh_interval = excluded.refresh_interval, supports_linux = excluded.supports_linux,
               supports_windows = excluded.supports_windows, config_schema = excluded.config_schema,
-              package_id = excluded.package_id, spec = excluded.spec, updated_at = CURRENT_TIMESTAMP`,
+              package_id = excluded.package_id, builtin = 0, spec = excluded.spec, updated_at = CURRENT_TIMESTAMP`,
       params: [`pkg-${manifest.id}-${w.type}`, w.type, c.display_name, c.description ?? '', c.icon ?? 'puzzle', c.category ?? 'custom',
         c.default_size ?? '{"w":8,"h":6}', c.min_size ?? '{"w":4,"h":4}', c.refresh_interval ?? 30,
         c.supports_linux ?? 1, c.supports_windows ?? 1, c.config_schema ?? '[]', manifest.id, w.spec ? JSON.stringify(w.spec) : null],
@@ -180,6 +183,7 @@ export async function installPackage(opts: InstallOptions): Promise<InstallResul
   }
 
   await rqlite.executeBatch(stmts as { sql: string; params?: never[] }[], { transaction: true });
+  await unmarkBundledRemoved(manifest.id).catch(() => {});
   invalidatePermissionCache();
   invalidateRuntimeCache();
   return { id: manifest.id, version: manifest.version, previousVersion, widgetTypes: newTypes, permissions: permIds };
@@ -202,6 +206,8 @@ export async function removePackage(id: string, removeWidgets: boolean): Promise
   stmts.push({ sql: 'DELETE FROM custom_widgets WHERE package_id = ?', params: [id] });
   stmts.push({ sql: 'DELETE FROM widget_packages WHERE id = ?', params: [id] });
   await rqlite.executeBatch(stmts as { sql: string; params?: never[] }[], { transaction: true });
+  // A bundled package that is removed stays removed (it is not installed again at the next start).
+  if (found.pkg.source === 'bundled' || isBundledId(id)) await markBundledRemoved(id).catch(() => {});
   invalidatePermissionCache();
   invalidateRuntimeCache();
   return { removedWidgets: inUse };

@@ -32,7 +32,7 @@ export interface PackageListItem {
   description: string;
   author: string;
   system: boolean;
-  source: 'system' | 'github' | 'upload';
+  source: 'system' | 'github' | 'upload' | 'bundled';
   sourceRef: string | null;
   widgetTypes: string[];
   permissions: string[];
