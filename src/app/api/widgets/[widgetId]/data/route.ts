@@ -49,6 +49,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const server = rowsToObjects(srvRes)[0] as unknown as ServerRow;
 
     if (widget.widget_type === 'custom_command') {
+      const ccSpec = await loadWidgetSpec('custom_command');
+      if (ccSpec?.spec.data.permission) {
+        const denied = await requirePermission(auth, ccSpec.spec.data.permission, server.id);
+        if (denied) return denied;
+      }
       // Always the host's non-admin shell account (no sudo, no Docker access), re-verified before use. The
       // result is shared by everyone viewing the same command on this host for the chosen interval, so extra
       // viewers or widgets do not multiply the SSH calls. Keyed by command, so editing it takes effect at once.
