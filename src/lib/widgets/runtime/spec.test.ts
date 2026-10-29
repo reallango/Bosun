@@ -290,3 +290,31 @@ describe('data.filter and data.unavailable', () => {
     expect(applyConfigFilters(rows, undefined, {})).toBe(rows);
   });
 });
+
+describe('fields views', () => {
+  const spec = (view: object) => ({ version: 1, data: { source: 'snapshot', section: 'cpu_memory', permission: 'dk.view' }, view });
+
+  it('accepts labelled values with gauges, formats and conditions', () => {
+    const r = validateWidgetSpec(spec({
+      type: 'fields',
+      fields: [
+        { label: 'CPU', value: '{cpu.usage}', format: 'percent', bar: '{cpu.usage}' },
+        { label: 'Uptime', value: '{uptime}', format: 'duration', when: { field: 'uptime', exists: true } },
+      ],
+    }), PERMS);
+    expect(r.ok).toBe(true);
+  });
+
+  it('also allows fields on list rows and a bar column in tables', () => {
+    const list = spec({ type: 'list', row: { title: '{name}', fields: [{ label: 'Util', value: '{util}', format: 'bar', bar: '{util}' }], actions: [] } });
+    expect(validateWidgetSpec(list, PERMS).ok).toBe(true);
+    const table = spec({ type: 'table', columns: [{ title: 'Used', value: '{pct}', format: 'bar' }] });
+    expect(validateWidgetSpec(table, PERMS).ok).toBe(true);
+  });
+
+  it('rejects empty or malformed fields', () => {
+    expect(validateWidgetSpec(spec({ type: 'fields', fields: [] }), PERMS).ok).toBe(false);
+    expect(validateWidgetSpec(spec({ type: 'fields', fields: [{ label: 'x' }] }), PERMS).ok).toBe(false);
+    expect(validateWidgetSpec(spec({ type: 'fields', fields: [{ label: 'x', value: '{a}', format: 'nope' }] }), PERMS).ok).toBe(false);
+  });
+});

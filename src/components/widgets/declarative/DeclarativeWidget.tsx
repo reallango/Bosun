@@ -13,7 +13,7 @@ import { readJson } from '@/lib/api/readJson';
 import { WidgetLoading } from '@/components/widgets/WidgetLoading';
 import { WidgetError } from '@/components/widgets/WidgetError';
 import { ConfirmActionDialog, apiAction } from '@/components/widgets/shared/ConfirmActionDialog';
-import { evalCond, fillTemplate, getPath, type ActionSpec, type ViewSpec, type ParamSpec } from '@/lib/widgets/runtime/spec';
+import { evalCond, fillTemplate, getPath, type ActionSpec, type FieldSpec, type ViewSpec, type ParamSpec } from '@/lib/widgets/runtime/spec';
 import { hasRole } from '@/lib/auth/levels';
 
 // The terminal (xterm) loads only when a container shell is opened.
@@ -50,8 +50,50 @@ function formatValue(v: unknown, format: string): string {
     while (x >= 1024 && i < units.length - 1) { x /= 1024; i++; }
     return `${x >= 10 || i === 0 ? Math.round(x) : x.toFixed(1)} ${units[i]}`;
   }
-  if (format === 'percent' && Number.isFinite(n)) return `${Math.round(n * 10) / 10}%`;
+  if ((format === 'percent' || format === 'bar') && Number.isFinite(n)) return `${Math.round(n * 10) / 10}%`;
+  if (format === 'mb' && Number.isFinite(n)) return n >= 1024 ? `${(n / 1024).toFixed(1)} GB` : `${Math.round(n)} MB`;
+  if (format === 'temp' && Number.isFinite(n)) return `${Math.round(n)}°C`;
+  if (format === 'duration' && Number.isFinite(n)) {
+    const d = Math.floor(n / 86400), h = Math.floor((n % 86400) / 3600), m = Math.floor((n % 3600) / 60);
+    return d > 0 ? `${d}d ${h}h` : h > 0 ? `${h}h ${m}m` : `${m}m`;
+  }
   return typeof v === 'object' ? JSON.stringify(v) : String(v);
+}
+
+/** Bar colour by how full it is. */
+function barColor(pct: number): string {
+  return pct >= 90 ? 'bg-red-500' : pct >= 75 ? 'bg-amber-500' : 'bg-green-500';
+}
+
+function Bar({ value }: { value: number }) {
+  const pct = Math.max(0, Math.min(100, value));
+  return (
+    <div className="h-1.5 w-full overflow-hidden rounded bg-gray-200 dark:bg-gray-700" role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
+      <div className={`h-full ${barColor(pct)}`} style={{ width: `${pct}%` }} />
+    </div>
+  );
+}
+
+/** Labelled values of one object: gauges for the ones with a `bar`, plain pairs for the rest. */
+function Fields({ fields, data }: { fields: FieldSpec[]; data: Row }) {
+  const shown = fields.filter(f => !f.when || evalCond(f.when, data));
+  return (
+    <div className="space-y-1.5">
+      {shown.map(f => {
+        const text = formatValue(fillTemplate(f.value, data), f.format);
+        const bar = f.bar ? Number(fillTemplate(f.bar, data)) : NaN;
+        return (
+          <div key={f.label}>
+            <div className="flex items-baseline justify-between gap-2 text-xs">
+              <span className="text-gray-500">{f.label}</span>
+              <span className="truncate font-medium text-gray-900 dark:text-gray-100">{text || '—'}</span>
+            </div>
+            {Number.isFinite(bar) && <Bar value={bar} />}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 /** The values an action is called with: a parameter's `from` field of the row, else its default. */
@@ -108,7 +150,7 @@ export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
 
   const view = spec?.view;
   const rows: Row[] = useMemo(() => {
-    if (!view || view.type === 'text') return [];
+    if (!view || view.type === 'text' || view.type === 'fields') return [];
     const list = Array.isArray(data) ? (data as Row[]) : data && typeof data === 'object' ? [data as Row] : [];
     const q = query.trim().toLowerCase();
     return list.filter(r => {
@@ -164,6 +206,11 @@ export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
     });
 
   const content = () => {
+    if (view.type === 'fields') {
+      const obj = (Array.isArray(data) ? (data[0] ?? null) : data) as Row | null;
+      if (!obj || typeof obj !== 'object') return <div className="py-4 text-center text-xs text-gray-500">{view.empty || 'Nothing to show'}</div>;
+      return <div className="min-h-0 flex-1 overflow-auto"><Fields fields={view.fields ?? []} data={obj} /></div>;
+    }
     if (view.type === 'text') {
       const root = (data && typeof data === 'object' ? data : { text: String(data) }) as Row;
       return <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-all font-mono text-xs">{fillTemplate(view.text ?? '', root)}</pre>;
@@ -182,6 +229,7 @@ export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
                   {r.badge && fillTemplate(r.badge, row) && <span className="hidden truncate rounded bg-gray-100 px-1 text-[10px] text-gray-500 dark:bg-gray-800 sm:inline">{fillTemplate(r.badge, row)}</span>}
                 </div>
                 {r.subtitle && <div className="truncate text-xs text-gray-500" title={fillTemplate(r.subtitle, row)}>{fillTemplate(r.subtitle, row)}</div>}
+                {r.fields && <div className="mt-1"><Fields fields={r.fields} data={row} /></div>}
               </div>
               <div className="flex shrink-0 items-center gap-0.5">
                 {busy !== null && <Loader2 className="size-4 animate-spin text-gray-400 motion-reduce:animate-none" aria-label="Working" />}
@@ -204,7 +252,8 @@ export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
               <tr key={i}>
                 {cols.map(c => {
                   const text = formatValue(fillTemplate(c.value, row), c.format);
-                  return <td key={c.title} className="px-2 py-1">{c.format === 'badge' ? <span className="rounded bg-gray-100 px-1 dark:bg-gray-800">{text}</span> : text}</td>;
+                  const bar = c.format === 'bar' ? Number(fillTemplate(c.value, row)) : NaN;
+                  return <td key={c.title} className="px-2 py-1">{c.format === 'badge' ? <span className="rounded bg-gray-100 px-1 dark:bg-gray-800">{text}</span> : Number.isFinite(bar) ? <div className="min-w-[4rem]"><div className="text-right">{text}</div><Bar value={bar} /></div> : text}</td>;
                 })}
                 {(view.rowActions?.length ?? 0) > 0 && <td className="px-2 py-1 text-right"><div className="flex justify-end gap-0.5">{rowButtons(row, view.rowActions ?? [])}</div></td>}
               </tr>
