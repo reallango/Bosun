@@ -76,7 +76,9 @@ export interface ActionSpec {
 export interface FieldSpec { label: string; value: string; format: (typeof FORMATS)[number]; bar?: string; when?: Cond }
 
 export interface ViewSpec {
-  type: 'list' | 'table' | 'text' | 'fields';
+  type: 'list' | 'table' | 'text' | 'fields' | 'chart';
+  /** A chart view: the history of tracked metrics, drawn as lines. `metrics` are the ones shown until a person picks others. */
+  chart?: { metrics: string[] };
   /** A fields view: the labelled values (gauges, key and value pairs) of one data object. */
   fields?: FieldSpec[];
   empty?: string;
@@ -433,8 +435,16 @@ function validateFields(raw: unknown, where: string): Validated<FieldSpec[]> {
 
 function validateView(raw: unknown, actionIds: ReadonlySet<string>): Validated<ViewSpec> {
   if (!isObj(raw)) return fail('"view" is required');
-  if (raw.type !== 'list' && raw.type !== 'table' && raw.type !== 'text' && raw.type !== 'fields') return fail('view.type must be "list", "table", "fields" or "text"');
+  if (raw.type !== 'list' && raw.type !== 'table' && raw.type !== 'text' && raw.type !== 'fields' && raw.type !== 'chart') return fail('view.type must be "list", "table", "fields", "chart" or "text"');
   const view: ViewSpec = { type: raw.type };
+  if (raw.type === 'chart') {
+    const c = raw.chart;
+    if (!isObj(c) || !Array.isArray(c.metrics) || c.metrics.length < 1 || c.metrics.length > 6 || !c.metrics.every(m => typeof m === 'string' && /^[a-z0-9_.]{1,64}$/.test(m))) {
+      return fail('a chart view needs chart.metrics: 1-6 metric names such as "cpu.usage"');
+    }
+    view.chart = { metrics: c.metrics as string[] };
+    return { ok: true, value: view };
+  }
   if (raw.type === 'fields') {
     const f = validateFields(raw.fields, 'view.fields');
     if (!f.ok) return f;

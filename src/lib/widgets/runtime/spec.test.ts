@@ -349,3 +349,13 @@ describe('metrics a widget tracks', () => {
     expect(bad([{ name: 'dk.*', from: { agg: 'count' } }])).toBe(false);
   });
 });
+
+describe('chart views', () => {
+  const chart = (c: unknown) => ({ version: 1, data: { source: 'snapshot', section: 'metrics', permission: 'dk.view' }, view: { type: 'chart', chart: c } });
+  it('needs 1-6 metric names', () => {
+    expect(validateWidgetSpec(chart({ metrics: ['cpu.usage', 'mem.used_pct'] }), PERMS).ok).toBe(true);
+    expect(validateWidgetSpec(chart({ metrics: [] }), PERMS).ok).toBe(false);
+    expect(validateWidgetSpec(chart({ metrics: ['Bad Name'] }), PERMS).ok).toBe(false);
+    expect(validateWidgetSpec(chart(undefined), PERMS).ok).toBe(false);
+  });
+});

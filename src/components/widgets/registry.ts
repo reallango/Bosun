@@ -30,17 +30,6 @@ export const widgetRegistry: Record<string, WidgetDefinition> = {
     defaultTTL: 1800,
     storageMode: 'latest_ttl',
   },
-  metrics_chart: {
-    type: 'metrics_chart',
-    displayName: 'Metrics History',
-    description: 'Charts recorded CPU, memory, network, disk and GPU history for a server',
-    icon: 'line-chart',
-    category: 'system',
-    defaultSize: { w: 12, h: 6 },
-    minSize: { w: 6, h: 4 },
-    refreshInterval: 60,
-    backgroundPollable: false,
-  },
   os_update_check: {
     type: 'os_update_check',
     displayName: 'OS Update Check',

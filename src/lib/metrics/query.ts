@@ -116,3 +116,34 @@ export function describeMetric(metric: string): { label: string; unit: string } 
   const [label, unit] = known[metric] || [metric, ''];
   return { label, unit };
 }
+
+/**
+ * A package widget's label and unit for a metric the built-in list does not know (`defs` are rows of
+ * metric_definitions; a `*` in a pattern matches anything). The built-in description wins when it knows the metric.
+ */
+export function describeFromDefinitions(
+  defs: { pattern: string; label: string | null; unit: string | null }[],
+  metric: string,
+  builtin: { label: string; unit: string },
+): { label: string; unit: string } {
+  if (builtin.label !== metric) return builtin;
+  for (const d of defs) {
+    if (wildcardMatch(d.pattern, metric)) return { label: d.label || metric, unit: d.unit || builtin.unit };
+  }
+  return builtin;
+}
+
+/** Does `text` match `pattern`, where `*` stands for any run of characters? */
+export function wildcardMatch(pattern: string, text: string): boolean {
+  const parts = pattern.split('*');
+  if (parts.length === 1) return pattern === text;
+  if (!text.startsWith(parts[0])) return false;
+  let pos = parts[0].length;
+  for (let i = 1; i < parts.length - 1; i++) {
+    const at = text.indexOf(parts[i], pos);
+    if (at < 0) return false;
+    pos = at + parts[i].length;
+  }
+  const last = parts[parts.length - 1];
+  return text.length - pos >= last.length && text.endsWith(last);
+}

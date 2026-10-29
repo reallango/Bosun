@@ -11,7 +11,6 @@ export type Sections = Record<string, { data: any; collectedAt: number }>;
 export const WIDGET_SECTIONS: Record<string, string[]> = {
   ollama_status: ['ollama'],
   os_update_check: ['updates'],
-  metrics_chart: [],
 };
 
 export interface ServerRow {
@@ -43,8 +42,6 @@ export function widgetDataFromSnapshots(type: string, s: Sections, server: Serve
       return d('ollama') ?? null;
     case 'os_update_check':
       return d('updates') ?? null;
-    case 'metrics_chart':
-      return { serverId: server.id };
     default:
       return undefined;
   }
