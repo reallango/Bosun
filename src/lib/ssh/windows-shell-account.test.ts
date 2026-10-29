@@ -34,6 +34,14 @@ describe('windowsShellAccountScript', () => {
     expect(s.trim().split('\n').slice(-1)[0]).toContain('Restart-Service sshd');   // restart last: it drops the connection
   });
 
+  it('never lets the optional sshd tightening abort account creation (a native command that writes to stderr is fatal under Stop in PowerShell 5.1)', () => {
+    expect(s).not.toMatch(/sshd -T/);                  // the effective-config query cannot resolve a local user and threw
+    expect(s).not.toContain('-C (');
+    expect(s).toContain("$ErrorActionPreference = 'Continue'");
+    expect(s).toMatch(/try \{[\s\S]*Test-SshdConfig[\s\S]*\} catch \{ \$restricted = \$false \}/);
+    expect(s.indexOf('BOSUN_SHELL_OK')).toBeGreaterThan(s.indexOf('catch { $restricted = $false }'));
+  });
+
   it('replaces or appends the key as asked', () => {
     expect(s).toContain('$replace = $true');
     expect(windowsShellAccountScript({ ...opts, replaceKeys: false })).toContain('$replace = $false');
