@@ -105,7 +105,7 @@ export const MAX_OUTPUT = 256 * 1024;
 /** Validate the parameters, render the command for the host's platform and run it. */
 export async function runAction(serverId: string, action: ActionSpec, params: unknown): Promise<ActionResult> {
   if (action.kind === 'terminal') {
-    throw new RuntimeError('This action opens the web terminal in the browser and cannot be run through the API. For scripted access use an API terminal: POST /api/servers/:id/terminal.', 400, 'NOT_RUNNABLE');
+    throw new RuntimeError('This action opens a terminal, not a command: call it through the widget-actions endpoint to get an API terminal token.', 400, 'NOT_RUNNABLE');
   }
   const server = await loadServer(serverId);
   const template = commandFor(action, server.platform);

@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "docker_package",
   "name": "Docker containers (package)",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "The Docker widget rebuilt as a package: lists containers, shows logs, opens a shell in a container, starts, stops and restarts them. It needs no code in Bosun, only this manifest.",
   "author": "Bosun",
   "permissions": [
@@ -36,7 +36,7 @@
     {
       "id": "docker_package.shell",
       "label": "Open a shell in a container (package)",
-      "description": "Show the shell button on each running container. It opens the web terminal, which asks for your own login and is only available to Full access users. API access to a container shell is separate (the API terminal).",
+      "description": "Show the shell button on each running container (the web terminal asks for your own login and is only available to Full access users), and let an API key with this permission get an API terminal in any container of the host (containers that could reach the host are refused).",
       "group": "Docker (package)",
       "defaultLevel": "admin",
       "risk": "high",

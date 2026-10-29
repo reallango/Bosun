@@ -91,3 +91,22 @@ describe('system widget actions in the OpenAPI document', () => {
     expect(doc.paths['/api/servers/{serverId}/containers/{containerId}/action'].post.description).toMatch(/Start, stop and restart containers/);
   });
 });
+
+describe('terminal actions in the OpenAPI document', () => {
+  it('are listed as a token-returning operation with the action permission', () => {
+    const r = validateWidgetSpec({
+      version: 1,
+      data: { source: 'snapshot', section: 'docker', permission: 'dk.view' },
+      view: { type: 'list', row: { title: '{name}', actions: ['shell'] } },
+      actions: [{ id: 'shell', label: 'Shell', permission: 'dk.shell', terminal: { container: 'name' } }],
+    }, ['dk.view', 'dk.shell']);
+    if (!r.ok) throw new Error(r.error);
+    const doc = buildOpenApi([{ type: 'dk_w', packageId: 'dk', displayName: 'Docker', spec: r.value, permissionLabels: { 'dk.shell': 'Open a shell' } }]) as any;
+    const op = doc.paths['/api/servers/{serverId}/widget-actions/dk_w/shell'].post;
+    expect(op['x-bosun-permission']).toBe('dk.shell');
+    expect(op['x-bosun-runs-as']).toBe('terminal');
+    expect(op.requestBody.content['application/json'].schema.required).toEqual(['container']);
+    expect(op.description).toMatch(/Open a shell/);
+    expect(op.description).toMatch(/ws\/api-terminal/);
+  });
+});
