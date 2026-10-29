@@ -17,7 +17,7 @@ interface InstalledItem {
   description: string;
   author: string;
   system: boolean;
-  source: 'system' | 'github' | 'upload';
+  source: 'system' | 'github' | 'upload' | 'bundled';
   sourceRef: string | null;
   widgetTypes: string[];
   permissions: string[];
@@ -364,7 +364,7 @@ export default function WidgetPackagesPage() {
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="font-medium">{p.name}</span>
                             <span className="rounded bg-muted px-1 text-xs">v{p.version}</span>
-                            <span className="rounded bg-muted px-1 text-[10px] uppercase text-muted-foreground">{p.source === 'github' ? `github:${p.sourceRef}` : 'zip import'}</span>
+                            <span className="rounded bg-muted px-1 text-[10px] uppercase text-muted-foreground">{p.source === 'github' ? `github:${p.sourceRef}` : p.source === 'bundled' ? 'preinstalled' : 'zip import'}</span>
                           </div>
                           {p.description && <p className="mt-0.5 text-sm text-muted-foreground">{p.description}</p>}
                           <p className="mt-1 text-xs text-muted-foreground">

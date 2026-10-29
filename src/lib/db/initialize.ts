@@ -31,6 +31,8 @@ export async function initializeDatabase(): Promise<void> {
 
   if (await rqlite.isReady()) {
     await runMigrations();
+    const { seedBundledPackages } = await import('@/lib/widgets/bundled-seed');
+    await seedBundledPackages();
     return;
   }
 

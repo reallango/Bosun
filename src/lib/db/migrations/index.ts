@@ -481,6 +481,49 @@ const V8_DENY_GRANTS: string[] = [
     `ALTER TABLE permission_grants ADD COLUMN effect TEXT NOT NULL DEFAULT 'allow'`,
 ];
 
+// ---- Version 9: package permissions can be held by everyone; bundled packages ----
+// permission_definitions.default_level gains 'viewer' (every access level holds it, so Read only users
+// still see dashboards), and widget_packages.source gains 'bundled' (shipped inside the image and
+// installed automatically). SQLite cannot change a CHECK in place, so both tables are rebuilt.
+const V9_BUNDLED: string[] = [
+    `CREATE TABLE permission_definitions_v9 (
+        id TEXT PRIMARY KEY,
+        source TEXT NOT NULL,
+        label TEXT NOT NULL,
+        description TEXT NOT NULL,
+        group_name TEXT NOT NULL,
+        default_level TEXT NOT NULL CHECK (default_level IN ('viewer', 'operator', 'admin')),
+        risk TEXT NOT NULL CHECK (risk IN ('low', 'medium', 'high')),
+        scope TEXT NOT NULL CHECK (scope IN ('server', 'global')),
+        implies TEXT NOT NULL DEFAULT '[]',
+        registered_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`,
+    `INSERT INTO permission_definitions_v9 (id, source, label, description, group_name, default_level, risk, scope, implies, registered_at)
+        SELECT id, source, label, description, group_name, default_level, risk, scope, implies, registered_at FROM permission_definitions`,
+    `DROP TABLE permission_definitions`,
+    `ALTER TABLE permission_definitions_v9 RENAME TO permission_definitions`,
+    `CREATE TABLE widget_packages_v9 (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        version TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        author TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL CHECK (source IN ('github', 'upload', 'bundled')),
+        source_ref TEXT,
+        manifest TEXT NOT NULL,
+        files TEXT NOT NULL DEFAULT '{}',
+        installed_by TEXT,
+        installed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`,
+    `INSERT INTO widget_packages_v9 (id, name, version, description, author, source, source_ref, manifest, files, installed_by, installed_at, updated_at)
+        SELECT id, name, version, description, author, source, source_ref, manifest, files, installed_by, installed_at, updated_at FROM widget_packages`,
+    `DROP TABLE widget_packages`,
+    `ALTER TABLE widget_packages_v9 RENAME TO widget_packages`,
+    // Bundled packages the person removed stay removed (a JSON list of package ids).
+    `INSERT OR IGNORE INTO app_config (key, value, description) VALUES ('widgets.bundled_removed', '[]', 'Bundled widget packages that were removed and must not be installed again automatically')`,
+];
+
 export const MIGRATIONS: Migration[] = [
     {
         version: 1,
@@ -498,6 +541,7 @@ export const MIGRATIONS: Migration[] = [
     { version: 6, name: 'shell_account', statements: V6_SHELL_ACCOUNT },
     { version: 7, name: 'widget_packages', statements: V7_WIDGET_PACKAGES },
     { version: 8, name: 'deny_grants', statements: V8_DENY_GRANTS },
+    { version: 9, name: 'bundled_packages', statements: V9_BUNDLED },
 ];
 
 /** The schema version this build expects. */
