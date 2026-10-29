@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   checkApiTerminalClaims, UsedTokens, SessionLimiter, containerRisks, isSensitiveMount, parseInspect,
-  inspectCommand, dockerExecCommand, TOKEN_TYPE,
+  inspectCommand, dockerExecCommand, TOKEN_TYPE, terminalLimits, LIMIT_KEYS,
 } from './api-terminal';
 
 const goodHost = { type: TOKEN_TYPE, authType: 'api_key', userId: 'apikey:k1', serverId: 's1', jti: 'j1', target: 'host' };
@@ -95,5 +95,26 @@ describe('commands', () => {
     expect(dockerExecCommand(ID)).toBe(`docker exec -it ${ID} sh -c 'if command -v bash >/dev/null 2>&1; then exec bash; else exec sh; fi'`);
     expect(() => dockerExecCommand('web-1')).toThrow();
     expect(() => dockerExecCommand(ID + '; id')).toThrow();
+  });
+});
+
+describe('terminalLimits', () => {
+  it('uses the defaults when nothing is set', () => {
+    expect(terminalLimits({})).toEqual({ tokenTtlSec: 60, maxSessionMs: 60 * 60000, idleMs: 10 * 60000, maxPerKey: 3 });
+    expect(terminalLimits()).toEqual(terminalLimits({}));
+  });
+  it('applies configured values, clamped to sane ranges, and ignores junk', () => {
+    const l = terminalLimits({
+      [LIMIT_KEYS.tokenTtlSec]: '120', [LIMIT_KEYS.sessionMaxMin]: '5000', [LIMIT_KEYS.idleMin]: '0', [LIMIT_KEYS.maxPerKey]: 'abc',
+    });
+    expect(l).toEqual({ tokenTtlSec: 120, maxSessionMs: 1440 * 60000, idleMs: 1 * 60000, maxPerKey: 3 });
+    expect(terminalLimits({ [LIMIT_KEYS.maxPerKey]: '' }).maxPerKey).toBe(3);
+    expect(terminalLimits({ [LIMIT_KEYS.maxPerKey]: null }).maxPerKey).toBe(3);
+  });
+  it('lets the session limiter take a per-call cap', () => {
+    const l = new SessionLimiter(3);
+    expect(l.acquire('k', 1)).toBe(true);
+    expect(l.acquire('k', 1)).toBe(false);
+    expect(l.acquire('k', 2)).toBe(true);
   });
 });

@@ -381,6 +381,9 @@ if it is ever found to have admin rights, API access is refused.
   PID/IPC, Docker socket or sensitive host mounts, dangerous capabilities, devices) are refused.
 - Neither path can reach the admin account: there is no admin shell, no fallback, and no
   stored admin key or password is ever handed to a session. Windows hosts are not supported yet.
+- Limits are settings (Settings → Database): token lifetime (default 60 s, used once to open the
+  WebSocket), maximum session length (60 min), idle timeout (10 min) and open terminals per API key (3).
+  Values are clamped to sane ranges, so a bad value cannot switch a limit off.
 
 **Email (SMTP)**, under Settings → General (admins), enables password reset links,
 emailed sign-in codes and email alert actions. Set *App URL* to the address users open

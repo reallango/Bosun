@@ -31,6 +31,7 @@ export interface CustomWidgetRow {
   config_schema: string | null;
   enabled: number;
   builtin: number;
+  package_id?: string | null;
 }
 
 /**
@@ -63,6 +64,7 @@ export function customRowToDefinition(row: CustomWidgetRow): WidgetDefinition {
     refreshInterval: row.refresh_interval ?? 30,
     backgroundPollable: true,
     isCustom: true,
+    packageId: row.package_id ?? undefined,
     supportsLinux: !!row.supports_linux,
     supportsWindows: !!row.supports_windows,
     configSchema: parseJson<WidgetConfigField[]>(row.config_schema, []),

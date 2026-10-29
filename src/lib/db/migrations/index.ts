@@ -449,6 +449,31 @@ const V6_SHELL_ACCOUNT: string[] = [
     `ALTER TABLE servers ADD COLUMN shell_key_id TEXT`,
 ];
 
+// ---- Version 7: widget packages ----
+// Installed widget packages (System widgets are declared in code and have no row here).
+// A package's widget types live in custom_widgets (package_id set); its permissions in
+// permission_definitions (source package:<id>). `manifest` is the validated manifest, `files`
+// its extra text files, kept so a package can be exported and upgraded without the network.
+const V7_WIDGET_PACKAGES: string[] = [
+    `CREATE TABLE IF NOT EXISTS widget_packages (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        version TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        author TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL CHECK (source IN ('github', 'upload')),
+        source_ref TEXT,
+        manifest TEXT NOT NULL,
+        files TEXT NOT NULL DEFAULT '{}',
+        installed_by TEXT,
+        installed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`,
+    `ALTER TABLE custom_widgets ADD COLUMN package_id TEXT`,
+    `ALTER TABLE custom_widgets ADD COLUMN spec TEXT`,
+    `INSERT OR IGNORE INTO app_config (key, value, description) VALUES ('widgets.source_ref', 'main', 'Branch of the Bosun repository that widget packages are listed from: main or dev')`,
+];
+
 export const MIGRATIONS: Migration[] = [
     {
         version: 1,
@@ -464,6 +489,7 @@ export const MIGRATIONS: Migration[] = [
     { version: 4, name: 'access', statements: V4_ACCESS },
     { version: 5, name: 'permissions', statements: V5_PERMISSIONS },
     { version: 6, name: 'shell_account', statements: V6_SHELL_ACCOUNT },
+    { version: 7, name: 'widget_packages', statements: V7_WIDGET_PACKAGES },
 ];
 
 /** The schema version this build expects. */
@@ -500,6 +526,7 @@ export const CORE_TABLES: string[] = [
     'user_groups',
     'api_key_groups',
     'permission_definitions',
+    'widget_packages',
 ];
 
 export class LegacySchemaError extends Error {

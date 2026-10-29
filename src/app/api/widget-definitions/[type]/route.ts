@@ -61,8 +61,8 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     const inUse = await rqlite.query('SELECT COUNT(*) FROM widgets WHERE widget_type = ?', [type]);
     const count = Number(inUse.values?.[0]?.[0] || 0);
     if (count > 0) return fail(`Cannot delete: ${count} widget instance(s) still use this type`, 409);
-    const r = await rqlite.execute('DELETE FROM custom_widgets WHERE type = ? AND builtin = 0', [type]);
-    if (!r.rows_affected) return fail('Custom widget not found, or built-in (disable it instead)', 404);
+    const r = await rqlite.execute('DELETE FROM custom_widgets WHERE type = ? AND builtin = 0 AND package_id IS NULL', [type]);
+    if (!r.rows_affected) return fail('Custom widget not found, built-in, or provided by a widget package (disable it, or remove the package in Settings → Widgets)', 404);
     return ok({ deleted: true });
   } catch (error) {
     return failFrom(error);
