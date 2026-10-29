@@ -109,18 +109,28 @@ $cfg = Join-Path $env:ProgramData 'ssh\\sshd_config'
 $sshd = Join-Path $env:windir 'System32\\OpenSSH\\sshd.exe'
 $marker = '# bosun-shell-' + $acct
 $restricted = $false
-if ((Test-Path $cfg) -and (Test-Path $sshd)) {
-  $text = Get-Content $cfg -Raw
-  if (-not $text.Contains($marker)) {
-    Copy-Item -Path $cfg -Destination ($cfg + '.bosun-bak') -Force
-    $block = [Environment]::NewLine + $marker + [Environment]::NewLine + 'Match User ' + $acct + [Environment]::NewLine + '    AllowTcpForwarding no' + [Environment]::NewLine + '    AllowAgentForwarding no' + [Environment]::NewLine + '    X11Forwarding no' + [Environment]::NewLine + '    PermitTunnel no' + [Environment]::NewLine + '    GatewayPorts no' + [Environment]::NewLine
-    Add-Content -Path $cfg -Value $block
-    & $sshd -t -f $cfg 2>$null
-    if ($LASTEXITCODE -ne 0) { Copy-Item -Path ($cfg + '.bosun-bak') -Destination $cfg -Force }
-  }
-  $eff = & $sshd -T -f $cfg -C ('user=' + $acct + ',host=localhost,addr=127.0.0.1') 2>$null
-  if ($eff -match '(?m)^allowtcpforwarding no') { $restricted = $true }
+# Everything above is the account itself. Tightening sshd is a bonus that must never undo it: whatever
+# goes wrong below is swallowed and only means "not restricted". (Under 'Stop' a native command that
+# writes to stderr becomes a terminating error in Windows PowerShell 5.1, so sshd is run with 'Continue'.)
+function Test-SshdConfig {
+  $old = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  try { $null = & $sshd -t -f $cfg 2>&1; return ($LASTEXITCODE -eq 0) } finally { $ErrorActionPreference = $old }
 }
+try {
+  if ((Test-Path $cfg) -and (Test-Path $sshd)) {
+    $text = Get-Content $cfg -Raw
+    $appended = $false
+    if (-not $text.Contains($marker)) {
+      Copy-Item -Path $cfg -Destination ($cfg + '.bosun-bak') -Force
+      $block = [Environment]::NewLine + $marker + [Environment]::NewLine + 'Match User ' + $acct + [Environment]::NewLine + '    AllowTcpForwarding no' + [Environment]::NewLine + '    AllowAgentForwarding no' + [Environment]::NewLine + '    X11Forwarding no' + [Environment]::NewLine + '    PermitTunnel no' + [Environment]::NewLine + '    GatewayPorts no' + [Environment]::NewLine
+      Add-Content -Path $cfg -Value $block
+      $appended = $true
+    }
+    if (Test-SshdConfig) { $restricted = $true }
+    elseif ($appended) { Copy-Item -Path ($cfg + '.bosun-bak') -Destination $cfg -Force }
+  }
+} catch { $restricted = $false }
 Write-Output 'BOSUN_SHELL_OK'
 if ($restricted) { Write-Output 'BOSUN_SSHD_RESTRICTED' } else { Write-Output 'BOSUN_SSHD_UNCHANGED' }
 Restart-Service sshd -ErrorAction SilentlyContinue
