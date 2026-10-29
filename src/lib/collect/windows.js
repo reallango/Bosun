@@ -68,15 +68,21 @@ foreach ($p in $Probes) {
            model = $cpu[0].Name; cores = ($cpu | Measure-Object NumberOfCores -Sum).Sum; threads = ($cpu | Measure-Object NumberOfLogicalProcessors -Sum).Sum } }
     'updates' { M 'updates'
       # Windows Update search (read-only). Slow (15 s to minutes): the poller runs it on its own, never with the regular probes.
+      # "Reboot pending" comes from the registry markers Windows Update and servicing set. The COM class for it
+      # (Microsoft.Update.SystemInfo) is refused for a remote (SSH) session, and must never cost the update list.
+      $reboot = $false
+      try {
+        $reboot = (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired') -or (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending')
+      } catch { $reboot = $false }
       try {
         $ErrorActionPreference = 'Stop'
-        $wu = (New-Object -ComObject Microsoft.Update.Session).CreateUpdateSearcher().Search("IsInstalled=0 and IsHidden=0 and Type='Software'")
+        $wu =(New-Object -ComObject Microsoft.Update.Session).CreateUpdateSearcher().Search("IsInstalled=0 and IsHidden=0 and Type='Software'")
         $list = @(foreach ($u in $wu.Updates) {
           $cats = @(foreach ($c in $u.Categories) { $c.Name })
           $kbs = @(foreach ($k in $u.KBArticleIDs) { "KB$k" })
           @{ title = [string]$u.Title; kb = ($kbs -join ','); severity = [string]$u.MsrcSeverity; categories = ($cats -join ';'); mb = [math]::Round($u.MaxDownloadSize / 1MB, 1) }
         })
-        J @{ ok = $true; rebootRequired = [bool](New-Object -ComObject Microsoft.Update.SystemInfo).RebootRequired; updates = $list }
+        J @{ ok = $true; rebootRequired = [bool]$reboot; updates = $list }
       } catch { J @{ ok = $false; error = [string]$_.Exception.Message } }
       $ErrorActionPreference = 'SilentlyContinue' }
   }
@@ -284,4 +290,20 @@ function buildSnapshot(raw, prev, now = Date.now()) {
   return { sections, metrics, state };
 }
 
-module.exports = { PROBES, SCRIPT, buildCommand, powershellCommand, execScript, splitSections, buildSnapshot };
+/**
+ * PowerShell run through -EncodedCommand reports its error and progress streams as CLIXML on
+ * stderr ("#< CLIXML <Objs ...>"). Turn that into the plain text it represents, dropping progress records.
+ */
+function cleanPowerShellOutput(text) {
+  const s = String(text || '');
+  if (!s.includes('<Objs')) return s;
+  const lines = [];
+  for (const m of s.matchAll(/<S S="(?:Error|Output|Warning)">([\s\S]*?)<\/S>/g)) {
+    lines.push(m[1].replace(/_x000D__x000A_/g, '\n').replace(/_x000D_/g, '').replace(/_x000A_/g, '\n')
+      .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&apos;/g, "'").replace(/&amp;/g, '&'));
+  }
+  const rest = s.replace(/#< CLIXML\s*/g, '').replace(/<Objs[\s\S]*?<\/Objs>/g, '').trim();
+  return [rest, lines.join('').trim()].filter(Boolean).join('\n');
+}
+
+module.exports = { PROBES, SCRIPT, buildCommand, powershellCommand, execScript, cleanPowerShellOutput, splitSections, buildSnapshot };

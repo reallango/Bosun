@@ -21,6 +21,8 @@ const { connect: sshConnect, exec: sshExec, decryptSecret } = require('../collec
 const { getMasterKey } = require('../secrets');
 const api = require('./api-terminal');
 const { SHELL_VERIFY_COMMAND, parseShellVerification } = require('../ssh/shell-account');
+const { WINDOWS_SHELL_VERIFY_COMMAND, parseWindowsShellVerification } = require('../ssh/windows-shell-account');
+const { powershellCommand } = require('../collect/windows');
 
 const usedTokens = new api.UsedTokens();
 const limiter = new api.SessionLimiter();
@@ -91,7 +93,8 @@ async function handleApiTerminal(ws, parsedUrl, deps) {
     const s = await queryRqlite('SELECT hostname, ssh_port, platform, host_key_fingerprint, ssh_user, ssh_key_id, shell_user, shell_key_id FROM servers WHERE id = ?', [payload.serverId]);
     if (!s.length) return fail('Server not found', 4000);
     const [hostname, port, platform, fingerprint, sshUser, sshKeyId, shellUser, shellKeyId] = s[0];
-    if (platform === 'windows') return fail('API terminals are not available on Windows hosts', 4000);
+    const isWindows = platform === 'windows';
+    if (isWindows && payload.target !== 'host') return fail('Container shells are not available on Windows hosts', 4000);
 
     // Which key and account does this session use? Exactly one, fixed by the token's target.
     const isHost = payload.target === 'host';
@@ -114,9 +117,12 @@ async function handleApiTerminal(ws, parsedUrl, deps) {
     let command = null;
     if (isHost) {
       // Prove, on every open, that the account still has no admin rights.
-      const v = await sshExec(client, SHELL_VERIFY_COMMAND, { timeoutMs: 15000 });
-      const verdict = parseShellVerification(v.stdout, account);
+      const v = await sshExec(client, isWindows ? powershellCommand(WINDOWS_SHELL_VERIFY_COMMAND) : SHELL_VERIFY_COMMAND, { timeoutMs: isWindows ? 30000 : 15000 });
+      const verdict = isWindows ? parseWindowsShellVerification(v.stdout, account) : parseShellVerification(v.stdout, account);
       if (!verdict.ok) return fail('The shell account is not safe to use: ' + verdict.problems.join('; '), 4003);
+      // Windows: an interactive PowerShell on a PTY (client.shell() would start cmd.exe). Still the same
+      // non-admin account, and nothing else is run.
+      if (isWindows) command = 'powershell -NoLogo -NoProfile';
     } else {
       // The privileged account is used for these two fixed commands only.
       const ref = String(payload.container);
