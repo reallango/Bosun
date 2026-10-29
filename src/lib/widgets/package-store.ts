@@ -8,6 +8,7 @@
  */
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { invalidatePermissionCache } from '@/lib/permissions/store';
+import { invalidateRuntimeCache } from '@/lib/widgets/runtime/execute';
 import { compareVersions, validateManifest, manifestToJson, type PackageManifest, type PackageFiles } from '@/lib/widgets/package-manifest';
 import { reservedPackageNames } from '@/lib/widgets/system-packages';
 
@@ -179,6 +180,7 @@ export async function installPackage(opts: InstallOptions): Promise<InstallResul
 
   await rqlite.executeBatch(stmts as { sql: string; params?: never[] }[], { transaction: true });
   invalidatePermissionCache();
+  invalidateRuntimeCache();
   return { id: manifest.id, version: manifest.version, previousVersion, widgetTypes: newTypes, permissions: permIds };
 }
 
@@ -198,5 +200,6 @@ export async function removePackage(id: string, removeWidgets: boolean): Promise
   stmts.push({ sql: 'DELETE FROM widget_packages WHERE id = ?', params: [id] });
   await rqlite.executeBatch(stmts as { sql: string; params?: never[] }[], { transaction: true });
   invalidatePermissionCache();
+  invalidateRuntimeCache();
   return { removedWidgets: inUse };
 }

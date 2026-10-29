@@ -69,6 +69,7 @@ export const AuditActions = {
   TERMINAL_API_TOKEN: 'terminal.api_token',
   TERMINAL_API_OPEN: 'terminal.api_open',
   TERMINAL_API_CLOSE: 'terminal.api_close',
+  WIDGET_ACTION: 'widget.action',
   WIDGET_PACKAGE_INSTALL: 'widget_package.install',
   WIDGET_PACKAGE_REMOVE: 'widget_package.remove',
   WIDGET_PACKAGE_EXPORT: 'widget_package.export',

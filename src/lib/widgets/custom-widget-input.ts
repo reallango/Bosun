@@ -74,3 +74,10 @@ export function sanitizeCustomWidget(body: any, creating: boolean): { values: Cu
   if (values.supports_linux === 0 && values.supports_windows === 0) return { error: 'A widget must support at least one platform' };
   return { values };
 }
+
+/** Rows sent to the browser omit `spec`: it holds the commands a package widget runs. */
+export function withoutSpec<T extends Record<string, unknown>>(row: T): Omit<T, 'spec'> {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { spec, ...rest } = row;
+  return rest;
+}

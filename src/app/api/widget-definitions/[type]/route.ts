@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireRole } from '@/lib/auth/middleware';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { ok, fail, failFrom } from '@/lib/api/response';
-import { sanitizeCustomWidget } from '@/lib/widgets/custom-widget-input';
+import { sanitizeCustomWidget, withoutSpec } from '@/lib/widgets/custom-widget-input';
 
 /**
  * Admin management of one database-defined widget type: rename, resize
@@ -17,7 +17,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   try {
     const res = await rqlite.query('SELECT * FROM custom_widgets WHERE type = ?', [type]);
     const rows = rowsToObjects(res);
-    return rows.length ? ok({ widget: rows[0] }) : fail('Custom widget not found', 404);
+    return rows.length ? ok({ widget: withoutSpec(rows[0]) }) : fail('Custom widget not found', 404);
   } catch (error) {
     return failFrom(error);
   }
@@ -44,7 +44,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
       `UPDATE custom_widgets SET ${cols.map(c => `${c} = ?`).join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE type = ?`,
       [...cols.map(c => v.values[c]), type]);
     const updated = await rqlite.query('SELECT * FROM custom_widgets WHERE type = ?', [type]);
-    return ok({ widget: rowsToObjects(updated)[0] });
+    return ok({ widget: withoutSpec(rowsToObjects(updated)[0]) });
   } catch (error) {
     return failFrom(error);
   }

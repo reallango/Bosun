@@ -4,7 +4,7 @@ import { requireAuth, requireRole } from '@/lib/auth/middleware';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { getWidgetDefinitions, resolveWidgetDefinition, CUSTOM_WIDGET_DATA_TYPES } from '@/components/widgets/registry-loader';
 import { ok, fail, failFrom } from '@/lib/api/response';
-import { sanitizeCustomWidget } from '@/lib/widgets/custom-widget-input';
+import { sanitizeCustomWidget, withoutSpec } from '@/lib/widgets/custom-widget-input';
 
 /**
  * GET /api/widget-definitions?serverId=<id>
@@ -60,7 +60,7 @@ export async function POST(request: NextRequest) {
         v.values.default_size ?? '{"w":8,"h":6}', v.values.min_size ?? '{"w":4,"h":4}', v.values.refresh_interval ?? 30,
         v.values.supports_linux ?? 1, v.values.supports_windows ?? 1, v.values.config_schema ?? '[]', v.values.enabled ?? 1]);
     const created = await rqlite.query('SELECT * FROM custom_widgets WHERE id = ?', [id]);
-    return ok({ widget: rowsToObjects(created)[0] }, { status: 201 });
+    return ok({ widget: withoutSpec(rowsToObjects(created)[0]) }, { status: 201 });
   } catch (error) {
     return failFrom(error);
   }

@@ -7,6 +7,7 @@
  */
 import { sanitizeCustomWidget, type CustomWidgetColumns } from '@/lib/widgets/custom-widget-input';
 import { CATALOG } from '@/lib/permissions/catalog';
+import { validateWidgetSpec, type WidgetSpec } from '@/lib/widgets/runtime/spec';
 
 export const MANIFEST_SCHEMA = 1;
 export const PACKAGE_ID_RE = /^[a-z][a-z0-9_]{1,39}$/;
@@ -24,7 +25,7 @@ export interface PackageWidget {
   /** Column values ready for `custom_widgets` (JSON serialised, booleans as 0/1). */
   columns: CustomWidgetColumns;
   /** Declarative definition interpreted by the widget runtime; stored as given. */
-  spec: Record<string, unknown> | null;
+  spec: WidgetSpec | null;
 }
 
 export interface PackagePermission {
@@ -137,11 +138,13 @@ export function validateManifest(
     types.add(type);
     const v = sanitizeCustomWidget(w, true);
     if ('error' in v) return fail(`widget "${type}": ${v.error}`);
-    let spec: Record<string, unknown> | null = null;
+    let spec: WidgetSpec | null = null;
     if (w.spec !== undefined) {
       if (!w.spec || typeof w.spec !== 'object' || Array.isArray(w.spec)) return fail(`widget "${type}": "spec" must be an object`);
       if (JSON.stringify(w.spec).length > MAX_SPEC_BYTES) return fail(`widget "${type}": "spec" is too large`);
-      spec = w.spec as Record<string, unknown>;
+      const s = validateWidgetSpec(w.spec, permissions.map(p => p.id));
+      if (!s.ok) return fail(`widget "${type}": ${s.error}`);
+      spec = s.value;
     }
     widgets.push({ type, columns: v.values, spec });
   }

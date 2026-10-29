@@ -6,6 +6,7 @@ import { runOnServerId } from '@/lib/ssh/connection-pool';
 import { WIDGET_SECTIONS, widgetDataFromSnapshots, collectedAtFor, Sections, ServerRow } from '@/lib/widgets/snapshot-data';
 import { consumeActionRateLimit } from '@/lib/utils/rate-limiter';
 import { logAudit } from '@/lib/audit/logger';
+import { loadWidgetSpec, loadRuntimeData, RuntimeError } from '@/lib/widgets/runtime/execute';
 import { startScript, statusScript, parseInstallStatus } from '@/lib/updates/windows-install';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -55,6 +56,23 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       const data = { output: (r.stdout + r.stderr).slice(0, 64 * 1024), exitCode: r.exitCode, timedOut: !!r.timedOut };
       customCache.set(cacheKey, { at: Date.now(), data });
       return NextResponse.json({ data, collectedAt: new Date().toISOString() });
+    }
+
+    // Package widgets with a declarative spec: data comes from the spec's snapshot section or command.
+    const loaded = WIDGET_SECTIONS[widget.widget_type] ? null : await loadWidgetSpec(widget.widget_type);
+    if (loaded) {
+      if (loaded.spec.data.permission) {
+        const denied = await requirePermission(auth, loaded.spec.data.permission, server.id);
+        if (denied) return denied;
+      }
+      try {
+        const rt = await loadRuntimeData(server.id, loaded, force);
+        return NextResponse.json({ ...rt, stale: false, server: { is_online: !!server.is_online, last_error: server.last_error ?? null } },
+          { headers: { 'Cache-Control': 'no-store' } });
+      } catch (err) {
+        if (err instanceof RuntimeError) return NextResponse.json({ error: { message: err.message, code: err.code } }, { status: err.status });
+        throw err;
+      }
     }
 
     const sections = WIDGET_SECTIONS[widget.widget_type];

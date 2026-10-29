@@ -33,7 +33,20 @@ interface AvailableItem {
   permissions: string[];
   installedVersion: string | null;
   upgradable: boolean;
+  review: PackageReview;
 }
+
+interface PackageReview {
+  widgets: { type: string; name: string; commands: { what: string; as: 'service' | 'shell'; command: string; windowsCommand?: string; permission?: string; confirm: boolean }[] }[];
+  permissions: { id: string; label: string; risk: string; defaultLevel: string }[];
+  runsAsService: boolean;
+  commandCount: number;
+}
+
+/** What the admin confirms before a package is installed. */
+type Reviewing =
+  | { kind: 'github'; id: string; name: string; version: string; upgrade: boolean; review: PackageReview }
+  | { kind: 'zip'; file: File; name: string; version: string; installedVersion: string | null; review: PackageReview };
 
 interface SourceInfo { repo: string; ref: string; refs: string[] }
 
@@ -76,6 +89,12 @@ export default function WidgetPackagesPage() {
   const [loadingAvailable, setLoadingAvailable] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
+  const [reviewing, setReviewing] = useState<Reviewing | null>(null);
+
+  const askInstall = (p: AvailableItem, upgrade: boolean) => {
+    if (p.review.commandCount === 0) install(p.id, upgrade);
+    else setReviewing({ kind: 'github', id: p.id, name: p.name, version: p.version, upgrade, review: p.review });
+  };
 
   const loadInstalled = useCallback(async () => {
     try {
@@ -134,6 +153,31 @@ export default function WidgetPackagesPage() {
     } finally {
       setBusy(null);
     }
+  };
+
+  // Zip imports are checked first (dry run) so the admin can review what the package runs before anything is installed.
+  const previewZip = async (file: File) => {
+    setBusy('import');
+    try {
+      const r = await api<{ name: string; version: string; installedVersion: string | null; review: PackageReview }>('/api/widget-packages/import?dry_run=1', {
+        method: 'POST', headers: { 'Content-Type': 'application/zip' }, body: file,
+      });
+      if (r.review.commandCount === 0) { setBusy(null); await importZip(file); return; }
+      setReviewing({ kind: 'zip', file, name: r.name, version: r.version, installedVersion: r.installedVersion, review: r.review });
+    } catch (err) {
+      toast('Import failed', { variant: 'error', description: errText(err) });
+    } finally {
+      setBusy(null);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  };
+
+  const confirmReview = async () => {
+    const r = reviewing;
+    setReviewing(null);
+    if (!r) return;
+    if (r.kind === 'github') await install(r.id, r.upgrade);
+    else await importZip(r.file, r.installedVersion !== null);
   };
 
   const importZip = async (file: File, replace = false): Promise<void> => {
@@ -207,9 +251,53 @@ export default function WidgetPackagesPage() {
               <Upload /> Import zip
             </Button>
             <input ref={fileRef} type="file" accept=".zip,application/zip" className="sr-only" aria-label="Import a widget package zip"
-              onChange={e => { const f = e.target.files?.[0]; if (f) importZip(f); }} />
+              onChange={e => { const f = e.target.files?.[0]; if (f) previewZip(f); }} />
           </div>
         </div>
+
+        {reviewing && (
+          <section className="space-y-3 rounded-xl border border-amber-500/50 bg-amber-500/5 p-4 text-sm" role="alertdialog" aria-label={`Review ${reviewing.name} before installing`}>
+            <h2 className="font-semibold">
+              Review {reviewing.name} v{reviewing.version} before installing
+            </h2>
+            <p className="text-muted-foreground">
+              This package runs commands on your servers, from widgets or when someone with the matching permission uses an action.
+              {reviewing.review.runsAsService && <> Some run as the <strong>privileged service account</strong> (unrestricted sudo).</>} Only install packages you trust.
+            </p>
+            {reviewing.review.widgets.map(w => (
+              <div key={w.type} className="space-y-1.5">
+                <div className="font-medium">{w.name} <code className="rounded bg-muted px-1 text-xs">{w.type}</code></div>
+                <ul className="space-y-1.5">
+                  {w.commands.map((c, i) => (
+                    <li key={i} className="rounded-lg bg-muted/60 p-2">
+                      <div className="flex flex-wrap items-center gap-2 text-xs">
+                        <span className="font-medium">{c.what}</span>
+                        <span className={`rounded px-1 uppercase ${c.as === 'service' ? 'bg-amber-500/20 text-amber-700 dark:text-amber-400' : 'bg-muted text-muted-foreground'}`}>
+                          {c.as === 'service' ? 'service account' : 'non-admin account'}
+                        </span>
+                        {c.permission && <span className="text-muted-foreground">needs <code>{c.permission}</code></span>}
+                        {c.confirm && <span className="text-muted-foreground">asks to confirm</span>}
+                      </div>
+                      <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-all font-mono text-xs">{c.command}</pre>
+                      {c.windowsCommand && <pre className="mt-1 overflow-x-auto whitespace-pre-wrap break-all font-mono text-xs"><span className="text-muted-foreground">Windows: </span>{c.windowsCommand}</pre>}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
+            {reviewing.review.permissions.length > 0 && (
+              <p className="text-xs text-muted-foreground">
+                Adds permissions: {reviewing.review.permissions.map(p => `${p.label} (${p.risk} risk)`).join(', ')}. Nobody holds them until you grant them in a permission group.
+              </p>
+            )}
+            <div className="flex flex-wrap gap-2">
+              <Button size="sm" onClick={confirmReview} disabled={busy !== null}>
+                {reviewing.kind === 'github' ? (reviewing.upgrade ? 'Upgrade' : 'Install') : reviewing.installedVersion ? 'Replace installed version' : 'Install'}
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => setReviewing(null)}>Cancel</Button>
+            </div>
+          </section>
+        )}
 
         {loading ? <LoadingSpinner /> : (
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -241,11 +329,11 @@ export default function WidgetPackagesPage() {
                           </p>
                         </div>
                         {p.upgradable ? (
-                          <Button size="sm" onClick={() => install(p.id, true)} disabled={busy !== null}>
+                          <Button size="sm" onClick={() => askInstall(p, true)} disabled={busy !== null}>
                             {busy === p.id ? 'Upgrading…' : `Upgrade from ${p.installedVersion}`}
                           </Button>
                         ) : !p.installedVersion ? (
-                          <Button size="sm" onClick={() => install(p.id, false)} disabled={busy !== null}>
+                          <Button size="sm" onClick={() => askInstall(p, false)} disabled={busy !== null}>
                             {busy === p.id ? 'Installing…' : 'Install'}
                           </Button>
                         ) : null}
