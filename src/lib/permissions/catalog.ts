@@ -58,16 +58,12 @@ export const CATALOG: readonly PermissionDef[] = [
   { id: 'power.shutdown', label: 'Shut down a server', group: 'Power', source: 'core', defaultLevel: 'operator', risk: 'high', scope: 'server',
     description: 'Power the host off. It stays off until it is woken or started at the machine.' },
 
-  // The OS update permissions (updates.*), the Ollama ones (ollama.*) and the Docker ones are provided by the
-  // bundled widget packages "updates", "ollama" and "docker" (see widgets/).
+  // The permissions of the widgets (docker.*, ollama.*, updates.*, commands.run, ...) are provided by the bundled
+  // widget packages in widgets/ and registered when they install.
 
   // ---- Shell (API) -------------------------------------------------------
   { id: 'shell.user', label: 'Terminal and commands as the non-admin account (API)', group: 'Shell', source: 'core', defaultLevel: 'admin', risk: 'high', scope: 'server',
     description: 'Run commands and open a terminal on the host as its unprivileged account (no sudo, no Docker group, no way back to the admin account). API keys only; the web terminal still asks for your own login.' },
-
-  // ---- Commands ----------------------------------------------------------
-  { id: 'commands.run', label: 'Run commands', group: 'Commands', source: 'widget:custom_command', defaultLevel: 'admin', risk: 'high', scope: 'server',
-    description: 'Run an arbitrary command on the host as the service account through the API, and set the command of a Custom Command widget (which runs as the non-admin account).' },
 
   // ---- Dashboards --------------------------------------------------------
   { id: 'dashboards.edit', label: 'Edit dashboards', group: 'Dashboards', source: 'core', defaultLevel: 'operator', risk: 'low', scope: 'global',

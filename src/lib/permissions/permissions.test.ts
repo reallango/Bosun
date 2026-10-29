@@ -39,7 +39,7 @@ describe('permission catalog', () => {
   });
 
   it('marks everything that can run code or power a host off or on as high risk', () => {
-    for (const id of ['power.restart', 'power.shutdown', 'commands.run']) {
+    for (const id of ['power.restart', 'power.shutdown']) {
       expect(permissionDef(id)?.risk).toBe('high');
     }
   });

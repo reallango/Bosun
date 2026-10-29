@@ -1,0 +1,51 @@
+{
+  "schema": 1,
+  "id": "commands",
+  "name": "Custom Command",
+  "version": "1.0.0",
+  "description": "Run a command on the host as its non-admin account (PowerShell on Windows) and show its output, repeated at the interval you choose. Installed by default. The runner is built into Bosun; this package carries its permissions, settings and size.",
+  "author": "Bosun",
+  "permissions": [
+    {
+      "id": "commands.view",
+      "label": "See Custom Command widgets",
+      "description": "See the Custom Command widget and the output of its command.",
+      "group": "Commands",
+      "defaultLevel": "viewer",
+      "risk": "low",
+      "scope": "server"
+    },
+    {
+      "id": "commands.run",
+      "label": "Run commands",
+      "description": "Run an arbitrary command on the host as the service account through the API, and set the command of a Custom Command widget (which runs as the non-admin account).",
+      "group": "Commands",
+      "defaultLevel": "admin",
+      "risk": "high",
+      "scope": "server"
+    }
+  ],
+  "widgets": [
+    {
+      "type": "custom_command",
+      "display_name": "Custom Command",
+      "description": "Run a command on the host as its non-admin account (PowerShell on Windows) and show its output, repeated at the interval you choose",
+      "icon": "terminal",
+      "category": "utility",
+      "default_size": { "w": 8, "h": 5 },
+      "min_size": { "w": 6, "h": 4 },
+      "refresh_interval": 30,
+      "supports_linux": true,
+      "supports_windows": true,
+      "config_schema": [
+        { "key": "command", "label": "Command", "type": "string", "placeholder": "uptime", "default": "uptime", "description": "Runs as the non-admin shell account of the host (no sudo or Docker access) each time the widget repeats. On Windows the untouched default shows how long the machine has been up." },
+        { "key": "interval", "label": "Repeat every (seconds)", "type": "number", "default": 30, "description": "How often the command runs, from 10 to 3600 seconds. The result is shared by everyone viewing the widget." }
+      ],
+      "spec": {
+        "version": 1,
+        "data": { "source": "snapshot", "section": "system", "permission": "commands.view" },
+        "view": { "type": "text", "text": "Custom Command is drawn by Bosun itself." }
+      }
+    }
+  ]
+}

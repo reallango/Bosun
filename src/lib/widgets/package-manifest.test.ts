@@ -121,8 +121,8 @@ describe('system packages', () => {
   it('lists the widgets that stay built into Bosun at 0.0.1', () => {
     const all = systemPackages();
     const ids = all.map(p => p.id);
-    for (const id of ['ssh_terminal', 'custom_command']) expect(ids).toContain(id);
-    for (const id of ['ollama_status', 'os_update_check', 'docker_containers', 'cpu_memory']) expect(ids).not.toContain(id);   // bundled packages now
+    for (const id of ['ssh_terminal']) expect(ids).toContain(id);
+    for (const id of ['ollama_status', 'os_update_check', 'docker_containers', 'cpu_memory', 'custom_command']) expect(ids).not.toContain(id);   // bundled packages now
     expect(all.every(p => p.version === '0.0.1')).toBe(true);
   });
 });
