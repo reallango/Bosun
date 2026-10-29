@@ -406,8 +406,9 @@ confirmation. The spec format is documented in `widgets/README.md`.
 **Hiding servers and widgets.** A permission group can *deny* as well as allow. Denying *See a server* for a server
 (or a server group) hides it from everyone in that group: it is not listed, its dashboards and widgets are gone and
 every API route under it answers 404. Denying a package widget's data permission hides that widget. A deny beats any
-allow, from any group or from the access level; Full access is never hidden anything. The Docker widget rebuilt as a
-package is in `widgets/docker`.
+allow, from any group or from the access level; Full access is never hidden anything. Every widget except the SSH Terminal is a package that is installed by default and can be
+removed or upgraded under Settings → Widgets (see `widgets/README.md`); each tracks its own statistics and
+keeps their history for the time its package declares.
 
 **Email (SMTP)**, under Settings → General (admins), enables password reset links,
 emailed sign-in codes and email alert actions. Set *App URL* to the address users open
