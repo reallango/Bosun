@@ -60,3 +60,11 @@ describe('parseOllama with the install block', () => {
     expect(parseOllama('DOWN')).toMatchObject({ status: 'stopped' });
   });
 });
+
+describe('Windows line endings', () => {
+  it('finds the install block when the probe output uses CRLF', () => {
+    const o = parseOllama('{"version":"0.40.10"}\r\n{"models":[]}\r\n{"models":[]}\r\n@@INSTALL\r\nSVC_NAME=Ollama\r\nSVC_STATE=Running\r\nSVC_START=Manual\r\nSVC_WRAPPER=nssm\r\nSVC_EXE=C:/Ollama/bin/ollama.exe\r\n');
+    expect(o.version).toBe('0.40.10');
+    expect(o.install).toMatchObject({ kind: 'service', manager: 'nssm', name: 'Ollama', startMode: 'manual' });
+  });
+});

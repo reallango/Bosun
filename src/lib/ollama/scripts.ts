@@ -149,7 +149,8 @@ export function windowsScript(o: WindowsScriptOptions): string {
     `for ($i = 0; $i -lt 30 -and -not $ver; $i++) { Start-Sleep -Seconds 1; try { $ver = (Invoke-RestMethod -TimeoutSec 2 ${psq('http://127.0.0.1:' + port + '/api/version')}).version } catch {} }`,
     `if ($ver) { Write-Output ('DONE ' + $ver) } elseif ($was -and $was -ne 'Running') { Write-Output 'DONE (service left stopped)' } else { throw 'The service started but the API did not answer' }`,
   );
-  return lines.join('\n');
+  // A failure prints one plain `ERROR:` line (not a PowerShell stack trace) and exits non-zero.
+  return ['try {', ...lines, `} catch { Write-Output ('ERROR: ' + $_.Exception.Message); exit 1 }`].join('\n');
 }
 
 /** `sc.exe` start types for the startup methods the widget offers. */

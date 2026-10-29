@@ -129,6 +129,13 @@ function lastLines(text: string, n = 6): string[] {
   return text.split(/\r?\n/).map(l => l.trim()).filter(Boolean).slice(-n);
 }
 
+/** The plain reason a script failed: its `ERROR:` line when it printed one, else the last lines of output. */
+function failureMessage(stdout: string, stderr: string): string {
+  const err = stdout.split(/?
+/).reverse().find(l => l.startsWith('ERROR:'));
+  return err ? err.replace(/^ERROR:s*/, '') : lastLines(stderr || stdout, 3).join(' ');
+}
+
 function startJob(serverId: string, action: 'install' | 'update', command: string, userId: string): ServiceJob {
   const running = currentJob(serverId);
   if (running && running.status === 'running') throw new OllamaManageError('An install or update is already running on this server', 409, 'JOB_RUNNING');
@@ -143,7 +150,7 @@ function startJob(serverId: string, action: 'install' | 'update', command: strin
       if (r.exitCode === 0 && !r.timedOut && done) { job.status = 'success'; job.message = done.replace(/^DONE\s*/, '') || 'done'; }
       else {
         job.status = 'error';
-        job.message = (r.timedOut ? 'It took too long and was stopped' : lastLines(r.stderr || r.stdout, 3).join(' ')) || `Failed (exit ${r.exitCode})`;
+        job.message = (r.timedOut ? 'It took too long and was stopped' : failureMessage(r.stdout, r.stderr)) || `Failed (exit ${r.exitCode})`;
       }
     })
     .catch(err => { job.status = 'error'; job.message = err instanceof Error ? err.message : String(err); })
@@ -199,7 +206,8 @@ export async function runOllamaAction(serverId: string, userId: string, action: 
   const windows = state.platform === 'windows';
 
   if (action === 'install') {
-    if (inst && inst.kind !== 'none') throw new OllamaManageError('Ollama is already installed on this server', 409, 'ALREADY_INSTALLED');
+    if (!inst) throw new OllamaManageError('Bosun has not checked how Ollama is installed on this server yet. Wait for the next poll and try again.', 409, 'UNKNOWN_STATE');
+    if (inst.kind !== 'none') throw new OllamaManageError('Ollama is already installed on this server', 409, 'ALREADY_INSTALLED');
     const version = versionParam(p.version);
     if (windows) return { job: startJob(serverId, 'install', windowsScript({ mode: 'install', version }), userId) };
     const method = p.method === 'host' ? 'host' : 'docker';
