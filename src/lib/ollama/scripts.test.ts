@@ -146,3 +146,25 @@ describe('versions', () => {
     expect(shq("it's")).toBe("'it'\\''s'");
   });
 });
+
+describe('getting nssm on Windows', () => {
+  const s = windowsScript({ mode: 'install' });
+  it('checks that winget works, tries to install it when it does not, and installs nssm with it', () => {
+    expect(s).toContain("Step 'checking that winget works'");
+    expect(s).toContain("Step 'winget is not working; trying to install it'");
+    expect(s).toContain('--id NSSM.NSSM --exact --silent');
+    expect(s).toContain('--accept-package-agreements --accept-source-agreements');
+    expect(s).toContain('Add-AppxPackage');
+    expect(s.indexOf('checking that winget works')).toBeLessThan(s.indexOf('installing nssm with winget'));
+  });
+
+  it('reuses an nssm that is already there, and only downloads it from nssm.cc after winget failed', () => {
+    expect(s.indexOf("Join-Path $root 'nssm.exe'")).toBeLessThan(s.indexOf('winget'));
+    expect(s.indexOf('installing nssm with winget')).toBeLessThan(s.indexOf('downloading it from nssm.cc'));
+    expect(s).toContain("Copy-Item $found[0].FullName (Join-Path $root 'nssm.exe')");   // the service does not depend on a per-user winget folder
+  });
+
+  it('is only part of an install, never an update', () => {
+    expect(windowsScript({ mode: 'update', service: 'Ollama', exe: String.raw`C:\Ollama\bin\ollama.exe` })).not.toContain('winget');
+  });
+});

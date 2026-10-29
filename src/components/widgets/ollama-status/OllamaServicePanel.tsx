@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import { ArrowUpCircle, Loader2, Play, RotateCw, Square, TriangleAlert } from 'lucide-react';
+import { ArrowUpCircle, ChevronDown, ChevronRight, Loader2, Play, RotateCw, Square, TriangleAlert } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { ConfirmActionDialog, apiAction } from '@/components/widgets/shared/ConfirmActionDialog';
@@ -65,6 +65,8 @@ export function OllamaServicePanel({ serverId, onChanged }: { serverId: string; 
   const [busy, setBusy] = useState<string | null>(null);
   const [message, setMessage] = useState<{ text: string; error?: boolean } | null>(null);
   const [pending, setPending] = useState<Pending>(null);
+  // Collapsed until asked for; a badge next to the arrow tells when something needs attention.
+  const [open, setOpen] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -115,14 +117,34 @@ export function OllamaServicePanel({ serverId, onChanged }: { serverId: string; 
   );
 
   return (
-    <div className="space-y-1.5 rounded-md border border-gray-200 p-2 text-xs dark:border-gray-700" aria-label="Ollama installation">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <span className="font-medium text-gray-900 dark:text-gray-100">{describe(inst, info.platform)}</span>
-        {manageable && <span className="text-gray-500">· {stateText}</span>}
-        {inst.kind === 'service' && inst.startMode && <span className="text-gray-500">· starts: {STARTUP_LABEL[inst.startMode] ?? inst.startMode}</span>}
-        {inst.kind === 'docker' && <span className="text-gray-500">· restart: {RESTART_POLICIES.find(p => p[0] === inst.restartPolicy)?.[1] ?? inst.restartPolicy ?? 'Never'}</span>}
-      </div>
+    <div className="rounded-md border border-gray-200 p-2 text-xs dark:border-gray-700" aria-label="Ollama installation">
+      <button type="button" onClick={() => setOpen(o => !o)} aria-expanded={open} aria-controls="ollama-install-body"
+        className="flex w-full flex-wrap items-center gap-x-2 gap-y-1 text-left">
+        {open ? <ChevronDown className="size-3.5 shrink-0 text-gray-500" aria-hidden /> : <ChevronRight className="size-3.5 shrink-0 text-gray-500" aria-hidden />}
+        {info.updateAvailable && (
+          <span className="flex shrink-0 items-center gap-1 rounded-full bg-blue-600 px-2 py-0.5 text-[10px] font-semibold text-white">
+            <ArrowUpCircle className="size-3" aria-hidden /> Update available
+          </span>
+        )}
+        {jobRunning && (
+          <span className="flex shrink-0 items-center gap-1 rounded-full bg-amber-500 px-2 py-0.5 text-[10px] font-semibold text-white">
+            <Loader2 className="size-3 animate-spin motion-reduce:animate-none" aria-hidden /> {info.job?.action === 'install' ? 'Installing' : 'Updating'}
+          </span>
+        )}
+        {inst.kind === 'none' && !jobRunning && (
+          <span className="shrink-0 rounded-full bg-gray-200 px-2 py-0.5 text-[10px] font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-200">Not installed</span>
+        )}
+        <span className="font-medium text-gray-900 dark:text-gray-100">Installation</span>
+        <span className="min-w-0 truncate text-gray-500">
+          {describe(inst, info.platform)}
+          {manageable && ` · ${stateText}`}
+          {inst.kind === 'service' && inst.startMode && ` · starts: ${STARTUP_LABEL[inst.startMode] ?? inst.startMode}`}
+          {inst.kind === 'docker' && ` · restart: ${RESTART_POLICIES.find(p => p[0] === inst.restartPolicy)?.[1] ?? inst.restartPolicy ?? 'Never'}`}
+        </span>
+      </button>
 
+      {open && (
+      <div id="ollama-install-body" className="mt-1.5 space-y-1.5">
       {info.updateAvailable && (
         <div className="flex flex-wrap items-center gap-2 rounded bg-blue-50 px-2 py-1 text-blue-800 dark:bg-blue-950/50 dark:text-blue-200">
           <ArrowUpCircle className="size-3.5" aria-hidden />
@@ -202,6 +224,8 @@ export function OllamaServicePanel({ serverId, onChanged }: { serverId: string; 
         </div>
       )}
       {message && <div role="alert" className={message.error ? 'text-red-600' : 'text-gray-600 dark:text-gray-300'}>{message.text}</div>}
+      </div>
+      )}
 
       <ConfirmActionDialog
         open={!!pending}
@@ -211,7 +235,7 @@ export function OllamaServicePanel({ serverId, onChanged }: { serverId: string; 
           stop: 'Models stop answering requests, and anything using Ollama on this host loses it until it is started again.',
           restart: 'Loaded models are unloaded and requests in flight fail while it restarts.',
           update: inst.kind === 'docker' ? 'The container is recreated from the new image with the same settings (ports, volumes, GPU access, restart policy). Ollama is unavailable while that happens.' : 'The service is stopped, its files are replaced and it is started again. Ollama is unavailable meanwhile.',
-          install: info.platform === 'windows' ? 'Downloads about 1.5 GB, unpacks it into C:\\Ollama and creates a Windows service with nssm.' : pending.method === 'host' ? 'Runs the official install script with sudo. It adds the ollama user and a systemd service.' : 'Pulls the ollama/ollama image and starts a container that keeps its models in a Docker volume.',
+          install: info.platform === 'windows' ? 'Downloads about 1.5 GB, unpacks it into C:\\Ollama and creates a Windows service with nssm (installed with winget when it is missing).' : pending.method === 'host' ? 'Runs the official install script with sudo. It adds the ollama user and a systemd service.' : 'Pulls the ollama/ollama image and starts a container that keeps its models in a Docker volume.',
         })[pending.action] : ''}
         confirmLabel={pending ? ({ stop: 'Stop', restart: 'Restart', update: 'Update', install: 'Install' })[pending.action] : ''}
         destructive={pending?.action === 'stop' || pending?.action === 'restart'}
