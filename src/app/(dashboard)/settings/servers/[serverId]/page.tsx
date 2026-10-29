@@ -12,6 +12,7 @@ import { DeleteConfirmDialog } from '@/components/dialogs/DeleteConfirmDialog';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import { WakeButton } from '@/components/servers/WakeButton';
 import { MacAddressFields, MacValue } from '@/components/servers/MacAddressFields';
+import { ReprovisionDialog } from '@/components/settings/ReprovisionDialog';
 
 export default function EditServerPage() {
     const { serverId } = useParams<{ serverId: string }>();
@@ -26,6 +27,10 @@ export default function EditServerPage() {
     const [hostKey, setHostKey] = useState<string | null>(null);
     const [lastError, setLastError] = useState<string | null>(null);
     const { toast } = useToast();
+    // The non-admin account Bosun created for this server (read-only here: it is managed by Re-provision).
+    const [shell, setShell] = useState<{ user: string | null; keyId: string | null }>({ user: null, keyId: null });
+    const [reprovisionOpen, setReprovisionOpen] = useState(false);
+    const [version, setVersion] = useState(0);
     const [form, setForm] = useState({
         name: '', hostname: '', ssh_port: 22, ssh_user: '', ssh_key_id: '', notes: '', platform: 'linux',
         poll_enabled: true, poll_interval_sec: 15, mac_address: null as MacValue, mac_address_alt: null as MacValue,
@@ -51,6 +56,7 @@ export default function EditServerPage() {
                 if (j.data) {
                     setHostKey(j.data.host_key_fingerprint || null);
                     setLastError(j.data.last_error || null);
+                    setShell({ user: j.data.shell_user || null, keyId: j.data.shell_key_id || null });
                 }
             })
             .finally(() => setLoading(false));
@@ -59,7 +65,7 @@ export default function EditServerPage() {
             .then(r => r.json())
             .then(j => { if (j.data) setSSHKeys(Array.isArray(j.data) ? j.data : j.data.ssh_keys || []); })
             .catch(() => {});
-    }, [serverId]);
+    }, [serverId, version]);
 
     const save = async () => {
         setSaving(true); setError('');
@@ -148,40 +154,77 @@ RAM: ${d.data.total_ram_mb} MB`,
                                     onChange={e => setForm(f => ({ ...f, ssh_port: parseInt(e.target.value) || 22 }))} />
                             </div>
                             <div>
-                                <Label htmlFor="ssh_user">SSH User *</Label>
-                                <Input id="ssh_user" value={form.ssh_user}
-                                    onChange={e => setForm(f => ({ ...f, ssh_user: e.target.value }))} />
+                                <Label htmlFor="platform">Platform</Label>
+                                <select id="platform" value={form.platform}
+                                    onChange={e => setForm(f => ({ ...f, platform: e.target.value }))}
+                                    className="form-select">
+                                    <option value="linux">Linux</option>
+                                    <option value="windows">Windows</option>
+                                </select>
                             </div>
                         </div>
 
-                        <div>
-                            <Label htmlFor="platform">Platform</Label>
-                            <select id="platform" value={form.platform}
-                                onChange={e => setForm(f => ({ ...f, platform: e.target.value }))}
-                                className="form-select">
-                                <option value="linux">Linux</option>
-                                <option value="windows">Windows</option>
-                            </select>
-                        </div>
+                        <fieldset className="space-y-3 rounded-md border p-3">
+                            <legend className="px-1 text-sm font-medium">
+                                Admin account <span className="ml-1 rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium uppercase text-primary">admin</span>
+                            </legend>
+                            <p className="text-xs text-muted-foreground">
+                                What Bosun uses to monitor this host and run actions that need elevated rights (the service account).
+                            </p>
+                            <div>
+                                <Label htmlFor="ssh_user">Admin user *</Label>
+                                <Input id="ssh_user" value={form.ssh_user}
+                                    onChange={e => setForm(f => ({ ...f, ssh_user: e.target.value }))} />
+                            </div>
+                            <div>
+                                <Label htmlFor="ssh_key">Admin SSH key</Label>
+                                <select id="ssh_key" value={form.ssh_key_id}
+                                    onChange={e => setForm(f => ({ ...f, ssh_key_id: e.target.value }))}
+                                    className="form-select">
+                                    <option value="">-- No key selected --</option>
+                                    {sshKeys.map(k => (
+                                        <option key={k.id} value={k.id}>
+                                            {k.name} ({k.fingerprint?.substring(0, 16)}...)
+                                        </option>
+                                    ))}
+                                </select>
+                                {form.platform === 'windows' && (
+                                    <p className="text-xs text-muted-foreground mt-1">
+                                        On Windows, place this key in <code>C:\ProgramData\ssh\administrators_authorized_keys</code>.
+                                    </p>
+                                )}
+                            </div>
+                        </fieldset>
 
-                        <div>
-                            <Label htmlFor="ssh_key">SSH Key</Label>
-                            <select id="ssh_key" value={form.ssh_key_id}
-                                onChange={e => setForm(f => ({ ...f, ssh_key_id: e.target.value }))}
-                                className="form-select">
-                                <option value="">-- No key selected --</option>
-                                {sshKeys.map(k => (
-                                    <option key={k.id} value={k.id}>
-                                        {k.name} ({k.fingerprint?.substring(0, 16)}...)
-                                    </option>
-                                ))}
-                            </select>
-                            {form.platform === 'windows' && (
-                                <p className="text-xs text-muted-foreground mt-1">
-                                    On Windows, place this key in <code>C:\ProgramData\ssh\administrators_authorized_keys</code>.
+                        {shell.user ? (
+                            <fieldset className="space-y-3 rounded-md border p-3">
+                                <legend className="px-1 text-sm font-medium">
+                                    Non-admin account <span className="ml-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium uppercase text-muted-foreground">non-admin</span>
+                                </legend>
+                                <p className="text-xs text-muted-foreground">
+                                    Used for API terminals, API shell commands and Custom Command widgets. It has no administrator rights. Managed by Re-provision below.
                                 </p>
-                            )}
-                        </div>
+                                <div>
+                                    <Label htmlFor="shell_user">Non-admin user</Label>
+                                    <Input id="shell_user" value={shell.user} readOnly />
+                                </div>
+                                <div>
+                                    <Label htmlFor="shell_key">Non-admin SSH key</Label>
+                                    <select id="shell_key" value={shell.keyId || ''} disabled className="form-select">
+                                        <option value="">-- No key --</option>
+                                        {sshKeys.map(k => (
+                                            <option key={k.id} value={k.id}>
+                                                {k.name} ({k.fingerprint?.substring(0, 16)}...)
+                                            </option>
+                                        ))}
+                                    </select>
+                                </div>
+                            </fieldset>
+                        ) : (
+                            <p className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
+                                No non-admin account yet. Re-provision (below) can create one for API terminals, API shell commands and Custom Command widgets.
+                            </p>
+                        )}
 
                         <div className="grid grid-cols-1 gap-4 xs:grid-cols-2">
                             <div>
@@ -240,9 +283,29 @@ RAM: ${d.data.total_ram_mb} MB`,
                             <div className="hidden flex-1 sm:block" />
                             <Button size="lg" variant="destructive" onClick={() => setConfirmDelete(true)}>Delete server</Button>
                         </div>
+
+                        <div className="space-y-2 rounded-md border p-3 text-sm">
+                            <div className="font-medium">Re-provision / rotate keys</div>
+                            <p className="text-xs text-muted-foreground">
+                                Sets this host up again with fresh keys, creates or repairs the non-admin account, and retires the old Bosun keys.
+                                Use it to repair provisioning, pick up new features, rename the admin account, or rotate keys if you think a key may have leaked.
+                                You enter the administrator login for this run; it is not stored.
+                            </p>
+                            <Button variant="outline" onClick={() => setReprovisionOpen(true)} disabled={saving}>Re-provision…</Button>
+                        </div>
                     </CardContent>
                 </Card>
             </div>
+            <ReprovisionDialog
+                server={{
+                    id: serverId, name: form.name, host: form.hostname, ssh_port: form.ssh_port, ssh_user: form.ssh_user, platform: form.platform, shell_user: shell.user,
+                    // Reuse the account name only when Bosun created it (its key is labeled <host>-<account>); otherwise start from bosun-svc.
+                    service_account_default: sshKeys.find(k => k.id === form.ssh_key_id)?.name === `${form.hostname}-${form.ssh_user}` ? form.ssh_user : 'bosun-svc',
+                }}
+                open={reprovisionOpen}
+                onOpenChange={setReprovisionOpen}
+                onDone={() => setVersion(v => v + 1)}
+            />
             <DeleteConfirmDialog
                 title="Delete server?"
                 confirmLabel="Delete"

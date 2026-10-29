@@ -17,6 +17,8 @@ export interface ReprovisionServer {
   ssh_user: string | null;
   platform?: string;
   shell_user?: string | null;
+  /** The service account name to start from (the current one when Bosun created it, otherwise bosun-svc). */
+  service_account_default?: string;
 }
 
 /**
@@ -31,6 +33,7 @@ export function ReprovisionDialog({ server, open, onOpenChange, onDone }: { serv
   const [rotate, setRotate] = useState(true);
   const [createShell, setCreateShell] = useState(true);
   const [shellAccount, setShellAccount] = useState('bosun-user');
+  const [serviceAccount, setServiceAccount] = useState('bosun-svc');
   const [running, setRunning] = useState(false);
   const [error, setError] = useState('');
   const [result, setResult] = useState<{ steps: string[]; keyId: string; leftover: LeftoverKey[]; testSuccess: boolean } | null>(null);
@@ -43,10 +46,13 @@ export function ReprovisionDialog({ server, open, onOpenChange, onDone }: { serv
     setRotate(true);
     setCreateShell(true);
     setShellAccount(server.shell_user || 'bosun-user');
+    setServiceAccount(server.service_account_default || 'bosun-svc');
     setError('');
     setResult(null);
     setCreds(null);
-  }, [open, server]);
+    // Only when the dialog opens (or for another server): the parent builds `server` fresh on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, server?.id]);
 
   if (!server) return null;
 
@@ -73,6 +79,7 @@ export function ReprovisionDialog({ server, open, onOpenChange, onDone }: { serv
           replace_keys: rotate,
           create_shell_account: createShell,
           shell_account: shellAccount.trim(),
+          service_account: serviceAccount.trim(),
         }),
       });
       const json = await res.json();
@@ -113,12 +120,17 @@ export function ReprovisionDialog({ server, open, onOpenChange, onDone }: { serv
               {error && <div role="alert" className="rounded-md bg-destructive/10 p-2 text-sm text-destructive">{error}</div>}
               <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 rounded-md bg-muted/40 p-3 text-sm">
                 <dt className="text-muted-foreground">Host</dt><dd className="break-all">{server.host}:{server.ssh_port} ({windows ? 'Windows' : 'Linux'})</dd>
-                <dt className="text-muted-foreground">Service account</dt><dd>{server.ssh_user || 'bosun-svc'}</dd>
-                <dt className="text-muted-foreground">Shell account</dt><dd>{server.shell_user || 'not set up yet'}</dd>
+                <dt className="text-muted-foreground">Admin account</dt><dd>{server.ssh_user || 'bosun-svc'}</dd>
+                <dt className="text-muted-foreground">Non-admin account</dt><dd>{server.shell_user || 'not set up yet'}</dd>
               </dl>
-              <p className="text-xs text-muted-foreground">
-                If this server was added with your own key and login, that login is left untouched: a separate bosun-svc service account is created and used from now on.
-              </p>
+              <div className="space-y-1.5">
+                <Label htmlFor="rp-svc">Admin (service) account name</Label>
+                <Input id="rp-svc" value={serviceAccount} onChange={e => setServiceAccount(e.target.value)} required autoCapitalize="off" autoCorrect="off" spellCheck={false} />
+                <p className="text-xs text-muted-foreground">
+                  Bosun&apos;s privileged account on the host. If this server was added with your own key and login, that login is left untouched
+                  and this account is created instead. Changing the name creates the new account; the old one is not deleted (you are told how).
+                </p>
+              </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label htmlFor="rp-user">Admin username</Label>
@@ -145,11 +157,11 @@ export function ReprovisionDialog({ server, open, onOpenChange, onDone }: { serv
               <div className="space-y-2">
                 <label htmlFor="rp-shell" className="flex items-start gap-2 text-sm font-medium">
                   <input id="rp-shell" type="checkbox" className="mt-1" checked={createShell} onChange={e => setCreateShell(e.target.checked)} />
-                  <span>Create or repair the non-admin shell account</span>
+                  <span>Create or repair the non-admin account</span>
                 </label>
                 {createShell && (
                   <div className="pl-6">
-                    <Input aria-label="Shell account name" value={shellAccount} onChange={e => setShellAccount(e.target.value)} />
+                    <Input aria-label="Non-admin account name" value={shellAccount} onChange={e => setShellAccount(e.target.value)} />
                   </div>
                 )}
               </div>
@@ -160,7 +172,7 @@ export function ReprovisionDialog({ server, open, onOpenChange, onDone }: { serv
             </DialogBody>
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => close(false)} disabled={running}>Cancel</Button>
-              <Button type="submit" disabled={running || !adminUser.trim() || !adminPassword}>{running ? 'Working…' : 'Re-provision'}</Button>
+              <Button type="submit" disabled={running || !adminUser.trim() || !adminPassword || !serviceAccount.trim()}>{running ? 'Working…' : 'Re-provision'}</Button>
             </DialogFooter>
           </form>
         )}
