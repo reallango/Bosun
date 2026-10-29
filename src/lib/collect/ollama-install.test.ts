@@ -68,3 +68,12 @@ describe('Windows line endings', () => {
     expect(o.install).toMatchObject({ kind: 'service', manager: 'nssm', name: 'Ollama', startMode: 'manual' });
   });
 });
+
+describe('nothing installed', () => {
+  it('reports "none" when the install block is empty (Windows prints nothing after the marker)', () => {
+    const o = parseOllama('DOWN\n@@INSTALL');
+    expect(o.status).toBe('stopped');
+    expect(o.install).toEqual({ dockerAvailable: false, kind: 'none' });
+    expect(parseOllama('DOWN\r\n@@INSTALL\r\n').install).toEqual({ dockerAvailable: false, kind: 'none' });
+  });
+});
