@@ -7,8 +7,12 @@ export const MIN_INTERVAL_SEC = 10;
 export const MAX_INTERVAL_SEC = 3600;
 export const DEFAULT_INTERVAL_SEC = 30;
 export const DEFAULT_COMMAND = 'uptime';
-/** `uptime` does not exist in PowerShell, so the untouched default means this on Windows. */
-export const WINDOWS_DEFAULT_COMMAND = "$o = Get-CimInstance Win32_OperatingSystem; 'Up since ' + $o.LastBootUpTime";
+/**
+ * `uptime` does not exist in PowerShell, so the untouched default means this on Windows. It must work for a
+ * standard user: WMI/CIM (Get-CimInstance, Get-WmiObject) is refused to a non-admin remote logon, but
+ * `net statistics workstation` is not. Its first lines name the machine and when it started counting.
+ */
+export const WINDOWS_DEFAULT_COMMAND = "(net statistics workstation | Where-Object { $_.Trim() } | Select-Object -First 2) -join [Environment]::NewLine";
 
 /** How often the command repeats, from the widget's settings, kept within the allowed range. */
 export function intervalOf(cfg: { interval?: unknown } | null | undefined): number {

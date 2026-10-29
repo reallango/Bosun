@@ -33,3 +33,10 @@ describe('combinedOutput', () => {
     expect(combinedOutput('x'.repeat(100), '', 10)).toBe('x'.repeat(10));
   });
 });
+
+describe('the Windows default works for a standard user', () => {
+  it('avoids WMI/CIM, which a non-admin remote logon is refused', () => {
+    expect(WINDOWS_DEFAULT_COMMAND).not.toMatch(/Get-CimInstance|Get-WmiObject|Win32_|Get-Process|WMI/i);
+    expect(WINDOWS_DEFAULT_COMMAND).toContain('net statistics workstation');
+  });
+});

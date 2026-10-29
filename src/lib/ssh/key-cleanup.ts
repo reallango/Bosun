@@ -69,12 +69,12 @@ export function linuxPruneScript(opts: { account: string; label: string; publicK
  * Linux: remove exactly the keys whose blob is in `bodies` (and never the new key), after a backup.
  * Prints BOSUN_REMOVED=<n>; exit 2 when the new key would be missing afterwards (nothing is changed).
  */
-export function linuxRemoveScript(opts: { account: string; publicKey: string; bodies: string[] }): string {
+export function linuxRemoveScript(opts: { account: string; publicKey: string; bodies: string[]; requireKeep?: boolean }): string {
   const list = opts.bodies.filter(b => KEY_BODY_RE.test(b)).join(' ');
   return `ak=/home/${opts.account}/.ssh/authorized_keys; KEEP=${shq(keyBody(opts.publicKey))}; LIST=${shq(list)}; `
     + `[ -f "$ak" ] || { echo BOSUN_REMOVED=0; exit 0; }; tmp=$(mktemp) || exit 1; `
     + `awk -v keep="$KEEP" -v list="$LIST" 'BEGIN { n = split(list, a, " "); for (i = 1; i <= n; i++) rm[a[i]] = 1 } { if (index($0, keep) == 0 && ($2 in rm)) next; print }' "$ak" > "$tmp" || { rm -f "$tmp"; exit 1; }; `
-    + `grep -qF -- "$KEEP" "$tmp" || { rm -f "$tmp"; exit 2; }; `
+    + (opts.requireKeep === false ? "" : `grep -qF -- "$KEEP" "$tmp" || { rm -f "$tmp"; exit 2; }; `)
     + `removed=$(( $(grep -c . "$ak") - $(grep -c . "$tmp") )); `
     + `if [ "$removed" -gt 0 ]; then cp -p "$ak" "$ak.bosun-bak" && cat "$tmp" > "$ak"; fi; rm -f "$tmp"; echo BOSUN_REMOVED=$removed`;
 }

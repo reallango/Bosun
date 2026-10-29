@@ -343,6 +343,9 @@ export async function POST(request: NextRequest) {
         // its record (only the administrator login and the options come from the request), and that
         // record is updated in place.
         const targetServerId: string | null = typeof body.server_id === 'string' && body.server_id ? body.server_id : null;
+        // The service account Bosun created for this server before (its key is labeled <host>-<account>), when the
+        // name is being changed this is where the old key has to be retired from.
+        let previousAccount: string | null = null;
         if (targetServerId) {
             const rec = await rqlite.query('SELECT s.hostname, s.ssh_port, s.platform, s.ssh_user, s.shell_user, k.name FROM servers s LEFT JOIN ssh_keys k ON k.id = s.ssh_key_id WHERE s.id = ?', [targetServerId]);
             const row = rec.values?.[0] as (string | number | null)[] | undefined;
@@ -352,7 +355,10 @@ export async function POST(request: NextRequest) {
             platform = row[2] === 'windows' ? 'windows' : 'linux';
             // Reuse the service account only if Bosun created it (its key is labeled <host>-<account>). A server added
             // with someone's own key and login keeps that login untouched: it gets a proper bosun-svc account instead.
-            if (row[3] && row[5] === `${row[0]}-${row[3]}`) service_account = String(row[3]);
+            // An explicit name in the request (changing the account's name) wins over the record's.
+            const provisioned = !!(row[3] && row[5] === `${row[0]}-${row[3]}`);
+            if (provisioned) previousAccount = String(row[3]);
+            if (provisioned && body.service_account === undefined) service_account = String(row[3]);
             if (body.shell_account === undefined) shell_account = row[4] ? String(row[4]) : DEFAULT_SHELL_ACCOUNT;
         }
 
@@ -511,16 +517,18 @@ export async function POST(request: NextRequest) {
         let previousKeysRemoved = 0;
         if (testSuccess && replace_keys !== false) {
             const newBody = keyBody(publicKey);
+            // The old key lives in the account Bosun used before: a different one when the account is being renamed.
+            const oldFileAccount = previousAccount && previousAccount !== service_account ? previousAccount : service_account;
             const bodies = previousServiceKeys.map(keyBody).filter(b => b && b !== newBody);
             if (bodies.length) {
                 try {
                     const gone = isWindowsHost
                         ? await sshExec(sshConfig, powershellCommand(windowsRemoveScript({ publicKey, bodies })))
-                        : await sshExec(sshConfig, asRootCommand(sshConfig, admin_password, linuxRemoveScript({ account: service_account, publicKey, bodies })));
+                        : await sshExec(sshConfig, asRootCommand(sshConfig, admin_password, linuxRemoveScript({ account: oldFileAccount, publicKey, bodies, requireKeep: oldFileAccount === service_account })));
                     const n = gone.stdout.match(/BOSUN_REMOVED=(\d+)/);
                     if (n) {
                         previousKeysRemoved = Number(n[1]);
-                        if (previousKeysRemoved > 0) steps.push(`Retired the previous Bosun key for ${service_account} on this host (${previousKeysRemoved} removed; it can no longer log in)`);
+                        if (previousKeysRemoved > 0) steps.push(`Retired the previous Bosun key for ${oldFileAccount} on this host (${previousKeysRemoved} removed; it can no longer log in)`);
                     } else {
                         steps.push(`${WARNING}Could not check whether the previous Bosun key was removed (${stripSudo(gone.stderr) || gone.stdout.trim().slice(0, 120) || `exit ${gone.exitCode}`}); it may still be authorized.`);
                     }
@@ -528,6 +536,14 @@ export async function POST(request: NextRequest) {
                     steps.push(`${WARNING}Could not remove the previous Bosun key (${String(err).slice(0, 160)}); it may still be authorized.`);
                 }
             }
+        }
+
+        // Renaming the service account leaves the old account on the host: it is not deleted automatically.
+        if (testSuccess && targetServerId && previousAccount && previousAccount !== service_account) {
+            const how = isWindowsHost
+                ? 'remove it with Remove-LocalUser'
+                : `remove it with userdel -r ${previousAccount} and delete /etc/sudoers.d/bosun-${previousAccount.replace(/[^A-Za-z0-9_-]/g, '_')}`;
+            steps.push(`${WARNING}The old service account "${previousAccount}" still exists on this host (its Bosun key was ${replace_keys !== false ? 'retired' : 'not removed'}). It is not deleted automatically: ${how} if nothing else uses it.`);
         }
 
         // Step 6: A host already added to this Bosun keeps its record; point it at the new key

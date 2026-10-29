@@ -2,14 +2,13 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { KeyRound, Pencil, Plus } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Pencil, Plus } from 'lucide-react';
 import Header from '@/components/layout/Header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
-import { EditServerModal } from '@/components/settings/EditServerModal';
-import { ReprovisionDialog } from '@/components/settings/ReprovisionDialog';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import { cn } from '@/lib/utils';
 import { WakeButton } from '@/components/servers/WakeButton';
@@ -59,11 +58,9 @@ function OnlineStatus({ online, monitored = true }: { online: boolean; monitored
 }
 
 export default function ServersPage() {
+  const router = useRouter();
   const [servers, setServers] = useState<Server[]>([]);
   const [loading, setLoading] = useState(true);
-  const [editModalOpen, setEditModalOpen] = useState(false);
-  const [selectedServer, setSelectedServer] = useState<Server | null>(null);
-  const [reprovision, setReprovision] = useState<Server | null>(null);
 
   const fetchServers = useCallback(async () => {
     try {
@@ -82,10 +79,7 @@ export default function ServersPage() {
     fetchServers();
   }, [fetchServers]);
 
-  const handleEditServer = (server: Server) => {
-    setSelectedServer(server);
-    setEditModalOpen(true);
-  };
+  const handleEditServer = (server: Server) => router.push(`/settings/servers/${server.id}`);
 
   return (
     <>
@@ -128,9 +122,6 @@ export default function ServersPage() {
                         </div>
                       </div>
                       <WakeButton serverId={server.id} serverName={server.name} macAddress={server.mac_address || server.mac_address_alt || null} iconOnly />
-                      <Button variant="outline" size="icon-lg" onClick={() => setReprovision(server)} aria-label={`Re-provision ${server.name}`} title="Re-provision / rotate keys">
-                        <KeyRound />
-                      </Button>
                       <Button variant="outline" size="icon-lg" onClick={() => handleEditServer(server)} aria-label={`Edit ${server.name}`}>
                         <Pencil />
                       </Button>
@@ -174,10 +165,6 @@ export default function ServersPage() {
                           <TableCell className="text-right">
                             <div className="flex justify-end gap-2">
                             <WakeButton serverId={server.id} serverName={server.name} macAddress={server.mac_address || server.mac_address_alt || null} />
-                            <Button variant="outline" size="sm" onClick={() => setReprovision(server)} title="Set this host up again with fresh keys, or rotate keys">
-                              <KeyRound />
-                              Re-provision
-                            </Button>
                             <Button variant="outline" size="sm" onClick={() => handleEditServer(server)}>
                               <Pencil />
                               Edit
@@ -194,13 +181,6 @@ export default function ServersPage() {
           </CardContent>
         </Card>
       </div>
-      <ReprovisionDialog server={reprovision} open={!!reprovision} onOpenChange={o => { if (!o) setReprovision(null); }} onDone={fetchServers} />
-      <EditServerModal
-        isOpen={editModalOpen}
-        onClose={() => setEditModalOpen(false)}
-        server={selectedServer}
-        onSave={fetchServers}
-      />
     </>
   );
 }
