@@ -17,8 +17,8 @@ Rules the manifest is checked against (a package that fails is listed as "skippe
   `supports_linux`, `supports_windows`, `config_schema`). An optional `spec` object holds the declarative
   definition interpreted by the widget runtime.
 - `permissions` lists the permissions the package adds. Ids must start with `<package id>.`, and a package may
-  not imply a built-in high-risk permission.
-- A package cannot use the id or widget type of a System widget (the widgets built in to Bosun).
+  not imply a built-in high-risk permission. `defaultLevel` is `viewer` (everybody, including Read only), `operator` or `admin`.
+- A package cannot use the id or widget type of a System widget (only the SSH Terminal is one now).
 - Folders starting with `_` are ignored (templates).
 
 A package can also be exported from Settings → Widgets as a zip and imported on another Bosun
@@ -77,3 +77,42 @@ Rules that keep a package from becoming a way to run arbitrary commands:
 Each action is also an API endpoint, `POST /api/servers/:serverId/widget-actions/:widgetType/:actionId`, with
 `{ "params": {...}, "confirm": true }`, and the data is at `GET /api/servers/:serverId/widget-data/:widgetType`.
 `GET /api/openapi.json` describes all of them for the packages that are installed.
+
+## Packages installed by default
+
+`bundled.json` lists the package ids that every Bosun image installs on start (Docker Containers, Disk Usage,
+System Services, Network, OS Info, CPU/Memory, GPU Monitoring, Server Summary, Metrics History, Ollama Status,
+OS Update Check and Custom Command). They are ordinary packages: an admin can remove them (a removed one is not
+brought back at the next start, only by installing it again) and upgrade them from GitHub. A newer bundled
+version replaces an older one that came from the image; a package the admin installed from GitHub or a zip is
+left alone. Every bundled widget has a `<id>.view` data permission at the `viewer` level, so Read only users keep
+their dashboards unless a group denies it.
+
+Ollama Status, OS Update Check and Custom Command have views that are compiled into Bosun (long running pulls,
+installs and live commands); their packages carry the permissions, size, settings and tracked statistics, and the
+`spec` only names the data permission.
+
+## More of the spec
+
+```jsonc
+"spec": {
+  "data": {
+    "source": "snapshot", "section": "services",
+    "also": ["metrics"],             // read more sections: the data becomes { services: ..., metrics: ... }
+    "server": true,                   // ... and add the server's own details as "server"
+    "filter": [{ "field": "status", "config": "filter", "all": "all", "default": "running" }],
+    "unavailable": { "when": { "field": "available", "equals": false }, "message": "Docker is not available: {error}" }
+  },
+  "metrics": [                        // statistics tracked as history, with their own retention
+    { "name": "cpu.usage", "label": "CPU usage", "unit": "%", "rawHours": 72, "rollup5mDays": 60, "rollup1hDays": 730 },
+    { "name": "mypkg.running", "from": { "agg": "count", "where": { "field": "state", "equals": "running" } } }
+  ],
+  "view": { "type": "fields", "fields": [{ "label": "CPU", "value": "{cpu.usagePercent}", "format": "percent", "bar": "{cpu.usagePercent}" }] }
+}
+```
+
+- `data.filter` keeps the rows whose `field` equals the widget setting `config` (a key of the widget's `config_schema`).
+- `data.unavailable` shows a message instead of rows when the collected data matches (for example Docker is not installed).
+- `data.also` and `data.server` combine several sections and the server row; templates reach them by name (`{system.prettyName}`, `{server.name}`, `{metrics.cpu.usage}`). The `metrics` section holds the latest value of every tracked number.
+- `metrics` lists the statistics the widget tracks. A name the built-in collectors produce (`cpu.usage`, `mem.used_pct`, `net.rx_bps`, `disk.root_used_pct`, `gpu*.util`, ...) only sets how long its history is kept. A name that starts with the package id and has `from` is computed from the widget's data on every collection (`count`, `sum`, `avg`, `min`, `max` or `first`, optionally over the rows matching `where`). `rawHours` (up to 2160), `rollup5mDays` (up to 365) and `rollup1hDays` (up to 3650) override the global retention; when several widgets name one metric the longest wins. Computed metrics are recorded for the servers that have the widget on a dashboard.
+- View types: `list`, `table` (columns may use `bar`, `mb`, `duration`, `temp` formats), `fields` (labelled values, optional gauges), `text`, and `chart` (history lines of `chart.metrics`). List rows can carry `fields` too.
