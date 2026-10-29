@@ -59,6 +59,7 @@ const TIERS = {
     { name: 'fast', probes: ['stat', 'mem', 'netdev', 'gpu'], periodMs: 0 },
     { name: 'medium', probes: ['df', 'docker', 'ollama'], periodMs: 2 * 60 * 1000 },
     { name: 'slow', probes: ['ip', 'services', 'system'], periodMs: 15 * 60 * 1000 },
+    { name: 'updates', probes: ['updates'], periodMs: 6 * 3600 * 1000, initialDelayMs: 5 * 60 * 1000 },
   ],
 };
 
@@ -236,6 +237,28 @@ class HostAgent {
     return probes;
   }
 
+  /**
+   * Windows Update search, in the background on the open connection. A failure is
+   * logged and leaves the last stored result alone; it never touches polling or
+   * the host's online status.
+   */
+  checkWindowsUpdates(client) {
+    if (this.updatesRunning) return;
+    this.updatesRunning = true;
+    (async () => {
+      const r = await ssh.exec(client, windows.buildCommand(['updates']), { timeoutMs: 10 * 60 * 1000 });
+      if (r.timedOut) throw new Error(`timed out after ${Math.round(r.durationMs / 1000)} s`);
+      const raw = windows.splitSections(r.stdout);
+      if (raw.updates === undefined) throw new Error(`no output (exit ${r.exitCode}): ${(r.stderr || '').trim().slice(0, 200)}`);
+      const snap = windows.buildSnapshot({ updates: raw.updates }, null, Date.now());
+      await executeBatch(store.buildPollStatements(this.id, snap, Date.now(), this.hashes));
+      const u = snap.sections.updates;
+      log(`${this.row.name}: Windows Update check done (${u.updatesAvailable} pending${u.error ? `, error: ${u.error}` : ''})`);
+    })()
+      .catch(err => warn(`${this.row.name}: Windows Update check failed: ${err.message}`))
+      .finally(() => { this.updatesRunning = false; });
+  }
+
   async poll({ forceAll = false, forceUpdates = false } = {}) {
     this.busy = true;
     const started = Date.now();
@@ -243,7 +266,11 @@ class HostAgent {
     try {
       const client = await this.ensureConnected();
       // First poll after (re)connecting collects everything so widgets fill in.
-      const probes = this.dueProbes(started, forceAll || this.polls === 0, forceUpdates);
+      const dueProbes = this.dueProbes(started, forceAll || this.polls === 0, forceUpdates);
+      // A Windows Update search takes 15 s to several minutes. It gets its own exec after
+      // this poll (checkWindowsUpdates) so it can never delay or fail the regular probes.
+      const windowsUpdates = this.platform === 'windows' && dueProbes.includes('updates');
+      const probes = windowsUpdates ? dueProbes.filter(p => p !== 'updates') : dueProbes;
       const cmd = lib.buildCommand(probes);
       const r = await ssh.exec(client, cmd, {
         stdin: this.platform === 'windows' ? undefined : linux.SCRIPT,
@@ -281,6 +308,7 @@ class HostAgent {
       this.polls++;
       this.lastDurationMs = Date.now() - started;
       this.nextDue = started + this.intervalMs;
+      if (windowsUpdates) this.checkWindowsUpdates(client);
     } catch (err) {
       this.failures++;
       this.lastError = err.message;

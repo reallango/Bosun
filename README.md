@@ -155,6 +155,23 @@ Bosun runs PowerShell over the host's OpenSSH server, the same way
 A Windows poll starts a PowerShell process. The fast tier takes well under a second
 of CPU, but it is costlier than the Linux script, so Windows hosts poll every 30 s by default.
 
+**OS updates.** The *OS Update Check* widget works on Windows hosts.
+
+- *Checking* uses the Windows Update Agent API (software updates; drivers are not listed),
+  every 6 hours and on demand from the widget's **Check for updates**. A scan takes 15 s to
+  several minutes, so it runs as its own background command and can never delay a poll or
+  make the host look offline. If the scan fails, the widget says so and shows the reason
+  instead of "System up to date". Updates Microsoft rates, or files under *Security Updates*,
+  count as security updates.
+- *Installing* needs *Read + actions* access. Windows refuses to download or install updates
+  for a remote session, and SSH counts as one, so Bosun runs the install as a one-off
+  scheduled task under SYSTEM (`BosunWindowsUpdate`, script and result in
+  `%ProgramData%\Bosun`) and follows its progress in the widget. It runs in the background,
+  keeps going if you close the dashboard, and the host is **not** restarted automatically:
+  the result says when a restart is needed (use **Restart** in the server's power menu).
+  The service account must be an administrator, which *Provision* sets up. Each install
+  request is audited as `server.updates_install`.
+
 ### Wake-on-LAN
 
 Use **Wake** on the servers list, the server's edit page or its dashboard toolbar.
