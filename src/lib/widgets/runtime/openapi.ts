@@ -89,7 +89,8 @@ export function buildOpenApi(widgets: OpenApiWidget[], serverUrl = '/'): Json {
         ...(dataPerm ? { 'x-bosun-permission': dataPerm } : {}),
       },
     };
-    for (const a of w.spec.actions) {
+    // Terminal actions open the web terminal in the browser; there is nothing to call. (API terminals are listed above.)
+    for (const a of w.spec.actions.filter(x => x.kind !== 'terminal')) {
       const names = Object.keys(a.params);
       const props: Json = { ...(names.length ? { params: { type: 'object', required: names, additionalProperties: false, properties: Object.fromEntries(names.map(n => [n, paramSchema(a.params[n])])) } } : {}) };
       if (a.confirm) props.confirm = { type: 'boolean', enum: [true], description: 'Must be true: this action asks for confirmation in the widget' };

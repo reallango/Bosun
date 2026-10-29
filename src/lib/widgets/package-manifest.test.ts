@@ -158,8 +158,11 @@ describe('packages shipped in the repository', () => {
     const r = validateManifest(raw);
     if (!r.ok) throw new Error(r.error);
     const spec = r.value.widgets[0].spec!;
-    expect(spec.actions.map(a => a.id).sort()).toEqual(['logs', 'restart', 'start', 'stop']);
-    expect(spec.view.row?.actions).toEqual(['logs', 'restart', 'stop', 'start']);
+    expect(spec.actions.map(a => a.id).sort()).toEqual(['logs', 'restart', 'shell', 'start', 'stop']);
+    // The shell button opens the web terminal in the container; it runs no command.
+    const shell = spec.actions.find(a => a.id === 'shell')!;
+    expect(shell).toMatchObject({ kind: 'terminal', terminal: { container: 'name' }, permission: 'docker_package.shell', command: '' });
+    expect(spec.view.row?.actions).toEqual(['logs', 'shell', 'restart', 'stop', 'start']);
     expect(spec.view.filter?.fields).toEqual(['name', 'image']);
     expect(spec.view.toggles?.[0].key).toBe('stopped');
   });

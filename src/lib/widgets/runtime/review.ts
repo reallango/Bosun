@@ -10,7 +10,8 @@ export interface ReviewCommand {
   what: string;
   actionId?: string;
   permission?: string;
-  as: 'service' | 'shell';
+  /** `terminal`: opens the web terminal (the person types their own login there). */
+  as: 'service' | 'shell' | 'terminal';
   command: string;
   windowsCommand?: string;
   confirm: boolean;
@@ -32,6 +33,10 @@ export function reviewPackage(m: PackageManifest): PackageReview {
       commands.push({ what: 'data (runs when the widget refreshes)', as: spec.data.as, command: spec.data.command, ...(spec.data.windowsCommand ? { windowsCommand: spec.data.windowsCommand } : {}), confirm: false, ...(spec.data.permission ? { permission: spec.data.permission } : {}) });
     }
     for (const a of spec?.actions ?? []) {
+      if (a.kind === 'terminal') {
+        commands.push({ what: a.label, actionId: a.id, permission: a.permission, as: 'terminal', command: `Interactive shell in a container (web terminal: asks for your own login, Full access only)`, confirm: false });
+        continue;
+      }
       commands.push({ what: a.label, actionId: a.id, permission: a.permission, as: a.as, command: a.command, ...(a.windowsCommand ? { windowsCommand: a.windowsCommand } : {}), confirm: !!a.confirm });
     }
     return { type: w.type, name: String(w.columns.display_name ?? w.type), dataSource: spec ? spec.data.source : null, commands };

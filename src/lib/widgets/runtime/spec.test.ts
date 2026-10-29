@@ -220,3 +220,45 @@ describe('parameter defaults', () => {
     expect(bad(s => { s.actions[1].params.name = { type: 'boolean', default: 'yes' }; }).ok).toBe(false);
   });
 });
+
+describe('terminal actions', () => {
+  const withShell = (extra: Record<string, unknown> = {}) => {
+    const s = dockerLike();
+    s.actions.push({ id: 'shell', label: 'Shell', icon: 'terminal-square', permission: 'dk.logs', terminal: { container: 'name' }, ...extra });
+    s.view.row.actions = ['logs', 'shell'];
+    return validateWidgetSpec(s, PERMS);
+  };
+
+  it('is accepted, runs nothing, and needs a package permission', () => {
+    const r = withShell({ when: { field: 'state', equals: 'running' } });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      const a = r.value.actions.find(x => x.id === 'shell')!;
+      expect(a).toMatchObject({ kind: 'terminal', terminal: { container: 'name' }, command: '', params: {} });
+      expect(r.value.actions.find(x => x.id === 'logs')?.kind).toBe('command');
+    }
+    expect(withShell({ permission: 'power.restart' }).ok).toBe(false);
+  });
+
+  it('cannot also carry a command or parameters, and needs a valid container field', () => {
+    expect(withShell({ command: 'docker exec -it {{name}} sh', params: { name: { type: 'string', values: ['a'] } } }).ok).toBe(false);
+    expect(withShell({ windowsCommand: 'x' }).ok).toBe(false);
+    expect(withShell({ terminal: {} }).ok).toBe(false);
+    expect(withShell({ terminal: { container: 'a b; id' } }).ok).toBe(false);
+  });
+
+  it('survives being stored and validated again (the normalised form)', () => {
+    const first = withShell();
+    if (!first.ok) throw new Error(first.error);
+    const again = validateWidgetSpec(JSON.parse(JSON.stringify(first.value)), PERMS);
+    expect(again.ok).toBe(true);
+  });
+
+  it('is described to the browser without a command, and is not offered as an API operation', () => {
+    const r = withShell();
+    if (!r.ok) throw new Error(r.error);
+    const pub = publicSpec(r.value);
+    expect(pub.actions.find(a => a.id === 'shell')).toMatchObject({ kind: 'terminal', terminal: { container: 'name' } });
+    expect(JSON.stringify(pub)).not.toMatch(/"command":|"as":/);
+  });
+});

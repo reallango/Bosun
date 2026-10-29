@@ -72,6 +72,7 @@ Rules that keep a package from becoming a way to run arbitrary commands:
   `pattern` or a fixed list of `values`; a number needs `min` and `max`. Values are validated, then inserted as one quoted word.
 - `as` is explicit on every command. `shell` is the non-admin account (no sudo, no Docker).
 - Installing shows the admin every command, the account and the permissions, and asks for confirmation.
+- **Terminal actions** (`"terminal": { "container": "<row field>" }`, no command or parameters) add a shell button that opens the web  terminal in a container, like the built-in Docker widget. The terminal asks for the person's own login and is only available to  Full access users, in addition to the permission the action names. It is not an API operation; scripted access is the API  terminal (`POST /api/servers/:id/terminal`, `docker.shell`).
 
 Each action is also an API endpoint, `POST /api/servers/:serverId/widget-actions/:widgetType/:actionId`, with
 `{ "params": {...}, "confirm": true }`, and the data is at `GET /api/servers/:serverId/widget-data/:widgetType`.

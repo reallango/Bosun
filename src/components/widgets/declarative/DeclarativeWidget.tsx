@@ -2,6 +2,7 @@
 
 import { forwardRef, useEffect, useMemo, useState } from 'react';
 import { Dialog } from 'radix-ui';
+import dynamic from 'next/dynamic';
 import {
   Download, Info, Loader2, Pause, Play, Power, RefreshCw, RotateCw, ScrollText, Search, Square, TerminalSquare, Trash2, Upload, X,
 } from 'lucide-react';
@@ -13,6 +14,16 @@ import { WidgetLoading } from '@/components/widgets/WidgetLoading';
 import { WidgetError } from '@/components/widgets/WidgetError';
 import { ConfirmActionDialog, apiAction } from '@/components/widgets/shared/ConfirmActionDialog';
 import { evalCond, fillTemplate, getPath, type ActionSpec, type ViewSpec, type ParamSpec } from '@/lib/widgets/runtime/spec';
+import { hasRole } from '@/lib/auth/levels';
+
+// The terminal (xterm) loads only when a container shell is opened.
+const SSHTerminalWidget = dynamic(
+  () => import('@/components/widgets/ssh-terminal').then(m => m.SSHTerminalWidget),
+  { ssr: false, loading: () => <WidgetLoading /> },
+);
+
+/** Container names the terminal accepts (the same rule the server applies). */
+const CONTAINER_REF_RE = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
 
 /** What the browser gets from /api/widget-runtime/:type (no commands). */
 type PublicAction = Omit<ActionSpec, 'command' | 'windowsCommand' | 'as' | 'timeoutSec'>;
@@ -67,7 +78,8 @@ interface Props {
  */
 export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
   const { data, isLoading, error, refresh } = useWidgetData(widgetId, 15);
-  const { can } = useAuth();
+  const { user, can } = useAuth();
+  const [shellFor, setShellFor] = useState<string | null>(null);
   const [spec, setSpec] = useState<PublicSpec | null>(null);
   const [specError, setSpecError] = useState<string | null>(null);
   const [query, setQuery] = useState('');
@@ -132,12 +144,18 @@ export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
   };
 
   const start = (action: PublicAction, row: Row | null) => {
+    if (action.kind === 'terminal') {
+      const ref = action.terminal ? String(getPath(row, action.terminal.container) ?? '') : '';
+      if (CONTAINER_REF_RE.test(ref)) setShellFor(ref); else setNotice(`${action.label}: this row has no usable container name`);
+      return;
+    }
     if (action.confirm) setPending({ action, row });
     else run(action, row).catch(err => setNotice(`${action.label} failed: ${err instanceof Error ? err.message : String(err)}`));
   };
 
   const rowButtons = (row: Row, ids: string[]) => ids.map(id => actionsById.get(id)).filter((a): a is PublicAction => !!a)
-    .filter(a => can(a.permission, serverId) && (!a.when || evalCond(a.when, row)))
+    // A web terminal asks for the person's own login and is only available to Full access; the action's permission still applies.
+    .filter(a => can(a.permission, serverId) && (a.kind !== 'terminal' || hasRole(user?.role, 'admin')) && (!a.when || evalCond(a.when, row)))
     .map(a => {
       const Icon = (a.icon && ICONS[a.icon]) || Info;
       const label = `${a.label}${view.type === 'list' && view.row ? ` ${fillTemplate(view.row.title, row)}` : ''}`;
@@ -236,6 +254,22 @@ export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
         destructive={!!pending?.action.confirm?.destructive}
         onConfirm={() => (pending ? run(pending.action, pending.row) : undefined)}
       />
+
+      <Dialog.Root open={!!shellFor} onOpenChange={o => { if (!o) setShellFor(null); }}>
+        <Dialog.Portal>
+          <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
+          <Dialog.Content className="fixed inset-0 z-50 flex flex-col bg-white p-2 shadow-xl dark:bg-gray-900 sm:inset-6 sm:rounded-xl sm:border sm:border-gray-700 lg:inset-x-[8%]">
+            <div className="mb-2 flex items-center justify-between gap-2 px-1">
+              <Dialog.Title className="truncate font-semibold">Shell: {shellFor}</Dialog.Title>
+              <Dialog.Description className="sr-only">Interactive docker exec session</Dialog.Description>
+              <Dialog.Close asChild><IconBtn label="Close shell"><X /></IconBtn></Dialog.Close>
+            </div>
+            <div className="min-h-0 flex-1">
+              {shellFor && <SSHTerminalWidget widgetId={`${widgetId}:exec:${shellFor}`} serverId={serverId} containerId={shellFor} />}
+            </div>
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
 
       <Dialog.Root open={!!output} onOpenChange={o => { if (!o) setOutput(null); }}>
         <Dialog.Portal>

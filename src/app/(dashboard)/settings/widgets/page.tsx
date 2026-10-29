@@ -37,7 +37,7 @@ interface AvailableItem {
 }
 
 interface PackageReview {
-  widgets: { type: string; name: string; commands: { what: string; as: 'service' | 'shell'; command: string; windowsCommand?: string; permission?: string; confirm: boolean }[] }[];
+  widgets: { type: string; name: string; commands: { what: string; as: 'service' | 'shell' | 'terminal'; command: string; windowsCommand?: string; permission?: string; confirm: boolean }[] }[];
   permissions: { id: string; label: string; risk: string; defaultLevel: string }[];
   runsAsService: boolean;
   commandCount: number;
@@ -273,7 +273,7 @@ export default function WidgetPackagesPage() {
                       <div className="flex flex-wrap items-center gap-2 text-xs">
                         <span className="font-medium">{c.what}</span>
                         <span className={`rounded px-1 uppercase ${c.as === 'service' ? 'bg-amber-500/20 text-amber-700 dark:text-amber-400' : 'bg-muted text-muted-foreground'}`}>
-                          {c.as === 'service' ? 'service account' : 'non-admin account'}
+                          {c.as === 'service' ? 'service account' : c.as === 'terminal' ? 'web terminal' : 'non-admin account'}
                         </span>
                         {c.permission && <span className="text-muted-foreground">needs <code>{c.permission}</code></span>}
                         {c.confirm && <span className="text-muted-foreground">asks to confirm</span>}

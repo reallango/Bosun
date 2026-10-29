@@ -49,6 +49,10 @@ export interface ActionSpec {
   description?: string;
   icon?: (typeof ICONS)[number];
   permission: string;
+  /** `command` runs a command on the host; `terminal` opens the web terminal in a container (see `terminal`). */
+  kind: 'command' | 'terminal';
+  /** Terminal actions only: the row field that holds the container name. */
+  terminal?: { container: string };
   as: RunAs;
   command: string;
   windowsCommand?: string;
@@ -245,6 +249,33 @@ function validateAction(raw: unknown, ownPerms: ReadonlySet<string>): Validated<
   if (description === null) return fail(`${where}: description is too long`);
   if (raw.icon !== undefined && !(ICONS as readonly string[]).includes(String(raw.icon))) return fail(`${where}: unknown icon (use one of: ${ICONS.join(', ')})`);
   if (typeof raw.permission !== 'string' || !ownPerms.has(raw.permission)) return fail(`${where}: "permission" must be a permission this package declares`);
+
+  // A terminal action opens the web terminal in a container. It runs nothing itself: the person types their
+  // own login there, and only Full access users get a web terminal at all. (API access to a container shell is
+  // the separate API terminal, granted with its own permission.)
+  if (raw.terminal !== undefined) {
+    if (!isObj(raw.terminal) || typeof raw.terminal.container !== 'string' || !FIELD_RE.test(raw.terminal.container)) {
+      return fail(`${where}: "terminal" needs "container": the row field that holds the container name`);
+    }
+    const hasCommand = (typeof raw.command === 'string' && raw.command !== '') || raw.windowsCommand !== undefined
+      || (isObj(raw.params) && Object.keys(raw.params).length > 0);
+    if (hasCommand) return fail(`${where}: a terminal action opens the web terminal and cannot also have a command or parameters`);
+    let when: Cond | undefined;
+    if (raw.when !== undefined) {
+      const c = cond(raw.when, `${where} "when"`);
+      if (!c.ok) return c;
+      when = c.value;
+    }
+    return {
+      ok: true,
+      value: {
+        id, label, ...(description ? { description } : {}), ...(raw.icon ? { icon: raw.icon as ActionSpec['icon'] } : {}), permission: raw.permission,
+        kind: 'terminal', terminal: { container: raw.terminal.container }, as: 'service', command: '', params: {}, timeoutSec: 30,
+        ...(when ? { when } : {}), result: 'none', after: 'none',
+      },
+    };
+  }
+
   if (raw.as !== 'service' && raw.as !== 'shell') return fail(`${where}: "as" must be "service" (the privileged account) or "shell" (the non-admin account)`);
 
   const params: Record<string, ParamSpec> = {};
@@ -287,7 +318,7 @@ function validateAction(raw: unknown, ownPerms: ReadonlySet<string>): Validated<
   return {
     ok: true,
     value: {
-      id, label, ...(description ? { description } : {}), ...(raw.icon ? { icon: raw.icon as ActionSpec['icon'] } : {}), permission: raw.permission, as: raw.as,
+      id, label, ...(description ? { description } : {}), ...(raw.icon ? { icon: raw.icon as ActionSpec['icon'] } : {}), permission: raw.permission, kind: 'command', as: raw.as,
       command: command.value, ...(windowsCommand ? { windowsCommand } : {}), params, timeoutSec, ...(when ? { when } : {}), ...(confirm ? { confirm } : {}), result, after,
     },
   };
