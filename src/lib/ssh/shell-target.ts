@@ -3,10 +3,14 @@ import { rqlite } from '@/lib/db/rqlite-client';
 import { decrypt } from '@/lib/crypto/keys';
 import { sshPool, type SSHConnectionConfig } from '@/lib/ssh/connection-pool';
 import { SHELL_VERIFY_COMMAND, parseShellVerification } from '@/lib/ssh/shell-account';
+import { WINDOWS_SHELL_VERIFY_COMMAND, parseWindowsShellVerification } from '@/lib/ssh/windows-shell-account';
+import { powershellCommand, cleanPowerShellOutput } from '@/lib/collect/windows';
+import type { CommandResult, ExecOptions } from '@/lib/ssh/connection-pool';
 
 export interface ShellTarget {
   id: string;
   name: string;
+  platform: 'linux' | 'windows';
   config: SSHConnectionConfig;
 }
 
@@ -32,12 +36,12 @@ export async function loadShellTarget(serverId: string): Promise<ShellTarget> {
   const row = r.values?.[0];
   if (!row) throw Object.assign(new Error('Server not found'), { status: 404 });
   const [id, name, hostname, port, platform, shellUser, keyEnc, passEnc] = row as (string | number | null)[];
-  if (platform === 'windows') throw new ShellUnavailableError('The non-admin shell account is not available on Windows hosts');
   if (!shellUser || !keyEnc) throw new ShellUnavailableError('This server has no non-admin shell account. Provision it again (Add Server) to create one.');
   const masterKey = getMasterKey();
   return {
     id: String(id),
     name: String(name),
+    platform: platform === 'windows' ? 'windows' : 'linux',
     config: {
       host: String(hostname),
       port: Number(port) || 22,
@@ -63,14 +67,27 @@ export async function assertShellAccountSafe(target: ShellTarget): Promise<void>
   verifiedAt.delete(key);
   let stdout = '';
   try {
-    stdout = (await sshPool.executeCommand(target.id, target.config, SHELL_VERIFY_COMMAND, { timeoutMs: 15_000 })).stdout;
+    const command = target.platform === 'windows' ? powershellCommand(WINDOWS_SHELL_VERIFY_COMMAND) : SHELL_VERIFY_COMMAND;
+    stdout = (await sshPool.executeCommand(target.id, target.config, command, { timeoutMs: target.platform === 'windows' ? 30_000 : 15_000 })).stdout;
   } catch (err) {
     throw new ShellUnavailableError(`Could not log in as the shell account: ${String(err).slice(0, 160)}`, 502, 'SHELL_LOGIN_FAILED');
   }
-  const v = parseShellVerification(stdout, target.config.username);
+  const v = target.platform === 'windows'
+    ? parseWindowsShellVerification(stdout, target.config.username)
+    : parseShellVerification(stdout, target.config.username);
   if (!v.ok) {
     await sshPool.drainServer(target.id);
     throw new ShellUnavailableError(`The shell account is not safe to use: ${v.problems.join('; ')}`, 409, 'SHELL_ACCOUNT_UNSAFE');
   }
   verifiedAt.set(key, Date.now());
+}
+
+/**
+ * Run a command as the shell account. On Windows `command` is a PowerShell script (wrapped
+ * for exec); on Linux a POSIX shell command. Output is cleaned of PowerShell's XML wrapper.
+ */
+export async function runOnShellTarget(target: ShellTarget, command: string, opts: ExecOptions = {}): Promise<CommandResult> {
+  const wrapped = target.platform === 'windows' ? powershellCommand(command) : command;
+  const r = await sshPool.executeCommand(target.id, target.config, wrapped, opts);
+  return target.platform === 'windows' ? { ...r, stdout: cleanPowerShellOutput(r.stdout), stderr: cleanPowerShellOutput(r.stderr) } : r;
 }

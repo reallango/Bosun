@@ -86,7 +86,7 @@ export const CATALOG: readonly PermissionDef[] = [
 
   // ---- Commands ----------------------------------------------------------
   { id: 'commands.run', label: 'Run commands', group: 'Commands', source: 'widget:custom_command', defaultLevel: 'admin', risk: 'high', scope: 'server',
-    description: 'Run an arbitrary command on the host as the service account (the Custom Command widget).' },
+    description: 'Run an arbitrary command on the host as the service account through the API, and set the command of a Custom Command widget (which runs as the non-admin account).' },
 
   // ---- Dashboards --------------------------------------------------------
   { id: 'dashboards.edit', label: 'Edit dashboards', group: 'Dashboards', source: 'core', defaultLevel: 'operator', risk: 'low', scope: 'global',

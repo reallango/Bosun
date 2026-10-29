@@ -44,7 +44,7 @@ if (-not (Test-Path $ak)) {
       if ($t -ne '' -and -not $t.Contains($body)) {
         $last = ($t -split '\\s+')[-1]
         if ($last -ceq $label) { $removed++; continue }
-        if ($last.EndsWith($suffix, [System.StringComparison]::Ordinal)) { $lookalike++ }
+        if ($last.EndsWith($suffix, [System.StringComparison]::Ordinal)) { $lookalike++; Write-Output ('BOSUN_CAND ' + ($t -split '\\s+')[1] + ' ' + $last) }
       }
       $keep.Add($l)
     }

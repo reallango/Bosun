@@ -29,7 +29,7 @@ try {
   $session = New-Object -ComObject Microsoft.Update.Session
   $found = $session.CreateUpdateSearcher().Search("IsInstalled=0 and IsHidden=0 and Type='Software'")
   if ($found.Updates.Count -eq 0) {
-    Save @{ state = 'done'; started = $started; finished = (Now); total = 0; installed = 0; failed = 0; rebootRequired = [bool](New-Object -ComObject Microsoft.Update.SystemInfo).RebootRequired }
+    Save @{ state = 'done'; started = $started; finished = (Now); total = 0; installed = 0; failed = 0; rebootRequired = [bool]((Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired') -or (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending')) }
     return
   }
   $all = New-Object -ComObject Microsoft.Update.UpdateColl

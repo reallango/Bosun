@@ -46,7 +46,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const row = r.values?.[0];
     if (!row) return fail('Server not found', 404);
     const [platform, shellUser, shellKeyId, sshKeyId] = row as (string | null)[];
-    if (platform === 'windows') return fail('API terminals are not available on Windows hosts yet', 409, 'SHELL_UNAVAILABLE');
+    if (platform === 'windows' && target === 'container') return fail('Container shells are not available on Windows hosts', 409, 'SHELL_UNAVAILABLE');
     if (target === 'host' && !(shellUser && shellKeyId)) return fail('This server has no non-admin shell account. Provision it again (Add Server) to create one.', 409, 'SHELL_UNAVAILABLE');
     if (target === 'container' && !sshKeyId) return fail('No SSH key assigned to this server', 409, 'SHELL_UNAVAILABLE');
 

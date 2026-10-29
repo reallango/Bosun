@@ -4,7 +4,7 @@ import { rqlite } from '@/lib/db/rqlite-client';
 import { decrypt } from '@/lib/crypto/keys';
 // Shared CommonJS helpers (also used by poller.js / ws-server.js).
 import * as sshHelpers from '@/lib/collect/ssh';
-import { powershellCommand } from '@/lib/collect/windows';
+import { powershellCommand, cleanPowerShellOutput } from '@/lib/collect/windows';
 
 export interface SSHConnectionConfig {
   host: string;
@@ -187,5 +187,8 @@ export async function runOnServerId(serverId: string, command: string, opts: Exe
   const t = await loadServerTarget(serverId);
   const cmd = t.platform === 'windows' ? powershellCommand(command) : command;
   const r = await sshPool.executeCommand(t.id, t.config, cmd, opts);
-  return { ...r, platform: t.platform };
+  // PowerShell wraps its error and progress streams in CLIXML; show the plain text instead.
+  return t.platform === 'windows'
+    ? { ...r, stdout: cleanPowerShellOutput(r.stdout), stderr: cleanPowerShellOutput(r.stderr), platform: t.platform }
+    : { ...r, platform: t.platform };
 }

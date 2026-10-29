@@ -380,7 +380,17 @@ if it is ever found to have admin rights, API access is refused.
   `docker exec` and ends with it; containers that could reach the host (privileged, host
   PID/IPC, Docker socket or sensitive host mounts, dangerous capabilities, devices) are refused.
 - Neither path can reach the admin account: there is no admin shell, no fallback, and no
-  stored admin key or password is ever handed to a session. Windows hosts are not supported yet.
+  stored admin key or password is ever handed to a session.
+- **Windows hosts** get the same non-admin account (`bosun-user`): a standard local user with a random password nobody
+  knows, a real profile holding its own key, hidden from the login screen, and no forwarding in `sshd_config`. Bosun logs
+  in as it and checks that it is not an administrator, not elevated, cannot write to the Windows folder and cannot read the
+  administrators' authorized keys before enabling it, and again on every use. The host target of an API terminal opens
+  PowerShell as that account. Container shells are Linux-only.
+- **Custom Command widget:** runs its one saved command as that non-admin account (never the service account), repeated at the
+  interval set in the widget settings (10-3600 s). There is no box for typing commands; ad-hoc commands are an API feature.
+- **Leftover keys:** when a host still has keys that look like an earlier Bosun's but are not labeled for it, Add Server
+  lists them and lets you choose which to remove (none are pre-selected). Keys labeled exactly for the host are still replaced
+  automatically, and every removal keeps a `.bosun-bak` backup and is undone if the new key would be lost.
 - Limits are settings (Settings → Database): token lifetime (default 60 s, used once to open the
   WebSocket), maximum session length (60 min), idle timeout (10 min) and open terminals per API key (3).
   Values are clamped to sane ranges, so a bad value cannot switch a limit off.

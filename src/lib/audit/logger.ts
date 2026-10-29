@@ -66,6 +66,7 @@ export const AuditActions = {
   API_KEY_DELETE: 'api_key.delete',
   SERVER_EXEC: 'server.exec',
   SERVER_SHELL_EXEC: 'server.shell_exec',
+  SERVER_PROVISION_KEYS: 'server.provision_keys',
   TERMINAL_API_TOKEN: 'terminal.api_token',
   TERMINAL_API_OPEN: 'terminal.api_open',
   TERMINAL_API_CLOSE: 'terminal.api_close',

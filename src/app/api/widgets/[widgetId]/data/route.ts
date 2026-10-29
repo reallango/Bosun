@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { requireAuth } from '@/lib/auth/middleware';
 import { hasPermission, requirePermission } from '@/lib/permissions/authorize';
+import { loadShellTarget, assertShellAccountSafe, runOnShellTarget } from '@/lib/ssh/shell-target';
+import { intervalOf, effectiveCommand, combinedOutput } from '@/lib/widgets/custom-command';
 import { runOnServerId } from '@/lib/ssh/connection-pool';
 import { WIDGET_SECTIONS, widgetDataFromSnapshots, collectedAtFor, Sections, ServerRow } from '@/lib/widgets/snapshot-data';
 import { consumeActionRateLimit } from '@/lib/utils/rate-limiter';
@@ -15,7 +17,6 @@ import { startScript, statusScript, parseInstallStatus } from '@/lib/updates/win
 // custom_command runs live; cache its result briefly so several open
 // dashboards do not each run it on every refresh.
 const customCache = new Map<string, { at: number; data: unknown }>();
-const CUSTOM_TTL_MS = 10_000;
 
 function parseJson(v: unknown, fallback: any = {}) {
   if (typeof v !== 'string') return v ?? fallback;
@@ -48,16 +49,23 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const server = rowsToObjects(srvRes)[0] as unknown as ServerRow;
 
     if (widget.widget_type === 'custom_command') {
-      // Keyed by command too, so editing the command takes effect immediately.
-      const cacheKey = `${widgetId}|${cfg.command || ''}`;
+      // Always the host's non-admin shell account (no sudo, no Docker access), re-verified before use. The
+      // result is shared by everyone viewing the same command on this host for the chosen interval, so extra
+      // viewers or widgets do not multiply the SSH calls. Keyed by command, so editing it takes effect at once.
+      const intervalSec = intervalOf(cfg);
+      const command = effectiveCommand(cfg, server.platform === 'windows' ? 'windows' : 'linux');
+      const cacheKey = `${server.id}|${command}`;
       const cached = customCache.get(cacheKey);
-      if (!force && cached && Date.now() - cached.at < CUSTOM_TTL_MS) {
-        return NextResponse.json({ data: cached.data, collectedAt: new Date(cached.at).toISOString() });
+      if (!force && cached && Date.now() - cached.at < intervalSec * 1000) {
+        return NextResponse.json({ data: { ...(cached.data as object), intervalSec }, collectedAt: new Date(cached.at).toISOString() });
       }
-      const r = await runOnServerId(server.id, cfg.command || 'uptime', { timeoutMs: 20_000 });
-      const data = { output: (r.stdout + r.stderr).slice(0, 64 * 1024), exitCode: r.exitCode, timedOut: !!r.timedOut };
+      const target = await loadShellTarget(server.id);
+      await assertShellAccountSafe(target);
+      const r = await runOnShellTarget(target, command, { timeoutMs: 20_000 });
+      const data = { output: combinedOutput(r.stdout, r.stderr), exitCode: r.exitCode, timedOut: !!r.timedOut, account: target.config.username };
       customCache.set(cacheKey, { at: Date.now(), data });
-      return NextResponse.json({ data, collectedAt: new Date().toISOString() });
+      if (customCache.size > 500) customCache.clear();
+      return NextResponse.json({ data: { ...data, intervalSec }, collectedAt: new Date().toISOString() });
     }
 
     // Package widgets with a declarative spec: data comes from the spec's snapshot section or command.

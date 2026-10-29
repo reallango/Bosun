@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireUserSession, requireAuth } from '@/lib/auth/middleware';
 import { requirePermission } from '@/lib/permissions/authorize';
-import { sshPool } from '@/lib/ssh/connection-pool';
-import { loadShellTarget, assertShellAccountSafe } from '@/lib/ssh/shell-target';
+import { loadShellTarget, assertShellAccountSafe, runOnShellTarget } from '@/lib/ssh/shell-target';
 import { consumeActionRateLimit } from '@/lib/utils/rate-limiter';
 import { logAudit, AuditActions } from '@/lib/audit/logger';
 import { ok, fail, failFrom } from '@/lib/api/response';
@@ -37,7 +36,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   try {
     const target = await loadShellTarget(serverId);
     await assertShellAccountSafe(target);
-    const r = await sshPool.executeCommand(target.id, target.config, command, { timeoutMs: 60_000 });
+    const r = await runOnShellTarget(target, command, { timeoutMs: 60_000 });
     await logAudit({ userId: auth.userId, serverId, action: AuditActions.SERVER_SHELL_EXEC, status: r.exitCode === 0 ? 'success' : 'failure',
       details: `${target.config.username}: ${command.slice(0, 500)}`, durationMs: Date.now() - started });
     return ok({ output: r.stdout.slice(0, 256 * 1024), error: r.stderr.slice(0, 64 * 1024), exitCode: r.exitCode, timedOut: !!r.timedOut, account: target.config.username });

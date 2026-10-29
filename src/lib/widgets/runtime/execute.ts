@@ -5,8 +5,8 @@
  */
 import crypto from 'crypto';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
-import { runOnServerId, sshPool } from '@/lib/ssh/connection-pool';
-import { loadShellTarget, assertShellAccountSafe, ShellUnavailableError } from '@/lib/ssh/shell-target';
+import { runOnServerId } from '@/lib/ssh/connection-pool';
+import { loadShellTarget, assertShellAccountSafe, runOnShellTarget, ShellUnavailableError } from '@/lib/ssh/shell-target';
 import { validateWidgetSpec, type ActionSpec, type DataSpec, type RunAs, type WidgetSpec } from '@/lib/widgets/runtime/spec';
 import { commandFor, renderCommand, validateParams } from '@/lib/widgets/runtime/command';
 import { parseOutput, shapeData } from '@/lib/widgets/runtime/data';
@@ -85,7 +85,7 @@ async function runAs(server: ServerInfo, as: RunAs, command: string, timeoutSec:
     if (as === 'shell') {
       const target = await loadShellTarget(server.id);
       await assertShellAccountSafe(target);
-      const r = await sshPool.executeCommand(target.id, target.config, command, { timeoutMs: timeoutSec * 1000 });
+      const r = await runOnShellTarget(target, command, { timeoutMs: timeoutSec * 1000 });
       return { stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode, timedOut: !!r.timedOut };
     }
     const r = await runOnServerId(server.id, command, { timeoutMs: timeoutSec * 1000 });

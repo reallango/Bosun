@@ -8,17 +8,13 @@ import { encrypt } from '@/lib/crypto/keys';
 import { generateSSHKeyPair } from '@/lib/ssh/keygen';
 import { powershellCommand } from '@/lib/collect/windows';
 import { pruneWindowsKeysScript } from '@/lib/ssh/windows-keys';
+import { linuxPruneScript, parseCandidates, type KeyCandidate } from '@/lib/ssh/key-cleanup';
+import { windowsShellAccountScript, WINDOWS_SHELL_VERIFY_COMMAND, parseWindowsShellVerification } from '@/lib/ssh/windows-shell-account';
 import {
     DEFAULT_SHELL_ACCOUNT, SHELL_ACCOUNT_RE, SHELL_VERIFY_COMMAND, parseShellVerification, shellAccountScript,
 } from '@/lib/ssh/shell-account';
+import { sshExec, stripSudo, shq, asRootCommand, type SshAuth } from '@/lib/ssh/admin-exec';
 import crypto from 'crypto';
-
-interface SshAuth {
-    host: string;
-    port: number;
-    username: string;
-    password: string;
-}
 
 // SAM account names on Windows are capped at 20 characters; the same bound is
 // safe everywhere and keeps the name from breaking the shell commands below.
@@ -27,61 +23,11 @@ const SERVICE_ACCOUNT_RE = /^[A-Za-z_][A-Za-z0-9._-]{0,19}$/;
 /** Setup steps that start with this are shown as warnings, not successes. */
 const WARNING = 'Warning: ';
 
-// Helper to run a command over SSH
-async function sshExec(
-    config: SshAuth,
-    command: string
-): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-    return new Promise((resolve, reject) => {
-        const conn = new Client();
-        const timeout = setTimeout(() => {
-            conn.end();
-            reject(new Error('SSH connection timeout'));
-        }, 15000);
-
-        conn.on('ready', () => {
-            conn.exec(command, (err, stream) => {
-                if (err) {
-                    clearTimeout(timeout);
-                    conn.end();
-                    reject(err);
-                    return;
-                }
-                let stdout = '';
-                let stderr = '';
-                stream.on('close', (code: number) => {
-                    clearTimeout(timeout);
-                    conn.end();
-                    resolve({ stdout, stderr, exitCode: code });
-                });
-                stream.on('data', (data: Buffer) => { stdout += data.toString(); });
-                stream.stderr.on('data', (data: Buffer) => { stderr += data.toString(); });
-            });
-        });
-
-        conn.on('error', (err) => {
-            clearTimeout(timeout);
-            reject(err);
-        });
-
-        conn.connect({
-            host: config.host,
-            port: config.port,
-            username: config.username,
-            password: config.password,
-            readyTimeout: 10000,
-        });
-    });
-}
-
 interface SetupResult {
     steps?: string[];
     error?: { message: string; code: string };
 }
 
-function stripSudo(stderr: string): string {
-    return stderr.replace(/^\[sudo\]/gm, '').trim();
-}
 
 /** Quote a value for embedding inside a PowerShell single-quoted string. */
 function psQuote(value: string): string {
@@ -102,19 +48,6 @@ function sudoersScript(serviceAccount: string): string {
         + `visudo -cf "$f" >/dev/null && install -m 440 -o root -g root "$f" /etc/sudoers.d/${file}; rc=$?; rm -f "$f"; exit $rc`;
 }
 
-/** Single-quote a value for a POSIX shell. */
-const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
-
-/**
- * Wrap a script so it runs as root on the host: directly when the admin user is
- * root, otherwise through sudo with the admin password. The script travels
- * base64-encoded so it can contain any quoting.
- */
-function asRootCommand(sshConfig: SshAuth, adminPassword: string, script: string): string {
-    const run = `sh -c "$(printf %s '${Buffer.from(script).toString('base64')}' | base64 -d)"`;
-    return sshConfig.username === 'root' ? run : `echo ${shq(adminPassword)} | sudo -S -p '' ${run}`;
-}
-
 /** Add the Bosun public key to the service account's authorized_keys (idempotent). */
 function installKeyScript(serviceAccount: string, publicKey: string): string {
     return `d=/home/${serviceAccount}/.ssh; ak="$d/authorized_keys"; KEY=${shq(publicKey)}; `
@@ -122,20 +55,6 @@ function installKeyScript(serviceAccount: string, publicKey: string): string {
         + `&& chmod 700 "$d" && chmod 600 "$ak" && chown -R ${serviceAccount}:${serviceAccount} "$d"`;
 }
 
-/**
- * Remove earlier Bosun keys from the service account's authorized_keys: lines
- * whose comment ends in `-<account>` (how Bosun labels the keys it generates),
- * except the new key. Other keys on the account are left alone, and the file is
- * never rewritten without the new key in it. Prints BOSUN_REMOVED=<count>.
- */
-function pruneKeysScript(serviceAccount: string, publicKey: string): string {
-    return `ak=/home/${serviceAccount}/.ssh/authorized_keys; KEY=${shq(publicKey)}; body=$(echo "$KEY" | awk '{print $2}'); `
-        + `[ -f "$ak" ] || { echo BOSUN_REMOVED=0; exit 0; }; tmp=$(mktemp) || exit 1; `
-        + `awk -v suf="-${serviceAccount}" -v body="$body" '{ n=length($NF); s=length(suf); `
-        + `if (n>=s && substr($NF,n-s+1)==suf && index($0,body)==0) next; print }' "$ak" > "$tmp" || { rm -f "$tmp"; exit 1; }; `
-        + `grep -qF -- "$body" "$tmp" || { rm -f "$tmp"; exit 2; }; `
-        + `removed=$(( $(grep -c . "$ak") - $(grep -c . "$tmp") )); cat "$tmp" > "$ak"; rm -f "$tmp"; echo BOSUN_REMOVED=$removed`;
-}
 
 /** Add the service account to the docker group; exit 3 when Docker is not installed (no such group). */
 function dockerGroupScript(serviceAccount: string): string {
@@ -335,30 +254,46 @@ function sshExecWithKey(
  */
 async function setupShellAccount(args: {
     sshConfig: SshAuth; adminPassword: string; hostname: string; port: number;
-    privilegedAccount: string; shellAccount: string; replaceKeys: boolean; steps: string[];
+    privilegedAccount: string; shellAccount: string; replaceKeys: boolean; windows: boolean; steps: string[];
 }): Promise<{ user: string; keyId: string } | null> {
-    const { sshConfig, adminPassword, hostname, port, privilegedAccount, shellAccount, replaceKeys, steps } = args;
+    const { sshConfig, adminPassword, hostname, port, privilegedAccount, shellAccount, replaceKeys, windows, steps } = args;
     const keyName = `${hostname}-${shellAccount}`;
     const pair = generateSSHKeyPair(keyName, 'ed25519');
 
-    const run = await sshExec(sshConfig, asRootCommand(sshConfig, adminPassword, shellAccountScript({
-        account: shellAccount, privilegedAccount, publicKey: pair.publicKey, replaceKeys,
-    })));
-    if (run.exitCode !== 0 || !run.stdout.includes('BOSUN_SHELL_OK')) {
-        const why = stripSudo(run.stderr) || `exit ${run.exitCode}`;
-        steps.push(`${WARNING}Could not create the non-admin shell account ${shellAccount} (${why}); API terminals and shell commands are not enabled for this host.`);
+    let run: { stdout: string; stderr: string; exitCode: number };
+    if (windows) {
+        // The script restarts sshd as its last line, which can cut this connection: the marker it
+        // printed before that is what counts, and the login check below is the real proof.
+        try {
+            run = await sshExec(sshConfig, powershellCommand(windowsShellAccountScript({ account: shellAccount, publicKey: pair.publicKey, replaceKeys })));
+        } catch (err) {
+            run = { stdout: '', stderr: String(err), exitCode: -1 };
+        }
+    } else {
+        run = await sshExec(sshConfig, asRootCommand(sshConfig, adminPassword, shellAccountScript({
+            account: shellAccount, privilegedAccount, publicKey: pair.publicKey, replaceKeys,
+        })));
+    }
+    const created = windows ? run.stdout.includes('BOSUN_SHELL_OK') : run.exitCode === 0 && run.stdout.includes('BOSUN_SHELL_OK');
+    if (!created) {
+        const why = (windows ? run.stderr.trim() || run.stdout.trim() : stripSudo(run.stderr)) || `exit ${run.exitCode}`;
+        steps.push(`${WARNING}Could not create the non-admin shell account ${shellAccount} (${why.slice(0, 240)}); API terminals and shell commands are not enabled for this host.`);
         return null;
     }
 
     // Log in as the new account with its new key, and prove it is not an administrator.
-    // sshd may still be reloading its configuration, so give the first logins a few tries.
+    // sshd may still be reloading its configuration (Windows restarts it), so give the first logins a few tries.
     let verification;
     let lastError: unknown = null;
-    for (let attempt = 0; attempt < 6 && !verification; attempt++) {
-        if (attempt > 0) await new Promise(r => setTimeout(r, 1500));
+    const attempts = windows ? 10 : 6;
+    for (let attempt = 0; attempt < attempts && !verification; attempt++) {
+        if (attempt > 0) await new Promise(r => setTimeout(r, windows ? 2500 : 1500));
         try {
-            const check = await sshExecWithKey({ host: hostname, port, username: shellAccount, privateKey: pair.privateKey }, SHELL_VERIFY_COMMAND);
-            verification = parseShellVerification(check.stdout, shellAccount);
+            const check = await sshExecWithKey(
+                { host: hostname, port, username: shellAccount, privateKey: pair.privateKey },
+                windows ? powershellCommand(WINDOWS_SHELL_VERIFY_COMMAND) : SHELL_VERIFY_COMMAND,
+            );
+            verification = windows ? parseWindowsShellVerification(check.stdout, shellAccount) : parseShellVerification(check.stdout, shellAccount);
         } catch (err) {
             lastError = err;
         }
@@ -377,8 +312,11 @@ async function setupShellAccount(args: {
         'INSERT INTO ssh_keys (id, name, fingerprint, public_key, private_key_enc, key_type, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
         [keyId, keyName, pair.fingerprint, pair.publicKey, encrypt(pair.privateKey, getMasterKey()), 'ed25519', new Date().toISOString()]
     );
-    steps.push(`Created the non-admin shell account ${shellAccount}: no sudo, no Docker group, password locked, key-only (verified by logging in as it)`);
+    steps.push(windows
+        ? `Created the non-admin shell account ${shellAccount}: standard user, not an administrator, random password nobody knows, key-only (verified by logging in as it)`
+        : `Created the non-admin shell account ${shellAccount}: no sudo, no Docker group, password locked, key-only (verified by logging in as it)`);
     if (run.stdout.includes('BOSUN_SSHD_RESTRICTED')) steps.push(`Blocked port, agent, X11 and tunnel forwarding for ${shellAccount} in sshd`);
+    else if (windows) steps.push(`${WARNING}sshd was not restricted for ${shellAccount} (the sshd_config change did not validate or could not be checked, so it was left unchanged); the account still has no admin rights.`);
     else steps.push(`${WARNING}sshd was not restricted for ${shellAccount} (${run.stdout.includes('BOSUN_SSHD_NOINCLUDE') ? 'sshd_config does not include sshd_config.d' : 'the new sshd configuration did not validate, so it was left unchanged'}); the account still has no admin rights.`);
     return { user: shellAccount, keyId };
 }
@@ -473,6 +411,9 @@ export async function POST(request: NextRequest) {
         // Step 5: Replace earlier Bosun keys. Only after the new key is proven to
         // log in, so a host is never left without a working key.
         let keysRemoved: number | null = null;
+        // Other keys on the host that look like an earlier Bosun's but are not labeled for this host: never removed
+        // automatically; the person is asked which (if any) to remove.
+        let leftoverKeys: KeyCandidate[] = [];
         if (replace_keys !== false) {
             if (!testSuccess) {
                 steps.push(`${WARNING}Earlier Bosun keys were not removed because the new key could not be verified.`);
@@ -490,8 +431,9 @@ export async function POST(request: NextRequest) {
                             steps.push(keysRemoved > 0
                                 ? `Removed ${plural(keysRemoved)} for ${keyName} from administrators_authorized_keys (a backup was saved next to it as .bosun-bak; any other Bosun install using them is revoked)`
                                 : 'No earlier Bosun keys to remove');
+                            leftoverKeys = parseCandidates(pruned.stdout);
                             if (lookalike > 0) {
-                                steps.push(`${WARNING}${lookalike} other key${lookalike === 1 ? '' : 's'} in administrators_authorized_keys end in -${service_account} but were left alone because they are not labeled ${keyName}. Remove them by hand if they belong to an old Bosun.`);
+                                steps.push(`${WARNING}${lookalike} other key${lookalike === 1 ? '' : 's'} in administrators_authorized_keys end in -${service_account} but are not labeled ${keyName}. They were left alone: you can choose which to remove.`);
                             }
                         } else if (pruned.stdout.includes('BOSUN_RESTORED')) {
                             steps.push(`${WARNING}Removing earlier Bosun keys failed a safety check, so administrators_authorized_keys was restored from its backup; earlier keys are still authorized.`);
@@ -502,13 +444,17 @@ export async function POST(request: NextRequest) {
                             steps.push(`${WARNING}Could not remove earlier Bosun keys (${why}); they are still authorized.`);
                         }
                     } else {
-                        const pruned = await sshExec(sshConfig, asRootCommand(sshConfig, admin_password, pruneKeysScript(service_account, publicKey)));
+                        const pruned = await sshExec(sshConfig, asRootCommand(sshConfig, admin_password, linuxPruneScript({ account: service_account, label: keyName, publicKey })));
                         const removed = pruned.stdout.match(/BOSUN_REMOVED=(\d+)/);
                         if (pruned.exitCode === 0 && removed) {
                             keysRemoved = Number(removed[1]);
                             steps.push(keysRemoved > 0
-                                ? `Removed ${plural(keysRemoved)} from ${service_account} (access for any other Bosun install using them is revoked)`
+                                ? `Removed ${plural(keysRemoved)} for ${keyName} from ${service_account} (a backup was saved next to the file as .bosun-bak; access for any other Bosun install using them is revoked)`
                                 : 'No earlier Bosun keys to remove');
+                            leftoverKeys = parseCandidates(pruned.stdout);
+                            if (leftoverKeys.length > 0) {
+                                steps.push(`${WARNING}${leftoverKeys.length} other key${leftoverKeys.length === 1 ? '' : 's'} for ${service_account} end in -${service_account} but are not labeled ${keyName}. They were left alone: you can choose which to remove.`);
+                            }
                         } else {
                             steps.push(`${WARNING}Could not remove earlier Bosun keys (${stripSudo(pruned.stderr) || `exit ${pruned.exitCode}`}); they are still authorized.`);
                         }
@@ -519,19 +465,17 @@ export async function POST(request: NextRequest) {
             }
         }
 
-        // Step 5b: The non-admin shell account (Linux). API terminals and API shell commands log
+        // Step 5b: The non-admin shell account (Linux and Windows). API terminals and API shell commands log
         // in as this account with its own key; the privileged account above is never used for them.
         // Nothing here can fail provisioning, and the account is only enabled after Bosun has logged
         // in as it and proven it has no sudo, no admin-like group and no Docker socket access.
         let shell: { user: string; keyId: string } | null = null;
         if (create_shell_account !== false) {
-            if (isWindowsHost) {
-                steps.push(`${WARNING}A non-admin shell account is not available on Windows hosts yet, so API terminals and shell commands are not enabled for this host.`);
-            } else if (!testSuccess) {
+            if (!testSuccess) {
                 steps.push(`${WARNING}The non-admin shell account was not created because the service account could not be verified.`);
             } else {
                 try {
-                    shell = await setupShellAccount({ sshConfig, adminPassword: admin_password, hostname, port, privilegedAccount: service_account, shellAccount: shell_account, replaceKeys: replace_keys !== false, steps });
+                    shell = await setupShellAccount({ sshConfig, adminPassword: admin_password, hostname, port, privilegedAccount: service_account, shellAccount: shell_account, replaceKeys: replace_keys !== false, windows: isWindowsHost, steps });
                 } catch (err) {
                     steps.push(`${WARNING}Could not set up the non-admin shell account (${String(err).slice(0, 200)}); API terminals and shell commands are not enabled for this host.`);
                 }
@@ -580,6 +524,8 @@ export async function POST(request: NextRequest) {
                 test_success: testSuccess,
                 existing_server: existingServer,
                 keys_removed: keysRemoved,
+                // Keys that look like an earlier Bosun's (not labeled for this host): the page asks which to remove.
+                leftover_keys: leftoverKeys.map(k => ({ fingerprint: k.fingerprint, comment: k.comment })),
                 shell_user: shell?.user ?? null,
                 shell_key_id: shell?.keyId ?? null,
                 steps,

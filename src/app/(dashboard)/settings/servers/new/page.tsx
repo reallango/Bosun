@@ -28,6 +28,13 @@ export default function NewServerPage() {
   const [provisionError, setProvisionError] = useState('');
   const [provisionData, setProvisionData] = useState<any>(null);
 
+  // Login used for provisioning, held in memory for the leftover-key cleanup (never stored or sent anywhere else).
+  const [creds, setCreds] = useState<{ hostname: string; port: number; admin_username: string; admin_password: string; platform: string; service_account: string } | null>(null);
+  const [leftover, setLeftover] = useState<{ fingerprint: string; comment: string }[]>([]);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [cleanupBusy, setCleanupBusy] = useState(false);
+  const [cleanupMessage, setCleanupMessage] = useState('');
+
   // Store provision form values for saving
   const [provisionForm, setProvisionForm] = useState({
     hostname: '',
@@ -59,11 +66,16 @@ export default function NewServerPage() {
     const admin_password = formData.get('admin_password') as string;
     const service_account = formData.get('service_account') as string || 'bosun-svc';
     const replace_keys = formData.get('replace_keys') === 'on';
-    const create_shell_account = platform !== 'windows' && formData.get('create_shell_account') === 'on';
+    const create_shell_account = formData.get('create_shell_account') === 'on';
     const shell_account = (formData.get('shell_account') as string || 'bosun-user').trim();
 
     // Store form values for later save
     setProvisionForm({ hostname, ssh_port: port, name, platform });
+    // Kept in memory only, while this page is open, so leftover keys can be removed without asking for the login again.
+    setCreds({ hostname, port, admin_username, admin_password, platform, service_account });
+    setLeftover([]);
+    setSelected([]);
+    setCleanupMessage('');
 
     try {
       const res = await fetch('/api/servers/provision', {
@@ -80,10 +92,34 @@ export default function NewServerPage() {
       
       setProvisionSteps(data.data?.steps || []);
       setProvisionData(data.data);
+      setLeftover(Array.isArray(data.data?.leftover_keys) ? data.data.leftover_keys : []);
     } catch (err) {
       setProvisionError(String(err));
     } finally {
       setProvisioning(false);
+    }
+  };
+
+  // Remove the leftover keys the person ticked. Nothing is pre-selected: removing a key cuts off whatever still uses it.
+  const removeLeftover = async () => {
+    if (!creds || !provisionData || selected.length === 0) return;
+    setCleanupBusy(true);
+    setCleanupMessage('');
+    try {
+      const res = await fetchWithAuth('/api/servers/provision/keys', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...creds, keep_key_id: provisionData.ssh_key_id, fingerprints: selected }),
+      });
+      const json = await res.json();
+      if (!res.ok) { setCleanupMessage(json.error?.message || 'The keys were not removed'); return; }
+      setLeftover(json.data?.remaining || []);
+      setSelected([]);
+      setCleanupMessage(`Removed ${json.data?.removed ?? 0} key${json.data?.removed === 1 ? '' : 's'}. A backup of the file was saved on the host next to it as .bosun-bak.`);
+    } catch (err) {
+      setCleanupMessage(String(err));
+    } finally {
+      setCleanupBusy(false);
     }
   };
 
@@ -234,6 +270,48 @@ export default function NewServerPage() {
                         })}
                       </div>
                     </div>
+                    {(leftover.length > 0 || cleanupMessage) && (
+                      <div className="space-y-3 rounded-md border border-warning/40 bg-warning/5 p-4 text-sm" role="group" aria-label="Other keys on this host">
+                        {leftover.length > 0 && (
+                          <>
+                            <div className="font-medium">Remove other keys that look like an earlier Bosun&apos;s?</div>
+                            <p className="text-muted-foreground">
+                              These keys end in <code>-{provisionData.service_account}</code> but are not labeled for this host ({provisionForm.hostname}).
+                              They may belong to an older Bosun install that still manages it. Removing one cuts off whatever still uses that key.
+                              Nothing is selected: tick the ones to remove.
+                            </p>
+                            <ul className="space-y-1.5">
+                              {leftover.map(k => (
+                                <li key={k.fingerprint}>
+                                  <label className="flex items-start gap-2">
+                                    <input
+                                      type="checkbox"
+                                      className="mt-1"
+                                      checked={selected.includes(k.fingerprint)}
+                                      onChange={e => setSelected(s => (e.target.checked ? [...s, k.fingerprint] : s.filter(x => x !== k.fingerprint)))}
+                                      disabled={cleanupBusy}
+                                    />
+                                    <span className="min-w-0">
+                                      <span className="block break-all font-medium">{k.comment}</span>
+                                      <span className="block break-all font-mono text-xs text-muted-foreground">{k.fingerprint}</span>
+                                    </span>
+                                  </label>
+                                </li>
+                              ))}
+                            </ul>
+                            <div className="flex flex-wrap gap-2">
+                              <Button type="button" variant="destructive" size="sm" onClick={removeLeftover} disabled={cleanupBusy || selected.length === 0}>
+                                {cleanupBusy ? 'Removing…' : `Remove selected (${selected.length})`}
+                              </Button>
+                              <Button type="button" variant="outline" size="sm" onClick={() => { setLeftover([]); setSelected([]); setCleanupMessage('Kept all other keys.'); }} disabled={cleanupBusy}>
+                                Keep them
+                              </Button>
+                            </div>
+                          </>
+                        )}
+                        {cleanupMessage && <p role="status" className="text-muted-foreground">{cleanupMessage}</p>}
+                      </div>
+                    )}
                     <div className="break-words text-sm text-muted-foreground">
                       <p>Service account: <strong>{provisionData.service_account}</strong></p>
                       <p>SSH Key: <strong>{provisionData.ssh_key_name}</strong></p>
@@ -299,14 +377,14 @@ export default function NewServerPage() {
                     <div className="space-y-2">
                       <label htmlFor="create_shell_account" className="flex items-start gap-2 text-sm font-medium">
                         <input id="create_shell_account" name="create_shell_account" type="checkbox" defaultChecked className="mt-1" />
-                        <span>Create a non-admin shell account (Linux)</span>
+                        <span>Create a non-admin shell account</span>
                       </label>
                       <div className="pl-6 space-y-2">
                         <Input id="shell_account" name="shell_account" defaultValue="bosun-user" aria-label="Shell account name" />
                         <p className="text-xs text-muted-foreground">
-                          Used only by API keys that are granted terminal or command access. It has no sudo, no Docker group and
+                          Used only by API keys that are granted terminal or command access. It has no administrator rights (no sudo or Docker group on Linux) and
                           no key to the admin account, and is checked by logging in as it before it is enabled. The web terminal
-                          is unaffected: it always asks for your own login. Not available on Windows hosts yet.
+                          is unaffected: it always asks for your own login. On Windows it is a standard user (not an administrator).
                         </p>
                       </div>
                     </div>
