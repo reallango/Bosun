@@ -6,7 +6,7 @@ import { systemPackages, reservedPackageNames } from './system-packages';
 const good = () => ({
   schema: 1, id: 'hello_pkg', name: 'Hello', version: '0.0.1', description: 'd', author: 'me',
   permissions: [{ id: 'hello_pkg.run', label: 'Run hello', description: 'Runs it', group: 'Hello', defaultLevel: 'admin', risk: 'low', scope: 'server' }],
-  widgets: [{ type: 'hello_widget', display_name: 'Hello', description: 'x', default_size: { w: 4, h: 3 }, spec: { kind: 'text' } }],
+  widgets: [{ type: 'hello_widget', display_name: 'Hello', description: 'x', default_size: { w: 4, h: 3 }, spec: { version: 1, data: { source: 'snapshot', section: 'docker' }, view: { type: 'text', text: '{x}' } } }],
 });
 
 describe('validateManifest', () => {
@@ -16,7 +16,7 @@ describe('validateManifest', () => {
     if (r.ok) {
       expect(r.value.widgets[0].columns.display_name).toBe('Hello');
       expect(r.value.widgets[0].columns.default_size).toBe('{"w":4,"h":3}');
-      expect(r.value.widgets[0].spec).toEqual({ kind: 'text' });
+      expect(r.value.widgets[0].spec?.data).toEqual({ source: 'snapshot', section: 'docker' });
       expect(r.value.permissions[0].implies).toEqual([]);
     }
   });

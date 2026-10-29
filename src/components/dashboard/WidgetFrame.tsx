@@ -29,6 +29,7 @@ import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { cn } from '@/lib/utils';
 import { RefreshHandler, WidgetFrameContext } from './widget-context';
 import { customWidgetComponents } from '@/components/widgets/custom-registry';
+import { DeclarativeWidget } from '@/components/widgets/declarative/DeclarativeWidget';
 import { WidgetLoading } from '@/components/widgets/WidgetLoading';
 import { useAuth } from '@/hooks/useAuth';
 import { hasRole } from '@/lib/auth/levels';
@@ -101,7 +102,8 @@ function WidgetContent({ widgetId, widgetType, serverId, serverName }: { widgetI
       // Database-defined widget types render through the custom registry.
       const Custom = customWidgetComponents[widgetType];
       if (Custom) return <Custom widgetId={widgetId} serverId={serverId} serverName={serverName} />;
-      return <div className="text-sm text-muted-foreground">Unknown widget: {widgetType}. If it came from a widget package, that package has no view in this version of Bosun yet.</div>;
+      // Package widgets render from their declarative spec; the component says so if the type has none.
+      return <DeclarativeWidget widgetId={widgetId} widgetType={widgetType} serverId={serverId} />;
     }
   }
 }

@@ -23,3 +23,55 @@ Rules the manifest is checked against (a package that fails is listed as "skippe
 
 A package can also be exported from Settings → Widgets as a zip and imported on another Bosun
 (`manifest.json` at the top of the zip, or inside one folder).
+
+## Widget specs
+
+A widget's optional `spec` makes it a *declarative* widget: Bosun renders it and runs its actions, with no
+code in the package. It has four parts (see `src/lib/widgets/runtime/spec.ts` for the exact rules; a package
+whose spec breaks them is rejected):
+
+```jsonc
+"spec": {
+  "version": 1,
+  "data": {                       // where the widget's rows come from
+    "source": "command",          // "snapshot" (a poller section) or "command"
+    "as": "service",              // command only: "service" (privileged account) or "shell" (non-admin account)
+    "command": "docker ps -a --format '{{json .}}'",
+    "windowsCommand": "...",      // optional; without it a command-based widget is not available on Windows
+    "parse": "jsonlines",         // json | jsonlines | lines | text
+    "map": { "name": "Names" },   // add fields: new name <- source field
+    "path": "items",              // select a field of the parsed data
+    "cacheSec": 10, "timeoutSec": 20,
+    "permission": "my_package.view"   // optional: needed to see the data
+  },
+  "view": {
+    "type": "list",               // list | table | text
+    "summary": [{ "label": "running", "where": { "field": "state", "equals": "running" } }, { "label": "total" }],
+    "filter": { "fields": ["name", "image"] },
+    "toggles": [{ "key": "stopped", "label": "stopped", "default": true, "hideWhen": { "field": "state", "notEquals": "running" } }],
+    "row": { "dot": { "field": "state", "colors": { "running": "green" } }, "title": "{name}", "subtitle": "{image}", "actions": ["restart"] }
+  },
+  "actions": [{
+    "id": "restart", "label": "Restart", "icon": "rotate-cw",
+    "permission": "my_package.control",   // required, and must be one the package declares
+    "as": "service",
+    "command": "docker restart {{name}}", // {{name}}: a declared parameter; Bosun quotes the value, do not add quotes
+    "params": { "name": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$", "from": "name" } },
+    "when": { "field": "state", "equals": "running" },
+    "confirm": { "title": "Restart {name}?", "destructive": true },
+    "result": "toast", "after": "refresh"
+  }]
+}
+```
+
+Rules that keep a package from becoming a way to run arbitrary commands:
+
+- Every action names a permission the package declares, so it cannot run until an admin grants it.
+- A command may only use `{{placeholders}}` for parameters the action declares. A string parameter needs an anchored
+  `pattern` or a fixed list of `values`; a number needs `min` and `max`. Values are validated, then inserted as one quoted word.
+- `as` is explicit on every command. `shell` is the non-admin account (no sudo, no Docker).
+- Installing shows the admin every command, the account and the permissions, and asks for confirmation.
+
+Each action is also an API endpoint, `POST /api/servers/:serverId/widget-actions/:widgetType/:actionId`, with
+`{ "params": {...}, "confirm": true }`, and the data is at `GET /api/servers/:serverId/widget-data/:widgetType`.
+`GET /api/openapi.json` describes all of them for the packages that are installed.

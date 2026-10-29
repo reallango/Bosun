@@ -3,6 +3,7 @@ import { ok, failFrom } from '@/lib/api/response';
 import { listRemotePackagesCached } from '@/lib/widgets/package-source';
 import { compareVersions } from '@/lib/widgets/package-manifest';
 import { listInstalledPackages } from '@/lib/widgets/package-store';
+import { reviewPackage } from '@/lib/widgets/runtime/review';
 import { requirePackageAdmin, configuredRef } from '@/lib/widgets/package-routes';
 
 /**
@@ -22,6 +23,7 @@ export async function GET(request: NextRequest) {
         id: p.id, name: p.manifest.name, version: p.manifest.version, description: p.manifest.description, author: p.manifest.author,
         widgetTypes: p.manifest.widgets.map(w => w.type), permissions: p.manifest.permissions.map(x => x.id),
         installedVersion: have, upgradable: have !== null && compareVersions(p.manifest.version, have) > 0,
+        review: reviewPackage(p.manifest),
       };
     });
     return ok({ ref, packages, skipped: listing.skipped });

@@ -385,6 +385,13 @@ if it is ever found to have admin rights, API access is refused.
   WebSocket), maximum session length (60 min), idle timeout (10 min) and open terminals per API key (3).
   Values are clamped to sane ranges, so a bad value cannot switch a limit off.
 
+**Widget packages with a declarative `spec`** (Settings → Widgets) render in Bosun without any code in the package:
+a list, table or text view over data from a poller section or a command, plus actions with strictly validated
+parameters. Each action names a permission the package declares and is also an API endpoint
+(`POST /api/servers/:id/widget-actions/:widgetType/:actionId`); `GET /api/openapi.json` describes every installed
+package's data and actions. Installing a package shows every command it can run and the account it runs as, and asks for
+confirmation. The spec format is documented in `widgets/README.md`.
+
 **Email (SMTP)**, under Settings → General (admins), enables password reset links,
 emailed sign-in codes and email alert actions. Set *App URL* to the address users open
 Bosun at: reset links are built from it. The SMTP password is stored encrypted.
