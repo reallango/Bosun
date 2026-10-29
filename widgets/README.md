@@ -128,9 +128,9 @@ default), manages it:
 | Linux | Docker container, systemd service, or a standard install | container: start, stop, restart, restart policy (never, always, unless stopped, on failure), update by recreating it with the same ports, volumes, GPU access and policy; systemd: start, stop, restart, enable or disable at boot, update |
 
 When Ollama is not installed the widget offers to install it. On Windows that is a service run by nssm in
-`C:\Ollama` (`bin`, `models`, `logs`, `nssm.exe`, the layout of existing installs), listening on localhost only and
+`C:\Ollama` (`bin`, `models`, `logs`, `nssm.exe`, the layout of existing installs), reachable from the network (all interfaces, port 11434, with an inbound firewall rule for private and domain networks unless a rule already allows the port) and
 started at boot; the Windows archive is checked against the SHA-256 GitHub publishes for the release. On Linux the
-default is a Docker container (`ollama/ollama`, models in the `ollama` volume, published on 127.0.0.1:11434, restart
+default is a Docker container (`ollama/ollama`, models in the `ollama` volume, published on every interface (port 11434), restart
 policy "unless stopped", GPU access when the NVIDIA runtime is present); without Docker the widget warns and offers the
 official install script on the host instead (needs passwordless sudo). Install and update run as a job the widget
 follows. A newer release (from GitHub, checked every six hours) shows as "Update available". Containers started by

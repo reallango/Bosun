@@ -15,7 +15,8 @@ export const SYSTEMD_STARTUP = ['enabled', 'disabled'] as const;
 /** Where a new Windows install goes: the layout used by existing installs (`C:\Ollama\bin`, `models`, `logs`, `nssm.exe`). */
 export const DEFAULT_WINDOWS_ROOT = 'C:\\Ollama';
 export const DEFAULT_WINDOWS_SERVICE = 'Ollama';
-export const DEFAULT_LISTEN = '127.0.0.1:11434';
+/** A new install is reachable from the network (like the existing installs); Bosun itself only needs localhost. */
+export const DEFAULT_LISTEN = '0.0.0.0:11434';
 
 /** A PowerShell single-quoted string literal. */
 const psq = (s: string) => `'${s.replace(/'/g, "''")}'`;
@@ -178,6 +179,15 @@ export function windowsScript(o: WindowsScriptOptions): string {
       `Step 'starting the service'`,
       `Start-Service -Name $svc`,
     );
+    if (listen.startsWith('0.0.0.0:')) {
+      // Reachable from the network: allow the port through the Windows firewall on private and domain networks,
+      // unless a rule that allows it inbound already exists (an existing "Ollama 11434 LAN" rule is reused).
+      lines.push(
+        `Step 'checking the firewall'`,
+        `$open = @(Get-NetFirewallPortFilter -Protocol TCP | Where-Object { $_.LocalPort -eq '${port}' } | Get-NetFirewallRule | Where-Object { $_.Enabled -eq 'True' -and $_.Direction -eq 'Inbound' -and $_.Action -eq 'Allow' })`,
+        `if ($open.Count -eq 0) { New-NetFirewallRule -DisplayName ${psq(`Ollama ${port} LAN`)} -Direction Inbound -Action Allow -Protocol TCP -LocalPort ${port} -Profile Private,Domain | Out-Null; Step 'added a firewall rule for the private network' } else { Step 'a firewall rule already allows the port' }`,
+      );
+    }
   } else {
     lines.push(
       `$was = (Get-Service -Name $svc -ErrorAction Stop).Status`,
@@ -238,21 +248,30 @@ export function dockerInstallCommand(opts: { version?: string; container?: strin
     `echo '[step] pulling ${image}'`,
     `$D pull ${image}`,
     `echo '[step] starting the container'`,
-    `$D run -d --name ${shq(container)} --restart unless-stopped $GPU -p 127.0.0.1:11434:11434 -v ollama:/root/.ollama ${image}`,
+    `$D run -d --name ${shq(container)} --restart unless-stopped $GPU -p 11434:11434 -v ollama:/root/.ollama ${image}`,
     `i=0; while [ $i -lt 30 ]; do v=$(curl -s -m 2 http://127.0.0.1:11434/api/version) && [ -n "$v" ] && { echo "DONE $v"; exit 0; }; i=$((i+1)); sleep 1; done`,
     `echo 'The container started but the API did not answer' >&2; exit 5`,
   ].join('\n');
 }
 
 /** Install or update Ollama on the host with the official script (creates the systemd service). Needs passwordless sudo. */
-export function hostInstallCommand(version?: string): string {
+export function hostInstallCommand(version?: string, opts: { listenOnNetwork?: boolean } = {}): string {
   if (version !== undefined) assert(VERSION_RE.test(version), 'Invalid version');
   const env = version ? `OLLAMA_VERSION=${version} ` : '';
+  const listen = opts.listenOnNetwork ? [
+    // The official script listens on localhost only. A drop-in makes a new install reachable from the network; an
+    // update leaves whatever the host has configured alone.
+    `echo '[step] making Ollama reachable from the network'`,
+    `sudo -n mkdir -p /etc/systemd/system/ollama.service.d`,
+    `printf '[Service]\\nEnvironment="OLLAMA_HOST=${DEFAULT_LISTEN}"\\n' | sudo -n tee /etc/systemd/system/ollama.service.d/bosun-listen.conf >/dev/null`,
+    `sudo -n systemctl daemon-reload && sudo -n systemctl restart ollama`,
+  ] : [];
   return [
     `sudo -n true 2>/dev/null || { echo 'This account needs passwordless sudo to install Ollama on the host' >&2; exit 3; }`,
     `command -v curl >/dev/null 2>&1 || { echo 'curl is required' >&2; exit 3; }`,
     `echo '[step] running the official install script'`,
     `curl -fsSL https://ollama.com/install.sh | sudo -n ${env}sh`,
+    ...listen,
     `i=0; while [ $i -lt 30 ]; do v=$(curl -s -m 2 http://127.0.0.1:11434/api/version) && [ -n "$v" ] && { echo "DONE $v"; exit 0; }; i=$((i+1)); sleep 1; done`,
     `echo 'DONE (service not answering yet)'`,
   ].join('\n');

@@ -5,10 +5,10 @@ import {
 } from './scripts';
 
 describe('windowsScript', () => {
-  it('installs a service with nssm in the C:/Ollama layout, listening on localhost', () => {
+  it('installs a service with nssm in the C:/Ollama layout, reachable from the network', () => {
     const s = windowsScript({ mode: 'install' });
     expect(s).toContain("$root = 'C:\\Ollama'");
-    expect(s).toContain("OLLAMA_HOST=' + '127.0.0.1:11434'");
+    expect(s).toContain("OLLAMA_HOST=' + '0.0.0.0:11434'");
     expect(s).toContain('Nssm install $svc');
     expect(s).toContain('SERVICE_AUTO_START');
     expect(s).toContain('AppExit Default Restart');
@@ -64,10 +64,10 @@ describe('docker commands', () => {
     expect(() => dockerControlCommand('start', 'x; rm -rf /')).toThrow(/container/);
   });
 
-  it('installs a container on localhost with a volume, GPU access when available and a restart policy', () => {
+  it('installs a container published on all interfaces with a volume, GPU access when available and a restart policy', () => {
     const c = dockerInstallCommand();
     expect(c).toContain('--restart unless-stopped');
-    expect(c).toContain('-p 127.0.0.1:11434:11434');
+    expect(c).toContain('-p 11434:11434');
     expect(c).toContain('-v ollama:/root/.ollama');
     expect(c).toContain("--gpus=all");
     expect(c).toContain('ollama/ollama:latest');
@@ -176,5 +176,36 @@ describe('stopping a systemd unit', () => {
   it('does not treat the "inactive" report after a successful stop as a failure', () => {
     const c = systemdCommand('stop', 'ollama');
     expect(c).toContain("sudo -n systemctl stop 'ollama' && { systemctl is-active 'ollama' || true; }");
+  });
+});
+
+describe('outside access for a new install', () => {
+  it('Windows: listens on all interfaces and makes sure a private-network firewall rule allows the port', () => {
+    const s = windowsScript({ mode: 'install' });
+    expect(s).toContain("Step 'checking the firewall'");
+    expect(s).toContain("New-NetFirewallRule -DisplayName 'Ollama 11434 LAN'");
+    expect(s).toContain('-Profile Private,Domain');
+    expect(s).toContain("'a firewall rule already allows the port'");   // an existing rule is reused
+    expect(s.indexOf('Start-Service -Name $svc')).toBeLessThan(s.indexOf('checking the firewall'));
+  });
+
+  it('Windows: no firewall change for a localhost-only install, and none when updating', () => {
+    expect(windowsScript({ mode: 'install', listen: '127.0.0.1:11434' })).not.toContain('NetFirewallRule');
+    expect(windowsScript({ mode: 'update', service: 'Ollama', exe: String.raw`C:\Ollama\bin\ollama.exe` })).not.toContain('NetFirewallRule');
+  });
+
+  it('Linux host: a new install adds a drop-in that listens on all interfaces; an update leaves the configuration alone', () => {
+    const fresh = hostInstallCommand(undefined, { listenOnNetwork: true });
+    expect(fresh).toContain('/etc/systemd/system/ollama.service.d/bosun-listen.conf');
+    expect(fresh).toContain('OLLAMA_HOST=0.0.0.0:11434');
+    expect(fresh).toContain('systemctl daemon-reload && sudo -n systemctl restart ollama');
+    expect(fresh.indexOf('install.sh')).toBeLessThan(fresh.indexOf('bosun-listen.conf'));
+    expect(hostInstallCommand('0.40.13')).not.toContain('bosun-listen.conf');
+  });
+
+  it('Docker: the container publishes the port on every interface', () => {
+    const c = dockerInstallCommand();
+    expect(c).toContain('-p 11434:11434');
+    expect(c).not.toContain('127.0.0.1:11434:11434');
   });
 });
