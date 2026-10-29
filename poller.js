@@ -35,6 +35,7 @@ const store = require('./src/lib/collect/store');
 const alerts = require('./src/lib/collect/alerts');
 const mailer = require('./src/lib/collect/mailer');
 const packages = require('./src/lib/collect/packages');
+const { extractMetrics, shapeData } = require('./src/lib/widgets/runtime/data');
 const { SHELL_VERIFY_COMMAND, parseShellVerification } = require('./src/lib/ssh/shell-account');
 const { WINDOWS_SHELL_VERIFY_COMMAND, parseWindowsShellVerification } = require('./src/lib/ssh/windows-shell-account');
 
@@ -237,6 +238,7 @@ class HostAgent {
       'JOIN custom_widgets c ON c.type = w.widget_type JOIN widget_packages p ON p.id = c.package_id ' +
       'WHERE w.server_id = ? AND c.spec IS NOT NULL AND c.enabled = 1', [this.id]);
     this.pkgList = packages.collectorsFrom(rows);
+    this.pkgTrackers = packages.snapshotTrackersFrom(rows);
     this.pkgListAt = now;
     return this.pkgList;
   }
@@ -304,7 +306,18 @@ class HostAgent {
             'ON CONFLICT(server_id, section) DO UPDATE SET data = excluded.data, data_hash = excluded.data_hash, collected_at = excluded.collected_at',
           params: [this.id, packages.sectionFor(c.type), json, null, Date.now()],
         }]);
+        const tracked = packages.metricsOf(c, result);
+        if (Object.keys(tracked).length) await executeBatch(store.metricStatements(this.id, tracked, Date.now()));
         if (!result.ok) warn(`${this.row.name}: ${c.type}: ${result.error}`);
+      }
+      // Statistics computed from the stored sections of snapshot-sourced widgets.
+      for (const t of this.pkgTrackers || []) {
+        const rows = await query('SELECT data FROM host_snapshots WHERE server_id = ? AND section = ?', [this.id, t.section]);
+        if (!rows.length) continue;
+        let parsed = null;
+        try { parsed = JSON.parse(rows[0].data); } catch { continue; }
+        const tracked = extractMetrics(t.metrics, shapeData(t, parsed));
+        if (Object.keys(tracked).length) await executeBatch(store.metricStatements(this.id, tracked, Date.now()));
       }
     })()
       .catch(err => warn(`${this.row.name}: package widget collection failed: ${err.message}`))
@@ -569,7 +582,8 @@ async function tick() {
     if (now - lastRetention > 10 * 60 * 1000) {
       lastRetention = now;
       const cfg = await readRetention();
-      await executeBatch(store.retentionStatements(cfg, now)).catch(err => warn('retention failed:', err.message));
+      const defs = await query('SELECT pattern, raw_hours, rollup_5m_days, rollup_1h_days FROM metric_definitions').catch(() => []);
+      await executeBatch(store.retentionStatements(cfg, now, defs)).catch(err => warn('retention failed:', err.message));
     }
   } catch (err) {
     warn('tick failed:', err.message);

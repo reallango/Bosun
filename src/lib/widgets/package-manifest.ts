@@ -142,7 +142,7 @@ export function validateManifest(
     if (w.spec !== undefined) {
       if (!w.spec || typeof w.spec !== 'object' || Array.isArray(w.spec)) return fail(`widget "${type}": "spec" must be an object`);
       if (JSON.stringify(w.spec).length > MAX_SPEC_BYTES) return fail(`widget "${type}": "spec" is too large`);
-      const s = validateWidgetSpec(w.spec, permissions.map(p => p.id));
+      const s = validateWidgetSpec(w.spec, permissions.map(p => p.id), id);
       if (!s.ok) return fail(`widget "${type}": ${s.error}`);
       spec = s.value;
     }

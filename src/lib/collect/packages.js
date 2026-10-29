@@ -11,7 +11,7 @@
  */
 
 const windows = require('./windows');
-const { parseOutput, shapeData } = require('../widgets/runtime/data');
+const { parseOutput, shapeData, extractMetrics } = require('../widgets/runtime/data');
 
 const SECTION_PREFIX = 'pkg:';
 const MIN_INTERVAL_SEC = 5;
@@ -40,9 +40,37 @@ function collectorsFrom(rows) {
       map: d.map,
       intervalMs: Math.max(MIN_INTERVAL_SEC, Number(d.cacheSec) || 10) * 1000,
       timeoutMs: Math.min(60, Math.max(1, Number(d.timeoutSec) || 20)) * 1000,
+      metrics: computedMetrics(spec),
     });
   }
   return out;
+}
+
+/** The metrics of a spec that are computed from the widget's data (the others name built-in collector metrics). */
+function computedMetrics(spec) {
+  return Array.isArray(spec && spec.metrics) ? spec.metrics.filter((m) => m && m.from) : [];
+}
+
+/**
+ * Snapshot-sourced widgets that track statistics computed from their data: `{ type, section, path, map, metrics }`.
+ * The poller reads the stored section after each poll and records the numbers.
+ */
+function snapshotTrackersFrom(rows) {
+  const out = [];
+  for (const row of rows || []) {
+    let spec = row.spec;
+    if (typeof spec === 'string') { try { spec = JSON.parse(spec); } catch { continue; } }
+    const d = spec && spec.data;
+    const metrics = computedMetrics(spec);
+    if (!d || d.source !== 'snapshot' || typeof d.section !== 'string' || !metrics.length) continue;
+    out.push({ type: String(row.type), section: d.section, path: d.path, map: d.map, metrics });
+  }
+  return out;
+}
+
+/** The numbers to record for a collected result (nothing for a failed one). */
+function metricsOf(collector, result) {
+  return result && result.ok ? extractMetrics(collector.metrics, result.data) : {};
 }
 
 /** Is a collector due? `last` is when it last ran (ms) or undefined. A forced poll runs everything. */
@@ -76,4 +104,4 @@ async function runCollector(collector, platform, exec) {
   }
 }
 
-module.exports = { SECTION_PREFIX, sectionFor, collectorsFrom, isDue, runCollector };
+module.exports = { SECTION_PREFIX, sectionFor, collectorsFrom, snapshotTrackersFrom, metricsOf, isDue, runCollector };

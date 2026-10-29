@@ -27,7 +27,28 @@ function hashOf(data) {
  * @param {number} nowMs
  * @param {Map<string,string>} hashes  section -> last written hash (mutated)
  */
-function buildPollStatements(serverId, snap, nowMs, hashes) {
+/** Raw sample plus rollup upserts for a set of { metric: number } at one moment. */
+function metricStatements(serverId, metrics, nowMs) {
+  const stmts = [];
+  const ts = Math.floor(nowMs / 1000);
+  for (const [metric, value] of Object.entries(metrics || {})) {
+    if (typeof value !== 'number' || !Number.isFinite(value)) continue;
+    stmts.push({ sql: 'INSERT OR REPLACE INTO metric_samples (server_id, metric, ts, value) VALUES (?, ?, ?, ?)', params: [serverId, metric, ts, value] });
+    for (const res of ROLLUP_RESOLUTIONS) {
+      const bucket = ts - (ts % res);
+      stmts.push({
+        sql: 'INSERT INTO metric_rollups (server_id, metric, resolution, bucket, avg, "min", "max", n) VALUES (?, ?, ?, ?, ?, ?, ?, 1) ' +
+          'ON CONFLICT(server_id, metric, resolution, bucket) DO UPDATE SET ' +
+          'avg = (metric_rollups.avg * metric_rollups.n + excluded.avg) / (metric_rollups.n + 1), ' +
+          '"min" = MIN(metric_rollups."min", excluded."min"), "max" = MAX(metric_rollups."max", excluded."max"), n = metric_rollups.n + 1',
+        params: [serverId, metric, res, bucket, value, value, value],
+      });
+    }
+  }
+  return stmts;
+}
+
+ function buildPollStatements(serverId, snap, nowMs, hashes) {
   const stmts = [];
   const ts = Math.floor(nowMs / 1000);
 
@@ -45,20 +66,7 @@ function buildPollStatements(serverId, snap, nowMs, hashes) {
     if (hashes) hashes.set(section, h);
   }
 
-  for (const [metric, value] of Object.entries(snap.metrics)) {
-    if (typeof value !== 'number' || !Number.isFinite(value)) continue;
-    stmts.push({ sql: 'INSERT OR REPLACE INTO metric_samples (server_id, metric, ts, value) VALUES (?, ?, ?, ?)', params: [serverId, metric, ts, value] });
-    for (const res of ROLLUP_RESOLUTIONS) {
-      const bucket = ts - (ts % res);
-      stmts.push({
-        sql: 'INSERT INTO metric_rollups (server_id, metric, resolution, bucket, avg, "min", "max", n) VALUES (?, ?, ?, ?, ?, ?, ?, 1) ' +
-          'ON CONFLICT(server_id, metric, resolution, bucket) DO UPDATE SET ' +
-          'avg = (metric_rollups.avg * metric_rollups.n + excluded.avg) / (metric_rollups.n + 1), ' +
-          '"min" = MIN(metric_rollups."min", excluded."min"), "max" = MAX(metric_rollups."max", excluded."max"), n = metric_rollups.n + 1',
-        params: [serverId, metric, res, bucket, value, value, value],
-      });
-    }
-  }
+  stmts.push(...metricStatements(serverId, snap.metrics, nowMs));
 
   // Server row: liveness, plus OS/CPU facts whenever the system section ran.
   const sys = snap.sections.system;
@@ -107,15 +115,49 @@ function capabilitiesOf(sections, prev) {
 }
 
 /**
- * Retention deletes. cfg: { rawHours, rollup5mDays, rollup1hDays }.
+ * Retention.
  */
-function retentionStatements(cfg, nowMs) {
-  const now = Math.floor(nowMs / 1000);
-  return [
-    { sql: 'DELETE FROM metric_samples WHERE ts < ?', params: [now - Math.round(cfg.rawHours * 3600)] },
-    { sql: 'DELETE FROM metric_rollups WHERE resolution = 300 AND bucket < ?', params: [now - Math.round(cfg.rollup5mDays * 86400)] },
-    { sql: 'DELETE FROM metric_rollups WHERE resolution = 3600 AND bucket < ?', params: [now - Math.round(cfg.rollup1hDays * 86400)] },
-  ];
+
+/** SQL LIKE pattern (used with ESCAPE '!') for a metric name; `*` matches anything. */
+function likeFor(name) {
+  return String(name).replace(/[!%_]/g, (c) => '!' + c).replace(/\*/g, '%');
 }
 
-module.exports = { buildPollStatements, retentionStatements, capabilitiesOf, macAutofillStatements, hashOf, ROLLUP_RESOLUTIONS };
+/** Merge metric definitions of several widgets: the longest retention wins per name pattern. */
+function mergeDefinitions(defs, cfg) {
+  const by = new Map();
+  for (const d of defs || []) {
+    const cur = by.get(d.pattern) || { pattern: d.pattern, rawHours: 0, rollup5mDays: 0, rollup1hDays: 0 };
+    cur.rawHours = Math.max(cur.rawHours, Number(d.raw_hours) || cfg.rawHours);
+    cur.rollup5mDays = Math.max(cur.rollup5mDays, Number(d.rollup_5m_days) || cfg.rollup5mDays);
+    cur.rollup1hDays = Math.max(cur.rollup1hDays, Number(d.rollup_1h_days) || cfg.rollup1hDays);
+    by.set(d.pattern, cur);
+  }
+  return Array.from(by.values());
+}
+
+/**
+ * Retention deletes. cfg: { rawHours, rollup5mDays, rollup1hDays } is the global setting; `defs` are rows of
+ * metric_definitions ({ pattern, raw_hours, rollup_5m_days, rollup_1h_days }) from package widgets, which keep
+ * the metrics they name for their own time instead (the longest wins when several widgets name one).
+ */
+function retentionStatements(cfg, nowMs, defs) {
+  const now = Math.floor(nowMs / 1000);
+  const merged = mergeDefinitions(defs, cfg);
+  const likes = merged.map((m) => likeFor(m.pattern));
+  const notCovered = likes.length ? ' AND NOT (' + likes.map(() => "metric LIKE ? ESCAPE '!'").join(' OR ') + ')' : '';
+  const stmts = [
+    { sql: 'DELETE FROM metric_samples WHERE ts < ?' + notCovered, params: [now - Math.round(cfg.rawHours * 3600), ...likes] },
+    { sql: 'DELETE FROM metric_rollups WHERE resolution = 300 AND bucket < ?' + notCovered, params: [now - Math.round(cfg.rollup5mDays * 86400), ...likes] },
+    { sql: 'DELETE FROM metric_rollups WHERE resolution = 3600 AND bucket < ?' + notCovered, params: [now - Math.round(cfg.rollup1hDays * 86400), ...likes] },
+  ];
+  merged.forEach((m, i) => {
+    const like = " AND metric LIKE ? ESCAPE '!'";
+    stmts.push({ sql: 'DELETE FROM metric_samples WHERE ts < ?' + like, params: [now - Math.round(m.rawHours * 3600), likes[i]] });
+    stmts.push({ sql: 'DELETE FROM metric_rollups WHERE resolution = 300 AND bucket < ?' + like, params: [now - Math.round(m.rollup5mDays * 86400), likes[i]] });
+    stmts.push({ sql: 'DELETE FROM metric_rollups WHERE resolution = 3600 AND bucket < ?' + like, params: [now - Math.round(m.rollup1hDays * 86400), likes[i]] });
+  });
+  return stmts;
+}
+
+module.exports = { buildPollStatements, metricStatements, retentionStatements, mergeDefinitions, likeFor, capabilitiesOf, macAutofillStatements, hashOf, ROLLUP_RESOLUTIONS };

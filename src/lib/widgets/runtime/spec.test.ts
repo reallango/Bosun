@@ -318,3 +318,34 @@ describe('fields views', () => {
     expect(validateWidgetSpec(spec({ type: 'fields', fields: [{ label: 'x', value: '{a}', format: 'nope' }] }), PERMS).ok).toBe(false);
   });
 });
+
+describe('metrics a widget tracks', () => {
+  const withMetrics = (metrics: unknown) => ({
+    version: 1, view: { type: 'text', text: '{x}' }, metrics,
+    data: { source: 'snapshot', section: 'cpu_memory', permission: 'dk.view' },
+  });
+
+  it('accepts built-in metric names with retention and computed ones with from', () => {
+    const r = validateWidgetSpec(withMetrics([
+      { name: 'cpu.usage', unit: '%', rawHours: 72, rollup5mDays: 60, rollup1hDays: 730 },
+      { name: 'gpu*.util' },
+      { name: 'dk.running', label: 'Running', from: { agg: 'count', where: { field: 'state', equals: 'running' } } },
+      { name: 'dk.mem', from: { agg: 'sum', field: 'mem_mb' } },
+    ]), PERMS, 'dk');
+    expect(r.ok).toBe(true);
+    expect(r.ok && r.value.metrics?.[0]).toMatchObject({ name: 'cpu.usage', rawHours: 72 });
+  });
+
+  it('rejects bad names, retention, duplicates and unprefixed computed metrics', () => {
+    const bad = (m: unknown) => validateWidgetSpec(withMetrics(m), PERMS, 'dk').ok;
+    expect(bad([])).toBe(false);
+    expect(bad([{ name: 'Bad Name' }])).toBe(false);
+    expect(bad([{ name: 'cpu.usage', rawHours: 0 }])).toBe(false);
+    expect(bad([{ name: 'cpu.usage', rollup1hDays: 99999 }])).toBe(false);
+    expect(bad([{ name: 'cpu.usage' }, { name: 'cpu.usage' }])).toBe(false);
+    expect(bad([{ name: 'other.running', from: { agg: 'count' } }])).toBe(false);        // must start with the package id
+    expect(bad([{ name: 'dk.running' }])).toBe(false);                                   // own prefix needs a "from"
+    expect(bad([{ name: 'dk.x', from: { agg: 'sum' } }])).toBe(false);                   // sum needs a field
+    expect(bad([{ name: 'dk.*', from: { agg: 'count' } }])).toBe(false);
+  });
+});

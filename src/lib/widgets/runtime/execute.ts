@@ -52,7 +52,7 @@ export async function loadWidgetSpec(type: string): Promise<LoadedSpec | null> {
     const perms = await rqlite.query('SELECT id FROM permission_definitions WHERE source = ?', [`package:${row.package_id}`]);
     let raw: unknown = null;
     try { raw = JSON.parse(String(row.spec)); } catch { raw = null; }
-    const v = validateWidgetSpec(raw, (perms.values ?? []).map(p => String(p[0])));
+    const v = validateWidgetSpec(raw, (perms.values ?? []).map(p => String(p[0])), String(row.package_id));
     if (v.ok) value = { type, packageId: String(row.package_id), spec: v.value };
   }
   specCache.set(type, { at: Date.now(), value });
