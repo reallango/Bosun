@@ -109,3 +109,11 @@ describe('changing a setting of a container', () => {
     expect(dockerUpdateCommand('ollama', 'ollama/ollama:0.40.13', run)).toContain('$D pull');
   });
 });
+
+describe('the systemd drop-in is readable by the monitoring account', () => {
+  it('is installed with mode 0644 (a root-only file made `systemctl cat` fail and hid the service)', () => {
+    const c = systemdEnvCommand('ollama', 'OLLAMA_CONTEXT_LENGTH', '8192');
+    expect(c).toContain('sudo -n install -m 0644 "$tmp"');
+    expect(c).not.toMatch(/sudo -n cp /);
+  });
+});
