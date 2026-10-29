@@ -34,6 +34,9 @@ const ssh = require('./src/lib/collect/ssh');
 const store = require('./src/lib/collect/store');
 const alerts = require('./src/lib/collect/alerts');
 const mailer = require('./src/lib/collect/mailer');
+const packages = require('./src/lib/collect/packages');
+const { SHELL_VERIFY_COMMAND, parseShellVerification } = require('./src/lib/ssh/shell-account');
+const { WINDOWS_SHELL_VERIFY_COMMAND, parseWindowsShellVerification } = require('./src/lib/ssh/windows-shell-account');
 
 const RQLITE_HOST = process.env.RQLITE_HOST || '127.0.0.1:4001';
 const { getMasterKey } = require('./src/lib/secrets');
@@ -151,7 +154,7 @@ class HostAgent {
   }
 
   update(row) {
-    const changed = this.row && ['hostname', 'ssh_port', 'ssh_user', 'ssh_key_id', 'platform', 'host_key_fingerprint']
+    const changed = this.row && ['hostname', 'ssh_port', 'ssh_user', 'ssh_key_id', 'shell_user', 'shell_key_id', 'platform', 'host_key_fingerprint']
       .some(k => this.row[k] !== row[k]);
     this.row = row;
     if (changed) {
@@ -176,6 +179,11 @@ class HostAgent {
     }
     this.client = null;
     this.connecting = null;
+    if (this.shellClient) {
+      try { this.shellClient.end(); } catch { /* ignore */ }
+    }
+    this.shellClient = null;
+    this.shellVerifiedAt = 0;
   }
 
   async ensureConnected() {
@@ -216,6 +224,91 @@ class HostAgent {
     } finally {
       this.connecting = null;
     }
+  }
+
+  // ---- package widgets ------------------------------------------------------
+
+  /** Collectors for the package widgets that have an instance on this server (list cached for 30 s unless forced). */
+  async packageCollectors(force) {
+    const now = Date.now();
+    if (!force && this.pkgListAt && now - this.pkgListAt < 30000) return this.pkgList;
+    const rows = await query(
+      'SELECT DISTINCT c.type AS type, c.spec AS spec FROM widgets w ' +
+      'JOIN custom_widgets c ON c.type = w.widget_type JOIN widget_packages p ON p.id = c.package_id ' +
+      'WHERE w.server_id = ? AND c.spec IS NOT NULL AND c.enabled = 1', [this.id]);
+    this.pkgList = packages.collectorsFrom(rows);
+    this.pkgListAt = now;
+    return this.pkgList;
+  }
+
+  /**
+   * A connection as the host's non-admin shell account, for package widgets that ask for it. It is proven
+   * unprivileged by logging in as it (not an administrator, no sudo or Docker, ...) when it is opened and
+   * again every 5 minutes; anything that fails that check is refused, never run as an administrator.
+   */
+  async ensureShellClient() {
+    if (!this.row.shell_user || !this.row.shell_key_id) throw new Error('this server has no non-admin account (re-provision it)');
+    if (!this.shellClient) {
+      const keys = await query('SELECT private_key_enc, passphrase_enc FROM ssh_keys WHERE id = ?', [this.row.shell_key_id]);
+      if (!keys.length) throw new Error('the non-admin account key was not found');
+      const client = await ssh.connect({
+        host: this.row.hostname,
+        port: this.row.ssh_port || 22,
+        username: this.row.shell_user,
+        privateKey: ssh.decryptSecret(keys[0].private_key_enc, getMasterKey()),
+        passphrase: keys[0].passphrase_enc ? ssh.decryptSecret(keys[0].passphrase_enc, getMasterKey()) : undefined,
+        expectedFingerprint: this.row.host_key_fingerprint || undefined,
+      });
+      client.on('close', () => { if (this.shellClient === client) { this.shellClient = null; this.shellVerifiedAt = 0; } });
+      client.on('error', (err) => warn(`${this.row.name}: non-admin connection error:`, err.message));
+      this.shellClient = client;
+      this.shellVerifiedAt = 0;
+    }
+    if (Date.now() - (this.shellVerifiedAt || 0) > 5 * 60 * 1000) {
+      const windowsHost = this.platform === 'windows';
+      const r = await ssh.exec(this.shellClient, windowsHost ? windows.powershellCommand(WINDOWS_SHELL_VERIFY_COMMAND) : SHELL_VERIFY_COMMAND, { timeoutMs: 30000 });
+      const v = windowsHost ? parseWindowsShellVerification(r.stdout, this.row.shell_user) : parseShellVerification(r.stdout, this.row.shell_user);
+      if (!v.ok) {
+        try { this.shellClient.end(); } catch { /* ignore */ }
+        this.shellClient = null;
+        throw new Error(`the non-admin account is not safe to use: ${v.problems.join('; ')}`);
+      }
+      this.shellVerifiedAt = Date.now();
+    }
+    return this.shellClient;
+  }
+
+  /**
+   * Run the package widgets' data commands that are due and store each result as host snapshot section
+   * `pkg:<type>` ({ok, data} or {ok:false, error}). In the background on the open connection: it never delays
+   * or fails the regular poll or the host's online status.
+   */
+  collectPackages(client, force) {
+    if (this.pkgRunning) return;
+    this.pkgRunning = true;
+    (async () => {
+      const collectors = await this.packageCollectors(force);
+      this.pkgLast = this.pkgLast || {};
+      const now = Date.now();
+      for (const c of collectors) {
+        if (!packages.isDue(c, this.pkgLast[c.type], now, force)) continue;
+        this.pkgLast[c.type] = now;
+        const exec = async (command, opts) => {
+          const conn = c.as === 'shell' ? await this.ensureShellClient() : client;
+          return ssh.exec(conn, command, { timeoutMs: opts.timeoutMs });
+        };
+        const result = await packages.runCollector(c, this.platform, exec);
+        const json = JSON.stringify(result);
+        await executeBatch([{
+          sql: 'INSERT INTO host_snapshots (server_id, section, data, data_hash, collected_at) VALUES (?, ?, ?, ?, ?) ' +
+            'ON CONFLICT(server_id, section) DO UPDATE SET data = excluded.data, data_hash = excluded.data_hash, collected_at = excluded.collected_at',
+          params: [this.id, packages.sectionFor(c.type), json, null, Date.now()],
+        }]);
+        if (!result.ok) warn(`${this.row.name}: ${c.type}: ${result.error}`);
+      }
+    })()
+      .catch(err => warn(`${this.row.name}: package widget collection failed: ${err.message}`))
+      .finally(() => { this.pkgRunning = false; });
   }
 
   /** Probes due this poll; marks their tiers as run. */
@@ -309,6 +402,7 @@ class HostAgent {
       this.lastDurationMs = Date.now() - started;
       this.nextDue = started + this.intervalMs;
       if (windowsUpdates) this.checkWindowsUpdates(client);
+      this.collectPackages(client, forceAll || this.polls === 1);
     } catch (err) {
       this.failures++;
       this.lastError = err.message;
@@ -379,7 +473,7 @@ let ticking = false;
 
 async function syncServers() {
   const rows = await query(
-    'SELECT id, name, hostname, ssh_port, ssh_user, ssh_key_id, platform, poll_enabled, poll_interval_sec, ' +
+    'SELECT id, name, hostname, ssh_port, ssh_user, ssh_key_id, shell_user, shell_key_id, platform, poll_enabled, poll_interval_sec, ' +
     'host_key_fingerprint, poll_requested_at, updates_requested_at, capabilities FROM servers');
   const seen = new Set();
   for (const row of rows) {
