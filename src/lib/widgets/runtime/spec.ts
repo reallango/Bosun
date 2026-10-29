@@ -31,12 +31,20 @@ export interface Cond {
   exists?: boolean;
 }
 
+/** Keep the rows whose `field` equals the widget setting `config` (an instance setting from the widget's config_schema); `all` is the setting value that keeps every row. */
+export interface ConfigFilter { field: string; config: string; all?: string; default?: string }
+
+/** When the collected data matches `when`, the widget shows `message` (a `{field}` template over that data) instead of rows. */
+export interface Unavailable { when: Cond; message: string }
+
+interface DataCommon { filter?: ConfigFilter[]; unavailable?: Unavailable }
+
 export type DataSpec =
-  | { source: 'snapshot'; section: string; path?: string; map?: Record<string, string>; permission: string }
-  | {
+  | ({ source: 'snapshot'; section: string; path?: string; map?: Record<string, string>; permission: string } & DataCommon)
+  | ({
       source: 'command'; as: RunAs; command: string; windowsCommand?: string; parse: (typeof PARSERS)[number];
       path?: string; map?: Record<string, string>; cacheSec: number; timeoutSec: number; permission: string;
-    };
+    } & DataCommon);
 
 export type ParamSpec =
   | { type: 'string'; pattern?: string; values?: string[]; maxLength: number; from?: string; default?: string; description?: string }
@@ -200,6 +208,45 @@ function validateParam(name: string, raw: unknown, where: string): Validated<Par
   return fail(`${where}: parameter "${name}" has an unknown type (use string, number or boolean)`);
 }
 
+const SETTING_RE = /^[a-z][a-zA-Z0-9_]{0,29}$/;
+
+/** `data.filter` and `data.unavailable`, shared by both data sources. */
+function dataExtras(raw: Obj): Validated<DataCommon> {
+  const out: DataCommon = {};
+  if (raw.filter !== undefined) {
+    if (!Array.isArray(raw.filter) || raw.filter.length < 1 || raw.filter.length > 4) return fail('data.filter must be a list of 1-4 entries');
+    out.filter = [];
+    for (const f of raw.filter as unknown[]) {
+      if (!isObj(f) || typeof f.field !== 'string' || !FIELD_RE.test(f.field) || typeof f.config !== 'string' || !SETTING_RE.test(f.config)) {
+        return fail('each data.filter entry needs "field" (a row field) and "config" (the widget setting to compare it with)');
+      }
+      const all = f.all === undefined ? undefined : text(f.all, 40);
+      const dflt = f.default === undefined ? undefined : text(f.default, 40);
+      if (all === null || dflt === null) return fail('data.filter "all" and "default" must be short text');
+      out.filter.push({ field: f.field, config: f.config, ...(all ? { all } : {}), ...(dflt ? { default: dflt } : {}) });
+    }
+  }
+  if (raw.unavailable !== undefined) {
+    if (!isObj(raw.unavailable)) return fail('data.unavailable must be an object with "when" and "message"');
+    const c = cond(raw.unavailable.when, 'data.unavailable "when"');
+    if (!c.ok) return c;
+    const message = text(raw.unavailable.message, 300);
+    if (!message) return fail('data.unavailable needs a message (max 300 characters)');
+    out.unavailable = { when: c.value, message };
+  }
+  return { ok: true, value: out };
+}
+
+/** Keep the rows that match the widget's settings (a setting that is missing falls back to the entry's default). */
+export function applyConfigFilters(rows: unknown, filters: ConfigFilter[] | undefined, config: Record<string, unknown>): unknown {
+  if (!filters || !Array.isArray(rows)) return rows;
+  return filters.reduce<unknown[]>((list, f) => {
+    const want = String(config[f.config] ?? f.default ?? f.all ?? '');
+    if (want === '' || (f.all !== undefined && want === f.all)) return list;
+    return list.filter(r => String(getPath(r, f.field) ?? '') === want);
+  }, rows);
+}
+
 function validateData(raw: unknown, ownPerms: ReadonlySet<string>): Validated<DataSpec> {
   if (!isObj(raw)) return fail('"data" is required');
   // Required: it decides who can see the widget on a dashboard and read its data.
@@ -209,7 +256,9 @@ function validateData(raw: unknown, ownPerms: ReadonlySet<string>): Validated<Da
   if (!path.ok) return path;
   const map = fieldMap(raw.map, 'data');
   if (!map.ok) return map;
-  const base = { ...(path.value ? { path: path.value } : {}), ...(map.value ? { map: map.value } : {}), permission: perm };
+  const extras = dataExtras(raw);
+  if (!extras.ok) return extras;
+  const base = { ...(path.value ? { path: path.value } : {}), ...(map.value ? { map: map.value } : {}), permission: perm, ...extras.value };
   if (raw.source === 'snapshot') {
     if (typeof raw.section !== 'string' || !(SNAPSHOT_SECTIONS as readonly string[]).includes(raw.section)) {
       return fail(`data.section must be one of: ${SNAPSHOT_SECTIONS.join(', ')}`);

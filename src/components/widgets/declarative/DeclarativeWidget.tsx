@@ -77,7 +77,7 @@ interface Props {
  * permission, confirmation and validation rules.
  */
 export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
-  const { data, isLoading, error, refresh } = useWidgetData(widgetId, 15);
+  const { data, isLoading, error, refresh, unavailable } = useWidgetData(widgetId, 15);
   const { user, can } = useAuth();
   const [shellFor, setShellFor] = useState<string | null>(null);
   const [spec, setSpec] = useState<PublicSpec | null>(null);
@@ -122,6 +122,7 @@ export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
   if (!spec || !view) return <WidgetLoading />;
   if (isLoading && data === null) return <WidgetLoading />;
   if (error) return <WidgetError error={error} onRetry={refresh} serverId={serverId} />;
+  if (unavailable) return <div className="p-2 text-sm text-gray-500">{unavailable}</div>;
   if (data === null || data === undefined) return <div className="p-2 text-sm text-gray-500">Waiting for the first data from this host…</div>;
 
   const actionsById = new Map(spec.actions.map(a => [a.id, a]));

@@ -11,6 +11,7 @@ export function useWidgetData(widgetId: string, refreshInterval: number = 15) {
   const [data, setData] = useState<unknown>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [unavailable, setUnavailable] = useState<string | null>(null);
   const mounted = useRef(true);
   const frame = useWidgetFrame();
 
@@ -25,12 +26,13 @@ export function useWidgetData(widgetId: string, refreshInterval: number = 15) {
     try {
       const url = force ? `/api/widgets/${widgetId}/data?force=true` : `/api/widgets/${widgetId}/data`;
       const res = await fetchWithAuth(url);
-      const json = await readJson<{ data?: unknown; error?: { message?: string } }>(res);
+      const json = await readJson<{ data?: unknown; unavailable?: string; error?: { message?: string } }>(res);
       if (!mounted.current) return;
       if (json.error) {
         setError(json.error.message || 'Request failed');
       } else {
         setData(json.data);
+        setUnavailable(json.unavailable ?? null);
         setError(null);
       }
     } catch (err) {
@@ -65,5 +67,5 @@ export function useWidgetData(widgetId: string, refreshInterval: number = 15) {
     return frame.registerRefresh(refresh);
   }, [frame, refresh]);
 
-  return { data, isLoading, error, refresh };
+  return { data, isLoading, error, refresh, unavailable };
 }
