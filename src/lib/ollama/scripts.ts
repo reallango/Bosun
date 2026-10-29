@@ -265,7 +265,8 @@ export function systemdCommand(action: 'start' | 'stop' | 'restart' | 'set_start
     assert(!!value && (SYSTEMD_STARTUP as readonly string[]).includes(value), 'Invalid startup method');
     return `sudo -n systemctl ${value === 'enabled' ? 'enable' : 'disable'} ${shq(unit)}`;
   }
-  return `sudo -n systemctl ${action} ${shq(unit)} && systemctl is-active ${shq(unit)}`;
+  // `is-active` exits non-zero for a stopped unit, which is the expected result of "stop": it only reports the state.
+  return `sudo -n systemctl ${action} ${shq(unit)} && { systemctl is-active ${shq(unit)} || true; }`;
 }
 
 // ---- Recreating a container with a newer image ------------------------------------------------------------
