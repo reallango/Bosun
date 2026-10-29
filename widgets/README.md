@@ -145,3 +145,16 @@ repairs it when it does not (registers the App Installer package, installs the w
 CDN, installs winget itself if it is missing), and installs `NSSM.NSSM` with it. Only when winget cannot be made to
 work does it download nssm from nssm.cc. The widget's Installation section is collapsed until opened, and shows an
 "Update available" badge next to its arrow when a newer release exists.
+
+### Ollama settings
+
+The Installation section also shows the current `OLLAMA_CONTEXT_LENGTH` and `OLLAMA_MAX_LOADED_MODELS` ("Ollama
+default" when a setting is not configured) and, with `ollama.service`, changes them. Where the values live depends on
+the install: for an nssm service they are in its `AppEnvironmentExtra` (the other variables, such as `OLLAMA_HOST` and
+`OLLAMA_MODELS`, are kept), for a plain Windows service in its `Environment` value, for a systemd service in the drop-in
+`/etc/systemd/system/ollama.service.d/zz-bosun-settings.conf` (sorted last so it wins over other files), and for a Docker
+container in its environment. Applying a setting restarts the service, or recreates the container from the image it
+already has (no pull) with the same ports, volumes, GPU access and restart policy; "Reset to default" removes the
+variable. Values are whole numbers (context length 512 to 4194304, loaded models 0 to 64) and are checked on the
+server; the API action is `{ "action": "set_setting", "name": "OLLAMA_CONTEXT_LENGTH", "value": "16384", "confirm": true }`
+(an empty value resets it).
