@@ -89,8 +89,25 @@ export function buildOpenApi(widgets: OpenApiWidget[], serverUrl = '/'): Json {
         ...(dataPerm ? { 'x-bosun-permission': dataPerm } : {}),
       },
     };
-    // Terminal actions open the web terminal in the browser; there is nothing to call. (API terminals are listed above.)
-    for (const a of w.spec.actions.filter(x => x.kind !== 'terminal')) {
+    for (const a of w.spec.actions) {
+      if (a.kind === 'terminal') {
+        // For API keys a terminal action hands out the token for an API terminal in a container.
+        paths[`/api/servers/{serverId}/widget-actions/${w.type}/${a.id}`] = {
+          post: {
+            operationId: `widgetTerminal_${w.type}_${a.id}`, summary: `${a.label} (API terminal token)`, tags: [tag],
+            description: [
+              a.description,
+              `Needs the "${w.permissionLabels[a.permission] ?? a.permission}" permission. API keys only. Returns a single-use token: connect to the WebSocket at /ws/api-terminal?token=... for an interactive shell in the container (a fixed docker exec; containers that could reach the host are refused).`,
+            ].filter(Boolean).join(" "),
+            parameters: [serverIdParam],
+            requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["container"], properties: { container: { type: "string", pattern: "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$", description: "Container name or id" } } } } } },
+            responses: { "200": { description: "token, expiresInSec, path" }, ...errorResponses },
+            "x-bosun-permission": a.permission,
+            "x-bosun-runs-as": "terminal",
+          },
+        };
+        continue;
+      }
       const names = Object.keys(a.params);
       const props: Json = { ...(names.length ? { params: { type: 'object', required: names, additionalProperties: false, properties: Object.fromEntries(names.map(n => [n, paramSchema(a.params[n])])) } } : {}) };
       if (a.confirm) props.confirm = { type: 'boolean', enum: [true], description: 'Must be true: this action asks for confirmation in the widget' };
