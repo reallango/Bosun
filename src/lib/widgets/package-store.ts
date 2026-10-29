@@ -162,6 +162,17 @@ export async function installPackage(opts: InstallOptions): Promise<InstallResul
   for (const t of dropped) stmts.push({ sql: 'DELETE FROM custom_widgets WHERE type = ? AND package_id = ?', params: [t, manifest.id] });
   for (const t of dropped) stmts.push({ sql: 'DELETE FROM host_snapshots WHERE section = ?', params: [`pkg:${t}`] });
 
+  // The statistics this version tracks (and how long their history lives); the poller reads these.
+  stmts.push({ sql: 'DELETE FROM metric_definitions WHERE package_id = ?', params: [manifest.id] });
+  for (const w of manifest.widgets) {
+    for (const m of w.spec?.metrics ?? []) {
+      stmts.push({
+        sql: 'INSERT INTO metric_definitions (package_id, widget_type, pattern, label, unit, raw_hours, rollup_5m_days, rollup_1h_days) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        params: [manifest.id, w.type, m.name, m.label ?? null, m.unit ?? null, m.rawHours ?? null, m.rollup5mDays ?? null, m.rollup1hDays ?? null],
+      });
+    }
+  }
+
   // Permissions: drop the ones this version no longer declares (and any grants of them), upsert the rest.
   const permIds = manifest.permissions.map(p => p.id);
   stmts.push({
@@ -204,6 +215,7 @@ export async function removePackage(id: string, removeWidgets: boolean): Promise
   stmts.push({ sql: 'DELETE FROM permission_grants WHERE permission IN (SELECT id FROM permission_definitions WHERE source = ?)', params: [`package:${id}`] });
   stmts.push({ sql: 'DELETE FROM permission_definitions WHERE source = ?', params: [`package:${id}`] });
   stmts.push({ sql: 'DELETE FROM custom_widgets WHERE package_id = ?', params: [id] });
+  stmts.push({ sql: 'DELETE FROM metric_definitions WHERE package_id = ?', params: [id] });
   stmts.push({ sql: 'DELETE FROM widget_packages WHERE id = ?', params: [id] });
   await rqlite.executeBatch(stmts as { sql: string; params?: never[] }[], { transaction: true });
   // A bundled package that is removed stays removed (it is not installed again at the next start).

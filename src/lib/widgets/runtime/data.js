@@ -74,4 +74,40 @@ function shapeData(spec, parsed) {
   return Array.isArray(picked) ? picked.slice(0, MAX_ROWS) : picked;
 }
 
-module.exports = { MAX_ROWS, getPath, parseOutput, selectPath, applyMap, shapeData };
+function matchCond(c, row) {
+  const v = getPath(row, c.field);
+  const same = (x) => v === x || (v !== undefined && v !== null && String(v) === String(x));
+  if (c.exists !== undefined) return (v !== undefined && v !== null && v !== '') === c.exists;
+  if (c.equals !== undefined) return same(c.equals);
+  if (c.notEquals !== undefined) return !same(c.notEquals);
+  if (Array.isArray(c.in)) return c.in.some(same);
+  return false;
+}
+
+/**
+ * The numbers a widget tracks over time, computed from its (shaped) data. Only metrics with `from` are computed
+ * here; the others name metrics the built-in collectors already produce. Returns { name: number }.
+ * @param {{ name: string, from?: { field?: string, agg: string, where?: object } }[] | undefined} metrics
+ * @param {unknown} data
+ */
+function extractMetrics(metrics, data) {
+  const out = {};
+  if (!Array.isArray(metrics) || data === null || data === undefined) return out;
+  const rows = Array.isArray(data) ? data : [data];
+  for (const m of metrics) {
+    if (!m || !m.from) continue;
+    const f = m.from;
+    const sel = f.where ? rows.filter((r) => matchCond(f.where, r)) : rows;
+    if (f.agg === 'count') { out[m.name] = sel.length; continue; }
+    const nums = sel.map((r) => Number(getPath(r, f.field))).filter((n) => Number.isFinite(n));
+    if (!nums.length) continue;
+    if (f.agg === 'sum') out[m.name] = nums.reduce((a, b) => a + b, 0);
+    else if (f.agg === 'avg') out[m.name] = nums.reduce((a, b) => a + b, 0) / nums.length;
+    else if (f.agg === 'min') out[m.name] = Math.min(...nums);
+    else if (f.agg === 'max') out[m.name] = Math.max(...nums);
+    else if (f.agg === 'first') out[m.name] = nums[0];
+  }
+  return out;
+}
+
+module.exports = { MAX_ROWS, getPath, parseOutput, selectPath, applyMap, shapeData, matchCond, extractMetrics };

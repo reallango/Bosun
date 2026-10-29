@@ -89,11 +89,30 @@ export interface ViewSpec {
   text?: string;
 }
 
+export const METRIC_AGGS = ['count', 'sum', 'avg', 'min', 'max', 'first'] as const;
+
+/**
+ * A statistic the widget tracks over time (kept as history on the server). Without `from` it names a metric the
+ * built-in collectors already produce (`cpu.usage`, `gpu*.util`; `*` matches a number) and only sets how long its
+ * history is kept. With `from` the metric is computed from the widget's data on every collection, and its name
+ * must start with the package id (`mypkg.running`). A retention left out uses the global setting.
+ */
+export interface MetricSpec {
+  name: string;
+  label?: string;
+  unit?: string;
+  rawHours?: number;
+  rollup5mDays?: number;
+  rollup1hDays?: number;
+  from?: { field?: string; agg: (typeof METRIC_AGGS)[number]; where?: Cond };
+}
+
 export interface WidgetSpec {
   version: number;
   data: DataSpec;
   view: ViewSpec;
   actions: ActionSpec[];
+  metrics?: MetricSpec[];
 }
 
 export type Validated<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -513,7 +532,50 @@ function validateView(raw: unknown, actionIds: ReadonlySet<string>): Validated<V
 }
 
 /** Validate a widget's `spec`. `ownPermissions` are the permission ids the package declares. */
-export function validateWidgetSpec(raw: unknown, ownPermissions: readonly string[]): Validated<WidgetSpec> {
+const METRIC_NAME_RE = /^[a-z][a-z0-9_*]{0,30}(\.[a-z0-9_*]{1,30}){1,3}$/;
+
+function validateMetrics(raw: unknown, packageId: string | undefined): Validated<MetricSpec[]> {
+  if (!Array.isArray(raw) || raw.length < 1 || raw.length > 20) return fail('"metrics" must be a list of 1-20 statistics');
+  const out: MetricSpec[] = [];
+  const seen = new Set<string>();
+  const limit = (v: unknown, name: string, max: number): Validated<number | undefined> => {
+    if (v === undefined) return { ok: true, value: undefined };
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > max) return fail(`metric "${name}": retention must be a whole number from 1 to ${max}`);
+    return { ok: true, value: v };
+  };
+  for (const m of raw as unknown[]) {
+    if (!isObj(m)) return fail('each metric must be an object');
+    const name = typeof m.name === 'string' ? m.name : '';
+    if (!METRIC_NAME_RE.test(name)) return fail(`metric name "${name}" must look like "cpu.usage" or "mypkg.running" (lowercase, digits, underscores, dots; "*" only in a built-in metric name)`);
+    if (seen.has(name)) return fail(`metric "${name}" is listed twice`);
+    seen.add(name);
+    const item: MetricSpec = { name };
+    if (m.label !== undefined) { const l = text(m.label, 60); if (!l) return fail(`metric "${name}": label must be text`); item.label = l; }
+    if (m.unit !== undefined) { const u = text(m.unit, 12); if (!u) return fail(`metric "${name}": unit must be short text`); item.unit = u; }
+    const raw_ = limit(m.rawHours, name, 24 * 90); if (!raw_.ok) return raw_; if (raw_.value) item.rawHours = raw_.value;
+    const d5 = limit(m.rollup5mDays, name, 365); if (!d5.ok) return d5; if (d5.value) item.rollup5mDays = d5.value;
+    const d1 = limit(m.rollup1hDays, name, 3650); if (!d1.ok) return d1; if (d1.value) item.rollup1hDays = d1.value;
+    if (m.from !== undefined) {
+      if (!isObj(m.from)) return fail(`metric "${name}": "from" must be an object`);
+      if (name.includes('*')) return fail(`metric "${name}": a metric computed from the data cannot use "*" in its name`);
+      if (packageId && !name.startsWith(`${packageId}.`)) return fail(`metric "${name}": metrics computed from the data must start with "${packageId}."`);
+      const agg = String(m.from.agg);
+      if (!(METRIC_AGGS as readonly string[]).includes(agg)) return fail(`metric "${name}": from.agg must be one of: ${METRIC_AGGS.join(', ')}`);
+      const field = m.from.field === undefined ? undefined : (typeof m.from.field === 'string' && FIELD_RE.test(m.from.field) ? m.from.field : null);
+      if (field === null) return fail(`metric "${name}": from.field must be a field name`);
+      if (agg !== 'count' && !field) return fail(`metric "${name}": "${agg}" needs from.field`);
+      let where: Cond | undefined;
+      if (m.from.where !== undefined) { const c = cond(m.from.where, `metric "${name}" "where"`); if (!c.ok) return c; where = c.value; }
+      item.from = { agg: agg as (typeof METRIC_AGGS)[number], ...(field ? { field } : {}), ...(where ? { where } : {}) };
+    } else if (packageId && name.startsWith(`${packageId}.`)) {
+      return fail(`metric "${name}": names starting with "${packageId}." are computed from the data, so they need "from"`);
+    }
+    out.push(item);
+  }
+  return { ok: true, value: out };
+}
+
+export function validateWidgetSpec(raw: unknown, ownPermissions: readonly string[], packageId?: string): Validated<WidgetSpec> {
   if (!isObj(raw)) return fail('"spec" must be an object');
   if (raw.version !== SPEC_VERSION) return fail(`spec.version must be ${SPEC_VERSION}`);
   const own = new Set(ownPermissions);
@@ -533,7 +595,13 @@ export function validateWidgetSpec(raw: unknown, ownPermissions: readonly string
   }
   const view = validateView(raw.view, ids);
   if (!view.ok) return view;
-  return { ok: true, value: { version: SPEC_VERSION, data: data.value, view: view.value, actions } };
+  let metrics: MetricSpec[] | undefined;
+  if (raw.metrics !== undefined) {
+    const m = validateMetrics(raw.metrics, packageId);
+    if (!m.ok) return m;
+    metrics = m.value;
+  }
+  return { ok: true, value: { version: SPEC_VERSION, data: data.value, view: view.value, actions, ...(metrics ? { metrics } : {}) } };
 }
 
 /** Does a row satisfy a condition? Used by the view and, for toggles and summaries, the renderer. */

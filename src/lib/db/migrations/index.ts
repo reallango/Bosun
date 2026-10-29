@@ -524,6 +524,23 @@ const V9_BUNDLED: string[] = [
     `INSERT OR IGNORE INTO app_config (key, value, description) VALUES ('widgets.bundled_removed', '[]', 'Bundled widget packages that were removed and must not be installed again automatically')`,
 ];
 
+// ---- Version 10: statistics that widgets track, and how long their history is kept ----
+// One row per metric a package widget declares (see `metrics` in the widget spec). `pattern` is the metric name
+// (`*` matches anything); a missing retention uses the global settings.
+const V10_METRIC_DEFINITIONS: string[] = [
+    `CREATE TABLE IF NOT EXISTS metric_definitions (
+        package_id TEXT NOT NULL,
+        widget_type TEXT NOT NULL,
+        pattern TEXT NOT NULL,
+        label TEXT,
+        unit TEXT,
+        raw_hours INTEGER,
+        rollup_5m_days INTEGER,
+        rollup_1h_days INTEGER,
+        PRIMARY KEY (package_id, widget_type, pattern)
+    )`,
+];
+
 export const MIGRATIONS: Migration[] = [
     {
         version: 1,
@@ -542,6 +559,7 @@ export const MIGRATIONS: Migration[] = [
     { version: 7, name: 'widget_packages', statements: V7_WIDGET_PACKAGES },
     { version: 8, name: 'deny_grants', statements: V8_DENY_GRANTS },
     { version: 9, name: 'bundled_packages', statements: V9_BUNDLED },
+    { version: 10, name: 'metric_definitions', statements: V10_METRIC_DEFINITIONS },
 ];
 
 /** The schema version this build expects. */
@@ -579,6 +597,7 @@ export const CORE_TABLES: string[] = [
     'api_key_groups',
     'permission_definitions',
     'widget_packages',
+    'metric_definitions',
 ];
 
 export class LegacySchemaError extends Error {

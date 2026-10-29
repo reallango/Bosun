@@ -53,6 +53,8 @@ export const BACKUP_TABLES: string[] = [
   'user_groups',
   'api_key_groups',
   'permission_definitions',
+  'widget_packages',
+  'metric_definitions',
 ];
 
 // Tables excluded by default because they can grow very large.
