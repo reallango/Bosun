@@ -2,8 +2,8 @@
   "schema": 1,
   "id": "docker_package",
   "name": "Docker containers (package)",
-  "version": "0.0.1",
-  "description": "The Docker widget rebuilt as a package: lists containers, shows logs, starts, stops and restarts them. It needs no code in Bosun, only this manifest.",
+  "version": "0.0.2",
+  "description": "The Docker widget rebuilt as a package: lists containers, shows logs, opens a shell in a container, starts, stops and restarts them. It needs no code in Bosun, only this manifest.",
   "author": "Bosun",
   "permissions": [
     {
@@ -31,6 +31,15 @@
       "group": "Docker (package)",
       "defaultLevel": "operator",
       "risk": "medium",
+      "scope": "server"
+    },
+    {
+      "id": "docker_package.shell",
+      "label": "Open a shell in a container (package)",
+      "description": "Show the shell button on each running container. It opens the web terminal, which asks for your own login and is only available to Full access users. API access to a container shell is separate (the API terminal).",
+      "group": "Docker (package)",
+      "defaultLevel": "admin",
+      "risk": "high",
       "scope": "server"
     }
   ],
@@ -76,7 +85,7 @@
             },
             "title": "{name}",
             "subtitle": "{image} · {status}",
-            "actions": ["logs", "restart", "stop", "start"]
+            "actions": ["logs", "shell", "restart", "stop", "start"]
           }
         },
         "actions": [
@@ -92,6 +101,14 @@
               "lines": { "type": "number", "min": 1, "max": 2000, "default": 300 }
             },
             "result": "text"
+          },
+          {
+            "id": "shell",
+            "label": "Shell",
+            "icon": "terminal-square",
+            "permission": "docker_package.shell",
+            "terminal": { "container": "name" },
+            "when": { "field": "state", "equals": "running" }
           },
           {
             "id": "restart",
