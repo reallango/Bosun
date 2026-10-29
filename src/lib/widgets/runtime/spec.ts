@@ -18,7 +18,7 @@ export const SPEC_VERSION = 1;
 export const SNAPSHOT_SECTIONS = ['cpu_memory', 'disks', 'gpus', 'system', 'net_rates', 'network', 'services', 'ollama', 'docker', 'updates'] as const;
 export const ICONS = ['play', 'square', 'rotate-cw', 'scroll-text', 'trash-2', 'download', 'upload', 'power', 'refresh-cw', 'terminal-square', 'pause', 'info'] as const;
 export const DOT_COLORS = ['green', 'amber', 'red', 'gray', 'blue'] as const;
-export const FORMATS = ['text', 'bytes', 'percent', 'badge'] as const;
+export const FORMATS = ['text', 'bytes', 'percent', 'badge', 'bar', 'duration', 'mb', 'temp'] as const;
 export const PARSERS = ['json', 'jsonlines', 'lines', 'text'] as const;
 
 export type RunAs = 'service' | 'shell';
@@ -72,13 +72,18 @@ export interface ActionSpec {
   after: 'refresh' | 'none';
 }
 
+/** One labelled value. `bar` (a template that gives 0-100) draws a gauge under it; `when` hides it for data it does not match. */
+export interface FieldSpec { label: string; value: string; format: (typeof FORMATS)[number]; bar?: string; when?: Cond }
+
 export interface ViewSpec {
-  type: 'list' | 'table' | 'text';
+  type: 'list' | 'table' | 'text' | 'fields';
+  /** A fields view: the labelled values (gauges, key and value pairs) of one data object. */
+  fields?: FieldSpec[];
   empty?: string;
   summary?: { label: string; where?: Cond }[];
   filter?: { fields: string[]; placeholder?: string };
   toggles?: { key: string; label: string; default: boolean; hideWhen: Cond }[];
-  row?: { dot?: { field: string; colors: Record<string, (typeof DOT_COLORS)[number]> }; title: string; subtitle?: string; badge?: string; actions: string[] };
+  row?: { dot?: { field: string; colors: Record<string, (typeof DOT_COLORS)[number]> }; title: string; subtitle?: string; badge?: string; actions: string[]; fields?: FieldSpec[] };
   columns?: { title: string; value: string; format: (typeof FORMATS)[number] }[];
   rowActions?: string[];
   text?: string;
@@ -373,10 +378,43 @@ function validateAction(raw: unknown, ownPerms: ReadonlySet<string>): Validated<
   };
 }
 
+function validateFields(raw: unknown, where: string): Validated<FieldSpec[]> {
+  if (!Array.isArray(raw) || raw.length < 1 || raw.length > 24) return fail(`${where} must be a list of 1-24 fields`);
+  const out: FieldSpec[] = [];
+  for (const f of raw as unknown[]) {
+    if (!isObj(f)) return fail(`${where}: each field must be an object`);
+    const label = text(f.label, 40);
+    const value = text(f.value, 200);
+    if (!label || !value) return fail(`${where}: each field needs a label and a value`);
+    const format = f.format === undefined ? 'text' : f.format;
+    if (!(FORMATS as readonly string[]).includes(String(format))) return fail(`${where}: format must be one of: ${FORMATS.join(', ')}`);
+    const item: FieldSpec = { label, value, format: format as FieldSpec['format'] };
+    if (f.bar !== undefined) {
+      const bar = text(f.bar, 200);
+      if (!bar) return fail(`${where}: "bar" must be a template that gives a number from 0 to 100`);
+      item.bar = bar;
+    }
+    if (f.when !== undefined) {
+      const c = cond(f.when, `${where} "when"`);
+      if (!c.ok) return c;
+      item.when = c.value;
+    }
+    out.push(item);
+  }
+  return { ok: true, value: out };
+}
+
 function validateView(raw: unknown, actionIds: ReadonlySet<string>): Validated<ViewSpec> {
   if (!isObj(raw)) return fail('"view" is required');
-  if (raw.type !== 'list' && raw.type !== 'table' && raw.type !== 'text') return fail('view.type must be "list", "table" or "text"');
+  if (raw.type !== 'list' && raw.type !== 'table' && raw.type !== 'text' && raw.type !== 'fields') return fail('view.type must be "list", "table", "fields" or "text"');
   const view: ViewSpec = { type: raw.type };
+  if (raw.type === 'fields') {
+    const f = validateFields(raw.fields, 'view.fields');
+    if (!f.ok) return f;
+    view.fields = f.value;
+    if (raw.empty !== undefined) { const e = text(raw.empty, 200); if (!e) return fail('view.empty must be text'); view.empty = e; }
+    return { ok: true, value: view };
+  }
   if (raw.empty !== undefined) {
     const e = text(raw.empty, 200);
     if (!e) return fail('view.empty must be text');
@@ -445,6 +483,11 @@ function validateView(raw: unknown, actionIds: ReadonlySet<string>): Validated<V
         colors[k] = v as (typeof DOT_COLORS)[number];
       }
       row.dot = { field: d.field, colors };
+    }
+    if (raw.row.fields !== undefined) {
+      const f = validateFields(raw.row.fields, 'view.row.fields');
+      if (!f.ok) return f;
+      row.fields = f.value;
     }
     const a = refActions(raw.row.actions, 'view.row.actions');
     if (!a.ok) return a;
