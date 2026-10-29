@@ -5,6 +5,7 @@ import { requireLevel } from '@/lib/auth/middleware';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { logAudit, AuditActions } from '@/lib/audit/logger';
 import { SHELL_ACCOUNT_RE } from '@/lib/ssh/shell-account';
+import { visibleServerIds } from '@/lib/permissions/effective';
 import crypto from 'crypto';
 
 export async function GET(request: NextRequest) {
@@ -12,7 +13,9 @@ export async function GET(request: NextRequest) {
     const payload = await requireLevel(request, 'viewer');
     if (payload instanceof NextResponse) return payload;
     const result = await rqlite.query('SELECT id, name, hostname, ssh_port, ssh_user, ssh_key_id, shell_user, shell_key_id, platform, os_type, os_version, cpu_model, cpu_cores, total_ram_mb, is_online, last_seen, last_error, poll_enabled, poll_interval_sec, capabilities, mac_address, mac_address_alt FROM servers ORDER BY name');
-    const servers = rowsToObjects(result).map(s => ({ 
+    // Servers a permission group hides (servers.view denied) are not listed.
+    const visible = await visibleServerIds(payload);
+    const servers = rowsToObjects(result).filter(s => visible === '*' || visible.has(String(s.id))).map(s => ({ 
       id: s.id, 
       name: s.name, 
       host: s.hostname,

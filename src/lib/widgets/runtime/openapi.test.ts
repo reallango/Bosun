@@ -67,7 +67,7 @@ describe('reviewPackage', () => {
     const m = validateManifest({
       schema: 1, id: 'dk', name: 'Dk', version: '0.0.1', permissions: [perm('dk.view'), perm('dk.control')],
       widgets: [{ type: 'dk_w', display_name: 'Docker', spec: {
-        version: 1, data: { source: 'command', as: 'shell', parse: 'lines', command: 'uptime' },
+        version: 1, data: { source: 'command', as: 'shell', parse: 'lines', command: 'uptime', permission: 'dk.view' },
         view: { type: 'list', row: { title: '{line}', actions: ['restart'] } },
         actions: [{ id: 'restart', label: 'Restart', permission: 'dk.control', as: 'service', command: 'docker restart {{n}}', confirm: { title: 'Sure?' }, params: { n: { type: 'string', values: ['a'] } } }],
       } }],
@@ -78,5 +78,16 @@ describe('reviewPackage', () => {
     expect(r.runsAsService).toBe(true);
     expect(r.widgets[0].commands.map(c => [c.as, c.command, c.confirm])).toEqual([['shell', 'uptime', false], ['service', 'docker restart {{n}}', true]]);
     expect(r.permissions.map(p => p.id)).toEqual(['dk.view', 'dk.control']);
+  });
+});
+
+describe('system widget actions in the OpenAPI document', () => {
+  const doc = buildOpenApi([]) as any;
+  it('lists the built-in widgets actions with their permissions', () => {
+    expect(doc.paths['/api/servers/{serverId}/containers/{containerId}/action'].post['x-bosun-permission']).toBe('docker.containers.control');
+    expect(doc.paths['/api/servers/{serverId}/containers/{containerId}/logs'].get['x-bosun-permission']).toBe('docker.logs');
+    expect(doc.paths['/api/servers/{serverId}/ollama/models'].delete['x-bosun-permission']).toBe('ollama.models.delete');
+    expect(doc.paths['/api/servers/{serverId}/power'].post.requestBody.content['application/json'].schema.required).toEqual(['action', 'confirm']);
+    expect(doc.paths['/api/servers/{serverId}/containers/{containerId}/action'].post.description).toMatch(/Start, stop and restart containers/);
   });
 });

@@ -40,8 +40,8 @@ export class DuplicateNameError extends Error {
 const isUnique = (err: unknown) => /UNIQUE constraint failed/i.test(String((err as Error)?.message));
 const str = (v: unknown): string | null => (v === null || v === undefined ? null : String(v));
 const grantRow = (groupId: string, g: Grant) => ({
-  sql: 'INSERT OR IGNORE INTO permission_grants (id, group_id, permission, scope_type, scope_id) VALUES (?, ?, ?, ?, ?)',
-  params: [crypto.randomUUID(), groupId, g.permission, g.scope.type, g.scope.type === 'all' ? '' : g.scope.id],
+  sql: 'INSERT OR IGNORE INTO permission_grants (id, group_id, permission, scope_type, scope_id, effect) VALUES (?, ?, ?, ?, ?, ?)',
+  params: [crypto.randomUUID(), groupId, g.permission, g.scope.type, g.scope.type === 'all' ? '' : g.scope.id, g.effect === 'deny' ? 'deny' : 'allow'],
 });
 
 // ---------------------------------------------------------------- permission groups
@@ -49,7 +49,7 @@ const grantRow = (groupId: string, g: Grant) => ({
 export async function listGroups(): Promise<GroupDto[]> {
   const [groups, grants, users, keys] = await Promise.all([
     rqlite.query('SELECT id, name, description, created_at, updated_at FROM permission_groups ORDER BY name COLLATE NOCASE'),
-    rqlite.query('SELECT group_id, permission, scope_type, scope_id FROM permission_grants ORDER BY permission'),
+    rqlite.query('SELECT group_id, permission, scope_type, scope_id, effect FROM permission_grants ORDER BY permission'),
     rqlite.query('SELECT group_id, COUNT(*) AS n FROM user_groups GROUP BY group_id'),
     rqlite.query('SELECT group_id, COUNT(*) AS n FROM api_key_groups GROUP BY group_id'),
   ]);
@@ -58,7 +58,7 @@ export async function listGroups(): Promise<GroupDto[]> {
     const type = String(r.scope_type);
     const scope = type === 'all' ? { type: 'all' as const } : { type: type as 'server' | 'server_group', id: String(r.scope_id) };
     const k = String(r.group_id);
-    grantsBy.set(k, [...(grantsBy.get(k) || []), { permission: String(r.permission), scope }]);
+    grantsBy.set(k, [...(grantsBy.get(k) || []), { permission: String(r.permission), scope, effect: r.effect === 'deny' ? 'deny' as const : 'allow' as const }]);
   }
   const count = (res: Awaited<ReturnType<typeof rqlite.query>>) =>
     new Map(rowsToObjects(res).map(r => [String(r.group_id), Number(r.n) || 0]));

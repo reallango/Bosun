@@ -43,7 +43,7 @@ export default function PermissionsPage() {
   const summary = (g: PermissionGroup) => {
     if (!data) return '';
     const label = (id: string) => data.catalog.find(p => p.id === id)?.label ?? id;
-    return g.grants.map(x => `${label(x.permission)} (${scopeLabel(x, data.servers, data.serverGroups)})`).join('\n');
+    return g.grants.map(x => `${x.effect === 'deny' ? 'DENY: ' : ''}${label(x.permission)} (${scopeLabel(x, data.servers, data.serverGroups)})`).join('\n');
   };
 
   const confirmDelete = async () => {
@@ -67,7 +67,7 @@ export default function PermissionsPage() {
                 <span key={r}>{i > 0 && ', '}<strong>{ACCESS_LEVELS[r].label}</strong></span>
               ))}.
               The level decides what they can do by default, exactly as before.
-              A <strong>permission group</strong> adds individual actions on top of it, for all servers or only some.
+              A <strong>permission group</strong> adds individual actions on top of it, for all servers or only some, and can also <strong>deny</strong> one: denying &quot;See a server&quot; hides that server from the group, and denying a widget&apos;s data permission hides that widget.
               For example, a Read only API key in a group that holds &quot;Restart a server&quot; for one machine can look at everything and restart just that machine.
             </p>
           </CardContent>

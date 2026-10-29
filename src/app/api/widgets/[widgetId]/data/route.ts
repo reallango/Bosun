@@ -7,6 +7,7 @@ import { WIDGET_SECTIONS, widgetDataFromSnapshots, collectedAtFor, Sections, Ser
 import { consumeActionRateLimit } from '@/lib/utils/rate-limiter';
 import { logAudit } from '@/lib/audit/logger';
 import { loadWidgetSpec, loadRuntimeData, RuntimeError } from '@/lib/widgets/runtime/execute';
+import { serverVisible } from '@/lib/permissions/effective';
 import { startScript, statusScript, parseInstallStatus } from '@/lib/updates/windows-install';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -38,6 +39,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     if (requested === 'updates' && await hasPermission(auth, 'updates.check', widget.server_id)) forceParam = 'updates';
     else if (requested === 'true' && await hasPermission(auth, 'servers.refresh', widget.server_id)) forceParam = 'true';
     force = forceParam !== null;
+    if (!(await serverVisible(auth, widget.server_id))) return NextResponse.json({ error: { message: 'Widget not found' } }, { status: 404 });
     const cfg = parseJson(widget.config);
     const srvRes = await rqlite.query(
       'SELECT id, name, hostname, platform, os_type, os_version, is_online, last_seen, last_error, poll_interval_sec FROM servers WHERE id = ?',

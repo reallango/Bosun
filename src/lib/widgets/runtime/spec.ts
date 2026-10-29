@@ -32,10 +32,10 @@ export interface Cond {
 }
 
 export type DataSpec =
-  | { source: 'snapshot'; section: string; path?: string; map?: Record<string, string>; permission?: string }
+  | { source: 'snapshot'; section: string; path?: string; map?: Record<string, string>; permission: string }
   | {
       source: 'command'; as: RunAs; command: string; windowsCommand?: string; parse: (typeof PARSERS)[number];
-      path?: string; map?: Record<string, string>; cacheSec: number; timeoutSec: number; permission?: string;
+      path?: string; map?: Record<string, string>; cacheSec: number; timeoutSec: number; permission: string;
     };
 
 export type ParamSpec =
@@ -198,13 +198,14 @@ function validateParam(name: string, raw: unknown, where: string): Validated<Par
 
 function validateData(raw: unknown, ownPerms: ReadonlySet<string>): Validated<DataSpec> {
   if (!isObj(raw)) return fail('"data" is required');
-  const perm = raw.permission === undefined ? undefined : (typeof raw.permission === 'string' && ownPerms.has(raw.permission) ? raw.permission : null);
-  if (perm === null) return fail('data.permission must be a permission this package declares');
+  // Required: it decides who can see the widget on a dashboard and read its data.
+  const perm = typeof raw.permission === 'string' && ownPerms.has(raw.permission) ? raw.permission : null;
+  if (perm === null) return fail('data.permission is required and must be a permission this package declares: it decides who sees the widget and its data');
   const path = optPath(raw.path, 'data');
   if (!path.ok) return path;
   const map = fieldMap(raw.map, 'data');
   if (!map.ok) return map;
-  const base = { ...(path.value ? { path: path.value } : {}), ...(map.value ? { map: map.value } : {}), ...(perm ? { permission: perm } : {}) };
+  const base = { ...(path.value ? { path: path.value } : {}), ...(map.value ? { map: map.value } : {}), permission: perm };
   if (raw.source === 'snapshot') {
     if (typeof raw.section !== 'string' || !(SNAPSHOT_SECTIONS as readonly string[]).includes(raw.section)) {
       return fail(`data.section must be one of: ${SNAPSHOT_SECTIONS.join(', ')}`);

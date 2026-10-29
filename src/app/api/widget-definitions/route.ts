@@ -5,6 +5,8 @@ import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { getWidgetDefinitions, resolveWidgetDefinition, CUSTOM_WIDGET_DATA_TYPES } from '@/components/widgets/registry-loader';
 import { ok, fail, failFrom } from '@/lib/api/response';
 import { sanitizeCustomWidget, withoutSpec } from '@/lib/widgets/custom-widget-input';
+import { hasPermission } from '@/lib/permissions/authorize';
+import { loadWidgetSpec } from '@/lib/widgets/runtime/execute';
 
 /**
  * GET /api/widget-definitions?serverId=<id>
@@ -23,10 +25,19 @@ export async function GET(request: NextRequest) {
       if (!srv.values?.length) return fail('Server not found', 404);
       platform = (srv.values[0][0] as string) || 'linux';
     }
-    const definitions = await getWidgetDefinitions(platform);
+    let definitions = await getWidgetDefinitions(platform);
+    // Package widgets are offered only to those who hold their data permission (for that server, when one is given).
+    if (auth.role !== 'admin') {
+      const keep: typeof definitions = [];
+      for (const d of definitions) {
+        const perm = d.packageId ? (await loadWidgetSpec(d.type))?.spec.data.permission : null;
+        if (!perm || await hasPermission(auth, perm, serverId)) keep.push(d);
+      }
+      definitions = keep;
+    }
     return NextResponse.json(
       { data: { definitions, platform: platform ?? null } },
-      { headers: { 'Cache-Control': 'private, max-age=300' } });
+      { headers: { 'Cache-Control': 'private, max-age=60' } });
   } catch (error) {
     return failFrom(error);
   }

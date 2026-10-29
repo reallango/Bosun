@@ -3,6 +3,7 @@ import { requireAuth } from '@/lib/auth/middleware';
 import { requirePermission } from '@/lib/permissions/authorize';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { DASHBOARD_NAME_MAX } from '@/lib/dashboards/events';
+import { visibleDashboards, visibleWidgets } from '@/lib/widgets/visibility';
 
 /** widgets.layouts holds per-breakpoint rects as JSON; always return an object. */
 function parseLayouts(value: unknown): Record<string, unknown> {
@@ -34,7 +35,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     );
 
     const dashboard = rowsToObjects(dashResult)[0];
-    const widgets = rowsToObjects(widgetsResult).map((w: any) => ({
+    // A server dashboard of a hidden server does not exist for this caller.
+    if ((await visibleDashboards(auth, [dashboard])).length === 0) {
+      return NextResponse.json({ error: { message: 'Dashboard not found' } }, { status: 404 });
+    }
+    const widgets = (await visibleWidgets(auth, rowsToObjects(widgetsResult) as any[])).map((w: any) => ({
       ...w,
       config: w.config ? (typeof w.config === 'string' ? JSON.parse(w.config || '{}') : w.config) : {},
       layouts: parseLayouts(w.layouts),

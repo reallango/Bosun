@@ -76,7 +76,14 @@ export function validateGrants(raw: unknown, defs: readonly PermissionDef[] = []
     } else {
       return { ok: false, error: `Unknown scope "${String(type)}"` };
     }
+    const rawEffect = (item as Record<string, unknown>).effect;
+    if (rawEffect !== undefined && rawEffect !== 'allow' && rawEffect !== 'deny') return { ok: false, error: 'Each grant must be either allow or deny' };
+    if (rawEffect === 'deny') grant.effect = 'deny';
     const key = grantKey(grant);
+    const earlier = out.find(o => grantKey(o) === key);
+    if (earlier && (earlier.effect ?? 'allow') !== (grant.effect ?? 'allow')) {
+      return { ok: false, error: `"${def.label}" is both allowed and denied for the same servers` };
+    }
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(grant);

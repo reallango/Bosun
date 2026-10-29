@@ -6,6 +6,8 @@ import { requirePermission } from '@/lib/permissions/authorize';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { COMMAND_CHANGE_FORBIDDEN, changesCommand, mayChangeCommand } from '@/lib/auth/widget-policy';
 import { resolveWidgetDefinition, supportsPlatform } from '@/components/widgets/registry-loader';
+import { visibleWidgets } from '@/lib/widgets/visibility';
+import { loadWidgetSpec } from '@/lib/widgets/runtime/execute';
 import crypto from 'crypto';
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ dashboardId: string }> }) {
@@ -14,7 +16,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const { dashboardId } = await params;
     try {
         const result = await rqlite.query('SELECT * FROM widgets WHERE dashboard_id = ? ORDER BY grid_y, grid_x', [dashboardId]);
-        const widgets = rowsToObjects(result).map((w: any) => ({
+        const widgets = (await visibleWidgets(auth, rowsToObjects(result) as any[])).map((w: any) => ({
             ...w,
             config: typeof w.config === 'string' ? JSON.parse(w.config) : w.config || {},
         }));
@@ -37,6 +39,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (!widget_type||!server_id) return NextResponse.json({ error: { message: 'widget_type and server_id required' } }, { status: 400 });
     const def = await resolveWidgetDefinition(widget_type);
     if (!def) return NextResponse.json({ error: { message: `Unknown widget type: ${widget_type}` } }, { status: 400 });
+    // A package widget needs its data permission for that server, so nobody can place a widget they could not see.
+    if (def.packageId) {
+      const dataPerm = (await loadWidgetSpec(widget_type))?.spec.data.permission;
+      if (dataPerm) { const denied = await requirePermission(auth, dataPerm, server_id); if (denied) return denied; }
+    }
     // Platform support and enabled state are enforced here, not just hidden in the picker.
     const srv = await rqlite.query('SELECT platform FROM servers WHERE id = ?', [server_id]);
     if (!srv.values?.length) return NextResponse.json({ error: { message: 'Server not found' } }, { status: 404 });

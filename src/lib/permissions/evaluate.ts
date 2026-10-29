@@ -2,16 +2,20 @@
  * Deciding whether a set of grants allows a permission. Pure: the database
  * lookups that build the inputs live in `store.ts`.
  */
-import { permissionDef, permissionsForLevel, satisfiers, type PermissionDef } from './catalog';
+import { impliedSet, permissionDef, permissionsForLevel, satisfiers, type PermissionDef } from './catalog';
 
 export type GrantScope =
   | { type: 'all' }
   | { type: 'server'; id: string }
   | { type: 'server_group'; id: string };
 
+export type GrantEffect = 'allow' | 'deny';
+
 export interface Grant {
   permission: string;
   scope: GrantScope;
+  /** Missing means allow. A deny beats every allow, from any group or from the access level. */
+  effect?: GrantEffect;
 }
 
 /** The server an action targets, with the server groups it belongs to. */
@@ -39,8 +43,25 @@ export function grantsAllow(
   extra: readonly PermissionDef[] = [],
 ): boolean {
   if (!permissionDef(permission, extra)) return false;   // unknown permission: never granted by accident
+  // A deny wins over every allow. Denying a permission also denies the ones that include it
+  // (denying "check for updates" denies "install updates", which implies it).
+  if (denied(grants, permission, server, extra)) return false;
   const ok = satisfiers(permission, extra);
-  return grants.some(g => ok.has(g.permission) && scopeCovers(g.scope, server));
+  return grants.some(g => g.effect !== 'deny' && ok.has(g.permission) && scopeCovers(g.scope, server));
+}
+
+/** Does a deny grant cover `permission` for `server`? */
+function denied(grants: readonly Grant[], permission: string, server: ServerContext | null | undefined, extra: readonly PermissionDef[]): boolean {
+  if (!grants.some(g => g.effect === 'deny')) return false;
+  const included = impliedSet(permission, extra);
+  return grants.some(g => g.effect === 'deny' && included.has(g.permission) && scopeCovers(g.scope, server));
+}
+
+/** Is there any deny grant that could apply to `permission` on some server? */
+function mayBeDenied(grants: readonly Grant[], permission: string, extra: readonly PermissionDef[]): boolean {
+  if (!grants.some(g => g.effect === 'deny')) return false;
+  const included = impliedSet(permission, extra);
+  return grants.some(g => g.effect === 'deny' && included.has(g.permission));
 }
 
 /**
@@ -61,6 +82,7 @@ export function allowedServerIds(
   servers: readonly ServerContext[],
   extra: readonly PermissionDef[] = [],
 ): '*' | string[] {
-  if (grantsAllow(grants, permission, null, extra)) return '*';
+  // "Everywhere" only when nothing is denied anywhere; otherwise decide server by server.
+  if (!mayBeDenied(grants, permission, extra) && grantsAllow(grants, permission, null, extra)) return '*';
   return servers.filter(s => grantsAllow(grants, permission, s, extra)).map(s => s.id);
 }

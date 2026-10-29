@@ -4,13 +4,13 @@ import { quoteSh, quotePs, validateParams, renderCommand, commandFor, ParamError
 import { parseOutput, shapeData, applyMap } from './data';
 import { validateManifest } from '@/lib/widgets/package-manifest';
 
-const PERMS = ['dk.control', 'dk.logs'];
+const PERMS = ['dk.control', 'dk.logs', 'dk.view'];
 
 /** A spec shaped like the Docker widget: command data, list view, actions with params. */
 const dockerLike = (): any => ({
   version: 1,
   data: {
-    source: 'command', as: 'service', parse: 'jsonlines', cacheSec: 10,
+    source: 'command', as: 'service', parse: 'jsonlines', cacheSec: 10, permission: 'dk.view',
     command: "docker ps -a --format '{{json .}}'",
     map: { name: 'Names', image: 'Image', state: 'State', status: 'Status' },
   },
@@ -82,9 +82,10 @@ describe('validateWidgetSpec', () => {
   });
 
   it('checks data sources, fields and limits', () => {
-    expect(bad(s => { s.data = { source: 'snapshot', section: 'docker', path: 'containers' }; }).ok).toBe(true);
-    expect(bad(s => { s.data = { source: 'snapshot', section: 'secrets' }; }).ok).toBe(false);
-    expect(bad(s => { s.data = { source: 'file', path: '/etc/shadow' }; }).ok).toBe(false);
+    expect(bad(s => { s.data = { source: 'snapshot', section: 'docker', path: 'containers', permission: 'dk.view' }; }).ok).toBe(true);
+    expect(bad(s => { s.data = { source: 'snapshot', section: 'docker', path: 'containers' }; }).ok).toBe(false);   // data.permission is required
+    expect(bad(s => { s.data = { source: 'snapshot', section: 'secrets', permission: 'dk.view' }; }).ok).toBe(false);
+    expect(bad(s => { s.data = { source: 'file', path: '/etc/shadow', permission: 'dk.view' }; }).ok).toBe(false);
     expect(bad(s => { s.data.parse = 'xml'; }).ok).toBe(false);
     expect(bad(s => { s.data.cacheSec = 1; }).ok).toBe(false);
     expect(bad(s => { s.data.path = 'a b'; }).ok).toBe(false);
@@ -108,7 +109,7 @@ describe('validateWidgetSpec', () => {
 
   it('is validated as part of a package manifest, against the package permissions', () => {
     const perm = (id: string) => ({ id, label: id, description: 'd', group: 'Dk', defaultLevel: 'admin', risk: 'high', scope: 'server' });
-    const manifest = (spec: any) => ({ schema: 1, id: 'dk', name: 'Dk', version: '0.0.1', permissions: [perm('dk.control'), perm('dk.logs')], widgets: [{ type: 'dk_w', display_name: 'Dk', spec }] });
+    const manifest = (spec: any) => ({ schema: 1, id: 'dk', name: 'Dk', version: '0.0.1', permissions: [perm('dk.control'), perm('dk.logs'), perm('dk.view')], widgets: [{ type: 'dk_w', display_name: 'Dk', spec }] });
     expect(validateManifest(manifest(dockerLike())).ok).toBe(true);
     const wrong = dockerLike(); wrong.actions[0].permission = 'power.restart';
     expect(validateManifest(manifest(wrong)).ok).toBe(false);

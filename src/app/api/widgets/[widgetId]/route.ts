@@ -3,6 +3,7 @@ import { requireAuth } from '@/lib/auth/middleware';
 import { requirePermission } from '@/lib/permissions/authorize';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { COMMAND_CHANGE_FORBIDDEN, mayChangeCommand, replacesCommand } from '@/lib/auth/widget-policy';
+import { visibleWidgets } from '@/lib/widgets/visibility';
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ widgetId: string }> }) {
   const auth = await requireAuth(request);
@@ -12,6 +13,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const r = await rqlite.query('SELECT * FROM widgets WHERE id=?', [widgetId]);
     const widgets = rowsToObjects(r);
     if (!widgets.length) {
+      return NextResponse.json({ error: { message: 'Widget not found' } }, { status: 404 });
+    }
+    if ((await visibleWidgets(auth, widgets as unknown as { widget_type: string; server_id: string }[])).length === 0) {
       return NextResponse.json({ error: { message: 'Widget not found' } }, { status: 404 });
     }
     return NextResponse.json({ data: { widget: widgets[0] } });

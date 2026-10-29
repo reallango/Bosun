@@ -474,6 +474,13 @@ const V7_WIDGET_PACKAGES: string[] = [
     `INSERT OR IGNORE INTO app_config (key, value, description) VALUES ('widgets.source_ref', 'main', 'Branch of the Bosun repository that widget packages are listed from: main or dev')`,
 ];
 
+// ---- Version 8: deny grants, and widgets that need a data permission ----
+// A grant can now deny instead of allow ("set to false"): a deny beats every allow. Denying
+// `servers.view` hides a server from that group.
+const V8_DENY_GRANTS: string[] = [
+    `ALTER TABLE permission_grants ADD COLUMN effect TEXT NOT NULL DEFAULT 'allow'`,
+];
+
 export const MIGRATIONS: Migration[] = [
     {
         version: 1,
@@ -490,6 +497,7 @@ export const MIGRATIONS: Migration[] = [
     { version: 5, name: 'permissions', statements: V5_PERMISSIONS },
     { version: 6, name: 'shell_account', statements: V6_SHELL_ACCOUNT },
     { version: 7, name: 'widget_packages', statements: V7_WIDGET_PACKAGES },
+    { version: 8, name: 'deny_grants', statements: V8_DENY_GRANTS },
 ];
 
 /** The schema version this build expects. */

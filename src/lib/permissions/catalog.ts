@@ -20,8 +20,8 @@
 
 export type PermissionRisk = 'low' | 'medium' | 'high';
 
-/** The legacy access level at which the built-in groups grant a permission. */
-export type DefaultLevel = 'operator' | 'admin';
+/** The legacy access level at which the built-in levels grant a permission (viewer = everyone). */
+export type DefaultLevel = 'viewer' | 'operator' | 'admin';
 
 export interface PermissionDef {
   /** Stable id, `<area>.<action>`, e.g. `power.restart`. */
@@ -45,6 +45,8 @@ export interface PermissionDef {
 
 export const CATALOG: readonly PermissionDef[] = [
   // ---- Servers -----------------------------------------------------------
+  { id: 'servers.view', label: 'See a server', group: 'Servers', source: 'core', defaultLevel: 'viewer', risk: 'low', scope: 'server',
+    description: 'Everyone can see every server by default. Deny this in a permission group to hide a server (and its dashboards, widgets and data) from that group.' },
   { id: 'servers.refresh', label: 'Refresh a server now', group: 'Servers', source: 'core', defaultLevel: 'operator', risk: 'low', scope: 'server',
     description: 'Ask the poller to collect a server again immediately, instead of waiting for the next poll.' },
 
@@ -107,8 +109,22 @@ export function fullCatalog(extra: readonly PermissionDef[] = []): PermissionDef
 export function permissionsForLevel(level: string, extra: readonly PermissionDef[] = []): PermissionDef[] {
   const all = fullCatalog(extra);
   if (level === 'admin') return all;
-  if (level === 'operator') return all.filter(p => p.defaultLevel === 'operator');
+  if (level === 'operator') return all.filter(p => p.defaultLevel === 'operator' || p.defaultLevel === 'viewer');
+  if (level === 'viewer') return all.filter(p => p.defaultLevel === 'viewer');
   return [];
+}
+
+/** What `permission` includes: itself plus the permissions it implies (transitively). The reverse of `satisfiers`. */
+export function impliedSet(permission: string, extra: readonly PermissionDef[] = []): Set<string> {
+  const out = new Set<string>([permission]);
+  const stack = [permission];
+  while (stack.length) {
+    const cur = permissionDef(stack.pop() as string, extra);
+    for (const i of cur?.implies ?? []) {
+      if (!out.has(i)) { out.add(i); stack.push(i); }
+    }
+  }
+  return out;
 }
 
 /** Everything that satisfies `permission`: itself plus any permission that implies it (transitively). */
