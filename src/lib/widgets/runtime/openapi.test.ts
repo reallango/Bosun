@@ -88,7 +88,7 @@ describe('system widget actions in the OpenAPI document', () => {
     expect(doc.paths['/api/servers/{serverId}/containers/{containerId}/logs'].get['x-bosun-permission']).toBe('docker.logs');
     expect(doc.paths['/api/servers/{serverId}/ollama/models'].delete['x-bosun-permission']).toBe('ollama.models.delete');
     expect(doc.paths['/api/servers/{serverId}/power'].post.requestBody.content['application/json'].schema.required).toEqual(['action', 'confirm']);
-    expect(doc.paths['/api/servers/{serverId}/containers/{containerId}/action'].post.description).toMatch(/Start, stop and restart containers/);
+    expect(doc.paths['/api/servers/{serverId}/containers/{containerId}/action'].post.description).toMatch(/docker.containers.control/);
   });
 });
 

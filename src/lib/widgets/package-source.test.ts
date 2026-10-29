@@ -47,13 +47,13 @@ describe('listRemotePackages', () => {
       'widgets/alpha/manifest.json': manifest('alpha'),
       'widgets/beta/manifest.json': manifest('wrong_id'),            // id must match the folder
       'widgets/gamma/manifest.json': '{not json',
-      'widgets/docker_containers/manifest.json': manifest('docker_containers'), // system id
+      'widgets/server_summary/manifest.json': manifest('server_summary'), // system id
       'widgets/_template/manifest.json': manifest('tmpl'),            // underscore folders are ignored
       'widgets/README.md': 'hi',
     });
     const r = await listRemotePackages('main', f);
     expect(r.packages.map(p => p.id)).toEqual(['alpha']);
-    expect(r.skipped.map(s => s.dir).sort()).toEqual(['beta', 'docker_containers', 'gamma']);
+    expect(r.skipped.map(s => s.dir).sort()).toEqual(['beta', 'gamma', 'server_summary']);
     expect(r.skipped.find(s => s.dir === 'beta')?.error).toMatch(/must match/);
   });
 

@@ -6,14 +6,14 @@ describe('validateGrants', () => {
     const r = validateGrants([
       { permission: 'power.restart', scope: { type: 'server', id: 's1' } },
       { permission: 'power.restart', scope: { type: 'server_group', id: 'lab' } },
-      { permission: 'docker.logs', scope: { type: 'all' } },
-      { permission: 'updates.check' },
+      { permission: 'servers.refresh', scope: { type: 'all' } },
+      { permission: 'power.wake' },
     ]);
     expect(r).toEqual({ ok: true, value: [
       { permission: 'power.restart', scope: { type: 'server', id: 's1' } },
       { permission: 'power.restart', scope: { type: 'server_group', id: 'lab' } },
-      { permission: 'docker.logs', scope: { type: 'all' } },
-      { permission: 'updates.check', scope: { type: 'all' } },
+      { permission: 'servers.refresh', scope: { type: 'all' } },
+      { permission: 'power.wake', scope: { type: 'all' } },
     ] });
   });
 

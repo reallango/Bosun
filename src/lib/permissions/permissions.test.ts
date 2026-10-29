@@ -49,8 +49,8 @@ describe('access levels map onto permissions exactly as before', () => {
 
   it('Read + actions has the operator permissions, and not the admin ones', () => {
     const ids = permissionsForLevel('operator').map(p => p.id);
-    for (const id of ['power.wake', 'power.restart', 'power.shutdown', 'updates.check', 'updates.install', 'docker.logs',
-      'docker.containers.control', 'ollama.models.pull', 'ollama.models.delete', 'dashboards.edit']) {
+    for (const id of ['power.wake', 'power.restart', 'power.shutdown', 'updates.check', 'updates.install',
+      'ollama.models.pull', 'ollama.models.delete', 'dashboards.edit']) {
       expect(ids).toContain(id);
     }
     expect(ids).not.toContain('commands.run');
@@ -119,11 +119,11 @@ describe('grantsAllow', () => {
   });
 
   it('grants combine (a person in several groups)', () => {
-    const g = [onServer('power.restart', 's1'), onGroup('power.restart', 'lab'), all('docker.logs')];
+    const g = [onServer('power.restart', 's1'), onGroup('power.restart', 'lab'), all('updates.check')];
     expect(grantsAllow(g, 'power.restart', srv('s1'))).toBe(true);
     expect(grantsAllow(g, 'power.restart', srv('s9', 'lab'))).toBe(true);
     expect(grantsAllow(g, 'power.restart', srv('s9'))).toBe(false);
-    expect(grantsAllow(g, 'docker.logs', srv('s9'))).toBe(true);
+    expect(grantsAllow(g, 'updates.check', srv('s9'))).toBe(true);
   });
 
   it('never allows an unknown permission, even with an all grant', () => {
@@ -169,6 +169,11 @@ describe('routes use real permission ids', () => {
 
   it('every authorize()/hasPermission() call names a permission in the catalog', () => {
     const known = new Set(fullCatalog().map(p => p.id));
+    // Permissions provided by the bundled widget packages (e.g. docker.logs) are registered when they install.
+    const widgetsRoot = join(__dirname, '..', '..', '..', 'widgets');
+    for (const d of readdirSync(widgetsRoot)) {
+      try { for (const p of JSON.parse(readFileSync(join(widgetsRoot, d, 'manifest.json'), 'utf8')).permissions ?? []) known.add(p.id); } catch { /* not a package folder */ }
+    }
     const used: string[] = [];
     for (const f of files) {
       const text = readFileSync(f, 'utf8');
