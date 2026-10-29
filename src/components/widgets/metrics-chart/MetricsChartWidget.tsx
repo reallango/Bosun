@@ -8,6 +8,8 @@ import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 interface Props {
   widgetId: string;
   serverId: string;
+  /** The metrics shown until a person picks others (a package widget's chart view names them). */
+  defaultMetrics?: string[];
 }
 
 interface ChartConfig {
@@ -18,7 +20,7 @@ interface ChartConfig {
 const DEFAULT_METRICS = ['cpu.usage', 'mem.used_pct'];
 
 /** Charts the history of one or more metrics of the widget's server. */
-export function MetricsChartWidget({ widgetId, serverId }: Props) {
+export function MetricsChartWidget({ widgetId, serverId, defaultMetrics }: Props) {
   const [config, setConfig] = useState<ChartConfig | null>(null);
   const [picking, setPicking] = useState(false);
   const catalog = useMetricCatalog(picking ? serverId : null);
@@ -38,7 +40,8 @@ export function MetricsChartWidget({ widgetId, serverId }: Props) {
     return () => { ignore = true; };
   }, [widgetId]);
 
-  const metrics = config?.metrics?.length ? config.metrics : DEFAULT_METRICS;
+  const fallback = defaultMetrics?.length ? defaultMetrics : DEFAULT_METRICS;
+  const metrics = config?.metrics?.length ? config.metrics : fallback;
   const range = config?.range || '24h';
   const { data, error, loading } = useMetricSeries(config ? serverId : null, metrics, range);
 
@@ -77,7 +80,7 @@ export function MetricsChartWidget({ widgetId, serverId }: Props) {
               <button key={m.metric}
                 onClick={() => {
                   const next = on ? metrics.filter(x => x !== m.metric) : [...metrics, m.metric].slice(-6);
-                  save({ ...config, range, metrics: next.length ? next : DEFAULT_METRICS });
+                  save({ ...config, range, metrics: next.length ? next : fallback });
                 }}
                 className={`rounded-full border px-2 py-0.5 text-[11px] ${on ? 'border-blue-600 bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-300' : 'border-gray-300 text-gray-600 dark:border-gray-600 dark:text-gray-300'}`}>
                 {m.label}

@@ -15,6 +15,7 @@ import { WidgetError } from '@/components/widgets/WidgetError';
 import { ConfirmActionDialog, apiAction } from '@/components/widgets/shared/ConfirmActionDialog';
 import { evalCond, fillTemplate, getPath, type ActionSpec, type FieldSpec, type ViewSpec, type ParamSpec } from '@/lib/widgets/runtime/spec';
 import { hasRole } from '@/lib/auth/levels';
+import { MetricsChartWidget } from '@/components/widgets/metrics-chart/MetricsChartWidget';
 
 // The terminal (xterm) loads only when a container shell is opened.
 const SSHTerminalWidget = dynamic(
@@ -150,7 +151,7 @@ export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
 
   const view = spec?.view;
   const rows: Row[] = useMemo(() => {
-    if (!view || view.type === 'text' || view.type === 'fields') return [];
+    if (!view || view.type === 'text' || view.type === 'fields' || view.type === 'chart') return [];
     const list = Array.isArray(data) ? (data as Row[]) : data && typeof data === 'object' ? [data as Row] : [];
     const q = query.trim().toLowerCase();
     return list.filter(r => {
@@ -165,6 +166,7 @@ export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
   if (isLoading && data === null) return <WidgetLoading />;
   if (error) return <WidgetError error={error} onRetry={refresh} serverId={serverId} />;
   if (unavailable) return <div className="p-2 text-sm text-gray-500">{unavailable}</div>;
+  if (view.type === 'chart') return <MetricsChartWidget widgetId={widgetId} serverId={serverId} defaultMetrics={view.chart?.metrics} />;
   if (data === null || data === undefined) return <div className="p-2 text-sm text-gray-500">Waiting for the first data from this host…</div>;
 
   const actionsById = new Map(spec.actions.map(a => [a.id, a]));

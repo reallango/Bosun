@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { planQuery, describeMetric, MAX_POINTS, RANGES } from './query';
+import { planQuery, describeMetric, describeFromDefinitions, MAX_POINTS, RANGES } from './query';
 
 describe('planQuery', () => {
   const raw48h = 48 * 3600;
@@ -29,5 +29,15 @@ describe('describeMetric', () => {
     expect(describeMetric('cpu.usage')).toEqual({ label: 'CPU usage', unit: '%' });
     expect(describeMetric('gpu1.vram_mb')).toEqual({ label: 'GPU 1 VRAM used', unit: 'MB' });
     expect(describeMetric('weird.metric')).toEqual({ label: 'weird.metric', unit: '' });
+  });
+});
+
+describe('describeFromDefinitions', () => {
+  const defs = [{ pattern: 'dk.running', label: 'Running containers', unit: '' }, { pattern: 'gpu*.fan', label: 'GPU fan', unit: '%' }];
+  it('labels metrics a package declared and leaves the built-in ones alone', () => {
+    expect(describeFromDefinitions(defs, 'dk.running', { label: 'dk.running', unit: '' })).toEqual({ label: 'Running containers', unit: '' });
+    expect(describeFromDefinitions(defs, 'gpu1.fan', { label: 'gpu1.fan', unit: '' })).toEqual({ label: 'GPU fan', unit: '%' });
+    expect(describeFromDefinitions(defs, 'cpu.usage', { label: 'CPU usage', unit: '%' })).toEqual({ label: 'CPU usage', unit: '%' });
+    expect(describeFromDefinitions(defs, 'other.x', { label: 'other.x', unit: '' })).toEqual({ label: 'other.x', unit: '' });
   });
 });

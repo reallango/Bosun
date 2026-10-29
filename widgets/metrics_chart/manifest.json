@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "id": "metrics_chart",
+  "name": "Metrics History",
+  "version": "1.0.0",
+  "description": "Charts the recorded history of a server's statistics: CPU, memory, network, disks, GPUs and anything a widget tracks. Installed by default.",
+  "author": "Bosun",
+  "permissions": [
+    {
+      "id": "metrics_chart.view",
+      "label": "See metrics history",
+      "description": "See the Metrics History widget and the recorded history of a server.",
+      "group": "Metrics history",
+      "defaultLevel": "viewer",
+      "risk": "low",
+      "scope": "server"
+    }
+  ],
+  "widgets": [
+    {
+      "type": "metrics_chart",
+      "display_name": "Metrics History",
+      "description": "Charts recorded CPU, memory, network, disk and GPU history for a server",
+      "icon": "line-chart",
+      "category": "system",
+      "default_size": { "w": 12, "h": 6 },
+      "min_size": { "w": 6, "h": 4 },
+      "refresh_interval": 60,
+      "supports_linux": true,
+      "supports_windows": true,
+      "spec": {
+        "version": 1,
+        "data": { "source": "snapshot", "section": "metrics", "permission": "metrics_chart.view" },
+        "view": { "type": "chart", "chart": { "metrics": ["cpu.usage", "mem.used_pct"] } }
+      }
+    }
+  ]
+}
