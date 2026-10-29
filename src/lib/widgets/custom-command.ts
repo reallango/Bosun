@@ -9,10 +9,11 @@ export const DEFAULT_INTERVAL_SEC = 30;
 export const DEFAULT_COMMAND = 'uptime';
 /**
  * `uptime` does not exist in PowerShell, so the untouched default means this on Windows. It must work for a
- * standard user: WMI/CIM (Get-CimInstance, Get-WmiObject) is refused to a non-admin remote logon, but
- * `net statistics workstation` is not. Its first lines name the machine and when it started counting.
+ * standard user: WMI/CIM (Get-CimInstance, Get-WmiObject) and `net statistics workstation` are refused to a
+ * non-admin remote logon (checked on a real Windows 11 host). The high resolution timer counts from boot and
+ * needs no rights, so it gives the uptime.
  */
-export const WINDOWS_DEFAULT_COMMAND = "(net statistics workstation | Where-Object { $_.Trim() } | Select-Object -First 2) -join [Environment]::NewLine";
+export const WINDOWS_DEFAULT_COMMAND = '$s=[Diagnostics.Stopwatch]::GetTimestamp()/[Diagnostics.Stopwatch]::Frequency; $t=[TimeSpan]::FromSeconds($s); "up {0} days, {1:00}:{2:00}" -f $t.Days,$t.Hours,$t.Minutes';
 
 /** How often the command repeats, from the widget's settings, kept within the allowed range. */
 export function intervalOf(cfg: { interval?: unknown } | null | undefined): number {
