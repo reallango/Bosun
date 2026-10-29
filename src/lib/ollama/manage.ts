@@ -131,9 +131,8 @@ function lastLines(text: string, n = 6): string[] {
 
 /** The plain reason a script failed: its `ERROR:` line when it printed one, else the last lines of output. */
 function failureMessage(stdout: string, stderr: string): string {
-  const err = stdout.split(/?
-/).reverse().find(l => l.startsWith('ERROR:'));
-  return err ? err.replace(/^ERROR:s*/, '') : lastLines(stderr || stdout, 3).join(' ');
+  const err = lastLines(stdout, 200).reverse().find(l => l.startsWith('ERROR:'));
+  return err ? err.slice('ERROR:'.length).trim() : lastLines(stderr || stdout, 3).join(' ');
 }
 
 function startJob(serverId: string, action: 'install' | 'update', command: string, userId: string): ServiceJob {
