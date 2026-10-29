@@ -18,6 +18,10 @@ const RQLITE_HOST = process.env.RQLITE_HOST || '127.0.0.1:4001';
 
 // WebSocket path for terminal (Cloudflare-compatible)
 const WS_PATH = '/ws/terminal';
+// API terminals (API keys only; non-admin shell account or one container). A separate
+// route, token type and handler: see src/lib/terminal/api-terminal-session.js.
+const API_WS_PATH = '/ws/api-terminal';
+const { handleApiTerminal } = require('./src/lib/terminal/api-terminal-session');
 
 // SSH sessions map
 const sshSessions = new Map();
@@ -51,6 +55,23 @@ async function queryRqlite(sql, params = []) {
   } catch (err) {
     console.error('[WS] Rqlite query error:', err.message);
     throw err;
+  }
+}
+
+// Append an audit record (best effort; never throws).
+async function auditLog(entry) {
+  try {
+    await fetch(`http://${RQLITE_HOST}/db/execute`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify([[
+        'INSERT INTO audit_log (id, user_id, server_id, action, category, details, status, ip_address, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+        crypto.randomUUID(), entry.userId || null, entry.serverId || null, entry.action, String(entry.action).split('.')[0],
+        entry.details ? String(entry.details).slice(0, 500) : null, entry.status, entry.ip ? String(entry.ip).slice(0, 64) : null, entry.durationMs ?? null,
+      ]]),
+    });
+  } catch (err) {
+    console.error('[WS] audit write failed:', err.message);
   }
 }
 
@@ -137,7 +158,7 @@ server.on('upgrade', (req, socket, head) => {
   const pathname = parsedUrl.pathname;
 
   // Validate path
-  if (pathname !== WS_PATH) {
+  if (pathname !== WS_PATH && pathname !== API_WS_PATH) {
     console.log('[WS] Invalid path:', pathname);
     socket.write('HTTP/1.1 400 Bad Request\r\n\r\nInvalid WS path');
     socket.destroy();
@@ -151,7 +172,7 @@ server.on('upgrade', (req, socket, head) => {
 
 // JWT verification: HS256 signature, expiry and token type. Only the
 // short-lived `type: 'ws'` tokens minted by /api/ws-token are accepted.
-function verifyToken(token) {
+function verifyToken(token, expectedType = 'ws') {
   try {
     const parts = String(token).split('.');
     if (parts.length !== 3) return null;
@@ -163,7 +184,7 @@ function verifyToken(token) {
     const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString());
     const now = Math.floor(Date.now() / 1000);
     if (typeof payload.exp !== 'number' || payload.exp < now) return null;
-    if (payload.type !== 'ws' || !payload.userId) return null;
+    if (payload.type !== expectedType || !payload.userId) return null;
     return payload;
   } catch {
     return null;
@@ -197,6 +218,11 @@ wss.on('connection', async (ws, req) => {
 
   // Get client IP (respect x-forwarded-for for Cloudflare)
   const clientIP = req.headers['x-forwarded-for']?.split(',')[0] || req.socket.remoteAddress;
+
+  // API terminals have their own handler and token type; nothing below is shared with them.
+  if (parsedUrl.pathname === API_WS_PATH) {
+    return handleApiTerminal(ws, parsedUrl, { verifyToken, queryRqlite, audit: auditLog, clientIP });
+  }
 
   // Validate token first (most common failure - log without exposing token)
   if (!token) {

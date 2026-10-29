@@ -14,7 +14,7 @@ One container, supervised by s6-overlay:
 | `rqlited` | Database (SQLite replicated with Raft; one node is fine). |
 | `poller.js` | The only process that collects monitoring data. One persistent SSH connection per host, one batched command per poll. Writes snapshots and metrics. |
 | `next start` | Web UI and API. Reads what the poller stored; opens SSH only for user actions (container control, model pull/delete, custom commands). |
-| `ws-server.js` | WebSocket bridge for the interactive terminal (host shells and `docker exec`). |
+| `ws-server.js` | WebSocket bridge for the interactive terminal (host shells and `docker exec`) and the API-key-only API terminal. |
 | `nginx` | Serves everything on port 3042 (`/ws/` to ws-server, the rest to Next). |
 
 ### Polling and impact on monitored hosts
@@ -362,6 +362,25 @@ The key is shown once; only its hash is stored. Keys can expire and be revoked, 
 are limited to 300 requests per minute. Keys never reach the web UI, terminals,
 user and key management, or cluster management (join codes contain the cluster
 secrets), whatever their level. The API Access page lists the endpoints per level.
+
+**API terminals and shell commands** are for API keys only, and need explicit permissions
+(Permission groups → Shell and Docker). The web terminal is unchanged: it always asks for
+your own login and password and never uses a service account. When a Linux host is added,
+Bosun can also create a second, non-admin *shell account* (default `bosun-user`) next to the
+privileged service account. It has its own key, a locked password, no sudo and no
+`docker`/`sudo`/`wheel`/`admin`/`lxd`/`disk` group, and sshd forbids port, agent and X11
+forwarding for it. Bosun logs in as it before enabling it and checks again on every use;
+if it is ever found to have admin rights, API access is refused.
+
+- `POST /api/servers/:id/shell/exec` runs one command as that account (*Terminal and commands as the non-admin account*).
+- `POST /api/servers/:id/terminal` returns a 60-second, single-use token for the WebSocket
+  `/ws/api-terminal?token=…`. `{"target":"host"}` needs the same shell permission;
+  `{"target":"container","container":"name"}` needs only *Open a shell in a container*, so
+  a container shell can be granted without any host shell. A container shell is one fixed
+  `docker exec` and ends with it; containers that could reach the host (privileged, host
+  PID/IPC, Docker socket or sensitive host mounts, dangerous capabilities, devices) are refused.
+- Neither path can reach the admin account: there is no admin shell, no fallback, and no
+  stored admin key or password is ever handed to a session. Windows hosts are not supported yet.
 
 **Email (SMTP)**, under Settings → General (admins), enables password reset links,
 emailed sign-in codes and email alert actions. Set *App URL* to the address users open

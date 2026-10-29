@@ -440,6 +440,15 @@ const V5_PERMISSIONS: string[] = [
     )`,
 ];
 
+// ---- Version 6: non-admin shell account ----
+// Each host can have a second, unprivileged SSH account (no sudo, no docker group) with its
+// own key. It is what API terminals and API shell commands log in as; the privileged
+// service account (servers.ssh_user / ssh_key_id) is never used for those. Additive columns.
+const V6_SHELL_ACCOUNT: string[] = [
+    `ALTER TABLE servers ADD COLUMN shell_user TEXT`,
+    `ALTER TABLE servers ADD COLUMN shell_key_id TEXT`,
+];
+
 export const MIGRATIONS: Migration[] = [
     {
         version: 1,
@@ -454,6 +463,7 @@ export const MIGRATIONS: Migration[] = [
     { version: 3, name: 'wol_hosts', statements: V3_WOL_HOSTS },
     { version: 4, name: 'access', statements: V4_ACCESS },
     { version: 5, name: 'permissions', statements: V5_PERMISSIONS },
+    { version: 6, name: 'shell_account', statements: V6_SHELL_ACCOUNT },
 ];
 
 /** The schema version this build expects. */
