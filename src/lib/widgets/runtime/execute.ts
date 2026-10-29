@@ -123,6 +123,26 @@ export interface RuntimeData {
   unavailable?: string;
 }
 
+/**
+ * A widget that reads more than one section (or the server's own details) gets one object keyed by name:
+ * `{ <section>: ..., <also>: ..., server: {...} }`, so a view can mix them (`{system.prettyName}`, `{metrics.cpu.usage}`).
+ */
+async function withExtras(serverId: string, ds: Extract<DataSpec, { source: 'snapshot' }>, main: unknown): Promise<unknown> {
+  const out: Record<string, unknown> = { [ds.section]: main };
+  if (ds.also?.length) {
+    const r = await rqlite.query(`SELECT section, data FROM host_snapshots WHERE server_id = ? AND section IN (${ds.also.map(() => '?').join(',')})`, [serverId, ...ds.also]);
+    for (const v of r.values ?? []) {
+      try { out[String(v[0])] = JSON.parse(String(v[1])); } catch { /* unreadable section: leave it out */ }
+    }
+  }
+  if (ds.server) {
+    const s = await rqlite.query('SELECT id, name, hostname, platform, os_type, os_version, is_online, last_seen, last_error FROM servers WHERE id = ?', [serverId]);
+    const o = rowsToObjects(s)[0];
+    if (o) out.server = { ...o, is_online: !!o.is_online, platform: o.platform || 'linux' };
+  }
+  return out;
+}
+
 /** A widget's data: the poller's snapshot section, or the output of its command (cached and shared between viewers). */
 export async function loadRuntimeData(serverId: string, loaded: LoadedSpec, force = false, config: Record<string, unknown> = {}): Promise<RuntimeData> {
   const ds: DataSpec = loaded.spec.data;
@@ -134,6 +154,7 @@ export async function loadRuntimeData(serverId: string, loaded: LoadedSpec, forc
     try { parsed = JSON.parse(String(row[0])); } catch { parsed = null; }
     const collectedAt = new Date(Number(row[1])).toISOString();
     if (ds.unavailable && evalCond(ds.unavailable.when, parsed)) return { data: null, collectedAt, pending: false, unavailable: fillTemplate(ds.unavailable.message, parsed) };
+    if (ds.also?.length || ds.server) parsed = await withExtras(serverId, ds, parsed);
     return { data: applyConfigFilters(shapeData(ds, parsed), ds.filter, config), collectedAt, pending: false };
   }
 

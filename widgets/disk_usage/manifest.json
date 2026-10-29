@@ -1,0 +1,51 @@
+{
+  "schema": 1,
+  "id": "disk_usage",
+  "name": "Disk Usage",
+  "version": "1.0.0",
+  "description": "Per-mount disk usage with usage bars. Installed by default; tracks the fullest disk and the root disk as history.",
+  "author": "Bosun",
+  "permissions": [
+    {
+      "id": "disk_usage.view",
+      "label": "See disk usage",
+      "description": "See the Disk Usage widget and the disk data of a server.",
+      "group": "Disk usage",
+      "defaultLevel": "viewer",
+      "risk": "low",
+      "scope": "server"
+    }
+  ],
+  "widgets": [
+    {
+      "type": "disk_usage",
+      "display_name": "Disk Usage",
+      "description": "Per-mount disk usage with usage bars",
+      "icon": "hard-drive",
+      "category": "system",
+      "default_size": { "w": 8, "h": 6 },
+      "min_size": { "w": 6, "h": 4 },
+      "refresh_interval": 30,
+      "supports_linux": true,
+      "supports_windows": true,
+      "spec": {
+        "version": 1,
+        "data": { "source": "snapshot", "section": "disks", "permission": "disk_usage.view" },
+        "metrics": [
+          { "name": "disk.root_used_pct", "label": "Root disk used", "unit": "%" },
+          { "name": "disk.max_used_pct", "label": "Fullest disk used", "unit": "%" }
+        ],
+        "view": {
+          "type": "table",
+          "empty": "No disk data",
+          "columns": [
+            { "title": "Mount", "value": "{mountPoint}", "format": "text" },
+            { "title": "Used", "value": "{usedMB}", "format": "mb" },
+            { "title": "Size", "value": "{sizeMB}", "format": "mb" },
+            { "title": "Use", "value": "{usagePercent}", "format": "bar" }
+          ]
+        }
+      }
+    }
+  ]
+}

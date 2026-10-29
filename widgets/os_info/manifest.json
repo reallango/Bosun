@@ -1,0 +1,47 @@
+{
+  "schema": 1,
+  "id": "os_info",
+  "name": "OS Info",
+  "version": "1.0.0",
+  "description": "Operating system, kernel, architecture, hostname and uptime. Installed by default.",
+  "author": "Bosun",
+  "permissions": [
+    {
+      "id": "os_info.view",
+      "label": "See OS information",
+      "description": "See the OS Info widget and the system details of a server.",
+      "group": "OS info",
+      "defaultLevel": "viewer",
+      "risk": "low",
+      "scope": "server"
+    }
+  ],
+  "widgets": [
+    {
+      "type": "os_info",
+      "display_name": "OS Info",
+      "description": "Operating system, kernel, hostname, uptime",
+      "icon": "monitor",
+      "category": "system",
+      "default_size": { "w": 8, "h": 4 },
+      "min_size": { "w": 4, "h": 3 },
+      "refresh_interval": 60,
+      "supports_linux": true,
+      "supports_windows": true,
+      "spec": {
+        "version": 1,
+        "data": { "source": "snapshot", "section": "system", "also": ["metrics"], "permission": "os_info.view" },
+        "view": {
+          "type": "fields",
+          "fields": [
+            { "label": "OS", "value": "{system.prettyName}", "format": "text" },
+            { "label": "Kernel", "value": "{system.kernel}", "format": "text" },
+            { "label": "Arch", "value": "{system.architecture}", "format": "text" },
+            { "label": "Hostname", "value": "{system.hostname}", "format": "text" },
+            { "label": "Uptime", "value": "{metrics.sys.uptime_s}", "format": "duration" }
+          ]
+        }
+      }
+    }
+  ]
+}

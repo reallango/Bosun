@@ -41,7 +41,7 @@ describe('validateManifest', () => {
     const { types, ids } = reservedPackageNames();
     expect(ids).toContain('server_summary');
     expect(validateManifest({ ...good(), id: 'server_summary' }, { reservedIds: ids, reservedTypes: types }).ok).toBe(false);
-    const m: any = good(); m.widgets[0].type = 'os_info';
+    const m: any = good(); m.widgets[0].type = 'ssh_terminal';
     expect(validateManifest(m, { reservedIds: ids, reservedTypes: types }).ok).toBe(false);
     const p: any = good(); p.permissions[0].id = 'updates.check';
     expect(validateManifest(p).ok).toBe(false);
@@ -149,7 +149,11 @@ describe('packages shipped in the repository', () => {
       expect(r.value.id).toBe(d.name);
       // Every widget declares what it needs to be seen, and every command is reviewable.
       for (const w of r.value.widgets) expect(w.spec?.data.permission).toBeTruthy();
-      expect(reviewPackage(r.value).commandCount).toBeGreaterThan(0);
+      const review = reviewPackage(r.value);
+      expect(review.widgets).toHaveLength(r.value.widgets.length);
+      // A package that runs commands is reviewable: every command shows up in the review.
+      const runs = r.value.widgets.some(w => w.spec?.data.source === 'command' || (w.spec?.actions.length ?? 0) > 0);
+      if (runs) expect(review.commandCount).toBeGreaterThan(0);
     });
   }
 
