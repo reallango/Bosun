@@ -42,7 +42,7 @@ whose spec breaks them is rejected):
     "map": { "name": "Names" },   // add fields: new name <- source field
     "path": "items",              // select a field of the parsed data
     "cacheSec": 10, "timeoutSec": 20,
-    "permission": "my_package.view"   // optional: needed to see the data
+    "permission": "my_package.view"   // required: who can see the widget and its data
   },
   "view": {
     "type": "list",               // list | table | text
@@ -66,7 +66,8 @@ whose spec breaks them is rejected):
 
 Rules that keep a package from becoming a way to run arbitrary commands:
 
-- Every action names a permission the package declares, so it cannot run until an admin grants it.
+- `data.permission` is required, and every action names a permission the package declares, so nothing can be seen or run until an admin grants it.
+- A widget is hidden from dashboards, the Add Widget picker and the API for anyone who does not hold its data permission for that server (or whose group denies it).
 - A command may only use `{{placeholders}}` for parameters the action declares. A string parameter needs an anchored
   `pattern` or a fixed list of `values`; a number needs `min` and `max`. Values are validated, then inserted as one quoted word.
 - `as` is explicit on every command. `shell` is the non-admin account (no sudo, no Docker).

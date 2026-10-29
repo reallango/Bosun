@@ -4,6 +4,7 @@ import { requireAuth } from '@/lib/auth/middleware';
 import { requirePermission } from '@/lib/permissions/authorize';
 import crypto from 'crypto';
 import { DASHBOARD_NAME_MAX } from '@/lib/dashboards/events';
+import { visibleDashboards } from '@/lib/widgets/visibility';
 
 export async function GET(request: NextRequest) {
   const auth = await requireAuth(request);
@@ -15,7 +16,7 @@ export async function GET(request: NextRequest) {
     let params: any[] = [];
     if (typeFilter) { sql = 'SELECT * FROM dashboards WHERE type = ? ORDER BY sort_order'; params = [typeFilter]; }
     const result = await rqlite.query(sql, params);
-    const dashboards = rowsToObjects(result);
+    const dashboards = await visibleDashboards(auth, rowsToObjects(result));
     return NextResponse.json({ data: { dashboards } });
   } catch (error) {
     return NextResponse.json({ data: { dashboards: [] }, error: { message: String(error) } }, { status: 500 });

@@ -19,7 +19,7 @@ describe('permission catalog', () => {
       expect(p.label.length).toBeGreaterThan(3);
       expect(p.description.length).toBeGreaterThan(10);
       expect(p.group.length).toBeGreaterThan(0);
-      expect(['operator', 'admin']).toContain(p.defaultLevel);
+      expect(['viewer', 'operator', 'admin']).toContain(p.defaultLevel);
       expect(['low', 'medium', 'high']).toContain(p.risk);
       expect(['server', 'global']).toContain(p.scope);
     }
@@ -42,8 +42,8 @@ describe('permission catalog', () => {
 });
 
 describe('access levels map onto permissions exactly as before', () => {
-  it('Read only has no action permissions', () => {
-    expect(permissionsForLevel('viewer')).toEqual([]);
+  it('Read only has no action permissions, only seeing servers (which a group can deny)', () => {
+    expect(permissionsForLevel('viewer').map(p => p.id)).toEqual(['servers.view']);
     expect(permissionsForLevel('nonsense')).toEqual([]);
   });
 
@@ -54,7 +54,7 @@ describe('access levels map onto permissions exactly as before', () => {
       expect(ids).toContain(id);
     }
     expect(ids).not.toContain('commands.run');
-    expect(ids.every(id => permissionDef(id)?.defaultLevel === 'operator')).toBe(true);
+    expect(ids.every(id => ['viewer', 'operator'].includes(permissionDef(id)?.defaultLevel ?? ''))).toBe(true);
   });
 
   it('Full access has everything, including permissions registered later', () => {
@@ -63,7 +63,7 @@ describe('access levels map onto permissions exactly as before', () => {
       source: 'package:thing', defaultLevel: 'operator', risk: 'low', scope: 'server' };
     expect(permissionsForLevel('admin', [later]).map(p => p.id)).toContain('pkg.thing.run');
     expect(permissionsForLevel('operator', [later]).map(p => p.id)).toContain('pkg.thing.run');
-    expect(permissionsForLevel('viewer', [later])).toEqual([]);
+    expect(permissionsForLevel('viewer', [later]).map(p => p.id)).toEqual(['servers.view']);
   });
 
   it('levelGrants are all-servers grants', () => {

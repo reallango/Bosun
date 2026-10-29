@@ -9,7 +9,7 @@ export interface PermissionDef {
   label: string;
   description: string;
   group: string;
-  defaultLevel: 'operator' | 'admin';
+  defaultLevel: 'viewer' | 'operator' | 'admin';
   risk: 'low' | 'medium' | 'high';
   scope: 'server' | 'global';
   implies?: string[];
@@ -17,7 +17,7 @@ export interface PermissionDef {
 }
 
 export type GrantScope = { type: 'all' } | { type: 'server'; id: string } | { type: 'server_group'; id: string };
-export interface Grant { permission: string; scope: GrantScope }
+export interface Grant { permission: string; scope: GrantScope; effect?: 'allow' | 'deny' }
 
 export interface PermissionGroup {
   id: string;

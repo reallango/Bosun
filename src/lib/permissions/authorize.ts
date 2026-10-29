@@ -16,45 +16,34 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireUserSession } from '@/lib/auth/middleware';
 import type { TokenPayload } from '@/lib/auth/jwt';
 import { fullCatalog, permissionDef, type PermissionDef } from './catalog';
-import { allowedServerIds, grantsAllow, levelGrants, type Grant, type ServerContext } from './evaluate';
-import { allServerContexts, loadGroupGrants, registeredPermissionDefs, serverContext, type Principal } from './store';
+import { allowedServerIds, grantsAllow, type ServerContext } from './evaluate';
+import { allServerContexts, registeredPermissionDefs, serverContext } from './store';
+import { effectiveGrants, serverVisible } from './effective';
 
-function principalOf(payload: TokenPayload): Principal {
-  return payload.authType === 'api_key' && payload.apiKeyId
-    ? { kind: 'api_key', id: payload.apiKeyId }
-    : { kind: 'user', id: String(payload.userId) };
-}
+export { effectiveGrants };
 
 /**
- * Everything a principal holds: its level's default permissions plus its groups' grants. If the
- * group grants cannot be read (database trouble) only the level applies: failing to the base
- * level can never give someone more than they should have.
+ * Does this principal hold `permission` (for `serverId` when the action targets a server)?
+ * A server a principal may not see (a group denies `servers.view` for it) allows nothing on it.
+ * Group grants that cannot be read make this throw rather than ignore a deny.
  */
-export async function effectiveGrants(payload: TokenPayload, defs?: readonly PermissionDef[]): Promise<Grant[]> {
-  const extra = defs ?? await registeredPermissionDefs();
-  const fromLevel = levelGrants(String(payload.role), extra);
-  try {
-    return [...fromLevel, ...await loadGroupGrants(principalOf(payload))];
-  } catch (err) {
-    console.error('Loading permission groups failed; using the access level only:', err);
-    return fromLevel;
-  }
-}
-
-/** Does this principal hold `permission` (for `serverId` when the action targets a server)? */
 export async function hasPermission(payload: TokenPayload, permission: string, serverId?: string | null): Promise<boolean> {
   if (payload.role === 'admin') return true;
   const extra = await registeredPermissionDefs();
   const server: ServerContext | null = serverId ? await serverContext(serverId).catch(() => ({ id: serverId, groupIds: [] })) : null;
-  return grantsAllow(await effectiveGrants(payload, extra), permission, server, extra);
+  const grants = await effectiveGrants(payload, extra, true);
+  if (server && permission !== 'servers.view' && !grantsAllow(grants, 'servers.view', server, extra)) return false;
+  return grantsAllow(grants, permission, server, extra);
 }
+
+export { serverVisible };
 
 /** Where (which servers) a principal holds each permission: what the UI uses to show or hide controls. */
 export async function permissionMap(payload: TokenPayload): Promise<Record<string, '*' | string[]>> {
   const extra = await registeredPermissionDefs();
   const defs = fullCatalog(extra);
   if (payload.role === 'admin') return Object.fromEntries(defs.map(d => [d.id, '*' as const]));
-  const grants = await effectiveGrants(payload, extra);
+  const grants = await effectiveGrants(payload, extra, true);
   const servers = await allServerContexts().catch(() => [] as ServerContext[]);
   const out: Record<string, '*' | string[]> = {};
   for (const d of defs) {

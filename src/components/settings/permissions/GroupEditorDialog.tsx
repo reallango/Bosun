@@ -11,12 +11,14 @@ import { send, type Grant, type PermissionData, type PermissionDef, type Permiss
 /** What the editor holds for one permission. */
 interface Row {
   on: boolean;
+  /** Deny wins over every allow: it takes the permission away, even if the access level includes it. */
+  effect: 'allow' | 'deny';
   mode: 'all' | 'selected';
   servers: string[];
   groups: string[];
 }
 
-const EMPTY: Row = { on: false, mode: 'all', servers: [], groups: [] };
+const EMPTY: Row = { on: false, effect: 'allow', mode: 'all', servers: [], groups: [] };
 
 const RISK_STYLE: Record<PermissionDef['risk'], string> = {
   low: 'bg-muted text-muted-foreground',
@@ -28,13 +30,12 @@ const RISK_STYLE: Record<PermissionDef['risk'], string> = {
 function rowsFromGrants(grants: Grant[]): Record<string, Row> {
   const rows: Record<string, Row> = {};
   for (const g of grants) {
-    const r = rows[g.permission] ?? { ...EMPTY, on: true, servers: [], groups: [] };
+    // A row starts as "only some" and becomes "all" when an all-servers grant is seen. (Starting from the
+    // empty row's "all" would show a server-scoped grant as all servers, and saving would then widen it.)
+    const r = rows[g.permission] ?? { ...EMPTY, on: true, mode: 'selected' as const, effect: g.effect === 'deny' ? 'deny' as const : 'allow' as const, servers: [], groups: [] };
     if (g.scope.type === 'all') r.mode = 'all';
-    else {
-      if (r.mode !== 'all') r.mode = 'selected';   // an all-servers grant wins over narrower ones
-      if (g.scope.type === 'server') r.servers.push(g.scope.id);
-      else r.groups.push(g.scope.id);
-    }
+    else if (g.scope.type === 'server') r.servers.push(g.scope.id);
+    else r.groups.push(g.scope.id);
     rows[g.permission] = r;
   }
   // A permission granted for everything stays "all" even if narrower grants were also saved.
@@ -49,12 +50,13 @@ function grantsFromRows(rows: Record<string, Row>, catalog: PermissionDef[]): { 
     const r = rows[def.id];
     if (!r?.on) continue;
     if (def.scope === 'global' || r.mode === 'all') {
-      grants.push({ permission: def.id, scope: { type: 'all' } });
+      grants.push({ permission: def.id, scope: { type: 'all' }, ...(r.effect === 'deny' ? { effect: 'deny' as const } : {}) });
       continue;
     }
     if (r.servers.length + r.groups.length === 0) return { error: `Choose at least one server or server group for "${def.label}", or switch it to all servers.` };
-    for (const id of r.servers) grants.push({ permission: def.id, scope: { type: 'server', id } });
-    for (const id of r.groups) grants.push({ permission: def.id, scope: { type: 'server_group', id } });
+    const eff = r.effect === 'deny' ? { effect: 'deny' as const } : {};
+    for (const id of r.servers) grants.push({ permission: def.id, scope: { type: 'server', id }, ...eff });
+    for (const id of r.groups) grants.push({ permission: def.id, scope: { type: 'server_group', id }, ...eff });
   }
   return { grants };
 }
@@ -144,7 +146,7 @@ export function GroupEditorDialog({
                   const scoped = def.scope === 'server' && r.on && r.mode === 'selected';
                   const chosen = r.servers.length + r.groups.length;
                   return (
-                    <div key={def.id} className={cn('rounded-md border px-3 py-2', r.on ? 'border-primary/40 bg-primary/5' : 'border-transparent hover:bg-muted/40')}>
+                    <div key={def.id} className={cn('rounded-md border px-3 py-2', r.on ? (r.effect === 'deny' ? 'border-destructive/50 bg-destructive/5' : 'border-primary/40 bg-primary/5') : 'border-transparent hover:bg-muted/40')}>
                       <div className="flex items-start gap-2">
                         <input id={`p-${def.id}`} type="checkbox" className="mt-1" checked={r.on} onChange={e => patch(def.id, { on: e.target.checked })} />
                         <div className="min-w-0 flex-1">
@@ -154,10 +156,21 @@ export function GroupEditorDialog({
                           </label>
                           <p className="text-xs text-muted-foreground">{def.description}</p>
                           <p className="text-[11px] text-muted-foreground">
-                            {def.defaultLevel === 'operator' ? 'Already included in Read + actions.' : 'Only included in Full access.'}
+                            {def.defaultLevel === 'viewer' ? 'Everyone has this by default; deny it to take it away.' : def.defaultLevel === 'operator' ? 'Already included in Read + actions.' : 'Only included in Full access.'}
                             {(def.implies?.length ?? 0) > 0 && ` Also allows: ${def.implies!.map(labelOf).join(', ')}.`}
                           </p>
                         </div>
+                        {r.on && (
+                          <select
+                            aria-label={`Allow or deny ${def.label}`}
+                            className={cn('form-select !h-8 !w-auto shrink-0 text-xs', r.effect === 'deny' && 'border-destructive text-destructive')}
+                            value={r.effect}
+                            onChange={e => patch(def.id, { effect: e.target.value as Row['effect'] })}
+                          >
+                            <option value="allow">Allow</option>
+                            <option value="deny">Deny</option>
+                          </select>
+                        )}
                         {r.on && def.scope === 'server' && (
                           <select
                             aria-label={`Where ${def.label} applies`}

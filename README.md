@@ -392,6 +392,12 @@ parameters. Each action names a permission the package declares and is also an A
 package's data and actions. Installing a package shows every command it can run and the account it runs as, and asks for
 confirmation. The spec format is documented in `widgets/README.md`.
 
+**Hiding servers and widgets.** A permission group can *deny* as well as allow. Denying *See a server* for a server
+(or a server group) hides it from everyone in that group: it is not listed, its dashboards and widgets are gone and
+every API route under it answers 404. Denying a package widget's data permission hides that widget. A deny beats any
+allow, from any group or from the access level; Full access is never hidden anything. The Docker widget rebuilt as a
+package is in `widgets/docker_package`.
+
 **Email (SMTP)**, under Settings → General (admins), enables password reset links,
 emailed sign-in codes and email alert actions. Set *App URL* to the address users open
 Bosun at: reset links are built from it. The SMTP password is stored encrypted.

@@ -4,6 +4,7 @@ import { bearerToken } from './api-keys';
 import { authenticateApiKey } from './api-key-auth';
 import { getUserStatus } from './user-status';
 import { ACCESS_LEVELS, hasRole, type Role } from './levels';
+import { serverVisible } from '@/lib/permissions/effective';
 
 function authError(message: string, code: string, status = 401, headers?: HeadersInit) {
   return NextResponse.json({ data: null, error: { message, code } }, { status, headers });
@@ -48,9 +49,29 @@ export async function requireAuth(request: NextRequest): Promise<TokenPayload | 
       const headers = result.retryAfterMs ? { 'Retry-After': String(Math.ceil(result.retryAfterMs / 1000)) } : undefined;
       return authError(result.message, result.code, result.status, headers);
     }
-    return result.payload;
+    return (await hiddenServerResponse(request, result.payload)) ?? result.payload;
   }
-  return sessionAuth(request);
+  const session = await sessionAuth(request);
+  if (session instanceof NextResponse) return session;
+  return (await hiddenServerResponse(request, session)) ?? session;
+}
+
+const SERVER_PATH_RE = /^\/api\/servers\/([^/]+)(?:\/|$)/;
+
+/**
+ * A server that a permission group hides from the caller (`servers.view` denied) does not exist as
+ * far as that caller can tell: every route under /api/servers/:id answers 404. Full access is never hidden anything.
+ */
+async function hiddenServerResponse(request: NextRequest, payload: TokenPayload): Promise<NextResponse | null> {
+  const m = SERVER_PATH_RE.exec(request.nextUrl.pathname);
+  if (!m || payload.role === 'admin') return null;
+  try {
+    if (await serverVisible(payload, decodeURIComponent(m[1]))) return null;
+  } catch (err) {
+    console.error('Checking server visibility failed:', err);
+    return authError('Could not check access right now', 'AUTH_UNAVAILABLE', 503);
+  }
+  return authError('Server not found', 'NOT_FOUND', 404);
 }
 
 /**
@@ -62,7 +83,9 @@ export async function requireUserSession(request: NextRequest): Promise<TokenPay
   if (bearerToken(request.headers.get('authorization'))) {
     return authError('API keys cannot be used for this endpoint; sign in to the web UI instead', 'API_KEY_NOT_ALLOWED', 403);
   }
-  return sessionAuth(request);
+  const session = await sessionAuth(request);
+  if (session instanceof NextResponse) return session;
+  return (await hiddenServerResponse(request, session)) ?? session;
 }
 
 export function requireRole(payload: TokenPayload, requiredRole: Role): NextResponse | null {

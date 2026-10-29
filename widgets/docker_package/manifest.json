@@ -1,0 +1,135 @@
+{
+  "schema": 1,
+  "id": "docker_package",
+  "name": "Docker containers (package)",
+  "version": "0.0.1",
+  "description": "The Docker widget rebuilt as a package: lists containers, shows logs, starts, stops and restarts them. It needs no code in Bosun, only this manifest.",
+  "author": "Bosun",
+  "permissions": [
+    {
+      "id": "docker_package.view",
+      "label": "See containers (package)",
+      "description": "See the Docker containers widget and the container list of a server.",
+      "group": "Docker (package)",
+      "defaultLevel": "operator",
+      "risk": "low",
+      "scope": "server"
+    },
+    {
+      "id": "docker_package.logs",
+      "label": "View container logs (package)",
+      "description": "Read the recent log output of a container.",
+      "group": "Docker (package)",
+      "defaultLevel": "operator",
+      "risk": "low",
+      "scope": "server"
+    },
+    {
+      "id": "docker_package.control",
+      "label": "Start, stop and restart containers (package)",
+      "description": "Change the running state of containers on the host.",
+      "group": "Docker (package)",
+      "defaultLevel": "operator",
+      "risk": "medium",
+      "scope": "server"
+    }
+  ],
+  "widgets": [
+    {
+      "type": "docker_package_containers",
+      "display_name": "Docker containers (package)",
+      "description": "Containers on the host with logs and start, stop and restart.",
+      "icon": "container",
+      "category": "docker",
+      "default_size": { "w": 8, "h": 8 },
+      "min_size": { "w": 5, "h": 5 },
+      "refresh_interval": 15,
+      "supports_linux": true,
+      "supports_windows": false,
+      "spec": {
+        "version": 1,
+        "data": {
+          "source": "command",
+          "as": "service",
+          "command": "docker ps -a --format '{{json .}}'",
+          "parse": "jsonlines",
+          "cacheSec": 10,
+          "timeoutSec": 20,
+          "permission": "docker_package.view",
+          "map": { "name": "Names", "image": "Image", "state": "State", "status": "Status", "ports": "Ports", "compose": "Labels" }
+        },
+        "view": {
+          "type": "list",
+          "empty": "No containers",
+          "summary": [
+            { "label": "running", "where": { "field": "state", "equals": "running" } },
+            { "label": "total" }
+          ],
+          "filter": { "fields": ["name", "image"], "placeholder": "Filter" },
+          "toggles": [
+            { "key": "stopped", "label": "stopped", "default": true, "hideWhen": { "field": "state", "notEquals": "running" } }
+          ],
+          "row": {
+            "dot": {
+              "field": "state",
+              "colors": { "running": "green", "restarting": "amber", "paused": "amber", "created": "gray", "exited": "gray", "dead": "red" }
+            },
+            "title": "{name}",
+            "subtitle": "{image} · {status}",
+            "actions": ["logs", "restart", "stop", "start"]
+          }
+        },
+        "actions": [
+          {
+            "id": "logs",
+            "label": "Logs",
+            "icon": "scroll-text",
+            "permission": "docker_package.logs",
+            "as": "service",
+            "command": "docker logs --tail {{lines}} {{name}} 2>&1",
+            "params": {
+              "name": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$", "from": "name" },
+              "lines": { "type": "number", "min": 1, "max": 2000, "default": 300 }
+            },
+            "result": "text"
+          },
+          {
+            "id": "restart",
+            "label": "Restart",
+            "icon": "rotate-cw",
+            "permission": "docker_package.control",
+            "as": "service",
+            "command": "docker restart {{name}}",
+            "params": { "name": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$", "from": "name" } },
+            "when": { "field": "state", "equals": "running" },
+            "confirm": { "title": "Restart {name}?", "text": "Anything the container is serving will be interrupted.", "destructive": true },
+            "after": "refresh"
+          },
+          {
+            "id": "stop",
+            "label": "Stop",
+            "icon": "square",
+            "permission": "docker_package.control",
+            "as": "service",
+            "command": "docker stop {{name}}",
+            "params": { "name": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$", "from": "name" } },
+            "when": { "field": "state", "equals": "running" },
+            "confirm": { "title": "Stop {name}?", "text": "Anything the container is serving will be interrupted.", "destructive": true },
+            "after": "refresh"
+          },
+          {
+            "id": "start",
+            "label": "Start",
+            "icon": "play",
+            "permission": "docker_package.control",
+            "as": "service",
+            "command": "docker start {{name}}",
+            "params": { "name": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$", "from": "name" } },
+            "when": { "field": "state", "notEquals": "running" },
+            "after": "refresh"
+          }
+        ]
+      }
+    }
+  ]
+}

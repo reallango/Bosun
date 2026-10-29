@@ -44,13 +44,13 @@ export async function loadGroupGrants(p: Principal): Promise<Grant[]> {
   if (hit && Date.now() - hit.at < TTL_MS) return hit.grants;
 
   const sql = p.kind === 'user'
-    ? 'SELECT gr.permission, gr.scope_type, gr.scope_id FROM permission_grants gr JOIN user_groups m ON m.group_id = gr.group_id WHERE m.user_id = ?'
-    : 'SELECT gr.permission, gr.scope_type, gr.scope_id FROM permission_grants gr JOIN api_key_groups m ON m.group_id = gr.group_id WHERE m.api_key_id = ?';
+    ? 'SELECT gr.permission, gr.scope_type, gr.scope_id, gr.effect FROM permission_grants gr JOIN user_groups m ON m.group_id = gr.group_id WHERE m.user_id = ?'
+    : 'SELECT gr.permission, gr.scope_type, gr.scope_id, gr.effect FROM permission_grants gr JOIN api_key_groups m ON m.group_id = gr.group_id WHERE m.api_key_id = ?';
   const r = await rqlite.query(sql, [p.id]);
   const grants: Grant[] = [];
-  for (const row of rowsToObjects(r) as Array<{ permission: string; scope_type: string; scope_id: string }>) {
+  for (const row of rowsToObjects(r) as Array<{ permission: string; scope_type: string; scope_id: string; effect: string }>) {
     const scope = toScope(row.scope_type, row.scope_id);
-    if (scope) grants.push({ permission: row.permission, scope });
+    if (scope) grants.push({ permission: row.permission, scope, effect: row.effect === 'deny' ? 'deny' : 'allow' });
   }
   if (cache.grants.size > MAX_ENTRIES) cache.grants.clear();
   cache.grants.set(key, { at: Date.now(), grants });

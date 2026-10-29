@@ -6,7 +6,7 @@ import { systemPackages, reservedPackageNames } from './system-packages';
 const good = () => ({
   schema: 1, id: 'hello_pkg', name: 'Hello', version: '0.0.1', description: 'd', author: 'me',
   permissions: [{ id: 'hello_pkg.run', label: 'Run hello', description: 'Runs it', group: 'Hello', defaultLevel: 'admin', risk: 'low', scope: 'server' }],
-  widgets: [{ type: 'hello_widget', display_name: 'Hello', description: 'x', default_size: { w: 4, h: 3 }, spec: { version: 1, data: { source: 'snapshot', section: 'docker' }, view: { type: 'text', text: '{x}' } } }],
+  widgets: [{ type: 'hello_widget', display_name: 'Hello', description: 'x', default_size: { w: 4, h: 3 }, spec: { version: 1, data: { source: 'snapshot', section: 'docker', permission: 'hello_pkg.run' }, view: { type: 'text', text: '{x}' } } }],
 });
 
 describe('validateManifest', () => {
@@ -16,7 +16,7 @@ describe('validateManifest', () => {
     if (r.ok) {
       expect(r.value.widgets[0].columns.display_name).toBe('Hello');
       expect(r.value.widgets[0].columns.default_size).toBe('{"w":4,"h":3}');
-      expect(r.value.widgets[0].spec?.data).toEqual({ source: 'snapshot', section: 'docker' });
+      expect(r.value.widgets[0].spec?.data).toEqual({ source: 'snapshot', section: 'docker', permission: 'hello_pkg.run' });
       expect(r.value.permissions[0].implies).toEqual([]);
     }
   });
@@ -124,5 +124,43 @@ describe('system packages', () => {
     for (const id of ['server_summary', 'docker_containers', 'ollama_status', 'os_update_check', 'custom_command']) expect(ids).toContain(id);
     expect(all.every(p => p.version === '0.0.1')).toBe(true);
     expect(all.find(p => p.id === 'docker_containers')?.permissions).toContain('docker.logs');
+  });
+});
+
+import fs from 'fs';
+import path from 'path';
+import { reservedPackageNames } from './system-packages';
+import { reviewPackage } from './runtime/review';
+
+describe('packages shipped in the repository', () => {
+  const root = path.join(process.cwd(), 'widgets');
+  const dirs = fs.existsSync(root) ? fs.readdirSync(root, { withFileTypes: true }).filter(d => d.isDirectory() && !d.name.startsWith('_')) : [];
+
+  it('has at least the Docker package', () => {
+    expect(dirs.map(d => d.name)).toContain('docker_package');
+  });
+
+  for (const d of dirs) {
+    it(`${d.name} is a valid package whose id matches its folder`, () => {
+      const raw = JSON.parse(fs.readFileSync(path.join(root, d.name, 'manifest.json'), 'utf8'));
+      const { types, ids } = reservedPackageNames();
+      const r = validateManifest(raw, { reservedTypes: types, reservedIds: ids });
+      if (!r.ok) throw new Error(r.error);
+      expect(r.value.id).toBe(d.name);
+      // Every widget declares what it needs to be seen, and every command is reviewable.
+      for (const w of r.value.widgets) expect(w.spec?.data.permission).toBeTruthy();
+      expect(reviewPackage(r.value).commandCount).toBeGreaterThan(0);
+    });
+  }
+
+  it('the Docker package offers what the built-in Docker widget does', () => {
+    const raw = JSON.parse(fs.readFileSync(path.join(root, 'docker_package', 'manifest.json'), 'utf8'));
+    const r = validateManifest(raw);
+    if (!r.ok) throw new Error(r.error);
+    const spec = r.value.widgets[0].spec!;
+    expect(spec.actions.map(a => a.id).sort()).toEqual(['logs', 'restart', 'start', 'stop']);
+    expect(spec.view.row?.actions).toEqual(['logs', 'restart', 'stop', 'start']);
+    expect(spec.view.filter?.fields).toEqual(['name', 'image']);
+    expect(spec.view.toggles?.[0].key).toBe('stopped');
   });
 });

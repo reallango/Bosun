@@ -4,6 +4,7 @@
  * from the widgets' specs so it always matches what is installed. Pure.
  */
 import type { ParamSpec, WidgetSpec } from '@/lib/widgets/runtime/spec';
+import { CATALOG } from '@/lib/permissions/catalog';
 
 export interface OpenApiWidget {
   type: string;
@@ -74,6 +75,8 @@ export function buildOpenApi(widgets: OpenApiWidget[], serverUrl = '/'): Json {
     },
   };
 
+  Object.assign(paths, systemOperations());
+
   for (const w of widgets) {
     const tag = `${w.displayName} (${w.packageId})`;
     const dataPerm = w.spec.data.permission;
@@ -121,5 +124,35 @@ export function buildOpenApi(widgets: OpenApiWidget[], serverUrl = '/'): Json {
     components: { securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer', description: 'Bosun API key' } } },
     security: [{ bearerAuth: [] }],
     paths,
+  };
+}
+
+/**
+ * The built-in (system) widgets' actions, described the same way as package actions so an API
+ * user finds one list. They keep their own routes; each names the catalog permission it needs.
+ */
+function systemOperations(): Record<string, Json> {
+  const label = (id: string) => CATALOG.find(p => p.id === id)?.label ?? id;
+  const body = (properties: Json, required: string[]) => ({ required: true, content: { 'application/json': { schema: { type: 'object', required, properties } } } });
+  const op = (operationId: string, summary: string, tag: string, permission: string, extra: Json = {}): Json => ({
+    operationId, summary, tags: [tag], description: `Needs the "${label(permission)}" permission.`,
+    parameters: [serverIdParam], responses: { '200': { description: 'Done' }, ...errorResponses }, 'x-bosun-permission': permission, ...extra,
+  });
+  const cid = { name: 'containerId', in: 'path', required: true, schema: { type: 'string' }, description: 'Container name' };
+  return {
+    '/api/servers/{serverId}/containers': { get: { operationId: 'listContainers', summary: 'Containers as last collected', tags: ['Docker (system)'], parameters: [serverIdParam], responses: { '200': { description: 'Containers' }, ...errorResponses } } },
+    '/api/servers/{serverId}/containers/{containerId}/logs': { get: op('containerLogs', 'Container logs', 'Docker (system)', 'docker.logs', {
+      parameters: [serverIdParam, cid, { name: 'tail', in: 'query', required: false, schema: { type: 'integer', default: 200 } }] }) },
+    '/api/servers/{serverId}/containers/{containerId}/action': { post: op('containerAction', 'Start, stop or restart a container', 'Docker (system)', 'docker.containers.control', {
+      parameters: [serverIdParam, cid],
+      requestBody: body({ action: { type: 'string', enum: ['start', 'stop', 'restart'] }, confirm: { type: 'boolean', enum: [true] } }, ['action', 'confirm']) }) },
+    '/api/servers/{serverId}/ollama/pull': { post: op('ollamaPull', 'Pull an Ollama model', 'Ollama (system)', 'ollama.models.pull', {
+      requestBody: body({ model: { type: 'string' } }, ['model']) }) },
+    '/api/servers/{serverId}/ollama/models': { delete: op('ollamaDeleteModel', 'Delete an Ollama model', 'Ollama (system)', 'ollama.models.delete', {
+      requestBody: body({ name: { type: 'string' }, confirm: { type: 'boolean', enum: [true] } }, ['name', 'confirm']) }) },
+    '/api/servers/{serverId}/power': { post: op('power', 'Restart or shut down a host', 'Power (system)', 'power.restart', {
+      description: 'Restart needs "Restart a server"; shutdown needs "Shut down a server".',
+      requestBody: body({ action: { type: 'string', enum: ['restart', 'shutdown'] }, confirm: { type: 'boolean', enum: [true] } }, ['action', 'confirm']) }) },
+    '/api/servers/{serverId}/wake': { post: op('wake', 'Send a Wake-on-LAN packet', 'Power (system)', 'power.wake') },
   };
 }
