@@ -13,9 +13,7 @@ export const SYSTEM_WIDGET_VERSION = '0.0.1';
 const VERSION_OVERRIDES: Record<string, string> = {};
 
 /** System widgets that are not in the compiled registry (they are defined by a built-in database row). */
-const EXTRA_SYSTEM_WIDGETS: { type: string; name: string; description: string }[] = [
-  { type: 'ollama_status', name: 'Ollama Status', description: 'Models, loaded models and their CPU/GPU memory split; pull and delete (admin)' },
-];
+const EXTRA_SYSTEM_WIDGETS: { type: string; name: string; description: string }[] = [];
 
 export interface SystemPackage {
   /** Same as the widget type. */

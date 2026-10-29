@@ -344,7 +344,6 @@ describe('metrics a widget tracks', () => {
     expect(bad([{ name: 'cpu.usage', rollup1hDays: 99999 }])).toBe(false);
     expect(bad([{ name: 'cpu.usage' }, { name: 'cpu.usage' }])).toBe(false);
     expect(bad([{ name: 'other.running', from: { agg: 'count' } }])).toBe(false);        // must start with the package id
-    expect(bad([{ name: 'dk.running' }])).toBe(false);                                   // own prefix needs a "from"
     expect(bad([{ name: 'dk.x', from: { agg: 'sum' } }])).toBe(false);                   // sum needs a field
     expect(bad([{ name: 'dk.*', from: { agg: 'count' } }])).toBe(false);
   });

@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { EllipsisVertical, GripVertical, RefreshCw, Settings2, Trash2 } from 'lucide-react';
 import { CustomCommandWidget } from '@/components/widgets/custom-command';
-import { OSUpdateCheckWidget } from '@/components/widgets/os-update-check';
 import { WidgetErrorBoundary } from '@/components/widgets/WidgetErrorBoundary';
 import { WidgetSettingsDialog } from '@/components/dialogs/WidgetSettingsDialog';
 import { DeleteConfirmDialog } from '@/components/dialogs/DeleteConfirmDialog';
@@ -64,8 +63,6 @@ function WidgetContent({ widgetId, widgetType, serverId, serverName }: { widgetI
       return <SSHTerminalWidget widgetId={widgetId} serverId={serverId} />;
     case 'custom_command':
       return <CustomCommandWidget widgetId={widgetId} serverId={serverId} />;
-    case 'os_update_check':
-      return <OSUpdateCheckWidget widgetId={widgetId} serverId={serverId} />;
     default:
     {
       // Database-defined widget types render through the custom registry.
