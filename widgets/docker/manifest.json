@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "docker",
   "name": "Docker Containers",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Containers on the host with logs, a shell in each container, and start, stop and restart. Installed by default; the poller collects the container list.",
   "author": "Bosun",
   "permissions": [
@@ -67,6 +67,9 @@
           "permission": "docker.view",
           "map": { "name": "Names", "image": "Image", "state": "State", "status": "Status", "ports": "Ports", "compose": "Labels" }
         },
+        "metrics": [
+          { "name": "docker.running", "label": "Running containers" }
+        ],
         "view": {
           "type": "list",
           "empty": "No containers",

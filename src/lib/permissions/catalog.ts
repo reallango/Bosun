@@ -58,21 +58,8 @@ export const CATALOG: readonly PermissionDef[] = [
   { id: 'power.shutdown', label: 'Shut down a server', group: 'Power', source: 'core', defaultLevel: 'operator', risk: 'high', scope: 'server',
     description: 'Power the host off. It stays off until it is woken or started at the machine.' },
 
-  // ---- OS updates (widget) -----------------------------------------------
-  { id: 'updates.check', label: 'Check for OS updates', group: 'OS updates', source: 'widget:os_update_check', defaultLevel: 'operator', risk: 'low', scope: 'server',
-    description: 'Run an update check now and see the progress of an install.' },
-  { id: 'updates.install', label: 'Install OS updates', group: 'OS updates', source: 'widget:os_update_check', defaultLevel: 'operator', risk: 'high', scope: 'server',
-    implies: ['updates.check'],
-    description: 'Install pending operating-system updates on the host.' },
-
-  // The Docker permissions (docker.view, docker.logs, docker.containers.control, docker.shell) are provided
-  // by the bundled "docker" widget package; see widgets/docker.
-
-  // ---- Ollama (widget) ---------------------------------------------------
-  { id: 'ollama.models.pull', label: 'Pull Ollama models', group: 'Ollama', source: 'widget:ollama_status', defaultLevel: 'operator', risk: 'medium', scope: 'server',
-    description: 'Download models onto the host (and cancel a download).' },
-  { id: 'ollama.models.delete', label: 'Delete Ollama models', group: 'Ollama', source: 'widget:ollama_status', defaultLevel: 'operator', risk: 'medium', scope: 'server',
-    description: 'Remove downloaded models from the host.' },
+  // The OS update permissions (updates.*), the Ollama ones (ollama.*) and the Docker ones are provided by the
+  // bundled widget packages "updates", "ollama" and "docker" (see widgets/).
 
   // ---- Shell (API) -------------------------------------------------------
   { id: 'shell.user', label: 'Terminal and commands as the non-admin account (API)', group: 'Shell', source: 'core', defaultLevel: 'admin', risk: 'high', scope: 'server',

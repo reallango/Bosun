@@ -1,0 +1,57 @@
+{
+  "schema": 1,
+  "id": "updates",
+  "name": "OS Update Check",
+  "version": "1.0.0",
+  "description": "Check for and install operating system updates (apt, dnf, Windows Update). Installed by default. The view and the install flow are built into Bosun; this package carries its permissions and size.",
+  "author": "Bosun",
+  "permissions": [
+    {
+      "id": "updates.view",
+      "label": "See OS updates",
+      "description": "See the OS Update Check widget and the pending updates of a server.",
+      "group": "OS updates",
+      "defaultLevel": "viewer",
+      "risk": "low",
+      "scope": "server"
+    },
+    {
+      "id": "updates.check",
+      "label": "Check for OS updates",
+      "description": "Run an update check now and see the progress of an install.",
+      "group": "OS updates",
+      "defaultLevel": "operator",
+      "risk": "low",
+      "scope": "server"
+    },
+    {
+      "id": "updates.install",
+      "label": "Install OS updates",
+      "description": "Install pending operating-system updates on the host.",
+      "group": "OS updates",
+      "defaultLevel": "operator",
+      "risk": "high",
+      "scope": "server",
+      "implies": ["updates.check"]
+    }
+  ],
+  "widgets": [
+    {
+      "type": "os_update_check",
+      "display_name": "OS Update Check",
+      "description": "Check for and install OS updates",
+      "icon": "refresh-cw",
+      "category": "system",
+      "default_size": { "w": 8, "h": 5 },
+      "min_size": { "w": 6, "h": 4 },
+      "refresh_interval": 3600,
+      "supports_linux": true,
+      "supports_windows": true,
+      "spec": {
+        "version": 1,
+        "data": { "source": "snapshot", "section": "updates", "permission": "updates.view" },
+        "view": { "type": "text", "text": "OS Update Check is drawn by Bosun itself." }
+      }
+    }
+  ]
+}

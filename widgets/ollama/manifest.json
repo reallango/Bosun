@@ -1,0 +1,59 @@
+{
+  "schema": 1,
+  "id": "ollama",
+  "name": "Ollama Status",
+  "version": "1.0.0",
+  "description": "Models, loaded models and their CPU/GPU memory split; pull and delete models. Installed by default. The view and the pull and delete flows are built into Bosun; this package carries its permissions, size and tracked statistics.",
+  "author": "Bosun",
+  "permissions": [
+    {
+      "id": "ollama.view",
+      "label": "See Ollama",
+      "description": "See the Ollama Status widget and the model list of a server.",
+      "group": "Ollama",
+      "defaultLevel": "viewer",
+      "risk": "low",
+      "scope": "server"
+    },
+    {
+      "id": "ollama.models.pull",
+      "label": "Pull Ollama models",
+      "description": "Download models onto the host (and cancel a download).",
+      "group": "Ollama",
+      "defaultLevel": "operator",
+      "risk": "medium",
+      "scope": "server"
+    },
+    {
+      "id": "ollama.models.delete",
+      "label": "Delete Ollama models",
+      "description": "Remove downloaded models from the host.",
+      "group": "Ollama",
+      "defaultLevel": "operator",
+      "risk": "medium",
+      "scope": "server"
+    }
+  ],
+  "widgets": [
+    {
+      "type": "ollama_status",
+      "display_name": "Ollama Status",
+      "description": "Models, loaded models and their CPU/GPU memory split; pull and delete (admin)",
+      "icon": "bot",
+      "category": "ai",
+      "default_size": { "w": 8, "h": 8 },
+      "min_size": { "w": 6, "h": 5 },
+      "refresh_interval": 30,
+      "supports_linux": true,
+      "supports_windows": true,
+      "spec": {
+        "version": 1,
+        "data": { "source": "snapshot", "section": "ollama", "permission": "ollama.view" },
+        "metrics": [
+          { "name": "ollama.loaded", "label": "Loaded models" }
+        ],
+        "view": { "type": "text", "text": "Ollama Status is drawn by Bosun itself." }
+      }
+    }
+  ]
+}

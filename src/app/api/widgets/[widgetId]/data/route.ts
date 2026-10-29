@@ -69,12 +69,16 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
 
     // Package widgets with a declarative spec: data comes from the spec's snapshot section or command.
-    const loaded = WIDGET_SECTIONS[widget.widget_type] ? null : await loadWidgetSpec(widget.widget_type);
+    // Widgets whose view is compiled into Bosun (WIDGET_SECTIONS: Ollama, OS updates) still name a data permission in their
+    // package spec; it is checked here before their snapshot data is served below.
+    const loaded = await loadWidgetSpec(widget.widget_type);
     if (loaded) {
       if (loaded.spec.data.permission) {
         const denied = await requirePermission(auth, loaded.spec.data.permission, server.id);
         if (denied) return denied;
       }
+    }
+    if (loaded && !WIDGET_SECTIONS[widget.widget_type]) {
       try {
         const rt = await loadRuntimeData(server.id, loaded, force, cfg);
         return NextResponse.json({ ...rt, stale: false, server: { is_online: !!server.is_online, last_error: server.last_error ?? null } },

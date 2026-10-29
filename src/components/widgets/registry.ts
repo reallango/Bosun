@@ -30,21 +30,6 @@ export const widgetRegistry: Record<string, WidgetDefinition> = {
     defaultTTL: 1800,
     storageMode: 'latest_ttl',
   },
-  os_update_check: {
-    type: 'os_update_check',
-    displayName: 'OS Update Check',
-    description: 'Check for and install OS updates',
-    supportsWindows: true,
-    icon: 'refresh-cw',
-    category: 'system',
-    defaultSize: { w: 8, h: 5 },
-    minSize: { w: 6, h: 4 },
-    refreshInterval: 0,
-    backgroundPollable: true,
-    defaultPollInterval: 86400,
-    defaultTTL: 15552000,
-    storageMode: 'change_only',
-  },
 };
 
 export function getWidgetDefinition(type: string): WidgetDefinition | undefined {

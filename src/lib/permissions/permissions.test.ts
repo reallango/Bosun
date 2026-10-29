@@ -9,6 +9,10 @@ const srv = (id: string, ...groupIds: string[]): ServerContext => ({ id, groupId
 const all = (permission: string): Grant => ({ permission, scope: { type: 'all' } });
 const onServer = (permission: string, id: string): Grant => ({ permission, scope: { type: 'server', id } });
 const onGroup = (permission: string, id: string): Grant => ({ permission, scope: { type: 'server_group', id } });
+const UPD: PermissionDef[] = [
+  { id: 'updates.check', label: 'Check', description: 'Check for updates.', group: 'Updates', source: 'package:updates', defaultLevel: 'operator', risk: 'low', scope: 'server' },
+  { id: 'updates.install', label: 'Install', description: 'Install updates.', group: 'Updates', source: 'package:updates', defaultLevel: 'operator', risk: 'high', scope: 'server', implies: ['updates.check'] },
+];
 
 describe('permission catalog', () => {
   it('has well-formed, unique ids and complete descriptions', () => {
@@ -35,7 +39,7 @@ describe('permission catalog', () => {
   });
 
   it('marks everything that can run code or power a host off or on as high risk', () => {
-    for (const id of ['power.restart', 'power.shutdown', 'updates.install', 'commands.run']) {
+    for (const id of ['power.restart', 'power.shutdown', 'commands.run']) {
       expect(permissionDef(id)?.risk).toBe('high');
     }
   });
@@ -49,8 +53,7 @@ describe('access levels map onto permissions exactly as before', () => {
 
   it('Read + actions has the operator permissions, and not the admin ones', () => {
     const ids = permissionsForLevel('operator').map(p => p.id);
-    for (const id of ['power.wake', 'power.restart', 'power.shutdown', 'updates.check', 'updates.install',
-      'ollama.models.pull', 'ollama.models.delete', 'dashboards.edit']) {
+    for (const id of ['power.wake', 'power.restart', 'power.shutdown', 'dashboards.edit']) {
       expect(ids).toContain(id);
     }
     expect(ids).not.toContain('commands.run');
@@ -75,8 +78,8 @@ describe('access levels map onto permissions exactly as before', () => {
 
 describe('satisfiers (implied permissions)', () => {
   it('install implies check, not the other way round', () => {
-    expect(satisfiers('updates.check').has('updates.install')).toBe(true);
-    expect(satisfiers('updates.install').has('updates.check')).toBe(false);
+    expect(satisfiers('updates.check', UPD).has('updates.install')).toBe(true);
+    expect(satisfiers('updates.install', UPD).has('updates.check')).toBe(false);
   });
 
   it('follows a chain of implications from registered definitions', () => {
@@ -114,16 +117,16 @@ describe('grantsAllow', () => {
 
   it('a permission that implies the requested one also counts, within its scope', () => {
     const g = [onServer('updates.install', 's1')];
-    expect(grantsAllow(g, 'updates.check', srv('s1'))).toBe(true);
-    expect(grantsAllow(g, 'updates.check', srv('s2'))).toBe(false);
+    expect(grantsAllow(g, 'updates.check', srv('s1'), UPD)).toBe(true);
+    expect(grantsAllow(g, 'updates.check', srv('s2'), UPD)).toBe(false);
   });
 
   it('grants combine (a person in several groups)', () => {
-    const g = [onServer('power.restart', 's1'), onGroup('power.restart', 'lab'), all('updates.check')];
+    const g = [onServer('power.restart', 's1'), onGroup('power.restart', 'lab'), all('servers.refresh')];
     expect(grantsAllow(g, 'power.restart', srv('s1'))).toBe(true);
     expect(grantsAllow(g, 'power.restart', srv('s9', 'lab'))).toBe(true);
     expect(grantsAllow(g, 'power.restart', srv('s9'))).toBe(false);
-    expect(grantsAllow(g, 'updates.check', srv('s9'))).toBe(true);
+    expect(grantsAllow(g, 'servers.refresh', srv('s9'))).toBe(true);
   });
 
   it('never allows an unknown permission, even with an all grant', () => {

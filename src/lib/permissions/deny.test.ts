@@ -1,12 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import { allowedServerIds, grantsAllow, levelGrants, type Grant, type ServerContext } from './evaluate';
-import { permissionsForLevel, impliedSet } from './catalog';
+import { permissionsForLevel, impliedSet, type PermissionDef } from './catalog';
 import { validateGrants } from './validate';
 
 const s1: ServerContext = { id: 's1', groupIds: ['g1'] };
 const s2: ServerContext = { id: 's2', groupIds: [] };
 const s3: ServerContext = { id: 's3', groupIds: ['g1'] };
 const servers = [s1, s2, s3];
+const UPD: PermissionDef[] = [
+  { id: 'updates.check', label: 'Check', description: 'Check for updates.', group: 'Updates', source: 'package:updates', defaultLevel: 'operator', risk: 'low', scope: 'server' },
+  { id: 'updates.install', label: 'Install', description: 'Install updates.', group: 'Updates', source: 'package:updates', defaultLevel: 'operator', risk: 'high', scope: 'server', implies: ['updates.check'] },
+];
 
 describe('servers.view and levels', () => {
   it('every level holds it by default, so nobody loses sight of servers unless a group denies it', () => {
@@ -48,10 +52,10 @@ describe('deny grants', () => {
   });
 
   it('denying a permission also denies the ones that include it', () => {
-    expect(impliedSet('updates.install').has('updates.check')).toBe(true);
+    expect(impliedSet('updates.install', UPD).has('updates.check')).toBe(true);
     const grants: Grant[] = [...base, { permission: 'updates.check', scope: { type: 'all' }, effect: 'deny' }];
-    expect(grantsAllow(grants, 'updates.check', s1)).toBe(false);
-    expect(grantsAllow(grants, 'updates.install', s1)).toBe(false);   // install implies check
+    expect(grantsAllow(grants, 'updates.check', s1, UPD)).toBe(false);
+    expect(grantsAllow(grants, 'updates.install', s1, UPD)).toBe(false);   // install implies check
     expect(grantsAllow(grants, 'power.restart', s1)).toBe(true);       // unrelated
   });
 

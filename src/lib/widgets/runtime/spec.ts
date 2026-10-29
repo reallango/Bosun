@@ -585,8 +585,6 @@ function validateMetrics(raw: unknown, packageId: string | undefined): Validated
       let where: Cond | undefined;
       if (m.from.where !== undefined) { const c = cond(m.from.where, `metric "${name}" "where"`); if (!c.ok) return c; where = c.value; }
       item.from = { agg: agg as (typeof METRIC_AGGS)[number], ...(field ? { field } : {}), ...(where ? { where } : {}) };
-    } else if (packageId && name.startsWith(`${packageId}.`)) {
-      return fail(`metric "${name}": names starting with "${packageId}." are computed from the data, so they need "from"`);
     }
     out.push(item);
   }

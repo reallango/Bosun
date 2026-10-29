@@ -1,5 +1,6 @@
 import { ComponentType } from 'react';
 import { OllamaStatusWidget } from '@/components/widgets/ollama-status';
+import { OSUpdateCheckWidget } from '@/components/widgets/os-update-check';
 
 export interface CustomWidgetComponentProps {
   widgetId: string;
@@ -20,4 +21,5 @@ export interface CustomWidgetComponentProps {
  */
 export const customWidgetComponents: Record<string, ComponentType<CustomWidgetComponentProps>> = {
   ollama_status: OllamaStatusWidget,
+  os_update_check: OSUpdateCheckWidget,
 };
