@@ -214,7 +214,7 @@ export async function runOllamaAction(serverId: string, userId: string, action: 
       if (!inst?.dockerAvailable) throw new OllamaManageError('Docker is not installed (or not usable by the Bosun account) on this server. Install Docker first, or choose to install Ollama on the host.', 409, 'NO_DOCKER');
       return { job: startJob(serverId, 'install', dockerInstallCommand({ version }), userId) };
     }
-    return { job: startJob(serverId, 'install', hostInstallCommand(version), userId) };
+    return { job: startJob(serverId, 'install', hostInstallCommand(version, { listenOnNetwork: true }), userId) };
   }
 
   if (!inst || inst.kind === 'none') throw new OllamaManageError('Ollama is not installed on this server', 409, 'NOT_INSTALLED');

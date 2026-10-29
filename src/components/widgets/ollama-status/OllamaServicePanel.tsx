@@ -195,7 +195,7 @@ export function OllamaServicePanel({ serverId, onChanged }: { serverId: string; 
           {info.platform === 'windows' ? (
             <div className="flex flex-wrap items-center gap-2">
               {button('Install as a service', <ArrowUpCircle className="size-3" aria-hidden />, () => setPending({ action: 'install' }))}
-              <span className="text-gray-500">Downloads Ollama into C:\Ollama and runs it with nssm, started at boot, listening on localhost only.</span>
+              <span className="text-gray-500">Downloads Ollama into C:\Ollama and runs it with nssm, started at boot, reachable from the network (port 11434, firewall rule for private networks).</span>
             </div>
           ) : (
             <>
@@ -235,7 +235,7 @@ export function OllamaServicePanel({ serverId, onChanged }: { serverId: string; 
           stop: 'Models stop answering requests, and anything using Ollama on this host loses it until it is started again.',
           restart: 'Loaded models are unloaded and requests in flight fail while it restarts.',
           update: inst.kind === 'docker' ? 'The container is recreated from the new image with the same settings (ports, volumes, GPU access, restart policy). Ollama is unavailable while that happens.' : 'The service is stopped, its files are replaced and it is started again. Ollama is unavailable meanwhile.',
-          install: info.platform === 'windows' ? 'Downloads about 1.5 GB, unpacks it into C:\\Ollama and creates a Windows service with nssm (installed with winget when it is missing).' : pending.method === 'host' ? 'Runs the official install script with sudo. It adds the ollama user and a systemd service.' : 'Pulls the ollama/ollama image and starts a container that keeps its models in a Docker volume.',
+          install: info.platform === 'windows' ? 'Downloads about 1.5 GB, unpacks it into C:\\Ollama and creates a Windows service with nssm (installed with winget when it is missing). Ollama will be reachable from your network on port 11434, with a firewall rule for private networks.' : pending.method === 'host' ? 'Runs the official install script with sudo. It adds the ollama user and a systemd service, and makes Ollama reachable from your network on port 11434.' : 'Pulls the ollama/ollama image and starts a container that keeps its models in a Docker volume, reachable from your network on port 11434.',
         })[pending.action] : ''}
         confirmLabel={pending ? ({ stop: 'Stop', restart: 'Restart', update: 'Update', install: 'Install' })[pending.action] : ''}
         destructive={pending?.action === 'stop' || pending?.action === 'restart'}
