@@ -138,3 +138,10 @@ Docker Compose are not recreated; update those with Compose.
 
 API: `GET /api/servers/:serverId/ollama/service` (state, latest version, job) and
 `POST /api/servers/:serverId/ollama/service` with `{ "action": "start|stop|restart|set_startup|set_restart_policy|install|update", "value", "method", "version", "confirm": true }`.
+
+On Windows the installer needs nssm. It uses a copy that is already there (`C:\Ollama\nssm.exe` or on the PATH);
+otherwise it checks that winget works for the service account (its program runs and its package source answers),
+repairs it when it does not (registers the App Installer package, installs the winget source package from Microsoft's
+CDN, installs winget itself if it is missing), and installs `NSSM.NSSM` with it. Only when winget cannot be made to
+work does it download nssm from nssm.cc. The widget's Installation section is collapsed until opened, and shows an
+"Update available" badge next to its arrow when a newer release exists.
