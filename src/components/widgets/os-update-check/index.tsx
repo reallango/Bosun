@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { ChevronDown, ChevronUp, CircleCheck, Package, RotateCcw, ShieldAlert, TriangleAlert } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
@@ -29,6 +29,8 @@ interface OSUpdateData {
   reboot_required: boolean;
   last_checked: string;
   os_type: string;
+  /** Why the last check failed (Windows Update search error); empty when it worked. */
+  check_error: string;
 }
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -49,6 +51,7 @@ function normalize(raw: any, collectedAt: string | null): OSUpdateData {
     reboot_required: !!(raw?.rebootRequired ?? raw?.reboot_required),
     last_checked: collectedAt || raw?.lastCheck || raw?.last_checked || '',
     os_type: raw?.manager || '',
+    check_error: typeof raw?.error === 'string' ? raw.error : '',
   };
 }
 /* eslint-enable @typescript-eslint/no-explicit-any */
@@ -73,6 +76,9 @@ export function OSUpdateCheckWidget({ widgetId, serverId }: OSUpdateCheckWidgetP
   const [installResult, setInstallResult] = useState<string | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
   const [showPackages, setShowPackages] = useState(false);
+  const [progress, setProgress] = useState<string | null>(null);
+  const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const statusErrors = useRef(0);
   const frame = useWidgetFrame();
   const { user } = useAuth();
   // Installing updates and forcing a check are actions (Read + actions).
@@ -111,18 +117,74 @@ export function OSUpdateCheckWidget({ widgetId, serverId }: OSUpdateCheckWidgetP
     return frame.registerRefresh(() => checkForUpdates(true));
   }, [frame, checkForUpdates]);
 
+  // Windows installs run in the background on the host: poll for progress until they finish.
+  // `resume` = on page load, only pick up an install that is already running (stay quiet otherwise).
+  const pollInstallStatus = useCallback(async (resume = false) => {
+    try {
+      const res = await fetchWithAuth(`/api/widgets/${widgetId}/data`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'status' }),
+      });
+      const json = await readJson<{ data?: { state?: string; message?: string }; error?: { message?: string } }>(res);
+      if (json.error || !json.data) throw new Error(json.error?.message || 'Could not read the install status');
+      statusErrors.current = 0;
+      const st = json.data;
+      if (st.state === 'running') {
+        setInstalling(true);
+        setProgress(st.message || 'Working…');
+        pollTimer.current = setTimeout(() => pollInstallStatus(false), 8000);
+        return;
+      }
+      setInstalling(false);
+      setProgress(null);
+      if (resume || st.state === 'idle') return;
+      setInstallResult(st.message || (st.state === 'done' ? 'Updates installed' : 'Install failed'));
+      // Re-scan (the search takes a while on Windows) so the pending list catches up.
+      setTimeout(() => checkForUpdates(true), 2000);
+      setTimeout(() => checkForUpdates(false), 60000);
+    } catch (err) {
+      if (resume) return;
+      // A restart in the middle of an install drops the connection: keep trying for a few minutes.
+      statusErrors.current += 1;
+      if (statusErrors.current <= 30) {
+        setProgress('Waiting for the host…');
+        pollTimer.current = setTimeout(() => pollInstallStatus(false), 10000);
+      } else {
+        setInstalling(false);
+        setProgress(null);
+        setInstallResult(err instanceof Error ? err.message : 'Lost contact with the host. Check it, then check for updates again.');
+      }
+    }
+  }, [widgetId, checkForUpdates]);
+
+  useEffect(() => () => { if (pollTimer.current) clearTimeout(pollTimer.current); }, []);
+
+  // Reopening the dashboard during a Windows install: show its progress again.
+  const isWindows = data?.os_type === 'windows';
+  useEffect(() => {
+    if (isWindows && canAct) pollInstallStatus(true);
+  }, [isWindows, canAct, pollInstallStatus]);
+
   const handleInstall = async () => {
     setShowConfirm(false);
     setInstalling(true);
     setInstallResult(null);
+    let background = false;
     try {
       const res = await fetchWithAuth(`/api/widgets/${widgetId}/data`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ action: 'install' }),
       });
-      const json = await readJson<{ data?: { success?: boolean; message?: string }; error?: { message?: string } }>(res);
-      if (json.data?.success) {
+      const json = await readJson<{ data?: { success?: boolean; started?: boolean; message?: string }; error?: { message?: string } }>(res);
+      if (json.data?.success && json.data.started) {
+        // Windows: running in the background on the host.
+        background = true;
+        statusErrors.current = 0;
+        setProgress(json.data.message || 'Install started…');
+        pollTimer.current = setTimeout(() => pollInstallStatus(false), 5000);
+      } else if (json.data?.success) {
         setInstallResult(json.data.message || 'Updates installed successfully');
         setData(null);
         // Refresh after install
@@ -133,7 +195,7 @@ export function OSUpdateCheckWidget({ widgetId, serverId }: OSUpdateCheckWidgetP
     } catch {
       setInstallResult('Failed to install updates');
     } finally {
-      setInstalling(false);
+      if (!background) setInstalling(false);
     }
   };
 
@@ -156,7 +218,14 @@ export function OSUpdateCheckWidget({ widgetId, serverId }: OSUpdateCheckWidgetP
     <div className="flex h-full min-h-0 flex-col gap-3">
       <div className="grid grid-cols-1 gap-3 @xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
         <div className="space-y-1.5 text-sm">
-          {data.updates_available === 0 ? (
+          {data.check_error ? (
+            <>
+              <div className="flex items-center gap-1.5 font-medium text-destructive">
+                <TriangleAlert className="size-4" aria-hidden /> Could not check for updates
+              </div>
+              <div className="break-words text-xs text-muted-foreground">{data.check_error}</div>
+            </>
+          ) : data.updates_available === 0 ? (
             <div className="flex items-center gap-1.5 font-medium text-success">
               <CircleCheck className="size-4" aria-hidden /> System up to date
             </div>
@@ -193,6 +262,7 @@ export function OSUpdateCheckWidget({ widgetId, serverId }: OSUpdateCheckWidgetP
       </div>
 
       {error && <div role="alert" className="text-xs text-destructive">{error}</div>}
+      {progress && <div role="status" className="text-xs text-muted-foreground">{progress}</div>}
       {installResult && <div className="text-xs">{installResult}</div>}
 
       {/* Expandable package list */}
@@ -213,7 +283,7 @@ export function OSUpdateCheckWidget({ widgetId, serverId }: OSUpdateCheckWidgetP
                 <li key={i} className={cn('flex flex-wrap gap-x-1', pkg.is_security ? 'text-destructive' : 'text-muted-foreground')}>
                   <span className="font-medium">{pkg.name}</span>
                   <span className="break-all">
-                    {pkg.current_version} → {pkg.new_version}
+                    {pkg.current_version ? `${pkg.current_version} → ${pkg.new_version}` : pkg.new_version}
                   </span>
                 </li>
               ))}
@@ -230,7 +300,9 @@ export function OSUpdateCheckWidget({ widgetId, serverId }: OSUpdateCheckWidgetP
               <TriangleAlert className="size-4" aria-hidden /> Install OS updates?
             </p>
             <p className="mt-2 text-xs text-muted-foreground">
-              This will install {data.updates_available} updates. The server may require a reboot afterward. This action will be logged.
+              {data.os_type === 'windows'
+                ? `This will download and install ${data.updates_available} update${data.updates_available === 1 ? '' : 's'} in the background on the host. It can take a while, and the host is not restarted automatically. This action will be logged.`
+                : `This will install ${data.updates_available} updates. The server may require a reboot afterward. This action will be logged.`}
             </p>
             <div className="mt-3 flex flex-wrap justify-end gap-2">
               <Button variant="outline" size="sm" onClick={() => setShowConfirm(false)}>

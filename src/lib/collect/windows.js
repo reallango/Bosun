@@ -16,7 +16,7 @@ const linux = require('./linux');
 const macs = require('./macs');
 const { splitSections } = linux;
 
-const PROBES = ['stat', 'mem', 'netdev', 'gpu', 'df', 'ip', 'docker', 'ollama', 'services', 'system'];
+const PROBES = ['stat', 'mem', 'netdev', 'gpu', 'df', 'ip', 'docker', 'ollama', 'services', 'system', 'updates'];
 
 const SCRIPT = String.raw`
 $ErrorActionPreference = 'SilentlyContinue'
@@ -66,6 +66,19 @@ foreach ($p in $Probes) {
       $os = Get-CimInstance Win32_OperatingSystem; $cpu = @(Get-CimInstance Win32_Processor)
       J @{ caption = $os.Caption; version = $os.Version; build = $os.BuildNumber; arch = $os.OSArchitecture; host = $env:COMPUTERNAME;
            model = $cpu[0].Name; cores = ($cpu | Measure-Object NumberOfCores -Sum).Sum; threads = ($cpu | Measure-Object NumberOfLogicalProcessors -Sum).Sum } }
+    'updates' { M 'updates'
+      # Windows Update search (read-only). Slow (15 s to minutes): the poller runs it on its own, never with the regular probes.
+      try {
+        $ErrorActionPreference = 'Stop'
+        $wu = (New-Object -ComObject Microsoft.Update.Session).CreateUpdateSearcher().Search("IsInstalled=0 and IsHidden=0 and Type='Software'")
+        $list = @(foreach ($u in $wu.Updates) {
+          $cats = @(foreach ($c in $u.Categories) { $c.Name })
+          $kbs = @(foreach ($k in $u.KBArticleIDs) { "KB$k" })
+          @{ title = [string]$u.Title; kb = ($kbs -join ','); severity = [string]$u.MsrcSeverity; categories = ($cats -join ';'); mb = [math]::Round($u.MaxDownloadSize / 1MB, 1) }
+        })
+        J @{ ok = $true; rebootRequired = [bool](New-Object -ComObject Microsoft.Update.SystemInfo).RebootRequired; updates = $list }
+      } catch { J @{ ok = $false; error = [string]$_.Exception.Message } }
+      $ErrorActionPreference = 'SilentlyContinue' }
   }
 }
 M 'end'
@@ -114,6 +127,33 @@ function powershellCommand(script) {
 const jsonOf = t => {
   try { return JSON.parse(t); } catch { return null; }
 };
+
+/**
+ * Windows Update search result -> the `updates` section the OS Update widget reads
+ * (same shape the Linux package managers produce). A failed or unreadable search
+ * is reported in `error` so the widget can say why instead of showing "up to date".
+ */
+function parseUpdates(u) {
+  const base = { manager: 'windows', updatesAvailable: 0, securityUpdates: 0, rebootRequired: false, packages: [] };
+  if (!u || u.ok === false || !Array.isArray(u.updates)) {
+    return { ...base, error: String((u && u.error) || 'Windows Update returned no data').slice(0, 300) };
+  }
+  // Anything Microsoft rates (MSRC severity) or files under "Security Updates" counts as security.
+  const packages = u.updates.map(p => ({
+    name: p.title || p.kb || 'Update',
+    current_version: '',
+    // Most titles already end in "(KB1234567)"; only show the KB separately when the title lacks it.
+    new_version: p.kb && !String(p.title || '').includes(p.kb) ? p.kb : '',
+    is_security: /security/i.test(p.categories || '') || !!p.severity,
+  }));
+  return {
+    ...base,
+    updatesAvailable: packages.length,
+    securityUpdates: packages.filter(p => p.is_security).length,
+    rebootRequired: !!u.rebootRequired,
+    packages: packages.slice(0, 200),
+  };
+}
 const arr = v => (Array.isArray(v) ? v : v ? [v] : []);
 const round1 = v => Math.round(v * 10) / 10;
 
@@ -215,6 +255,10 @@ function buildSnapshot(raw, prev, now = Date.now()) {
       status: /running/i.test(s.status) ? 'running' : 'stopped',
       enabled: !/disabled/i.test(s.start),
     }));
+  }
+
+  if (raw.updates !== undefined) {
+    sections.updates = parseUpdates(jsonOf(raw.updates));
   }
 
   if (raw.system !== undefined) {

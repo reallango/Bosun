@@ -6,6 +6,7 @@ import { runOnServerId } from '@/lib/ssh/connection-pool';
 import { WIDGET_SECTIONS, widgetDataFromSnapshots, collectedAtFor, Sections, ServerRow } from '@/lib/widgets/snapshot-data';
 import { consumeActionRateLimit } from '@/lib/utils/rate-limiter';
 import { logAudit } from '@/lib/audit/logger';
+import { startScript, statusScript, parseInstallStatus } from '@/lib/updates/windows-install';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -105,15 +106,57 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   }
 }
 
+/**
+ * Windows: start an install as a SYSTEM scheduled task (the Windows Update Agent
+ * refuses installs from remote sessions) or report on one. Returns at once; the
+ * widget polls `status`. The host is never restarted here.
+ */
+async function windowsUpdates(action: 'install' | 'status', userId: string, serverId: string) {
+  if (action === 'status') {
+    const r = await runOnServerId(serverId, statusScript(), { timeoutMs: 30_000 });
+    return NextResponse.json({ data: parseInstallStatus(r.stdout) });
+  }
+  const started = Date.now();
+  const r = await runOnServerId(serverId, startScript(), { timeoutMs: 60_000 });
+  const already = r.stdout.includes('BOSUN_ALREADY_RUNNING');
+  const ok = already || r.stdout.includes('BOSUN_STARTED');
+  // PowerShell 7 colours its error text with ANSI escapes; keep stored and shown messages plain.
+  const plain = (s: string) => s.replace(/\u001b\[[0-9;]*m/g, '').trim();
+  await logAudit({
+    userId, serverId, action: 'server.updates_install', category: 'server', status: ok ? 'success' : 'failure',
+    details: JSON.stringify({ platform: 'windows', phase: already ? 'already_running' : ok ? 'started' : 'start_failed', ...(ok ? {} : { error: plain(r.stderr || r.stdout).slice(0, 300) }) }),
+    durationMs: Date.now() - started,
+  });
+  if (!ok) {
+    const why = plain(r.stderr || r.stdout).split(/\r?\n/)[0]?.slice(0, 300) || `exit ${r.exitCode}`;
+    return NextResponse.json({ error: { message: `Could not start the Windows Update install: ${why}` } }, { status: 502 });
+  }
+  return NextResponse.json({
+    data: {
+      success: true,
+      started: true,
+      message: already ? 'An install is already running on this host' : 'Install started in the background. This can take a while.',
+    },
+  });
+}
+
 // POST: os_update_check "install updates" (operator or higher, audited, rate limited).
+// `status` (Windows only) reports on an install that is running in the background; it
+// is polled by the widget, so it does not use up the action rate limit.
 export async function POST(request: NextRequest, { params }: { params: Promise<{ widgetId: string }> }) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
   const roleError = requireRole(auth, 'operator');
   if (roleError) return roleError;
-  const limited = consumeActionRateLimit(auth.userId);
-  if (!limited.allowed) return NextResponse.json({ error: { message: 'Too many actions, slow down' } }, { status: 429 });
   const { widgetId } = await params;
+
+  let action: unknown;
+  try { action = (await request.json())?.action; } catch { return NextResponse.json({ error: { message: 'Invalid JSON body' } }, { status: 400 }); }
+  if (action !== 'install' && action !== 'status') return NextResponse.json({ error: { message: 'Invalid action' } }, { status: 400 });
+  if (action === 'install') {
+    const limited = consumeActionRateLimit(auth.userId);
+    if (!limited.allowed) return NextResponse.json({ error: { message: 'Too many actions, slow down' } }, { status: 429 });
+  }
 
   try {
     const widgetRes = await rqlite.query('SELECT * FROM widgets WHERE id = ?', [widgetId]);
@@ -122,12 +165,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (widget.widget_type !== 'os_update_check') {
       return NextResponse.json({ error: { message: 'Invalid widget type for POST' } }, { status: 400 });
     }
-    const { action } = await request.json();
-    if (action !== 'install') return NextResponse.json({ error: { message: 'Invalid action' } }, { status: 400 });
 
     const srvRes = await rqlite.query('SELECT os_type, platform FROM servers WHERE id = ?', [widget.server_id]);
     const [osType, platform] = (srvRes.values?.[0] || []) as string[];
-    if (platform === 'windows') return NextResponse.json({ error: { message: 'Not supported on Windows' } }, { status: 400 });
+    if (platform === 'windows') return await windowsUpdates(action, auth.userId, widget.server_id);
+    if (action !== 'install') return NextResponse.json({ error: { message: 'Status is only available for Windows hosts' } }, { status: 400 });
     const rhel = /rhel|centos|fedora|rocky|alma/.test(osType || '');
     // Non-interactive sudo: fails fast instead of hanging on a password prompt.
     const cmd = rhel

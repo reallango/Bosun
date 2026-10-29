@@ -159,7 +159,7 @@ export const widgetRegistry: Record<string, WidgetDefinition> = {
     type: 'os_update_check',
     displayName: 'OS Update Check',
     description: 'Check for and install OS updates',
-    supportsWindows: false,
+    supportsWindows: true,
     icon: 'refresh-cw',
     category: 'system',
     defaultSize: { w: 8, h: 5 },
