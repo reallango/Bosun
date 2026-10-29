@@ -1,6 +1,6 @@
 # Plan: self-contained widget packages
 
-Status: **plan, not started.** Written on the `dev` branch so the work can be picked up later by anyone (or any
+Status: **plan, decisions made (declarative + host scripts; all three widgets at once), build not started.** Written on the `dev` branch so the work can be picked up later by anyone (or any
 session). Nothing in this document has been built yet except where it says "done".
 
 ## 1. The rule
@@ -62,9 +62,9 @@ direct check (`docker inspect` over SSH); it must stop reading the `docker` snap
 
 ## 4. Decisions
 
-### 4.1 Execution model — **needs the owner's confirmation**
+### 4.1 Execution model — **DECIDED by the owner: declarative spec plus host scripts**
 
-Recommended, and assumed by the rest of this plan: **declarative spec plus host scripts.** A package is data: a richer
+Chosen, and the basis of the rest of this plan: **declarative spec plus host scripts.** A package is data: a richer
 spec plus script files that run on the managed host. No package code runs inside the Bosun process or the browser.
 Everything a package can do to a server is a reviewed host command.
 
@@ -72,7 +72,16 @@ Alternative: packages ship code (server modules in a sandbox, prebuilt UI bundle
 flexible, but a package would then run with access to the user's session and Bosun's data, which needs real
 sandboxing, signing and a much heavier install review. If a widget turns out to be impossible to express
 declaratively, add this later as an opt-in tier (bundled or signed packages only) on top of the same file
-materialisation (section 5.1). The owner has not chosen yet; the question was asked and left open.
+materialisation (section 5.1). The owner chose the declarative option over the code option and over
+"declarative first, code later"; do not build a code tier unless the owner asks for it again.
+
+### 4.1a Scope — **DECIDED by the owner: all three widgets at once**
+
+The generic runtime is designed against Ollama, OS Update Check and Custom Command together, so it is general from the
+start and not shaped by one widget. Phases 5 to 7 below are therefore one combined "port the three widgets" step:
+write the three package v2 manifests and scripts first (on paper, as the requirements for phases 1 to 4), build the
+runtime until all three work, then delete the three widgets' code from core in one clean-up. The Docker completion
+(phase 8) follows. Testing is still per widget (section 8), but nothing ships to a release until all three are done.
 
 ### 4.2 Decisions already made
 
@@ -179,14 +188,15 @@ hosts, the live tests in section 8. Do not push to `main` until the owner has te
    scripts and network hosts.
 3. **Jobs** (5.5): table (migration), runtime, routes, audit, UI progress.
 4. **Conditions, variants, UI blocks** (5.6, 5.7) in the declarative renderer, with a browser check (see section 8).
-5. **Port Ollama**: write the package v2 (manifest, scripts per platform and install kind, layout view); move the
+5. **Port the three widgets together (phases 5, 6 and 7 as one step; see 4.1a).**
+   **5a. Port Ollama**: write the package v2 (manifest, scripts per platform and install kind, layout view); move the
    current scripts over, replacing string interpolation with the parameter blob; delete `src/lib/ollama`, the four
    routes, the collector additions, the components, audit entries, seeded row, label map and `system-packages`
    leftovers. Keep permission ids and widget type. Re-run the full Ollama test matrix.
-6. **Port OS Update Check**: probes per package manager and Windows Update (slow tier with initial delay, "check now"
+   **5b. Port OS Update Check**: probes per package manager and Windows Update (slow tier with initial delay, "check now"
    as an action), install as a job; delete the widget-specific data-route branches, the poller updates tier and
    `updates_requested_at` handling, `src/lib/updates` and the component.
-7. **Port Custom Command**: generic command data source that reads the command and interval from instance settings,
+   **5c. Port Custom Command**: generic command data source that reads the command and interval from instance settings,
    runs as the non-admin account, `requires_permission` on the command field; delete the component and the data-route
    branch.
 8. **Docker package completion**: container actions, logs and the terminal action as package actions; remove the
@@ -240,8 +250,8 @@ widget's code from core and are independently releasable.
 
 ## 9. Risks and open questions
 
-1. **Execution model** (4.1) is unconfirmed; the plan assumes declarative. If code packages are wanted, add a
-   sandbox design document before phase 4.
+1. **Execution model** (4.1) is decided: declarative plus host scripts. If the owner later wants code packages, add a
+   sandbox design document first; nothing in this plan builds one.
 2. **Expressiveness limits.** Recreating a Docker container from `docker inspect` output is logic that today lives in
    TypeScript. In the package it has to be a host script (shell using Docker's own `--format` templates, or
    PowerShell on Windows). Decide early whether the declarative layer needs a tiny safe transform language
