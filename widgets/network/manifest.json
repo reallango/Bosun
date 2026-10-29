@@ -1,0 +1,55 @@
+{
+  "schema": 1,
+  "id": "network",
+  "name": "Network",
+  "version": "1.0.0",
+  "description": "Network interfaces with their addresses and live traffic. Installed by default; tracks total receive and transmit rates as history.",
+  "author": "Bosun",
+  "permissions": [
+    {
+      "id": "network.view",
+      "label": "See network interfaces",
+      "description": "See the Network widget and the interface data of a server.",
+      "group": "Network",
+      "defaultLevel": "viewer",
+      "risk": "low",
+      "scope": "server"
+    }
+  ],
+  "widgets": [
+    {
+      "type": "network",
+      "display_name": "Network",
+      "description": "Network interfaces with IP addresses",
+      "icon": "network",
+      "category": "network",
+      "default_size": { "w": 8, "h": 5 },
+      "min_size": { "w": 4, "h": 4 },
+      "refresh_interval": 30,
+      "supports_linux": true,
+      "supports_windows": true,
+      "spec": {
+        "version": 1,
+        "data": { "source": "snapshot", "section": "network", "permission": "network.view" },
+        "metrics": [
+          { "name": "net.rx_bps", "label": "Receive rate", "unit": "B/s" },
+          { "name": "net.tx_bps", "label": "Transmit rate", "unit": "B/s" }
+        ],
+        "view": {
+          "type": "list",
+          "empty": "No network data",
+          "row": {
+            "dot": { "field": "state", "colors": { "UP": "green", "DOWN": "gray" } },
+            "title": "{name}",
+            "subtitle": "{ipv4} {macAddress}",
+            "fields": [
+              { "label": "Receive /s", "value": "{rxBps}", "format": "bytes", "when": { "field": "rxBps", "exists": true } },
+              { "label": "Transmit /s", "value": "{txBps}", "format": "bytes", "when": { "field": "txBps", "exists": true } }
+            ],
+            "actions": []
+          }
+        }
+      }
+    }
+  ]
+}

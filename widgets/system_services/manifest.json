@@ -1,0 +1,57 @@
+{
+  "schema": 1,
+  "id": "system_services",
+  "name": "System Services",
+  "version": "1.0.0",
+  "description": "System services with their status; show the running ones, the failed ones or all. Installed by default.",
+  "author": "Bosun",
+  "permissions": [
+    {
+      "id": "system_services.view",
+      "label": "See system services",
+      "description": "See the System Services widget and the service list of a server.",
+      "group": "System services",
+      "defaultLevel": "viewer",
+      "risk": "low",
+      "scope": "server"
+    }
+  ],
+  "widgets": [
+    {
+      "type": "system_services",
+      "display_name": "System Services",
+      "description": "System services with status",
+      "icon": "settings",
+      "category": "system",
+      "default_size": { "w": 8, "h": 6 },
+      "min_size": { "w": 6, "h": 4 },
+      "refresh_interval": 30,
+      "supports_linux": true,
+      "supports_windows": true,
+      "config_schema": [
+        { "key": "filter", "label": "Show", "type": "select", "options": ["running", "failed", "all"], "default": "running" }
+      ],
+      "spec": {
+        "version": 1,
+        "data": {
+          "source": "snapshot",
+          "section": "services",
+          "permission": "system_services.view",
+          "filter": [{ "field": "status", "config": "filter", "all": "all", "default": "running" }]
+        },
+        "view": {
+          "type": "list",
+          "empty": "No services",
+          "summary": [{ "label": "shown" }],
+          "filter": { "fields": ["name", "description"], "placeholder": "Filter services" },
+          "row": {
+            "dot": { "field": "status", "colors": { "running": "green", "failed": "red", "stopped": "gray" } },
+            "title": "{name}",
+            "subtitle": "{description}",
+            "actions": []
+          }
+        }
+      }
+    }
+  ]
+}

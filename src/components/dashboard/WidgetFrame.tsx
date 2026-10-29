@@ -3,11 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { EllipsisVertical, GripVertical, RefreshCw, Settings2, Trash2 } from 'lucide-react';
-import { OSInfoWidget } from '@/components/widgets/os-info';
 import { CPUMemoryWidget } from '@/components/widgets/cpu-memory';
-import { DiskUsageWidget } from '@/components/widgets/disk-usage';
-import { NetworkWidget } from '@/components/widgets/network';
-import { SystemServicesWidget } from '@/components/widgets/system-services';
 import { ServerSummaryWidget } from '@/components/widgets/server-summary';
 import { GPUMonitoringWidget } from '@/components/widgets/gpu-monitoring';
 import { MetricsChartWidget } from '@/components/widgets/metrics-chart';
@@ -68,20 +64,9 @@ function SSHTerminalGate({ widgetId, serverId }: { widgetId: string; serverId: s
 
 function WidgetContent({ widgetId, widgetType, serverId, serverName }: { widgetId: string; widgetType: string; serverId: string; serverName?: string }) {
   switch (widgetType) {
-    case 'os_info':
-    case 'os-info':
-      return <OSInfoWidget widgetId={widgetId} serverId={serverId} />;
     case 'cpu_memory':
     case 'cpu-memory':
       return <CPUMemoryWidget widgetId={widgetId} />;
-    case 'disk_usage':
-    case 'disk-usage':
-      return <DiskUsageWidget widgetId={widgetId} />;
-    case 'network':
-      return <NetworkWidget widgetId={widgetId} />;
-    case 'system_services':
-    case 'system-services':
-      return <SystemServicesWidget widgetId={widgetId} serverId={serverId} />;
     case 'server_summary':
       return <ServerSummaryWidget widgetId={widgetId} serverId={serverId} serverName={serverName} />;
     case 'gpu_monitoring':

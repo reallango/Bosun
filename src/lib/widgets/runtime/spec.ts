@@ -15,7 +15,7 @@
  */
 
 export const SPEC_VERSION = 1;
-export const SNAPSHOT_SECTIONS = ['cpu_memory', 'disks', 'gpus', 'system', 'net_rates', 'network', 'services', 'ollama', 'docker', 'updates'] as const;
+export const SNAPSHOT_SECTIONS = ['cpu_memory', 'disks', 'gpus', 'system', 'net_rates', 'network', 'services', 'ollama', 'docker', 'updates', 'metrics'] as const;
 export const ICONS = ['play', 'square', 'rotate-cw', 'scroll-text', 'trash-2', 'download', 'upload', 'power', 'refresh-cw', 'terminal-square', 'pause', 'info'] as const;
 export const DOT_COLORS = ['green', 'amber', 'red', 'gray', 'blue'] as const;
 export const FORMATS = ['text', 'bytes', 'percent', 'badge', 'bar', 'duration', 'mb', 'temp'] as const;
@@ -40,7 +40,7 @@ export interface Unavailable { when: Cond; message: string }
 interface DataCommon { filter?: ConfigFilter[]; unavailable?: Unavailable }
 
 export type DataSpec =
-  | ({ source: 'snapshot'; section: string; path?: string; map?: Record<string, string>; permission: string } & DataCommon)
+  | ({ source: 'snapshot'; section: string; also?: string[]; server?: boolean; path?: string; map?: Record<string, string>; permission: string } & DataCommon)
   | ({
       source: 'command'; as: RunAs; command: string; windowsCommand?: string; parse: (typeof PARSERS)[number];
       path?: string; map?: Record<string, string>; cacheSec: number; timeoutSec: number; permission: string;
@@ -287,7 +287,15 @@ function validateData(raw: unknown, ownPerms: ReadonlySet<string>): Validated<Da
     if (typeof raw.section !== 'string' || !(SNAPSHOT_SECTIONS as readonly string[]).includes(raw.section)) {
       return fail(`data.section must be one of: ${SNAPSHOT_SECTIONS.join(', ')}`);
     }
-    return { ok: true, value: { source: 'snapshot', section: raw.section, ...base } };
+    let also: string[] | undefined;
+    if (raw.also !== undefined) {
+      if (!Array.isArray(raw.also) || raw.also.length < 1 || raw.also.length > 6 || !raw.also.every(s => typeof s === 'string' && (SNAPSHOT_SECTIONS as readonly string[]).includes(s))) {
+        return fail(`data.also must list up to 6 of: ${SNAPSHOT_SECTIONS.join(', ')}`);
+      }
+      also = Array.from(new Set(raw.also as string[])).filter(s => s !== raw.section);
+    }
+    if (raw.server !== undefined && typeof raw.server !== 'boolean') return fail('data.server must be true or false');
+    return { ok: true, value: { source: 'snapshot', section: raw.section, ...(also?.length ? { also } : {}), ...(raw.server === true ? { server: true } : {}), ...base } };
   }
   if (raw.source === 'command') {
     if (raw.as !== 'service' && raw.as !== 'shell') return fail('data.as must be "service" (the privileged account) or "shell" (the non-admin account)');
@@ -628,6 +636,7 @@ export function fillTemplate(template: string, row: unknown): string {
   return template.replace(/\{([A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*)\}/g, (_, path: string) => {
     const v = getPath(row, path);
     if (v === undefined || v === null) return '';
+    if (Array.isArray(v) && v.every(x => typeof x !== 'object' || x === null)) return v.join(', ');
     return typeof v === 'object' ? JSON.stringify(v) : String(v);
   });
 }

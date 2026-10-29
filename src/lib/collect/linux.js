@@ -12,6 +12,7 @@
  */
 
 const macs = require('./macs');
+const { metricsSection } = require('./metrics-section');
 
 const MARK = '@@BOSUN ';
 
@@ -462,6 +463,7 @@ function buildSnapshot(raw, prev, now = Date.now()) {
 
   if (raw.updates !== undefined) sections.updates = parseUpdates(raw.updates);
 
+  sections.metrics = metricsSection(metrics, state.uptimeSeconds);
   return { sections, metrics, state };
 }
 

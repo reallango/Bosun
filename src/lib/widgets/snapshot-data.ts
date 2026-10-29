@@ -10,11 +10,7 @@ export type Sections = Record<string, { data: any; collectedAt: number }>;
 /** Snapshot sections each widget type needs. */
 export const WIDGET_SECTIONS: Record<string, string[]> = {
   server_summary: ['cpu_memory', 'disks', 'gpus', 'system', 'net_rates'],
-  os_info: ['system', 'cpu_memory'],
   cpu_memory: ['cpu_memory'],
-  disk_usage: ['disks'],
-  network: ['network', 'net_rates'],
-  system_services: ['services'],
   gpu_monitoring: ['gpus'],
   ollama_status: ['ollama'],
   os_update_check: ['updates'],
@@ -70,28 +66,8 @@ export function widgetDataFromSnapshots(type: string, s: Sections, server: Serve
         net_tx_bps: d('net_rates')?.txBps ?? null,
       };
     }
-    case 'os_info': {
-      const sys = d('system');
-      if (!sys) return null;
-      const up = d('cpu_memory')?.uptimeSeconds ?? null;
-      return {
-        name: sys.name, version: sys.version, codename: sys.codename, prettyName: sys.prettyName,
-        kernel: sys.kernel, architecture: sys.architecture, hostname: sys.hostname,
-        uptime: formatUptime(up), uptimeSeconds: up,
-      };
-    }
     case 'cpu_memory':
       return d('cpu_memory') ?? null;
-    case 'disk_usage':
-      return d('disks') ?? null;
-    case 'network':
-      return d('network') ?? null;
-    case 'system_services': {
-      const list = d('services') as any[] | undefined;
-      if (!list) return null;
-      const filter = cfg.filter || 'running';
-      return filter === 'all' ? list : list.filter(x => x.status === filter || (filter === 'running' && x.status === 'running'));
-    }
     case 'gpu_monitoring':
       return d('gpus') ?? null;
     case 'ollama_status':
