@@ -8,6 +8,9 @@ import { encrypt } from '@/lib/crypto/keys';
 import { generateSSHKeyPair } from '@/lib/ssh/keygen';
 import { powershellCommand } from '@/lib/collect/windows';
 import { pruneWindowsKeysScript } from '@/lib/ssh/windows-keys';
+import {
+    DEFAULT_SHELL_ACCOUNT, SHELL_ACCOUNT_RE, SHELL_VERIFY_COMMAND, parseShellVerification, shellAccountScript,
+} from '@/lib/ssh/shell-account';
 import crypto from 'crypto';
 
 interface SshAuth {
@@ -302,6 +305,84 @@ Restart-Service sshd -ErrorAction SilentlyContinue
     return { steps };
 }
 
+/** Run one command over SSH with a private key (used to log in as the shell account and check it). */
+function sshExecWithKey(
+    target: { host: string; port: number; username: string; privateKey: string },
+    command: string
+): Promise<{ stdout: string; stderr: string; exitCode: number }> {
+    return new Promise((resolve, reject) => {
+        const conn = new Client();
+        const timeout = setTimeout(() => { conn.end(); reject(new Error('SSH connection timeout')); }, 15000);
+        conn.on('ready', () => {
+            conn.exec(command, (err, stream) => {
+                if (err) { clearTimeout(timeout); conn.end(); reject(err); return; }
+                let stdout = '';
+                let stderr = '';
+                stream.on('close', (code: number) => { clearTimeout(timeout); conn.end(); resolve({ stdout, stderr, exitCode: code }); });
+                stream.on('data', (d: Buffer) => { stdout += d.toString(); });
+                stream.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
+            });
+        });
+        conn.on('error', (err) => { clearTimeout(timeout); reject(err); });
+        conn.connect({ host: target.host, port: target.port, username: target.username, privateKey: target.privateKey, readyTimeout: 10000 });
+    });
+}
+
+/**
+ * Create (or repair) the non-admin shell account, log in as it with its new key, and only
+ * enable it when it provably has no admin rights. Returns the account and the id of its
+ * stored key, or null (with a warning in `steps`) when it was not enabled.
+ */
+async function setupShellAccount(args: {
+    sshConfig: SshAuth; adminPassword: string; hostname: string; port: number;
+    privilegedAccount: string; shellAccount: string; replaceKeys: boolean; steps: string[];
+}): Promise<{ user: string; keyId: string } | null> {
+    const { sshConfig, adminPassword, hostname, port, privilegedAccount, shellAccount, replaceKeys, steps } = args;
+    const keyName = `${hostname}-${shellAccount}`;
+    const pair = generateSSHKeyPair(keyName, 'ed25519');
+
+    const run = await sshExec(sshConfig, asRootCommand(sshConfig, adminPassword, shellAccountScript({
+        account: shellAccount, privilegedAccount, publicKey: pair.publicKey, replaceKeys,
+    })));
+    if (run.exitCode !== 0 || !run.stdout.includes('BOSUN_SHELL_OK')) {
+        const why = stripSudo(run.stderr) || `exit ${run.exitCode}`;
+        steps.push(`${WARNING}Could not create the non-admin shell account ${shellAccount} (${why}); API terminals and shell commands are not enabled for this host.`);
+        return null;
+    }
+
+    // Log in as the new account with its new key, and prove it is not an administrator.
+    // sshd may still be reloading its configuration, so give the first logins a few tries.
+    let verification;
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt < 6 && !verification; attempt++) {
+        if (attempt > 0) await new Promise(r => setTimeout(r, 1500));
+        try {
+            const check = await sshExecWithKey({ host: hostname, port, username: shellAccount, privateKey: pair.privateKey }, SHELL_VERIFY_COMMAND);
+            verification = parseShellVerification(check.stdout, shellAccount);
+        } catch (err) {
+            lastError = err;
+        }
+    }
+    if (!verification) {
+        steps.push(`${WARNING}Created ${shellAccount} but could not log in as it (${String(lastError).slice(0, 160)}); API terminals and shell commands are not enabled for this host.`);
+        return null;
+    }
+    if (!verification.ok) {
+        steps.push(`${WARNING}The shell account ${shellAccount} was NOT enabled because ${verification.problems.join('; ')}. Remove that access from the account (or pick another name) and run Provision again.`);
+        return null;
+    }
+
+    const keyId = crypto.randomUUID();
+    await rqlite.execute(
+        'INSERT INTO ssh_keys (id, name, fingerprint, public_key, private_key_enc, key_type, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        [keyId, keyName, pair.fingerprint, pair.publicKey, encrypt(pair.privateKey, getMasterKey()), 'ed25519', new Date().toISOString()]
+    );
+    steps.push(`Created the non-admin shell account ${shellAccount}: no sudo, no Docker group, password locked, key-only (verified by logging in as it)`);
+    if (run.stdout.includes('BOSUN_SSHD_RESTRICTED')) steps.push(`Blocked port, agent, X11 and tunnel forwarding for ${shellAccount} in sshd`);
+    else steps.push(`${WARNING}sshd was not restricted for ${shellAccount} (${run.stdout.includes('BOSUN_SSHD_NOINCLUDE') ? 'sshd_config does not include sshd_config.d' : 'the new sshd configuration did not validate, so it was left unchanged'}); the account still has no admin rights.`);
+    return { user: shellAccount, keyId };
+}
+
 export async function POST(request: NextRequest) {
     // Require admin role
     const auth = await requireAuth(request);
@@ -318,6 +399,8 @@ export async function POST(request: NextRequest) {
             platform = 'linux',
             service_account = 'bosun-svc',
             replace_keys = true,
+            create_shell_account = true,
+            shell_account = DEFAULT_SHELL_ACCOUNT,
         } = await request.json();
 
         if (!hostname || !admin_username || !admin_password) {
@@ -329,6 +412,12 @@ export async function POST(request: NextRequest) {
         if (!SERVICE_ACCOUNT_RE.test(service_account)) {
             return NextResponse.json({
                 error: { message: 'service_account must be 1-20 characters (letters, digits, dot, dash, underscore)', code: 'VALIDATION_ERROR' },
+            }, { status: 400 });
+        }
+
+        if (create_shell_account !== false && (typeof shell_account !== 'string' || !SHELL_ACCOUNT_RE.test(shell_account) || shell_account === service_account)) {
+            return NextResponse.json({
+                error: { message: 'shell_account must be a lowercase unix account name (1-20 characters: letters, digits, dash, underscore) different from the service account', code: 'VALIDATION_ERROR' },
             }, { status: 400 });
         }
 
@@ -430,20 +519,45 @@ export async function POST(request: NextRequest) {
             }
         }
 
+        // Step 5b: The non-admin shell account (Linux). API terminals and API shell commands log
+        // in as this account with its own key; the privileged account above is never used for them.
+        // Nothing here can fail provisioning, and the account is only enabled after Bosun has logged
+        // in as it and proven it has no sudo, no admin-like group and no Docker socket access.
+        let shell: { user: string; keyId: string } | null = null;
+        if (create_shell_account !== false) {
+            if (isWindowsHost) {
+                steps.push(`${WARNING}A non-admin shell account is not available on Windows hosts yet, so API terminals and shell commands are not enabled for this host.`);
+            } else if (!testSuccess) {
+                steps.push(`${WARNING}The non-admin shell account was not created because the service account could not be verified.`);
+            } else {
+                try {
+                    shell = await setupShellAccount({ sshConfig, adminPassword: admin_password, hostname, port, privilegedAccount: service_account, shellAccount: shell_account, replaceKeys: replace_keys !== false, steps });
+                } catch (err) {
+                    steps.push(`${WARNING}Could not set up the non-admin shell account (${String(err).slice(0, 200)}); API terminals and shell commands are not enabled for this host.`);
+                }
+            }
+        }
+
         // Step 6: A host already added to this Bosun keeps its record; point it at the new key
         // (and drop the old key row if nothing else uses it) instead of creating a duplicate.
         let existingServer: { id: string; name: string } | null = null;
         if (testSuccess) {
             const found = await rqlite.query(
-                'SELECT id, name, ssh_key_id FROM servers WHERE LOWER(hostname) = LOWER(?) AND COALESCE(ssh_port, 22) = ? LIMIT 1',
+                'SELECT id, name, ssh_key_id, shell_key_id FROM servers WHERE LOWER(hostname) = LOWER(?) AND COALESCE(ssh_port, 22) = ? LIMIT 1',
                 [hostname, Number(port) || 22]
             );
             const row = found.values?.[0] as (string | null)[] | undefined;
             if (row) {
-                const [existingId, existingName, oldKeyId] = row as string[];
+                const [existingId, existingName, oldKeyId, oldShellKeyId] = row as string[];
                 await rqlite.execute('UPDATE servers SET ssh_key_id = ?, ssh_user = ?, updated_at = ? WHERE id = ?', [keyId, service_account, now, existingId]);
+                if (shell) {
+                    await rqlite.execute('UPDATE servers SET shell_user = ?, shell_key_id = ? WHERE id = ?', [shell.user, shell.keyId, existingId]);
+                    if (oldShellKeyId && oldShellKeyId !== shell.keyId) {
+                        await rqlite.execute('DELETE FROM ssh_keys WHERE id = ? AND NOT EXISTS (SELECT 1 FROM servers WHERE ssh_key_id = ? OR shell_key_id = ?)', [oldShellKeyId, oldShellKeyId, oldShellKeyId]);
+                    }
+                }
                 if (oldKeyId && oldKeyId !== keyId) {
-                    await rqlite.execute('DELETE FROM ssh_keys WHERE id = ? AND NOT EXISTS (SELECT 1 FROM servers WHERE ssh_key_id = ?)', [oldKeyId, oldKeyId]);
+                    await rqlite.execute('DELETE FROM ssh_keys WHERE id = ? AND NOT EXISTS (SELECT 1 FROM servers WHERE ssh_key_id = ? OR shell_key_id = ?)', [oldKeyId, oldKeyId, oldKeyId]);
                 }
                 existingServer = { id: existingId, name: existingName };
                 steps.push(`This host is already added as "${existingName}"; it now uses the new key`);
@@ -466,6 +580,8 @@ export async function POST(request: NextRequest) {
                 test_success: testSuccess,
                 existing_server: existingServer,
                 keys_removed: keysRemoved,
+                shell_user: shell?.user ?? null,
+                shell_key_id: shell?.keyId ?? null,
                 steps,
             },
         });

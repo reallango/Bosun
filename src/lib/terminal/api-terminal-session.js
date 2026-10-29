@@ -1,0 +1,169 @@
+'use strict';
+
+/**
+ * The API terminal WebSocket session (`/ws/api-terminal`), used by ws-server.js.
+ *
+ * Why this is not the web terminal: the web terminal logs in with the person's own typed
+ * account and password. This one is for API keys and uses only credentials Bosun holds for
+ * a deliberately weak purpose:
+ *   - host target:      the host's NON-ADMIN shell account (its own key; no sudo, no Docker group),
+ *                       re-verified on every open;
+ *   - container target: one fixed `docker exec` into one container, over the privileged account,
+ *                       and only for containers that cannot reach the host. The privileged account
+ *                       runs exactly two fixed commands (`docker inspect`, `docker exec`); it never
+ *                       gets a shell, and the session ends the moment that exec ends.
+ * There is no reattach, no fallback to another account, and no way to type commands into
+ * anything but the shell/exec the session was opened for.
+ */
+
+const WebSocket = require('ws');
+const { connect: sshConnect, exec: sshExec, decryptSecret } = require('../collect/ssh');
+const { getMasterKey } = require('../secrets');
+const api = require('./api-terminal');
+const { SHELL_VERIFY_COMMAND, parseShellVerification } = require('../ssh/shell-account');
+
+const usedTokens = new api.UsedTokens();
+const limiter = new api.SessionLimiter();
+
+function refuse(ws, code, message) {
+  try { ws.send('\r\n*** ' + message + ' ***\r\n'); } catch { /* closed */ }
+  try { ws.close(code, message.slice(0, 120)); } catch { /* closed */ }
+}
+
+/**
+ * @param {import('ws')} ws
+ * @param {URL|{query:any}} parsedUrl url.parse(..., true) result
+ * @param {{ verifyToken: (t: string, type: string) => any, queryRqlite: Function, audit: Function, clientIP: string }} deps
+ */
+async function handleApiTerminal(ws, parsedUrl, deps) {
+  const { verifyToken, queryRqlite, audit, clientIP } = deps;
+  const token = parsedUrl.query.token;
+  if (!token) return refuse(ws, 4001, 'Missing token');
+  const payload = verifyToken(token, api.TOKEN_TYPE);
+  if (!payload) return refuse(ws, 4001, 'Invalid token');
+  const checked = api.checkApiTerminalClaims(payload);
+  if (!checked.ok) return refuse(ws, 4003, 'Insufficient permissions');
+  if (!usedTokens.consume(payload.jti, payload.exp)) return refuse(ws, 4001, 'Token already used');
+  if (!limiter.acquire(payload.apiKeyId)) return refuse(ws, 4000, 'Too many open terminals for this API key');
+
+  let released = false;
+  let client = null;
+  let stream = null;
+  let maxTimer = null;
+  let idleTimer = null;
+  let detail = payload.target === 'host' ? 'host shell' : 'container ' + payload.container;
+  let opened = false;
+  const startedAt = Date.now();
+
+  const finish = (why) => {
+    if (released) return;
+    released = true;
+    clearTimeout(maxTimer);
+    clearTimeout(idleTimer);
+    limiter.release(payload.apiKeyId);
+    try { if (stream) stream.close(); } catch { /* ignore */ }
+    try { if (client) client.end(); } catch { /* ignore */ }
+    if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+      try { ws.close(); } catch { /* ignore */ }
+    }
+    if (opened) {
+      audit({ userId: payload.userId, serverId: payload.serverId, action: 'terminal.api_close', status: 'success',
+        details: `${detail}; ${why}`, ip: clientIP, durationMs: Date.now() - startedAt });
+    }
+  };
+  ws.on('close', () => finish('client disconnected'));
+  ws.on('error', () => finish('socket error'));
+
+  try {
+    // The key must still be active (the token lives 60 s; a revoke should bite at once).
+    const keyRow = await queryRqlite('SELECT revoked_at, expires_at FROM api_keys WHERE id = ?', [payload.apiKeyId]);
+    if (!keyRow.length || keyRow[0][0]) return fail('API key is no longer active', 4003);
+    if (keyRow[0][1] && new Date(String(keyRow[0][1]).replace(' ', 'T') + (String(keyRow[0][1]).endsWith('Z') ? '' : 'Z')).getTime() <= Date.now()) return fail('API key is no longer active', 4003);
+
+    const s = await queryRqlite('SELECT hostname, ssh_port, platform, host_key_fingerprint, ssh_user, ssh_key_id, shell_user, shell_key_id FROM servers WHERE id = ?', [payload.serverId]);
+    if (!s.length) return fail('Server not found', 4000);
+    const [hostname, port, platform, fingerprint, sshUser, sshKeyId, shellUser, shellKeyId] = s[0];
+    if (platform === 'windows') return fail('API terminals are not available on Windows hosts', 4000);
+
+    // Which key and account does this session use? Exactly one, fixed by the token's target.
+    const isHost = payload.target === 'host';
+    const account = isHost ? shellUser : sshUser;
+    const keyId = isHost ? shellKeyId : sshKeyId;
+    if (!account || !keyId) return fail(isHost ? 'No non-admin shell account on this server' : 'No SSH key on this server', 4000);
+    const k = await queryRqlite('SELECT private_key_enc, passphrase_enc FROM ssh_keys WHERE id = ?', [keyId]);
+    if (!k.length) return fail('SSH key not found', 4000);
+    const masterKey = getMasterKey();
+
+    client = await sshConnect({
+      host: hostname, port: Number(port) || 22, username: account,
+      privateKey: decryptSecret(String(k[0][0]), masterKey),
+      passphrase: k[0][1] ? decryptSecret(String(k[0][1]), masterKey) : undefined,
+      expectedFingerprint: fingerprint || undefined,
+    });
+    client.on('error', () => finish('ssh error'));
+    client.on('close', () => finish('ssh closed'));
+
+    let command = null;
+    if (isHost) {
+      // Prove, on every open, that the account still has no admin rights.
+      const v = await sshExec(client, SHELL_VERIFY_COMMAND, { timeoutMs: 15000 });
+      const verdict = parseShellVerification(v.stdout, account);
+      if (!verdict.ok) return fail('The shell account is not safe to use: ' + verdict.problems.join('; '), 4003);
+    } else {
+      // The privileged account is used for these two fixed commands only.
+      const ref = String(payload.container);
+      const ins = await sshExec(client, api.inspectCommand(ref), { timeoutMs: 15000 });
+      const info = api.parseInspect(ins.stdout);
+      const risks = ins.exitCode === 0 ? api.containerRisks(info) : ['the container was not found'];
+      if (risks.length) return fail('Container shell refused: ' + risks.join('; '), 4003);
+      if (!api.CONTAINER_ID_RE.test(String(info.Id))) return fail('Container shell refused: unreadable container id', 4003);
+      command = api.dockerExecCommand(String(info.Id));
+      detail = 'container ' + ref + ' (' + String(info.Id).slice(0, 12) + ')';
+    }
+
+    const pty = { term: 'xterm-256color', cols: 80, rows: 24 };
+    await new Promise((resolve, reject) => {
+      const onStream = (err, st) => (err ? reject(err) : (stream = st, resolve()));
+      if (command) client.exec(command, { pty }, onStream);
+      else client.shell(pty, onStream);
+    });
+
+    opened = true;
+    audit({ userId: payload.userId, serverId: payload.serverId, action: 'terminal.api_open', status: 'success', details: `${detail} as ${account}`, ip: clientIP });
+    ws.send('\r\n\x1b[32m' + (isHost ? 'Connected as ' + account : 'Connected to ' + detail) + '\x1b[0m\r\n\r\n');
+
+    const touch = () => {
+      clearTimeout(idleTimer);
+      idleTimer = setTimeout(() => finish('idle timeout'), api.IDLE_MS);
+    };
+    touch();
+    maxTimer = setTimeout(() => finish('maximum session time'), api.MAX_SESSION_MS);
+
+    stream.on('data', (d) => { touch(); if (ws.readyState === WebSocket.OPEN) ws.send(d.toString('utf-8')); });
+    // For a container the ssh channel IS the exec: when it ends the whole session is torn down,
+    // so there is never a host shell left behind it.
+    stream.on('close', () => finish('shell ended'));
+    ws.on('message', (data) => {
+      touch();
+      const msg = data.toString();
+      try {
+        const p = JSON.parse(msg);
+        if (p && p.type === 'resize') { stream.setWindow(Number(p.rows) || 24, Number(p.cols) || 80); return; }
+        if (p && p.type === 'auth') return; // never typed into the shell
+      } catch { /* raw input */ }
+      stream.write(msg);
+    });
+  } catch (err) {
+    console.error('[WS] api-terminal error:', err && err.message);
+    refuse(ws, 4002, 'Could not open the terminal: ' + String((err && err.message) || err).slice(0, 100));
+    finish('failed to open');
+  }
+
+  function fail(message, code) {
+    refuse(ws, code, message);
+    audit({ userId: payload.userId, serverId: payload.serverId, action: 'terminal.api_open', status: 'failure', details: `${detail}: ${message}`.slice(0, 500), ip: clientIP });
+    finish('refused');
+  }
+}
+
+module.exports = { handleApiTerminal };

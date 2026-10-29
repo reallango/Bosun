@@ -7,7 +7,7 @@
   },
   "overrides": [
     {
-      "files": ["src/lib/collect/**/*.js", "src/lib/secrets.js", "src/lib/cluster/*.js"],
+      "files": ["src/lib/collect/**/*.js", "src/lib/secrets.js", "src/lib/cluster/*.js", "src/lib/terminal/*.js", "src/lib/ssh/*.js"],
       "rules": { "@typescript-eslint/no-require-imports": "off" }
     }
   ]

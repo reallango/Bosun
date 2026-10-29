@@ -59,6 +59,8 @@ export default function NewServerPage() {
     const admin_password = formData.get('admin_password') as string;
     const service_account = formData.get('service_account') as string || 'bosun-svc';
     const replace_keys = formData.get('replace_keys') === 'on';
+    const create_shell_account = platform !== 'windows' && formData.get('create_shell_account') === 'on';
+    const shell_account = (formData.get('shell_account') as string || 'bosun-user').trim();
 
     // Store form values for later save
     setProvisionForm({ hostname, ssh_port: port, name, platform });
@@ -67,7 +69,7 @@ export default function NewServerPage() {
       const res = await fetch('/api/servers/provision', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ hostname, port, admin_username, admin_password, platform, service_account, replace_keys })
+        body: JSON.stringify({ hostname, port, admin_username, admin_password, platform, service_account, replace_keys, create_shell_account, shell_account })
       });
       const data = await res.json();
       
@@ -105,6 +107,8 @@ export default function NewServerPage() {
           ssh_port: provisionForm.ssh_port,
           ssh_user: provisionData.service_account,
           ssh_key_id: provisionData.ssh_key_id,
+          ...(provisionData.shell_user && provisionData.shell_key_id
+            ? { shell_user: provisionData.shell_user, shell_key_id: provisionData.shell_key_id } : {}),
           platform: provisionForm.platform,
         }),
       });
@@ -233,6 +237,7 @@ export default function NewServerPage() {
                     <div className="break-words text-sm text-muted-foreground">
                       <p>Service account: <strong>{provisionData.service_account}</strong></p>
                       <p>SSH Key: <strong>{provisionData.ssh_key_name}</strong></p>
+                      <p>Non-admin shell account (API terminals): <strong>{provisionData.shell_user || 'not enabled'}</strong></p>
                     </div>
                     <div className="flex flex-col-reverse gap-2 pt-2 xs:flex-row">
                       <Button
@@ -290,6 +295,20 @@ export default function NewServerPage() {
                         Use this when moving a host from an old Bosun; the old install loses access. On Windows only keys
                         labeled exactly for this host are removed.
                       </p>
+                    </div>
+                    <div className="space-y-2">
+                      <label htmlFor="create_shell_account" className="flex items-start gap-2 text-sm font-medium">
+                        <input id="create_shell_account" name="create_shell_account" type="checkbox" defaultChecked className="mt-1" />
+                        <span>Create a non-admin shell account (Linux)</span>
+                      </label>
+                      <div className="pl-6 space-y-2">
+                        <Input id="shell_account" name="shell_account" defaultValue="bosun-user" aria-label="Shell account name" />
+                        <p className="text-xs text-muted-foreground">
+                          Used only by API keys that are granted terminal or command access. It has no sudo, no Docker group and
+                          no key to the admin account, and is checked by logging in as it before it is enabled. The web terminal
+                          is unaffected: it always asks for your own login. Not available on Windows hosts yet.
+                        </p>
+                      </div>
                     </div>
                     <div className="flex flex-col-reverse gap-2 pt-2 xs:flex-row">
                       <Button type="submit" disabled={provisioning}>

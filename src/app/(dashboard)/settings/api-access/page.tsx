@@ -53,6 +53,8 @@ const ENDPOINTS: { method: string; path: string; what: string; role: Role }[] = 
   { method: 'POST', path: '/api/servers/:id/wake', what: 'Wake-on-LAN', role: 'operator' },
   { method: 'GET', path: '/api/widgets/:widgetId/data?force=true', what: 'Force a fresh poll of the host', role: 'operator' },
   { method: 'POST', path: '/api/servers/:id/exec', what: 'Run a command on the host: {"command":"uptime"}', role: 'admin' },
+  { method: 'POST', path: '/api/servers/:id/shell/exec', what: 'Run a command as the non-admin shell account (needs the Shell permission): {"command":"uptime"}', role: 'admin' },
+  { method: 'POST', path: '/api/servers/:id/terminal', what: 'Get a 60 s single-use token for wss://<host>/ws/api-terminal?token=…: {"target":"host"} (Shell permission) or {"target":"container","container":"name"} (Docker shell permission only)', role: 'admin' },
 ];
 
 function StatusText({ status }: { status: ApiKey['status'] }) {

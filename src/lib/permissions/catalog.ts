@@ -75,6 +75,13 @@ export const CATALOG: readonly PermissionDef[] = [
   { id: 'ollama.models.delete', label: 'Delete Ollama models', group: 'Ollama', source: 'widget:ollama_status', defaultLevel: 'operator', risk: 'medium', scope: 'server',
     description: 'Remove downloaded models from the host.' },
 
+  { id: 'docker.shell', label: 'Open a shell in a container (API)', group: 'Docker', source: 'widget:docker_containers', defaultLevel: 'admin', risk: 'high', scope: 'server',
+    description: 'Open an interactive shell inside a container through the API, and nothing else on the host. Containers that would give access to the host (privileged, Docker socket, host mounts) are refused. API keys only; the web terminal still asks for your own login.' },
+
+  // ---- Shell (API) -------------------------------------------------------
+  { id: 'shell.user', label: 'Terminal and commands as the non-admin account (API)', group: 'Shell', source: 'core', defaultLevel: 'admin', risk: 'high', scope: 'server',
+    description: 'Run commands and open a terminal on the host as its unprivileged account (no sudo, no Docker group, no way back to the admin account). API keys only; the web terminal still asks for your own login.' },
+
   // ---- Commands ----------------------------------------------------------
   { id: 'commands.run', label: 'Run commands', group: 'Commands', source: 'widget:custom_command', defaultLevel: 'admin', risk: 'high', scope: 'server',
     description: 'Run an arbitrary command on the host as the service account (the Custom Command widget).' },

@@ -28,7 +28,7 @@ export async function PATCH(request: NextRequest, { params }: { params: { server
     const { serverId } = await params;
     const body = await request.json();
     const allowed = ['name','hostname','ssh_port','ssh_user','ssh_key_id','notes','tags','platform','os_type','os_version','os_codename','kernel_version',
-      'poll_enabled','poll_interval_sec','host_key_fingerprint','mac_address','mac_address_alt'];
+      'poll_enabled','poll_interval_sec','host_key_fingerprint','shell_user','shell_key_id','mac_address','mac_address_alt'];
     const updates: string[] = []; const values: any[] = [];
     for (const [k,v] of Object.entries(body)) {
       if (!allowed.includes(k)) continue;
@@ -38,6 +38,8 @@ export async function PATCH(request: NextRequest, { params }: { params: { server
       if (k === 'poll_enabled') value = v ? 1 : 0;
       if (k === 'poll_interval_sec') value = Math.min(3600, Math.max(5, Math.round(Number(v) || 15)));
       // Only clearing is allowed (re-trust a host whose key legitimately changed).
+      // The shell account is only ever set by provisioning; here it can only be switched off.
+      if (k === 'shell_user' || k === 'shell_key_id') { if (v !== null) continue; value = null; }
       if (k === 'host_key_fingerprint') { if (v !== null) continue; value = null; }
       if (k === 'mac_address' || k === 'mac_address_alt') {
         // null = auto-detect again (the poller refills it); '' = deliberately
@@ -73,6 +75,7 @@ export async function DELETE(request: NextRequest, { params }: { params: { serve
     const payload = await requireLevel(request, 'admin');
     if (payload instanceof NextResponse) return payload;
     const { serverId } = await params;
+    const shellKey = (await rqlite.query('SELECT shell_key_id FROM servers WHERE id = ?', [serverId])).values?.[0]?.[0] as string | null | undefined;
     // Remove everything that hangs off the server in one transaction (does not
     // rely on SQLite foreign-key enforcement being enabled).
     await rqlite.executeBatch([
@@ -86,7 +89,8 @@ export async function DELETE(request: NextRequest, { params }: { params: { serve
       "DELETE FROM permission_grants WHERE scope_type='server' AND scope_id=?",
       'DELETE FROM server_group_members WHERE server_id=?',
       'DELETE FROM servers WHERE id=?',
-    ].map(sql => ({ sql, params: sql.split('?').length === 3 ? [serverId, serverId] : [serverId] })), { transaction: true });
+    ].map(sql => ({ sql, params: sql.split('?').length === 3 ? [serverId, serverId] : [serverId] }))
+      .concat(shellKey ? [{ sql: 'DELETE FROM ssh_keys WHERE id=? AND NOT EXISTS (SELECT 1 FROM servers WHERE ssh_key_id=ssh_keys.id OR shell_key_id=ssh_keys.id)', params: [shellKey] }] : []), { transaction: true });
     try { await sshPool.drainServer(serverId); } catch {}
     await logAudit({ userId: payload.userId, serverId, action: AuditActions.SERVER_DELETE, status: 'success' });
     return NextResponse.json({ data: { success: true } });
