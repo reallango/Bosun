@@ -73,9 +73,9 @@ export function useWakeServer(serverId: string, serverName: string) {
 }
 
 export function WakeButton({ serverId, serverName, macAddress, size = 'sm', variant = 'outline', iconOnly, className }: WakeButtonProps) {
-  const { user } = useAuth();
+  const { can } = useAuth();
   const { wake, waking, installDialog } = useWakeServer(serverId, serverName);
-  const canWake = user?.role === 'admin' || user?.role === 'operator';
+  const canWake = can('power.wake', serverId);
   if (!canWake) return null;
 
   const noMac = macAddress !== undefined && !macAddress;

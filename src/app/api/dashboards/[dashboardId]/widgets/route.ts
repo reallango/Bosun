@@ -1,7 +1,8 @@
 import { internalError } from '@/lib/api/response';
 import { findFreeSpot } from '@/lib/widgets/placement';
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth, requireRole } from '@/lib/auth/middleware';
+import { requireAuth } from '@/lib/auth/middleware';
+import { requirePermission } from '@/lib/permissions/authorize';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { COMMAND_CHANGE_FORBIDDEN, changesCommand, mayChangeCommand } from '@/lib/auth/widget-policy';
 import { resolveWidgetDefinition, supportsPlatform } from '@/components/widgets/registry-loader';
@@ -28,7 +29,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ dashboardId: string }> }) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
-  const roleError = requireRole(auth, 'operator');
+  const roleError = await requirePermission(auth, 'dashboards.edit');
   if (roleError) return roleError;
   const { dashboardId } = await params;
   try {

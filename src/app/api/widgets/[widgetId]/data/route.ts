@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
-import { requireAuth, requireRole } from '@/lib/auth/middleware';
-import { hasRole } from '@/lib/auth/levels';
+import { requireAuth } from '@/lib/auth/middleware';
+import { hasPermission, requirePermission } from '@/lib/permissions/authorize';
 import { runOnServerId } from '@/lib/ssh/connection-pool';
 import { WIDGET_SECTIONS, widgetDataFromSnapshots, collectedAtFor, Sections, ServerRow } from '@/lib/widgets/snapshot-data';
 import { consumeActionRateLimit } from '@/lib/utils/rate-limiter';
@@ -24,15 +24,19 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
   const { widgetId } = await params;
-  // Forcing a poll (or re-running a custom command) is an action: operator+.
-  // Read-only callers silently get the regular (cached) data instead.
-  const forceParam = hasRole(auth.role, 'operator') ? new URL(request.url).searchParams.get('force') : null;
-  const force = forceParam === 'true' || forceParam === 'updates';
+  // Forcing a poll (or an update check, or re-running a custom command) is an action. Callers
+  // without the permission for this server silently get the regular (cached) data instead.
+  const requested = new URL(request.url).searchParams.get('force');
+  let forceParam: string | null = null;
+  let force = false;
 
   try {
     const widgetRes = await rqlite.query('SELECT * FROM widgets WHERE id = ?', [widgetId]);
     if (!widgetRes.values?.length) return NextResponse.json({ error: { message: 'Widget not found' } }, { status: 404 });
     const widget = rowsToObjects(widgetRes)[0] as any;
+    if (requested === 'updates' && await hasPermission(auth, 'updates.check', widget.server_id)) forceParam = 'updates';
+    else if (requested === 'true' && await hasPermission(auth, 'servers.refresh', widget.server_id)) forceParam = 'true';
+    force = forceParam !== null;
     const cfg = parseJson(widget.config);
     const srvRes = await rqlite.query(
       'SELECT id, name, hostname, platform, os_type, os_version, is_online, last_seen, last_error, poll_interval_sec FROM servers WHERE id = ?',
@@ -146,8 +150,6 @@ async function windowsUpdates(action: 'install' | 'status', userId: string, serv
 export async function POST(request: NextRequest, { params }: { params: Promise<{ widgetId: string }> }) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
-  const roleError = requireRole(auth, 'operator');
-  if (roleError) return roleError;
   const { widgetId } = await params;
 
   let action: unknown;
@@ -165,6 +167,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (widget.widget_type !== 'os_update_check') {
       return NextResponse.json({ error: { message: 'Invalid widget type for POST' } }, { status: 400 });
     }
+    // Installing needs updates.install for this server; following an install's progress needs updates.check.
+    const denied = await requirePermission(auth, action === 'install' ? 'updates.install' : 'updates.check', widget.server_id);
+    if (denied) return denied;
 
     const srvRes = await rqlite.query('SELECT os_type, platform FROM servers WHERE id = ?', [widget.server_id]);
     const [osType, platform] = (srvRes.values?.[0] || []) as string[];

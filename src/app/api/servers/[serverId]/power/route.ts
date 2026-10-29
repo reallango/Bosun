@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth, requireRole } from '@/lib/auth/middleware';
+import { requireAuth } from '@/lib/auth/middleware';
+import { requirePermission } from '@/lib/permissions/authorize';
 import { rqlite } from '@/lib/db/rqlite-client';
 import { runOnServerId } from '@/lib/ssh/connection-pool';
 import { isPowerAction, powerCommand, NO_SUDO_MARKER } from '@/lib/ssh/power';
@@ -8,21 +9,21 @@ import { logAudit, AuditActions } from '@/lib/audit/logger';
 import { ok, fail, failFrom } from '@/lib/api/response';
 
 /**
- * Shut down or restart a server over SSH. Read + actions (operator) or higher, like
- * Wake-on-LAN: whoever can power a host on can power it off. Requires an
+ * Shut down or restart a server over SSH. Needs the `power.shutdown` or `power.restart`
+ * permission for this server (Read + actions holds both by default). Requires an
  * explicit `confirm: true`, rate limited and audited.
  */
 export async function POST(request: NextRequest, { params }: { params: Promise<{ serverId: string }> }) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
-  const roleError = requireRole(auth, 'operator');
-  if (roleError) return roleError;
   const { serverId } = await params;
 
   let body: { action?: unknown; confirm?: unknown };
   try { body = await request.json(); } catch { return fail('Invalid JSON body'); }
   const action = body.action;
   if (!isPowerAction(action)) return fail('action must be shutdown or restart');
+  const roleError = await requirePermission(auth, action === 'shutdown' ? 'power.shutdown' : 'power.restart', serverId);
+  if (roleError) return roleError;
   if (body.confirm !== true) return fail('Confirmation required', 400, 'CONFIRM_REQUIRED');
   const limit = consumeActionRateLimit(auth.userId);
   if (!limit.allowed) return fail('Too many actions, slow down', 429, 'RATE_LIMITED');

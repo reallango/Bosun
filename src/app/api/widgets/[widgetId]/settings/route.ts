@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth, requireRole } from '@/lib/auth/middleware';
+import { requireAuth } from '@/lib/auth/middleware';
+import { requirePermission } from '@/lib/permissions/authorize';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { resolveWidgetDefinition } from '@/components/widgets/registry-loader';
 import { COMMAND_CHANGE_FORBIDDEN, changesCommand, mayChangeCommand } from '@/lib/auth/widget-policy';
@@ -44,7 +45,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 export async function PUT(request: NextRequest, { params }: { params: Promise<{ widgetId: string }> }) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
-  const roleError = requireRole(auth, 'operator');
+  const roleError = await requirePermission(auth, 'dashboards.edit');
   if (roleError) return roleError;
   const { widgetId } = await params;
 

@@ -66,4 +66,11 @@ export const AuditActions = {
   API_KEY_DELETE: 'api_key.delete',
   SERVER_EXEC: 'server.exec',
   SERVER_POWER: 'server.power',
+  PERMISSION_GROUP_CREATE: 'permission_group.create',
+  PERMISSION_GROUP_UPDATE: 'permission_group.update',
+  PERMISSION_GROUP_DELETE: 'permission_group.delete',
+  SERVER_GROUP_CREATE: 'server_group.create',
+  SERVER_GROUP_UPDATE: 'server_group.update',
+  SERVER_GROUP_DELETE: 'server_group.delete',
+  ACCESS_GROUPS_SET: 'access.groups_set',
 } as const;

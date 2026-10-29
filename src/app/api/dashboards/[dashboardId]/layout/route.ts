@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth, requireRole } from '@/lib/auth/middleware';
+import { requireAuth } from '@/lib/auth/middleware';
+import { requirePermission } from '@/lib/permissions/authorize';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { isGridBreakpoint, type GridBreakpoint, type GridRect } from '@/types/dashboard';
 
@@ -43,7 +44,7 @@ function parseLayouts(value: unknown): Record<string, GridRect> {
 export async function PATCH(request: NextRequest, { params }: { params: Promise<{ dashboardId: string }> }) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
-  const roleError = requireRole(auth, 'operator');
+  const roleError = await requirePermission(auth, 'dashboards.edit');
   if (roleError) return roleError;
   const { dashboardId } = await params;
 

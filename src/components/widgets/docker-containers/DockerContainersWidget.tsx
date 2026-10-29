@@ -52,9 +52,10 @@ interface Props {
 
 export function DockerContainersWidget({ widgetId, serverId }: Props) {
   const { data, isLoading, error, refresh } = useWidgetData(widgetId, 15);
-  const { user } = useAuth();
+  const { user, can } = useAuth();
   // Read + actions: logs and start/stop/restart. Shells need Full access.
-  const canAct = hasRole(user?.role, 'operator');
+  const canLogs = can('docker.logs', serverId);
+  const canControl = can('docker.containers.control', serverId);
   const canShell = hasRole(user?.role, 'admin');
   const [query, setQuery] = useState('');
   const [showStopped, setShowStopped] = useState(true);
@@ -150,17 +151,21 @@ export function DockerContainersWidget({ widgetId, serverId }: Props) {
             </div>
             <div className="flex shrink-0 items-center gap-0.5">
               {busy === c.id && <Loader2 className="size-4 animate-spin text-gray-400" aria-label="Working" />}
-              {canAct && (
+              {canLogs && (
                 <IconBtn label={`Logs for ${c.name}`} onClick={() => openLogs(c)}><ScrollText /></IconBtn>
               )}
-              {canAct && c.state === 'running' && (
+              {c.state === 'running' && (
                 <>
                   {canShell && <IconBtn label={`Shell in ${c.name}`} onClick={() => setShellFor(c)}><TerminalSquare /></IconBtn>}
-                  <IconBtn label={`Restart ${c.name}`} onClick={() => setPending({ c, action: 'restart' })} disabled={!!busy}><RotateCw /></IconBtn>
-                  <IconBtn label={`Stop ${c.name}`} onClick={() => setPending({ c, action: 'stop' })} disabled={!!busy} danger><Square /></IconBtn>
+                  {canControl && (
+                    <>
+                      <IconBtn label={`Restart ${c.name}`} onClick={() => setPending({ c, action: 'restart' })} disabled={!!busy}><RotateCw /></IconBtn>
+                      <IconBtn label={`Stop ${c.name}`} onClick={() => setPending({ c, action: 'stop' })} disabled={!!busy} danger><Square /></IconBtn>
+                    </>
+                  )}
                 </>
               )}
-              {canAct && c.state !== 'running' && (
+              {canControl && c.state !== 'running' && (
                 <IconBtn label={`Start ${c.name}`} onClick={() => setPending({ c, action: 'start' })} disabled={!!busy}><Play /></IconBtn>
               )}
             </div>

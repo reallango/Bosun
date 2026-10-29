@@ -5,6 +5,7 @@ import { expiryFromDays, generateApiKey } from '@/lib/auth/api-keys';
 import { API_KEY_COLUMNS, toApiKeyDto } from '@/lib/auth/api-key-dto';
 import { roleLabel, isRole } from '@/lib/auth/levels';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
+import { groupIdsByPrincipal } from '@/lib/permissions/groups';
 import { logAudit, AuditActions } from '@/lib/audit/logger';
 import { fail, internalError, ok } from '@/lib/api/response';
 
@@ -16,7 +17,8 @@ export async function GET(request: NextRequest) {
     const r = await rqlite.query(
       `SELECT ${API_KEY_COLUMNS}, u.username AS created_by_username
        FROM api_keys k LEFT JOIN users u ON u.id = k.created_by ORDER BY k.created_at DESC`);
-    return ok({ keys: rowsToObjects(r).map(row => toApiKeyDto(row)) });
+    const groups = await groupIdsByPrincipal('api_key');
+    return ok({ keys: rowsToObjects(r).map(row => ({ ...toApiKeyDto(row), group_ids: groups.get(String(row.id)) || [] })) });
   } catch (error) {
     console.error('API key list error:', error);
     return internalError(error);

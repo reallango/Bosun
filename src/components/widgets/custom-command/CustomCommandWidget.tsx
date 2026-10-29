@@ -7,7 +7,6 @@ import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { WidgetLoading } from '@/components/widgets/WidgetLoading';
 import { WidgetError } from '@/components/widgets/WidgetError';
 import { useAuth } from '@/hooks/useAuth';
-import { hasRole } from '@/lib/auth/levels';
 
 interface CustomCommandWidgetProps {
   widgetId: string;
@@ -19,9 +18,9 @@ export function CustomCommandWidget({ widgetId, serverId }: CustomCommandWidgetP
   const [running, setRunning] = useState(false);
   const [command, setCommand] = useState('');
   const [execError, setExecError] = useState<string | null>(null);
-  const { user } = useAuth();
+  const { can } = useAuth();
   // Ad-hoc commands (/exec) need Full access; others see the configured command's output.
-  const canExec = hasRole(user?.role, 'admin');
+  const canExec = can('commands.run', serverId);
 
   const execute = async () => {
     if (!command.trim() || running) return;

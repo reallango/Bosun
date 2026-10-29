@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { Ban, Check, Copy, KeySquare, Plus, Trash2, TriangleAlert } from 'lucide-react';
+import { Ban, Check, Copy, KeySquare, Plus, ShieldCheck, Trash2, TriangleAlert } from 'lucide-react';
 import Header from '@/components/layout/Header';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -14,6 +14,9 @@ import { ErrorState } from '@/components/shared/ErrorState';
 import { useToast } from '@/components/ui/toast';
 import { ConfirmActionDialog, apiAction } from '@/components/widgets/shared/ConfirmActionDialog';
 import { AdminOnlyNotice, LevelBadge, LevelSelect, When } from '@/components/settings/access-ui';
+import { GroupPicker } from '@/components/settings/permissions/GroupPicker';
+import { KeyGroupsDialog } from '@/components/settings/permissions/KeyGroupsDialog';
+import type { PermissionGroup } from '@/components/settings/permissions/data';
 import { useAuth } from '@/hooks/useAuth';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { readJson } from '@/lib/api/readJson';
@@ -32,6 +35,7 @@ interface ApiKey {
   expires_at: string | null;
   revoked_at: string | null;
   status: 'active' | 'revoked' | 'expired';
+  group_ids?: string[];
 }
 
 const EXPIRY_OPTIONS: [string, string][] = [['never', 'Never'], ['30', '30 days'], ['90', '90 days'], ['365', '1 year']];
@@ -86,9 +90,14 @@ function CreateKeyDialog({ open, onOpenChange, onCreated }: { open: boolean; onO
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [createdKey, setCreatedKey] = useState<string | null>(null);
+  const [groupIds, setGroupIds] = useState<string[]>([]);
+  const [groups, setGroups] = useState<PermissionGroup[]>([]);
 
   useEffect(() => {
-    if (open) { setName(''); setRole('viewer'); setExpiry('90'); setError(null); setCreatedKey(null); }
+    if (open) {
+      setName(''); setRole('viewer'); setExpiry('90'); setError(null); setCreatedKey(null); setGroupIds([]);
+      fetchWithAuth('/api/permission-groups').then(r => r.json()).then(j => setGroups(j.data?.groups ?? [])).catch(() => setGroups([]));
+    }
   }, [open]);
 
   const submit = async (e: React.FormEvent) => {
@@ -98,7 +107,10 @@ function CreateKeyDialog({ open, onOpenChange, onCreated }: { open: boolean; onO
     try {
       const data = await apiAction(fetchWithAuth, '/api/api-keys', 'POST', {
         name, role, expires_in_days: expiry === 'never' ? null : Number(expiry),
-      }) as { key?: string };
+      }) as { key?: string; apiKey?: { id?: string } };
+      if (groupIds.length && data?.apiKey?.id) {
+        await apiAction(fetchWithAuth, `/api/api-keys/${data.apiKey.id}/groups`, 'PUT', { group_ids: groupIds });
+      }
       setCreatedKey(data?.key ?? null);
       onCreated();
     } catch (err) {
@@ -145,6 +157,13 @@ function CreateKeyDialog({ open, onOpenChange, onCreated }: { open: boolean; onO
                 <LevelSelect id="key-role" value={role} onChange={setRole} />
               </div>
               <div className="space-y-1.5">
+                <Label>Permission groups</Label>
+                <GroupPicker groups={groups} selected={groupIds} onChange={setGroupIds} />
+                <p className="text-xs text-muted-foreground">
+                  Add individual actions to a low access level, for example a Read only key that can also restart one server.
+                </p>
+              </div>
+              <div className="space-y-1.5">
                 <Label htmlFor="key-expiry">Expires</Label>
                 <select id="key-expiry" className="form-select" value={expiry} onChange={e => setExpiry(e.target.value)}>
                   {EXPIRY_OPTIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
@@ -162,9 +181,12 @@ function CreateKeyDialog({ open, onOpenChange, onCreated }: { open: boolean; onO
   );
 }
 
-function KeyActions({ k, onPending }: { k: ApiKey; onPending: (p: { kind: 'revoke' | 'delete'; key: ApiKey }) => void }) {
+function KeyActions({ k, onPending, onGroups }: { k: ApiKey; onPending: (p: { kind: 'revoke' | 'delete'; key: ApiKey }) => void; onGroups: (k: ApiKey) => void }) {
   return (
     <div className="flex shrink-0 items-center justify-end gap-0.5">
+      <Button variant="ghost" size="icon-lg" onClick={() => onGroups(k)} aria-label={`Permission groups for ${k.name}`} title="Permission groups">
+        <ShieldCheck />
+      </Button>
       {k.status === 'active' && (
         <Button variant="ghost" size="icon-lg" onClick={() => onPending({ kind: 'revoke', key: k })} aria-label={`Revoke ${k.name}`} title="Revoke">
           <Ban />
@@ -186,6 +208,7 @@ export default function ApiAccessPage() {
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [pending, setPending] = useState<{ kind: 'revoke' | 'delete'; key: ApiKey } | null>(null);
+  const [groupsFor, setGroupsFor] = useState<ApiKey | null>(null);
   const [origin, setOrigin] = useState('http://<host>:3042');
 
   useEffect(() => { if (typeof window !== 'undefined') setOrigin(window.location.origin); }, []);
@@ -260,11 +283,12 @@ export default function ApiAccessPage() {
                           </div>
                           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                             <LevelBadge role={k.role} />
+                            {!!k.group_ids?.length && <span>+ {k.group_ids.length} group{k.group_ids.length === 1 ? '' : 's'}</span>}
                             <span>Created <When value={k.created_at} /></span>
                             <span>Used <When value={k.last_used_at} empty="never" /></span>
                             <span>Expires <When value={k.expires_at} empty="never" /></span>
                           </div>
-                          <KeyActions k={k} onPending={setPending} />
+                          <KeyActions k={k} onPending={setPending} onGroups={setGroupsFor} />
                         </li>
                       ))}
                     </ul>
@@ -286,7 +310,10 @@ export default function ApiAccessPage() {
                           {keys.map(k => (
                             <TableRow key={k.id}>
                               <TableCell className="max-w-[14rem] truncate px-4 font-medium">{k.name}</TableCell>
-                              <TableCell><LevelBadge role={k.role} /></TableCell>
+                              <TableCell>
+                                <LevelBadge role={k.role} />
+                                {!!k.group_ids?.length && <span className="ml-1.5 text-xs text-muted-foreground">+ {k.group_ids.length} group{k.group_ids.length === 1 ? '' : 's'}</span>}
+                              </TableCell>
                               <TableCell><code className="text-xs">bosun_{k.prefix}_…</code></TableCell>
                               <TableCell className="text-muted-foreground">
                                 <When value={k.created_at} />{k.created_by_username && <span className="block text-xs">by {k.created_by_username}</span>}
@@ -296,7 +323,7 @@ export default function ApiAccessPage() {
                               </TableCell>
                               <TableCell className="text-muted-foreground"><When value={k.expires_at} empty="never" /></TableCell>
                               <TableCell><StatusText status={k.status} /></TableCell>
-                              <TableCell className="px-4"><KeyActions k={k} onPending={setPending} /></TableCell>
+                              <TableCell className="px-4"><KeyActions k={k} onPending={setPending} onGroups={setGroupsFor} /></TableCell>
                             </TableRow>
                           ))}
                         </TableBody>
@@ -356,6 +383,7 @@ export default function ApiAccessPage() {
       </div>
 
       <CreateKeyDialog open={createOpen} onOpenChange={setCreateOpen} onCreated={load} />
+      <KeyGroupsDialog keyId={groupsFor?.id ?? null} keyName={groupsFor?.name ?? ""} selected={groupsFor?.group_ids ?? []} onOpenChange={o => { if (!o) setGroupsFor(null); }} onSaved={load} />
       <ConfirmActionDialog
         open={!!pending}
         onOpenChange={o => { if (!o) setPending(null); }}

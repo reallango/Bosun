@@ -83,6 +83,8 @@ export async function DELETE(request: NextRequest, { params }: { params: { serve
       'DELETE FROM metric_rollups WHERE server_id=?',
       'DELETE FROM alert_rules WHERE server_id=?',
       'DELETE FROM notifications WHERE server_id=?',
+      "DELETE FROM permission_grants WHERE scope_type='server' AND scope_id=?",
+      'DELETE FROM server_group_members WHERE server_id=?',
       'DELETE FROM servers WHERE id=?',
     ].map(sql => ({ sql, params: sql.split('?').length === 3 ? [serverId, serverId] : [serverId] })), { transaction: true });
     try { await sshPool.drainServer(serverId); } catch {}

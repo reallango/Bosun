@@ -132,6 +132,7 @@ export async function DELETE(request: NextRequest, { params }: Params) {
       { sql: 'DELETE FROM password_resets WHERE user_id = ?', params: [userId] },
       { sql: 'DELETE FROM mfa_challenges WHERE user_id = ?', params: [userId] },
       { sql: 'UPDATE api_keys SET created_by = NULL WHERE created_by = ?', params: [userId] },
+      { sql: 'DELETE FROM user_groups WHERE user_id = ?', params: [userId] },
       { sql: 'DELETE FROM users WHERE id = ?', params: [userId] },
     ], { transaction: true });
     invalidateUserStatus();

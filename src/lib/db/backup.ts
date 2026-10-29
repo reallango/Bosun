@@ -45,6 +45,14 @@ export const BACKUP_TABLES: string[] = [
   'metric_samples',
   'custom_widgets',
   'api_keys',
+  // Permission groups: groups and server groups before the rows that reference them.
+  'permission_groups',
+  'permission_grants',
+  'server_groups',
+  'server_group_members',
+  'user_groups',
+  'api_key_groups',
+  'permission_definitions',
 ];
 
 // Tables excluded by default because they can grow very large.

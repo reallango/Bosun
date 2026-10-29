@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth, requireRole } from '@/lib/auth/middleware';
+import { requireAuth } from '@/lib/auth/middleware';
+import { requirePermission } from '@/lib/permissions/authorize';
 import { runOnServerId } from '@/lib/ssh/connection-pool';
 import { consumeActionRateLimit } from '@/lib/utils/rate-limiter';
 import { logAudit } from '@/lib/audit/logger';
@@ -13,9 +14,9 @@ import { ok, fail, failFrom } from '@/lib/api/response';
 export async function POST(request: NextRequest, { params }: { params: Promise<{ serverId: string }> }) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
-  const roleError = requireRole(auth, 'admin');
-  if (roleError) return roleError;
   const { serverId } = await params;
+  const roleError = await requirePermission(auth, 'commands.run', serverId);
+  if (roleError) return roleError;
 
   let body: { command?: unknown };
   try { body = await request.json(); } catch { return fail('Invalid JSON body'); }
