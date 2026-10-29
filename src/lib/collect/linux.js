@@ -284,8 +284,8 @@ function parseDocker(text) {
 
 /** The Ollama API answers, then (optionally) the `@@INSTALL` block that says how it is installed. */
 function parseOllama(raw) {
-  // Windows output has CRLF line ends.
-  const [text, installText] = String(raw || '').split(/\r?\n@@INSTALL\r?\n/);
+  // Windows output has CRLF line ends, and the block is empty (nothing follows the marker) when nothing is installed.
+  const [text, installText] = String(raw || '').split(/\r?\n@@INSTALL(?:\r?\n|$)/);
   const o = parseOllamaApi(String(text || '').replace(/\r/g, ''));
   return installText === undefined ? o : { ...o, install: parseInstall(installText, o.status === 'running') };
 }
