@@ -44,7 +44,15 @@ async function handleApiTerminal(ws, parsedUrl, deps) {
   const checked = api.checkApiTerminalClaims(payload);
   if (!checked.ok) return refuse(ws, 4003, 'Insufficient permissions');
   if (!usedTokens.consume(payload.jti, payload.exp)) return refuse(ws, 4001, 'Token already used');
-  if (!limiter.acquire(payload.apiKeyId)) return refuse(ws, 4000, 'Too many open terminals for this API key');
+  // Limits come from the settings (Settings → Database); a failed read falls back to the defaults.
+  let stored = {};
+  try {
+    const keys = Object.values(api.LIMIT_KEYS);
+    const rows = await queryRqlite('SELECT key, value FROM app_config WHERE key IN (' + keys.map(() => '?').join(',') + ')', keys);
+    for (const [k, v] of rows) stored[k] = v;
+  } catch { stored = {}; }
+  const limits = api.terminalLimits(stored);
+  if (!limiter.acquire(payload.apiKeyId, limits.maxPerKey)) return refuse(ws, 4000, 'Too many open terminals for this API key');
 
   let released = false;
   let client = null;
@@ -134,10 +142,10 @@ async function handleApiTerminal(ws, parsedUrl, deps) {
 
     const touch = () => {
       clearTimeout(idleTimer);
-      idleTimer = setTimeout(() => finish('idle timeout'), api.IDLE_MS);
+      idleTimer = setTimeout(() => finish('idle timeout'), limits.idleMs);
     };
     touch();
-    maxTimer = setTimeout(() => finish('maximum session time'), api.MAX_SESSION_MS);
+    maxTimer = setTimeout(() => finish('maximum session time'), limits.maxSessionMs);
 
     stream.on('data', (d) => { touch(); if (ws.readyState === WebSocket.OPEN) ws.send(d.toString('utf-8')); });
     // For a container the ssh channel IS the exec: when it ends the whole session is torn down,

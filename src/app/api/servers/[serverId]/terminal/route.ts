@@ -8,7 +8,8 @@ import { rqlite } from '@/lib/db/rqlite-client';
 import { consumeActionRateLimit } from '@/lib/utils/rate-limiter';
 import { logAudit, AuditActions } from '@/lib/audit/logger';
 import { ok, fail, failFrom } from '@/lib/api/response';
-import { TOKEN_TYPE, TOKEN_TTL_SEC, CONTAINER_REF_RE } from '@/lib/terminal/api-terminal';
+import { TOKEN_TYPE, CONTAINER_REF_RE, LIMIT_KEYS, terminalLimits } from '@/lib/terminal/api-terminal';
+import { getConfig } from '@/lib/db/migrations';
 
 /**
  * Mint a single-use, 60-second token for the API terminal WebSocket (`/ws/api-terminal`).
@@ -49,6 +50,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (target === 'host' && !(shellUser && shellKeyId)) return fail('This server has no non-admin shell account. Provision it again (Add Server) to create one.', 409, 'SHELL_UNAVAILABLE');
     if (target === 'container' && !sshKeyId) return fail('No SSH key assigned to this server', 409, 'SHELL_UNAVAILABLE');
 
+    const tokenTtlSec = terminalLimits({ [LIMIT_KEYS.tokenTtlSec]: await getConfig(LIMIT_KEYS.tokenTtlSec) }).tokenTtlSec;
     const token = await new SignJWT({
       userId: auth.userId, username: auth.username, authType: 'api_key', apiKeyId: auth.apiKeyId,
       type: TOKEN_TYPE, serverId, target, ...(target === 'container' ? { container } : {}),
@@ -56,12 +58,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       .setProtectedHeader({ alg: 'HS256' })
       .setJti(crypto.randomUUID())
       .setIssuedAt()
-      .setExpirationTime(`${TOKEN_TTL_SEC}s`)
+      .setExpirationTime(`${tokenTtlSec}s`)
       .sign(authSecret());
 
     await logAudit({ userId: auth.userId, serverId, action: AuditActions.TERMINAL_API_TOKEN, status: 'success',
       details: target === 'host' ? 'host shell' : `container ${container}` });
-    return ok({ token, expiresInSec: TOKEN_TTL_SEC, path: '/ws/api-terminal', target, container: container || null });
+    return ok({ token, expiresInSec: tokenTtlSec, path: '/ws/api-terminal', target, container: container || null });
   } catch (error) {
     return failFrom(error);
   }

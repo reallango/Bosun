@@ -33,6 +33,8 @@ export interface WidgetDefinition {
   defaultPollInterval?: number;  // seconds
   defaultTTL?: number;        // seconds
   storageMode?: WidgetStorageMode;
+  /** Id of the widget package that provides this type (database-defined types only). */
+  packageId?: string;
   /** Database-defined (custom_widgets) rather than compiled into the registry. */
   isCustom?: boolean;
   /** Platform support; both default to true. */

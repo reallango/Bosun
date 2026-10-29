@@ -101,7 +101,7 @@ function WidgetContent({ widgetId, widgetType, serverId, serverName }: { widgetI
       // Database-defined widget types render through the custom registry.
       const Custom = customWidgetComponents[widgetType];
       if (Custom) return <Custom widgetId={widgetId} serverId={serverId} serverName={serverName} />;
-      return <div className="text-sm text-muted-foreground">Unknown widget: {widgetType}</div>;
+      return <div className="text-sm text-muted-foreground">Unknown widget: {widgetType}. If it came from a widget package, that package has no view in this version of Bosun yet.</div>;
     }
   }
 }

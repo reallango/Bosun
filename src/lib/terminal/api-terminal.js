@@ -37,6 +37,40 @@ function checkApiTerminalClaims(payload) {
   return { ok: true };
 }
 
+
+/** app_config keys behind the limits (editable under Settings → Database). */
+const LIMIT_KEYS = {
+  tokenTtlSec: 'terminal.api.token_ttl_sec',
+  sessionMaxMin: 'terminal.api.session_max_min',
+  idleMin: 'terminal.api.idle_min',
+  maxPerKey: 'terminal.api.max_per_key',
+};
+const LIMIT_RANGES = {
+  tokenTtlSec: { def: TOKEN_TTL_SEC, min: 10, max: 300 },
+  sessionMaxMin: { def: MAX_SESSION_MS / 60000, min: 1, max: 1440 },
+  idleMin: { def: IDLE_MS / 60000, min: 1, max: 240 },
+  maxPerKey: { def: MAX_SESSIONS_PER_KEY, min: 1, max: 20 },
+};
+
+/**
+ * Turn stored setting values into usable limits: missing, non-numeric or out-of-range
+ * values fall back to the default or are clamped, so a bad setting can never disable a limit.
+ * @param {Record<string, string|number|null|undefined>} stored keyed by app_config key
+ */
+function terminalLimits(stored = {}) {
+  const pick = (name) => {
+    const r = LIMIT_RANGES[name];
+    const n = Math.round(Number(stored[LIMIT_KEYS[name]]));
+    return Number.isFinite(n) && stored[LIMIT_KEYS[name]] !== null && stored[LIMIT_KEYS[name]] !== undefined && stored[LIMIT_KEYS[name]] !== ''
+      ? Math.min(r.max, Math.max(r.min, n)) : r.def;
+  };
+  return {
+    tokenTtlSec: pick('tokenTtlSec'),
+    maxSessionMs: pick('sessionMaxMin') * 60000,
+    idleMs: pick('idleMin') * 60000,
+    maxPerKey: pick('maxPerKey'),
+  };
+}
 /** Tokens are single use: remembers ids until they would have expired anyway. */
 class UsedTokens {
   constructor() { this.map = new Map(); }
@@ -52,9 +86,10 @@ class UsedTokens {
 /** Caps concurrent API terminals per API key. */
 class SessionLimiter {
   constructor(max = MAX_SESSIONS_PER_KEY) { this.max = max; this.counts = new Map(); }
-  acquire(key) {
+  /** @param {string} key @param {number} [max] overrides the default cap (from the settings) */
+  acquire(key, max = this.max) {
     const n = this.counts.get(key) || 0;
-    if (n >= this.max) return false;
+    if (n >= max) return false;
     this.counts.set(key, n + 1);
     return true;
   }
@@ -149,5 +184,5 @@ function dockerExecCommand(containerId) {
 
 module.exports = {
   TOKEN_TYPE, TOKEN_TTL_SEC, CONTAINER_REF_RE, CONTAINER_ID_RE, MAX_SESSION_MS, IDLE_MS, MAX_SESSIONS_PER_KEY,
-  checkApiTerminalClaims, UsedTokens, SessionLimiter, containerRisks, isSensitiveMount, parseInspect, inspectCommand, dockerExecCommand,
+  LIMIT_KEYS, terminalLimits, checkApiTerminalClaims, UsedTokens, SessionLimiter, containerRisks, isSensitiveMount, parseInspect, inspectCommand, dockerExecCommand,
 };
