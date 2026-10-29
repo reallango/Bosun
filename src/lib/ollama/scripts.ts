@@ -347,7 +347,7 @@ export function systemdEnvCommand(unit: string, name: string, value: string): st
     `tmp=$(mktemp)`,
     `{ echo '[Service]'; if sudo -n test -f ${shq(file)}; then sudo -n cat ${shq(file)} | grep '^Environment=' | grep -v '^Environment="${v.name}=' || true; fi;` +
       (v.value !== '' ? ` echo 'Environment="${v.name}=${v.value}"';` : '') + ` } > "$tmp"`,
-    `sudo -n cp "$tmp" ${shq(file)} && rm -f "$tmp"`,
+    `sudo -n install -m 0644 "$tmp" ${shq(file)} && rm -f "$tmp"`,
     `sudo -n systemctl daemon-reload && sudo -n systemctl restart ${shq(unit)} && { systemctl is-active ${shq(unit)} || true; }`,
   ].join('\n');
 }

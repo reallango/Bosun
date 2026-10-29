@@ -78,7 +78,7 @@ ollama) m ollama
     fi
   else echo DOCKER_AVAILABLE=0; fi
   have ollama && echo "HOST_BIN=$(command -v ollama)"
-  if have systemctl && systemctl cat ollama.service >/dev/null 2>&1; then
+  if have systemctl && [ "$(systemctl show -p LoadState --value ollama.service 2>/dev/null)" = loaded ]; then
     echo UNIT=ollama
     echo "UNIT_ACTIVE=$(systemctl is-active ollama 2>/dev/null)"
     echo "UNIT_ENABLED=$(systemctl is-enabled ollama 2>/dev/null)"
