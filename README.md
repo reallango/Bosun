@@ -391,6 +391,7 @@ if it is ever found to have admin rights, API access is refused.
 - **Leftover keys:** when a host still has keys that look like an earlier Bosun's but are not labeled for it, Add Server
   lists them and lets you choose which to remove (none are pre-selected). Keys labeled exactly for the host are still replaced
   automatically, and every removal keeps a `.bosun-bak` backup and is undone if the new key would be lost.
+- **Re-provision / rotate keys** (Settings → Servers, key button on each row): sets an already-added server up again from its  record, asking for the administrator login each time (never stored). Fresh keys are generated and proven to work, the  non-admin account is created or repaired, and with *Rotate keys* on the host's previous Bosun key is removed by its exact  key (even if labeled differently) and deleted from Bosun, so it can no longer log in. A server added with someone's own  key and login keeps that login untouched and gets a separate `bosun-svc` account. If a key may have leaked, also change the  host's administrator password and review its authorized_keys: only keys Bosun created are replaced.
 - Limits are settings (Settings → Database): token lifetime (default 60 s, used once to open the
   WebSocket), maximum session length (60 min), idle timeout (10 min) and open terminals per API key (3).
   Values are clamped to sane ranges, so a bad value cannot switch a limit off.

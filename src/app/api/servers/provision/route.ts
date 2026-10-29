@@ -8,7 +8,7 @@ import { encrypt } from '@/lib/crypto/keys';
 import { generateSSHKeyPair } from '@/lib/ssh/keygen';
 import { powershellCommand } from '@/lib/collect/windows';
 import { pruneWindowsKeysScript } from '@/lib/ssh/windows-keys';
-import { linuxPruneScript, parseCandidates, type KeyCandidate } from '@/lib/ssh/key-cleanup';
+import { linuxPruneScript, linuxRemoveScript, windowsRemoveScript, keyBody, parseCandidates, type KeyCandidate } from '@/lib/ssh/key-cleanup';
 import { windowsShellAccountScript, WINDOWS_SHELL_VERIFY_COMMAND, parseWindowsShellVerification } from '@/lib/ssh/windows-shell-account';
 import {
     DEFAULT_SHELL_ACCOUNT, SHELL_ACCOUNT_RE, SHELL_VERIFY_COMMAND, parseShellVerification, shellAccountScript,
@@ -329,17 +329,32 @@ export async function POST(request: NextRequest) {
     if (roleCheck) return roleCheck;
 
     try {
-        const {
+        const body = await request.json();
+        let {
             hostname,
             port = 22,
-            admin_username,
-            admin_password,
             platform = 'linux',
             service_account = 'bosun-svc',
-            replace_keys = true,
-            create_shell_account = true,
             shell_account = DEFAULT_SHELL_ACCOUNT,
-        } = await request.json();
+        } = body;
+        const { admin_username, admin_password, replace_keys = true, create_shell_account = true } = body;
+
+        // Re-provisioning a server that is already added: its address, platform and accounts come from
+        // its record (only the administrator login and the options come from the request), and that
+        // record is updated in place.
+        const targetServerId: string | null = typeof body.server_id === 'string' && body.server_id ? body.server_id : null;
+        if (targetServerId) {
+            const rec = await rqlite.query('SELECT s.hostname, s.ssh_port, s.platform, s.ssh_user, s.shell_user, k.name FROM servers s LEFT JOIN ssh_keys k ON k.id = s.ssh_key_id WHERE s.id = ?', [targetServerId]);
+            const row = rec.values?.[0] as (string | number | null)[] | undefined;
+            if (!row) return NextResponse.json({ error: { message: 'Server not found', code: 'NOT_FOUND' } }, { status: 404 });
+            hostname = String(row[0]);
+            port = Number(row[1]) || 22;
+            platform = row[2] === 'windows' ? 'windows' : 'linux';
+            // Reuse the service account only if Bosun created it (its key is labeled <host>-<account>). A server added
+            // with someone's own key and login keeps that login untouched: it gets a proper bosun-svc account instead.
+            if (row[3] && row[5] === `${row[0]}-${row[3]}`) service_account = String(row[3]);
+            if (body.shell_account === undefined) shell_account = row[4] ? String(row[4]) : DEFAULT_SHELL_ACCOUNT;
+        }
 
         if (!hostname || !admin_username || !admin_password) {
             return NextResponse.json({
@@ -370,6 +385,16 @@ export async function POST(request: NextRequest) {
                 error: { message: `Cannot connect: ${String(err)}`, code: 'SSH_CONNECT_FAILED' },
             }, { status: 400 });
         }
+
+        // The Bosun key(s) this server uses now, read before anything changes. After the new key is proven
+        // they are removed from the host by their exact key (not by label), so re-provisioning really
+        // retires the old keys even if they were labeled differently.
+        const previous = await rqlite.query(
+            'SELECT k.public_key FROM servers s JOIN ssh_keys k ON k.id = s.ssh_key_id '
+            + (targetServerId ? 'WHERE s.id = ?' : 'WHERE LOWER(s.hostname) = LOWER(?) AND COALESCE(s.ssh_port, 22) = ?'),
+            targetServerId ? [targetServerId] : [hostname, Number(port) || 22]
+        );
+        const previousServiceKeys: string[] = (previous.values || []).map(v => String(v[0])).filter(Boolean);
 
         // Step 2: Generate and store the SSH key pair
         const keyName = `${hostname}-${service_account}`;
@@ -482,13 +507,37 @@ export async function POST(request: NextRequest) {
             }
         }
 
+        // Step 5c: Retire the key this server used before (exact key, after the new one is proven to work).
+        let previousKeysRemoved = 0;
+        if (testSuccess && replace_keys !== false) {
+            const newBody = keyBody(publicKey);
+            const bodies = previousServiceKeys.map(keyBody).filter(b => b && b !== newBody);
+            if (bodies.length) {
+                try {
+                    const gone = isWindowsHost
+                        ? await sshExec(sshConfig, powershellCommand(windowsRemoveScript({ publicKey, bodies })))
+                        : await sshExec(sshConfig, asRootCommand(sshConfig, admin_password, linuxRemoveScript({ account: service_account, publicKey, bodies })));
+                    const n = gone.stdout.match(/BOSUN_REMOVED=(\d+)/);
+                    if (n) {
+                        previousKeysRemoved = Number(n[1]);
+                        if (previousKeysRemoved > 0) steps.push(`Retired the previous Bosun key for ${service_account} on this host (${previousKeysRemoved} removed; it can no longer log in)`);
+                    } else {
+                        steps.push(`${WARNING}Could not check whether the previous Bosun key was removed (${stripSudo(gone.stderr) || gone.stdout.trim().slice(0, 120) || `exit ${gone.exitCode}`}); it may still be authorized.`);
+                    }
+                } catch (err) {
+                    steps.push(`${WARNING}Could not remove the previous Bosun key (${String(err).slice(0, 160)}); it may still be authorized.`);
+                }
+            }
+        }
+
         // Step 6: A host already added to this Bosun keeps its record; point it at the new key
         // (and drop the old key row if nothing else uses it) instead of creating a duplicate.
         let existingServer: { id: string; name: string } | null = null;
         if (testSuccess) {
             const found = await rqlite.query(
-                'SELECT id, name, ssh_key_id, shell_key_id FROM servers WHERE LOWER(hostname) = LOWER(?) AND COALESCE(ssh_port, 22) = ? LIMIT 1',
-                [hostname, Number(port) || 22]
+                'SELECT id, name, ssh_key_id, shell_key_id FROM servers WHERE '
+                + (targetServerId ? 'id = ?' : 'LOWER(hostname) = LOWER(?) AND COALESCE(ssh_port, 22) = ?') + ' LIMIT 1',
+                targetServerId ? [targetServerId] : [hostname, Number(port) || 22]
             );
             const row = found.values?.[0] as (string | null)[] | undefined;
             if (row) {
@@ -511,7 +560,7 @@ export async function POST(request: NextRequest) {
         // Log to audit
         await rqlite.execute(
             'INSERT INTO audit_log (id, user_id, action, category, details, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-            [crypto.randomUUID(), (auth as any).userId, 'server.provision', 'server', JSON.stringify({ steps, service_account, platform: isWindowsHost ? 'windows' : 'linux', replace_keys: replace_keys !== false, keys_removed: keysRemoved, existing_server: existingServer?.id ?? null }), now]
+            [crypto.randomUUID(), (auth as any).userId, 'server.provision', 'server', JSON.stringify({ steps, service_account, platform: isWindowsHost ? 'windows' : 'linux', replace_keys: replace_keys !== false, keys_removed: keysRemoved, previous_keys_removed: previousKeysRemoved, reprovision: !!targetServerId, existing_server: existingServer?.id ?? null }), now]
         );
 
         return NextResponse.json({
@@ -524,6 +573,7 @@ export async function POST(request: NextRequest) {
                 test_success: testSuccess,
                 existing_server: existingServer,
                 keys_removed: keysRemoved,
+                previous_keys_removed: previousKeysRemoved,
                 // Keys that look like an earlier Bosun's (not labeled for this host): the page asks which to remove.
                 leftover_keys: leftoverKeys.map(k => ({ fingerprint: k.fingerprint, comment: k.comment })),
                 shell_user: shell?.user ?? null,
