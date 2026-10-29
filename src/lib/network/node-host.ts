@@ -3,6 +3,7 @@ import os from 'os';
 import { rqlite } from '@/lib/db/rqlite-client';
 import { getConfig, setConfig } from '@/lib/db/migrations';
 import { effectiveClusterConfig } from '@/lib/cluster/config';
+import { runOnServerId } from '@/lib/ssh/connection-pool';
 
 /**
  * Which managed server is this Bosun node's container running on?
@@ -13,9 +14,9 @@ import { effectiveClusterConfig } from '@/lib/cluster/config';
  * from some fixed server that may be down.
  *
  * Resolution: an explicit mapping for this node (app_config
- * `wol.node_host.<NODE_NAME>`) wins; otherwise the host is detected by
- * finding this container's ID among the Docker containers the poller has seen
- * on each managed server.
+ * `wol.node_host.<NODE_NAME>`) wins. Otherwise, if this process runs in a Docker container, the host is found by
+ * looking for this container among the Docker containers the poller has stored and, failing that, by asking each
+ * managed Linux server whether its Docker daemon has it (`docker inspect <our id>`). Not in a container: no host.
  */
 
 export function nodeName(): string {
@@ -54,16 +55,69 @@ export function matchContainerHost(
   return null;
 }
 
+/** Does `docker inspect <short id>` output (the full container id) belong to one of our container ids? Pure (tested). */
+export function matchInspectOutput(ids: string[], stdout: string): boolean {
+  const full = stdout.trim().split(/\s+/)[0] || '';
+  if (!/^[0-9a-f]{64}$/.test(full)) return false;
+  return ids.some(id => full.startsWith(id.slice(0, 12)));
+}
+
+const g = globalThis as unknown as { __bosunNodeHost?: { at: number; serverId: string | null } };
+const FOUND_TTL_MS = 10 * 60 * 1000;
+const MISS_TTL_MS = 2 * 60 * 1000;
+
+/**
+ * Ask the managed Linux servers which one runs this container: `docker inspect <our container id>` succeeds
+ * only on the host whose Docker daemon has it. This does not depend on any widget or on what the poller has
+ * stored. The answer is remembered for 10 minutes (2 when nothing was found), since a container rarely moves.
+ */
+async function pollForHost(ids: string[]): Promise<string | null> {
+  const now = Date.now();
+  const hit = g.__bosunNodeHost;
+  if (hit && now - hit.at < (hit.serverId ? FOUND_TTL_MS : MISS_TTL_MS)) return hit.serverId;
+
+  const short = ids.map(id => id.slice(0, 12)).find(s => /^[0-9a-f]{12}$/.test(s));
+  let found: string | null = null;
+  if (short) {
+    const r = await rqlite.query("SELECT id FROM servers WHERE COALESCE(platform, 'linux') = 'linux' AND ssh_key_id IS NOT NULL ORDER BY name");
+    const candidates = (r.values || []).map(v => String(v[0]));
+    // A few at a time, so a large fleet is not asked all at once.
+    for (let i = 0; i < candidates.length && !found; i += 6) {
+      const batch = candidates.slice(i, i + 6);
+      const results = await Promise.all(batch.map(async (serverId) => {
+        try {
+          const out = await runOnServerId(serverId, `docker inspect --format '{{.Id}}' ${short} 2>/dev/null`, { timeoutMs: 8000 });
+          return out.exitCode === 0 && matchInspectOutput(ids, out.stdout) ? serverId : null;
+        } catch {
+          return null;   // offline, no Docker, no permission: not this one
+        }
+      }));
+      found = results.find(Boolean) ?? null;
+    }
+  }
+  g.__bosunNodeHost = { at: now, serverId: found };
+  return found;
+}
+
+/** Forget the remembered answer (after changing mappings or when asked to look again). */
+export function forgetDetectedNodeHost(): void {
+  g.__bosunNodeHost = undefined;
+}
+
+/**
+ * The managed server this Bosun node's container runs on, or null (not in a container, or not found).
+ * First the Docker containers the poller already stored (free), then the managed servers are asked directly.
+ */
 export async function detectNodeHost(): Promise<string | null> {
   const ids = ownContainerIds();
-  if (!ids.length) return null;
+  if (!ids.length) return null;   // not running in a container: there is no host to find
   const r = await rqlite.query("SELECT server_id, data FROM host_snapshots WHERE section = 'docker'");
   const snapshots = r.values.map(([serverId, data]) => {
     let containers: { id?: string }[] = [];
     try { containers = JSON.parse(String(data)).containers || []; } catch { containers = []; }
     return { serverId: String(serverId), containers };
   });
-  return matchContainerHost(ids, snapshots);
+  return matchContainerHost(ids, snapshots) ?? await pollForHost(ids);
 }
 
 export async function getNodeHostMapping(): Promise<string | null> {

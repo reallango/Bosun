@@ -59,6 +59,8 @@ COPY --from=builder /app/src/lib/secrets.js ./src/lib/secrets.js
 # API terminal (ws-server.js): session handler, pure helpers and the shell-account checks.
 COPY --from=builder /app/src/lib/terminal ./src/lib/terminal
 COPY --from=builder /app/src/lib/ssh/shell-account.js /app/src/lib/ssh/windows-shell-account.js ./src/lib/ssh/
+# Package widget data shaping, shared by the web app and the poller.
+COPY --from=builder /app/src/lib/widgets/runtime/data.js ./src/lib/widgets/runtime/data.js
 # Cluster settings + the start-time helper used by the rqlite service.
 COPY --from=builder /app/src/lib/cluster/config.js /app/src/lib/cluster/boot.js ./src/lib/cluster/
 # Next writes its cache under .next at runtime; services run as `node`.

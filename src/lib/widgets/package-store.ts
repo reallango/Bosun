@@ -157,6 +157,7 @@ export async function installPackage(opts: InstallOptions): Promise<InstallResul
     });
   }
   for (const t of dropped) stmts.push({ sql: 'DELETE FROM custom_widgets WHERE type = ? AND package_id = ?', params: [t, manifest.id] });
+  for (const t of dropped) stmts.push({ sql: 'DELETE FROM host_snapshots WHERE section = ?', params: [`pkg:${t}`] });
 
   // Permissions: drop the ones this version no longer declares (and any grants of them), upsert the rest.
   const permIds = manifest.permissions.map(p => p.id);
@@ -194,6 +195,8 @@ export async function removePackage(id: string, removeWidgets: boolean): Promise
   const stmts: { sql: string; params?: unknown[] }[] = [];
   const types = found.pkg.widgetTypes;
   if (types.length) stmts.push({ sql: `DELETE FROM widgets WHERE widget_type IN (${placeholders(types.length)})`, params: types });
+  // Data the poller collected for these widgets goes with them.
+  if (types.length) stmts.push({ sql: `DELETE FROM host_snapshots WHERE section IN (${placeholders(types.length)})`, params: types.map(t => `pkg:${t}`) });
   stmts.push({ sql: 'DELETE FROM permission_grants WHERE permission IN (SELECT id FROM permission_definitions WHERE source = ?)', params: [`package:${id}`] });
   stmts.push({ sql: 'DELETE FROM permission_definitions WHERE source = ?', params: [`package:${id}`] });
   stmts.push({ sql: 'DELETE FROM custom_widgets WHERE package_id = ?', params: [id] });

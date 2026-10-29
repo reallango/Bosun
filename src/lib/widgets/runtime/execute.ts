@@ -3,13 +3,13 @@
  * actions and fetching its data. Everything here is called after the route has authenticated
  * the caller and checked the permission the spec names.
  */
-import crypto from 'crypto';
+
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { runOnServerId } from '@/lib/ssh/connection-pool';
 import { loadShellTarget, assertShellAccountSafe, runOnShellTarget, ShellUnavailableError } from '@/lib/ssh/shell-target';
 import { validateWidgetSpec, type ActionSpec, type DataSpec, type RunAs, type WidgetSpec } from '@/lib/widgets/runtime/spec';
 import { commandFor, renderCommand, validateParams } from '@/lib/widgets/runtime/command';
-import { parseOutput, shapeData } from '@/lib/widgets/runtime/data';
+import { shapeData } from '@/lib/widgets/runtime/data';
 
 export class RuntimeError extends Error {
   status: number;
@@ -28,14 +28,13 @@ export interface LoadedSpec {
 }
 
 const SPEC_TTL_MS = 15_000;
-const g = globalThis as unknown as { __bosunSpecCache?: Map<string, { at: number; value: LoadedSpec | null }>; __bosunDataCache?: Map<string, { at: number; value: unknown; pending?: Promise<unknown> }> };
+const g = globalThis as unknown as { __bosunSpecCache?: Map<string, { at: number; value: LoadedSpec | null }> };
 const specCache = g.__bosunSpecCache ?? (g.__bosunSpecCache = new Map());
-const dataCache = g.__bosunDataCache ?? (g.__bosunDataCache = new Map());
+const pollRequested = new Map<string, number>();
 
 /** Forget cached specs and command results (after a package is installed or removed). */
 export function invalidateRuntimeCache(): void {
   specCache.clear();
-  dataCache.clear();
 }
 
 /**
@@ -134,37 +133,26 @@ export async function loadRuntimeData(serverId: string, loaded: LoadedSpec, forc
     return { data: shapeData(ds, parsed), collectedAt: new Date(Number(row[1])).toISOString(), pending: false };
   }
 
-  const server = await loadServer(serverId);
-  const template = commandFor({ command: ds.command, windowsCommand: ds.windowsCommand }, server.platform);
-  if (template === null) throw new RuntimeError('This widget is not available on Windows hosts', 409, 'PLATFORM_UNSUPPORTED');
-  const key = `${serverId}|${loaded.type}|${crypto.createHash('sha1').update(`${ds.as}|${template}`).digest('hex')}`;
-  const hit = dataCache.get(key);
-  if (!force && hit && !hit.pending && Date.now() - hit.at < ds.cacheSec * 1000) {
-    return { data: hit.value, collectedAt: new Date(hit.at).toISOString(), pending: false };
+  // Command-sourced data is collected by the poller (see lib/collect/packages.js) and stored as the host
+  // snapshot section `pkg:<type>`, so opening a dashboard never runs an SSH command from the web process.
+  const r = await rqlite.query('SELECT data, collected_at FROM host_snapshots WHERE server_id = ? AND section = ?', [serverId, `pkg:${loaded.type}`]);
+  const row = r.values?.[0];
+  if (force || !row) await requestPoll(serverId, force);
+  if (!row) return { data: null, collectedAt: null, pending: true };
+  let stored: { ok?: boolean; data?: unknown; error?: string } = {};
+  try { stored = JSON.parse(String(row[0])); } catch { stored = { ok: false, error: 'The stored result is unreadable' }; }
+  if (stored.ok === false) {
+    const msg = stored.error || 'The command failed';
+    throw new RuntimeError(msg, /Windows hosts/.test(msg) ? 409 : 502, /Windows hosts/.test(msg) ? 'PLATFORM_UNSUPPORTED' : 'COMMAND_FAILED');
   }
-  // One run at a time per host and command; concurrent viewers share its result.
-  if (hit?.pending) await hit.pending.catch(() => undefined);
-  const again = dataCache.get(key);
-  if (!force && again && !again.pending && Date.now() - again.at < ds.cacheSec * 1000) {
-    return { data: again.value, collectedAt: new Date(again.at).toISOString(), pending: false };
-  }
-  const run = (async () => {
-    const out = await runAs(server, ds.as, template, ds.timeoutSec);
-    if (out.timedOut) throw new RuntimeError('The command timed out', 504, 'TIMEOUT');
-    if (out.exitCode !== 0) throw new RuntimeError((out.stderr || out.stdout).trim().slice(0, 300) || `The command failed (exit ${out.exitCode})`, 502, 'COMMAND_FAILED');
-    let parsed: unknown;
-    try { parsed = parseOutput(ds.parse, out.stdout.slice(0, MAX_OUTPUT)); } catch (e) { throw new RuntimeError((e as Error).message, 502, 'PARSE_FAILED'); }
-    return shapeData(ds, parsed);
-  })();
-  dataCache.set(key, { at: Date.now(), value: undefined, pending: run });
-  try {
-    const value = await run;
-    dataCache.set(key, { at: Date.now(), value });
-    return { data: value, collectedAt: new Date().toISOString(), pending: false };
-  } catch (err) {
-    dataCache.delete(key);
-    throw err;
-  } finally {
-    if (dataCache.size > 500) dataCache.clear();
-  }
+  return { data: stored.data ?? null, collectedAt: new Date(Number(row[1])).toISOString(), pending: false };
+}
+
+/** Ask the poller to collect this host now (when a widget has no data yet, or the person pressed Refresh). Not more than once every 10 s. */
+async function requestPoll(serverId: string, force: boolean): Promise<void> {
+  const now = Date.now();
+  const last = pollRequested.get(serverId) ?? 0;
+  if (now - last < (force ? 2_000 : 10_000)) return;
+  pollRequested.set(serverId, now);
+  await rqlite.execute('UPDATE servers SET poll_requested_at = ? WHERE id = ?', [now, serverId]).catch(() => undefined);
 }
