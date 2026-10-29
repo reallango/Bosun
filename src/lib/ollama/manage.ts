@@ -244,13 +244,15 @@ export async function runOllamaAction(serverId: string, userId: string, action: 
       try { runCmd = recreateRunCommand(parsed as Parameters<typeof recreateRunCommand>[0], image, inst.container, { env: { [v.name]: v.value } }); }
       catch (e) { throw new OllamaManageError(e instanceof Error ? e.message : String(e), 409, 'CANNOT_RECREATE'); }
       // Recreated from the image it already has (no pull), so only this setting changes.
-      return { message: await runQuick(serverId, dockerUpdateCommand(inst.container, image, runCmd, { pull: false }), 'Changing the setting') || 'Done' };
+      await runQuick(serverId, dockerUpdateCommand(inst.container, image, runCmd, { pull: false }), 'Changing the setting');
+      return { message: 'Applied: the container was recreated with the new setting' };
     }
     if (!inst.name) throw new OllamaManageError('The service could not be identified', 409, 'NO_SERVICE');
     if (windows) {
       return { message: await runQuick(serverId, windowsEnvScript(inst.manager === 'nssm' ? 'nssm' : 'windows', inst.name, v.name, v.value), 'Changing the setting') || 'Done' };
     }
-    return { message: await runQuick(serverId, systemdEnvCommand(inst.name, v.name, v.value), 'Changing the setting') || 'Done' };
+    await runQuick(serverId, systemdEnvCommand(inst.name, v.name, v.value), 'Changing the setting');
+    return { message: 'Applied: the service was restarted' };
   }
 
   if (action === 'update') {
