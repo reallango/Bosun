@@ -49,7 +49,10 @@ export async function DELETE(request: NextRequest, { params }: Params) {
   try {
     const key = await findKey(keyId);
     if (!key) return fail('API key not found', 404, 'NOT_FOUND');
-    await rqlite.execute('DELETE FROM api_keys WHERE id = ?', [keyId]);
+    await rqlite.executeBatch([
+      { sql: 'DELETE FROM api_key_groups WHERE api_key_id = ?', params: [keyId] },
+      { sql: 'DELETE FROM api_keys WHERE id = ?', params: [keyId] },
+    ], { transaction: true });
     invalidateApiKeyCache();
     await logAudit({
       userId: auth.userId, action: AuditActions.API_KEY_DELETE, category: 'api_key', status: 'success',

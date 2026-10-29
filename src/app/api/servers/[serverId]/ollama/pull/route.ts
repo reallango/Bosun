@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth, requireRole } from '@/lib/auth/middleware';
+import { requireAuth } from '@/lib/auth/middleware';
+import { requirePermission } from '@/lib/permissions/authorize';
 import { startPull, listPullJobs, cancelPull, assertModelName } from '@/lib/ollama/actions';
 import { requestPoll } from '@/lib/docker/actions';
 import { consumeActionRateLimit } from '@/lib/utils/rate-limiter';
@@ -21,9 +22,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
 export async function POST(request: NextRequest, { params }: { params: Promise<{ serverId: string }> }) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
-  const roleError = requireRole(auth, 'operator');
-  if (roleError) return roleError;
   const { serverId } = await params;
+  const roleError = await requirePermission(auth, 'ollama.models.pull', serverId);
+  if (roleError) return roleError;
   let body: { model?: unknown };
   try { body = await request.json(); } catch { return fail('Invalid JSON body'); }
   const model = typeof body.model === 'string' ? body.model.trim() : body.model;
@@ -43,9 +44,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 export async function DELETE(request: NextRequest, { params }: { params: Promise<{ serverId: string }> }) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
-  const roleError = requireRole(auth, 'operator');
-  if (roleError) return roleError;
   const { serverId } = await params;
+  const roleError = await requirePermission(auth, 'ollama.models.pull', serverId);
+  if (roleError) return roleError;
   const jobId = new URL(request.url).searchParams.get('jobId') || '';
   if (!cancelPull(serverId, jobId)) return fail('No running pull with that id', 404);
   await logAudit({ userId: auth.userId, serverId, action: AuditActions.OLLAMA_PULL, status: 'cancelled', details: JSON.stringify({ jobId }) });

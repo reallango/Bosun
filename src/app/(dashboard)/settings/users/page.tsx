@@ -15,6 +15,8 @@ import { useToast } from '@/components/ui/toast';
 import { ConfirmActionDialog, apiAction } from '@/components/widgets/shared/ConfirmActionDialog';
 import { AdminOnlyNotice, LevelBadge, LevelSelect, When } from '@/components/settings/access-ui';
 import { useAuth } from '@/hooks/useAuth';
+import { GroupPicker } from '@/components/settings/permissions/GroupPicker';
+import type { PermissionGroup } from '@/components/settings/permissions/data';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { readJson } from '@/lib/api/readJson';
 import { hasRole } from '@/lib/auth/levels';
@@ -30,6 +32,7 @@ interface User {
   mfa_method: string;
   last_login: string | null;
   created_at: string | null;
+  group_ids?: string[];
 }
 
 const MFA_LABEL: Record<string, string> = { none: 'Off', totp: 'Authenticator app', email: 'Email code' };
@@ -55,8 +58,19 @@ function StatusPill({ disabled }: { disabled: boolean }) {
 /** Create or edit a user. `user` null = create. */
 function UserDialog({ open, user, onOpenChange, onSaved }: { open: boolean; user: User | null; onOpenChange: (o: boolean) => void; onSaved: () => void }) {
   const [form, setForm] = useState({ username: '', display_name: '', email: '', role: 'viewer', password: '' });
+  const [groupIds, setGroupIds] = useState<string[]>([]);
+  const [groups, setGroups] = useState<PermissionGroup[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Permission groups the user can be put in (loaded when the dialog opens).
+  useEffect(() => {
+    if (!open) return;
+    fetchWithAuth('/api/permission-groups')
+      .then(r => r.json())
+      .then(j => setGroups(j.data?.groups ?? []))
+      .catch(() => setGroups([]));
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -64,6 +78,7 @@ function UserDialog({ open, user, onOpenChange, onSaved }: { open: boolean; user
     setForm(user
       ? { username: user.username, display_name: user.display_name ?? '', email: user.email ?? '', role: user.role, password: '' }
       : { username: '', display_name: '', email: '', role: 'viewer', password: '' });
+    setGroupIds(user?.group_ids ?? []);
   }, [open, user]);
 
   const submit = async (e: React.FormEvent) => {
@@ -75,8 +90,10 @@ function UserDialog({ open, user, onOpenChange, onSaved }: { open: boolean; user
         const body: Record<string, unknown> = { display_name: form.display_name, email: form.email };
         if (form.role !== user.role) body.role = form.role;
         await apiAction(fetchWithAuth, `/api/users/${user.id}`, 'PATCH', body);
+        await apiAction(fetchWithAuth, `/api/users/${user.id}/groups`, 'PUT', { group_ids: groupIds });
       } else {
-        await apiAction(fetchWithAuth, '/api/users', 'POST', form);
+        const created = await apiAction(fetchWithAuth, '/api/users', 'POST', form) as { user?: { id?: string } };
+        if (groupIds.length && created?.user?.id) await apiAction(fetchWithAuth, `/api/users/${created.user.id}/groups`, 'PUT', { group_ids: groupIds });
       }
       onSaved();
       onOpenChange(false);
@@ -116,6 +133,11 @@ function UserDialog({ open, user, onOpenChange, onSaved }: { open: boolean; user
             <div className="space-y-1.5">
               <Label htmlFor="u-role">Access level</Label>
               <LevelSelect id="u-role" value={form.role} onChange={role => setForm({ ...form, role })} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Permission groups</Label>
+              <GroupPicker groups={groups} selected={groupIds} onChange={setGroupIds} />
+              <p className="text-xs text-muted-foreground">Groups add individual permissions on top of the access level, for all servers or only some.</p>
             </div>
             {!user && (
               <div className="space-y-1.5">
@@ -327,6 +349,7 @@ export default function UsersPage() {
                           </div>
                           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                             <LevelBadge role={u.role} />
+                            {!!u.group_ids?.length && <span>+ {u.group_ids.length} group{u.group_ids.length === 1 ? '' : 's'}</span>}
                             <span>MFA: <MfaStatus method={u.mfa_method} /></span>
                             <span>Last login: <When value={u.last_login} empty="never" /></span>
                           </div>
@@ -353,7 +376,10 @@ export default function UsersPage() {
                                 <div className="truncate font-medium">{u.username}{u.id === me?.id && <span className="text-muted-foreground"> (you)</span>}</div>
                                 {(u.display_name || u.email) && <div className="truncate text-xs text-muted-foreground">{[u.display_name, u.email].filter(Boolean).join(' · ')}</div>}
                               </TableCell>
-                              <TableCell><LevelBadge role={u.role} /></TableCell>
+                              <TableCell>
+                                <LevelBadge role={u.role} />
+                                {!!u.group_ids?.length && <span className="ml-1.5 text-xs text-muted-foreground">+ {u.group_ids.length} group{u.group_ids.length === 1 ? '' : 's'}</span>}
+                              </TableCell>
                               <TableCell><StatusPill disabled={u.disabled} /></TableCell>
                               <TableCell><MfaStatus method={u.mfa_method} /></TableCell>
                               <TableCell className="text-muted-foreground"><When value={u.last_login} empty="never" /></TableCell>

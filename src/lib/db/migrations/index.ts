@@ -372,6 +372,74 @@ const V4_ACCESS: string[] = [
     `INSERT OR IGNORE INTO app_config (key, value, description) VALUES ('smtp.enabled', 'false', 'Whether outgoing email is configured')`,
 ];
 
+// ---- Version 5: permission groups ----
+// Additive only (new tables), so a node still running the previous version keeps working
+// against a database that already has them. The users.role / api_keys.role access levels
+// stay: they are the base level, and groups add individual permissions on top.
+const V5_PERMISSIONS: string[] = [
+    `CREATE TABLE IF NOT EXISTS permission_groups (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        description TEXT,
+        created_by TEXT REFERENCES users(id) ON DELETE SET NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`,
+
+    // One permission granted to a group for all servers, one server or a server group.
+    // scope_id is '' for scope_type 'all' (so the UNIQUE constraint works).
+    `CREATE TABLE IF NOT EXISTS permission_grants (
+        id TEXT PRIMARY KEY,
+        group_id TEXT NOT NULL REFERENCES permission_groups(id) ON DELETE CASCADE,
+        permission TEXT NOT NULL,
+        scope_type TEXT NOT NULL DEFAULT 'all' CHECK (scope_type IN ('all', 'server', 'server_group')),
+        scope_id TEXT NOT NULL DEFAULT '',
+        UNIQUE (group_id, permission, scope_type, scope_id)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_permission_grants_group ON permission_grants(group_id)`,
+
+    // Optional named sets of servers, for granting to many hosts at once. A server can be in several.
+    `CREATE TABLE IF NOT EXISTS server_groups (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        description TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`,
+    `CREATE TABLE IF NOT EXISTS server_group_members (
+        server_group_id TEXT NOT NULL REFERENCES server_groups(id) ON DELETE CASCADE,
+        server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+        PRIMARY KEY (server_group_id, server_id)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_server_group_members_server ON server_group_members(server_id)`,
+
+    // Who holds which groups.
+    `CREATE TABLE IF NOT EXISTS user_groups (
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        group_id TEXT NOT NULL REFERENCES permission_groups(id) ON DELETE CASCADE,
+        PRIMARY KEY (user_id, group_id)
+    )`,
+    `CREATE TABLE IF NOT EXISTS api_key_groups (
+        api_key_id TEXT NOT NULL REFERENCES api_keys(id) ON DELETE CASCADE,
+        group_id TEXT NOT NULL REFERENCES permission_groups(id) ON DELETE CASCADE,
+        PRIMARY KEY (api_key_id, group_id)
+    )`,
+
+    // Permissions registered by installed widget packages. System and core permissions are
+    // declared in code (lib/permissions/catalog.ts); readers merge the two.
+    `CREATE TABLE IF NOT EXISTS permission_definitions (
+        id TEXT PRIMARY KEY,
+        source TEXT NOT NULL,
+        label TEXT NOT NULL,
+        description TEXT NOT NULL,
+        group_name TEXT NOT NULL,
+        default_level TEXT NOT NULL CHECK (default_level IN ('operator', 'admin')),
+        risk TEXT NOT NULL CHECK (risk IN ('low', 'medium', 'high')),
+        scope TEXT NOT NULL CHECK (scope IN ('server', 'global')),
+        implies TEXT NOT NULL DEFAULT '[]',
+        registered_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )`,
+];
+
 export const MIGRATIONS: Migration[] = [
     {
         version: 1,
@@ -385,6 +453,7 @@ export const MIGRATIONS: Migration[] = [
     { version: 2, name: 'wol_and_custom_widgets', statements: V2_WOL_AND_CUSTOM_WIDGETS },
     { version: 3, name: 'wol_hosts', statements: V3_WOL_HOSTS },
     { version: 4, name: 'access', statements: V4_ACCESS },
+    { version: 5, name: 'permissions', statements: V5_PERMISSIONS },
 ];
 
 /** The schema version this build expects. */
@@ -414,6 +483,13 @@ export const CORE_TABLES: string[] = [
     'api_keys',
     'password_resets',
     'mfa_challenges',
+    'permission_groups',
+    'permission_grants',
+    'server_groups',
+    'server_group_members',
+    'user_groups',
+    'api_key_groups',
+    'permission_definitions',
 ];
 
 export class LegacySchemaError extends Error {

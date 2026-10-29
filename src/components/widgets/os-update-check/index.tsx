@@ -8,7 +8,6 @@ import { readJson } from '@/lib/api/readJson';
 import { useWidgetFrame } from '@/components/dashboard/widget-context';
 import { cn } from '@/lib/utils';
 import { useAuth } from '@/hooks/useAuth';
-import { hasRole } from '@/lib/auth/levels';
 
 interface OSUpdateCheckWidgetProps {
   widgetId: string;
@@ -80,9 +79,10 @@ export function OSUpdateCheckWidget({ widgetId, serverId }: OSUpdateCheckWidgetP
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const statusErrors = useRef(0);
   const frame = useWidgetFrame();
-  const { user } = useAuth();
+  const { can } = useAuth();
   // Installing updates and forcing a check are actions (Read + actions).
-  const canAct = hasRole(user?.role, 'operator');
+  const canCheck = can('updates.check', serverId);
+  const canInstall = can('updates.install', serverId);
 
   const checkForUpdates = useCallback(async (force = false) => {
     setLoading(true);
@@ -163,8 +163,8 @@ export function OSUpdateCheckWidget({ widgetId, serverId }: OSUpdateCheckWidgetP
   // Reopening the dashboard during a Windows install: show its progress again.
   const isWindows = data?.os_type === 'windows';
   useEffect(() => {
-    if (isWindows && canAct) pollInstallStatus(true);
-  }, [isWindows, canAct, pollInstallStatus]);
+    if (isWindows && canCheck) pollInstallStatus(true);
+  }, [isWindows, canCheck, pollInstallStatus]);
 
   const handleInstall = async () => {
     setShowConfirm(false);
@@ -205,7 +205,7 @@ export function OSUpdateCheckWidget({ widgetId, serverId }: OSUpdateCheckWidgetP
         <div className="text-sm text-muted-foreground">{loading ? 'Checking…' : 'No data yet'}</div>
         {error && <div role="alert" className="text-xs text-destructive">{error}</div>}
         {installResult && <div className="text-xs">{installResult}</div>}
-        {canAct && (
+        {canCheck && (
           <Button onClick={() => checkForUpdates(true)} disabled={loading} className="w-full max-w-xs">
             {loading ? 'Checking…' : 'Check for updates'}
           </Button>
@@ -248,12 +248,12 @@ export function OSUpdateCheckWidget({ widgetId, serverId }: OSUpdateCheckWidgetP
         </div>
 
         <div className="flex flex-col gap-2 @xl:items-end">
-          {canAct && data.updates_available > 0 && (
+          {canInstall && data.updates_available > 0 && (
             <Button onClick={() => setShowConfirm(true)} disabled={installing} className="w-full @xl:w-auto">
               {installing ? 'Installing…' : 'Install updates'}
             </Button>
           )}
-          {canAct && (
+          {canCheck && (
             <Button onClick={() => checkForUpdates(true)} disabled={loading} variant="outline" className="w-full @xl:w-auto">
               {loading ? 'Checking…' : 'Check for updates'}
             </Button>

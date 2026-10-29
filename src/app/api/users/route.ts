@@ -6,6 +6,7 @@ import { invalidateUserStatus } from '@/lib/auth/user-status';
 import { validateDisplayName, validateEmail, validatePassword, validateRole, validateUsername } from '@/lib/auth/user-rules';
 import { roleLabel } from '@/lib/auth/levels';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
+import { groupIdsByPrincipal } from '@/lib/permissions/groups';
 import { logAudit, AuditActions } from '@/lib/audit/logger';
 import { fail, internalError, ok } from '@/lib/api/response';
 import { USER_COLUMNS, toUserDto } from '@/lib/auth/user-dto';
@@ -16,7 +17,8 @@ export async function GET(request: NextRequest) {
   if (auth instanceof NextResponse) return auth;
   try {
     const r = await rqlite.query(`SELECT ${USER_COLUMNS} FROM users ORDER BY username COLLATE NOCASE`);
-    return ok({ users: rowsToObjects(r).map(toUserDto) });
+    const groups = await groupIdsByPrincipal('user');
+    return ok({ users: rowsToObjects(r).map(row => ({ ...toUserDto(row), group_ids: groups.get(String(row.id)) || [] })) });
   } catch (error) {
     console.error('Users list error:', error);
     return internalError(error);

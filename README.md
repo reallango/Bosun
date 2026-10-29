@@ -314,6 +314,37 @@ Every user account and every API key has one of three access levels:
 | Read + actions | `operator` | Also run widget actions: container start/stop/restart and logs, Ollama pull/delete, OS update install, Wake-on-LAN, restarting and shutting down servers, forced refreshes, dashboard and widget edits. No shells, terminals or arbitrary commands. |
 | Full access | `admin` | Everything: servers, SSH keys, host and container shells, command execution, custom commands, settings, alerts, users and API keys. |
 
+### Permission groups
+
+The level is the base. For finer control, **Settings → Permissions** (admins) manages
+*permission groups*: named sets of individual permissions that are added **on top of** a
+user's or API key's level. They can only add, never take away, so a level still behaves
+exactly as described above when no group is involved.
+
+- **Permissions** are single actions such as `power.restart`, `power.shutdown`,
+  `updates.install`, `docker.containers.control`, `ollama.models.delete` or
+  `commands.run`. Each system widget declares its own, so for the update widget you can
+  allow *check* without *install*, and for Ollama allow *pull* without *delete*. Each one
+  shows its risk (low, medium, high) and whether *Read + actions* already includes it.
+  Installing a widget will register the permissions it declares, so they appear in the
+  editor on their own.
+- **Scope.** A grant applies to all servers, to one server, or to a **server group**.
+  Server groups are optional named sets of servers (a server can be in several); create
+  them on the same page, or skip them and grant per server.
+- **Who holds a group.** Assign groups to a user (Settings → Users) or to an API key
+  (Settings → API Access). A person's permissions are the union of their level and all
+  their groups. Changes apply within about 30 seconds on other cluster nodes, at once on
+  the node where you make them.
+- **Example.** A *Read only* API key in a group that holds *Restart a server* for one machine
+  can read everything and restart just that machine, and nothing else.
+
+The API enforces permissions on its own; the UI only hides controls the user cannot use.
+A denied request returns `403` with `{"error": {"code": "FORBIDDEN", "permission": "power.restart", ...}}`
+so a client (or an AI agent) can see exactly which permission is missing. `GET /api/auth/me`
+lists, for the signed-in user, each permission they hold and the server ids it covers
+(`"*"` = every server). Full access holds every permission, including ones added later.
+Permission groups are included in backups.
+
 **Users** (Settings → Users, admins): create accounts, change their level, disable
 them (signed-in sessions stop within 30 s), or reset their password. The last active
 admin cannot be demoted or disabled. Everyone manages their own profile, password and

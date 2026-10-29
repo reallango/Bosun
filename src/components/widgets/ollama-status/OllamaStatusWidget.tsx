@@ -4,7 +4,6 @@ import { useCallback, useEffect, useState } from 'react';
 import { Download, Trash2, X, Cpu, Loader2 } from 'lucide-react';
 import { useWidgetData } from '@/hooks/useWidgetData';
 import { useAuth } from '@/hooks/useAuth';
-import { hasRole } from '@/lib/auth/levels';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { WidgetLoading } from '@/components/widgets/WidgetLoading';
 import { WidgetError } from '@/components/widgets/WidgetError';
@@ -54,9 +53,10 @@ interface Props {
 
 export function OllamaStatusWidget({ widgetId, serverId }: Props) {
   const { data, isLoading, error, refresh } = useWidgetData(widgetId, 30);
-  const { user } = useAuth();
+  const { can } = useAuth();
   // Pull/cancel/delete models: Read + actions or higher.
-  const canAct = hasRole(user?.role, 'operator');
+  const canPull = can('ollama.models.pull', serverId);
+  const canDelete = can('ollama.models.delete', serverId);
   const [pulls, setPulls] = useState<PullJob[]>([]);
   const [newModel, setNewModel] = useState('');
   const [pullError, setPullError] = useState<string | null>(null);
@@ -136,7 +136,7 @@ export function OllamaStatusWidget({ widgetId, serverId }: Props) {
         })()}
       </div>
 
-      {canAct && ollama.status === 'running' && (
+      {canPull && ollama.status === 'running' && (
         <form className="flex gap-1.5" onSubmit={e => { e.preventDefault(); startPull(); }}>
           <input
             value={newModel}
@@ -160,7 +160,7 @@ export function OllamaStatusWidget({ widgetId, serverId }: Props) {
             <span className="shrink-0 text-gray-500">
               {p.status === 'error' ? <span className="text-red-600">failed</span> : p.percent !== null ? `${p.percent}%` : p.phase}
             </span>
-            {p.status === 'running' && canAct && (
+            {p.status === 'running' && canPull && (
               <button onClick={() => cancel(p)} aria-label={`Cancel pull of ${p.model}`} className="text-gray-400 hover:text-red-600"><X className="size-3" /></button>
             )}
           </div>
@@ -190,7 +190,7 @@ export function OllamaStatusWidget({ widgetId, serverId }: Props) {
                 {[formatBytes(m.size), m.parameter_size, m.quantization_level, m.family].filter(Boolean).join(' · ')}
               </div>
             </div>
-            {canAct && (
+            {canDelete && (
               <button
                 type="button"
                 onClick={() => setToDelete(m)}

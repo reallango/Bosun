@@ -7,6 +7,8 @@ interface User {
   id: string;
   username: string;
   role: string;
+  /** What the user may do and where: permission id -> '*' (every server) or the server ids it covers. */
+  permissions?: Record<string, '*' | string[]>;
 }
 
 interface AuthContextType {
@@ -14,13 +16,19 @@ interface AuthContextType {
   loading: boolean;
   refresh: () => Promise<void>;
   logout: () => Promise<void>;
+  /** May the user do `permission` (on `serverId`, when the action targets a server)? */
+  can: (permission: string, serverId?: string | null) => boolean;
+  /** May the user do `permission` on at least one server (or system-wide)? For showing a page or a menu. */
+  canAny: (permission: string) => boolean;
 }
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
   refresh: async () => {},
-  logout: async () => {}
+  logout: async () => {},
+  can: () => false,
+  canAny: () => false,
 });
 
 // Helper function that ALWAYS works for redirect
@@ -94,8 +102,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     );
   }
 
+  // The UI only shows controls; the API enforces permissions on its own, so a stale map is never a security issue.
+  const can = (permission: string, serverId?: string | null) => {
+    if (!user) return false;
+    if (user.role === 'admin') return true;   // Full access holds every permission
+    const where = user.permissions?.[permission];
+    if (!where) return false;
+    if (where === '*') return true;
+    return !!serverId && where.includes(serverId);
+  };
+  const canAny = (permission: string) => {
+    if (!user) return false;
+    if (user.role === 'admin') return true;
+    const where = user.permissions?.[permission];
+    return !!where && (where === '*' || where.length > 0);
+  };
+
   return (
-    <AuthContext.Provider value={{ user, loading, refresh, logout }}>
+    <AuthContext.Provider value={{ user, loading, refresh, logout, can, canAny }}>
       {children}
     </AuthContext.Provider>
   );

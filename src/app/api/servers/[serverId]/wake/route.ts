@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import net from 'net';
 import { requireAuth, requireRole } from '@/lib/auth/middleware';
+import { requirePermission } from '@/lib/permissions/authorize';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { setConfig } from '@/lib/db/migrations';
 import { logAudit, AuditActions } from '@/lib/audit/logger';
@@ -65,8 +66,6 @@ async function macsFor(server: any, override: unknown): Promise<string[]> {
 export async function POST(request: NextRequest, { params }: { params: Promise<{ serverId: string }> }) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
-  const roleError = requireRole(auth, 'operator');
-  if (roleError) return roleError;
   const { serverId } = await params;
 
   try {
@@ -75,6 +74,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const server = rowsToObjects(srv)[0] as any;
     const body = await request.json().catch(() => ({}));
     const action = String(body?.action || 'wake');
+    // Waking needs the power.wake permission for this server; installing the wakeonlan
+    // utility on the sending host stays a Full access action (checked below).
+    if (action !== 'install') {
+      const denied = await requirePermission(auth, 'power.wake', serverId);
+      if (denied) return denied;
+    }
 
     const limit = consumeActionRateLimit(auth.userId);
     if (!limit.allowed) return NextResponse.json({ error: { message: 'Too many actions, slow down', code: 'RATE_LIMITED' } }, { status: 429 });

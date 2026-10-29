@@ -17,7 +17,6 @@ import { DeleteConfirmDialog } from '@/components/dialogs/DeleteConfirmDialog';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { notifyDashboardsChanged } from '@/lib/dashboards/events';
 import { useAuth } from '@/hooks/useAuth';
-import { hasRole } from '@/lib/auth/levels';
 
 interface DashboardViewProps {
   dashboardId: string;
@@ -38,9 +37,9 @@ export function DashboardView({ dashboardId, name, type, serverId, serverName, o
   const [deleting, setDeleting] = useState(false);
   const router = useRouter();
   const { toast } = useToast();
-  const { user } = useAuth();
+  const { can } = useAuth();
   // Adding widgets and editing the layout: Read + actions or higher.
-  const canEdit = hasRole(user?.role, 'operator');
+  const canEdit = can('dashboards.edit');
 
   useEffect(() => {
     if (!isLoading) onDashboardLoaded?.(dashboard);

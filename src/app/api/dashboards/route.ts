@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
-import { requireAuth, requireRole } from '@/lib/auth/middleware';
+import { requireAuth } from '@/lib/auth/middleware';
+import { requirePermission } from '@/lib/permissions/authorize';
 import crypto from 'crypto';
 import { DASHBOARD_NAME_MAX } from '@/lib/dashboards/events';
 
@@ -24,7 +25,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
-  const roleError = requireRole(auth, 'operator');
+  const roleError = await requirePermission(auth, 'dashboards.edit');
   if (roleError) return roleError;
   try {
     const body = await request.json();
@@ -48,7 +49,7 @@ export async function POST(request: NextRequest) {
 export async function PATCH(request: NextRequest) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
-  const roleError = requireRole(auth, 'operator');
+  const roleError = await requirePermission(auth, 'dashboards.edit');
   if (roleError) return roleError;
   try {
     const { order } = await request.json();

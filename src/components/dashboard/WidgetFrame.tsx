@@ -121,9 +121,9 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName,
   const [refreshing, setRefreshing] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const { user } = useAuth();
-  // Settings and removal edit the dashboard: Read + actions or higher.
-  const canEdit = hasRole(user?.role, 'operator');
+  const { can } = useAuth();
+  // Settings and removal edit the dashboard.
+  const canEdit = can('dashboards.edit');
 
   // Refresh handlers registered by the widget inside (via useWidgetData).
   const handlers = useRef(new Set<RefreshHandler>());

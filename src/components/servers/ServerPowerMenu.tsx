@@ -45,11 +45,14 @@ const COPY: Record<PowerAction, { title: (n: string) => string; description: (n:
  */
 export function ServerPowerMenu({ serverId, serverName, className }: ServerPowerMenuProps) {
   const { toast } = useToast();
-  const { user } = useAuth();
+  const { can } = useAuth();
   const { wake, waking, installDialog } = useWakeServer(serverId, serverName);
   const [pending, setPending] = useState<PowerAction | null>(null);
-  const canAct = user?.role === 'admin' || user?.role === 'operator';
-  if (!canAct) return null;
+  // Each item needs its own permission for this server; with none of them there is no menu.
+  const canWake = can('power.wake', serverId);
+  const canRestart = can('power.restart', serverId);
+  const canShutdown = can('power.shutdown', serverId);
+  if (!canWake && !canRestart && !canShutdown) return null;
 
   const name = serverName || 'server';
   const copy = pending ? COPY[pending] : null;
@@ -63,19 +66,25 @@ export function ServerPowerMenu({ serverId, serverName, className }: ServerPower
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent>
-          <DropdownMenuItem onSelect={() => { void wake(); }}>
-            <Zap />
-            Wake
-          </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => setPending('restart')}>
-            <RotateCw />
-            Restart
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem variant="destructive" onSelect={() => setPending('shutdown')}>
-            <Power />
-            Shut down
-          </DropdownMenuItem>
+          {canWake && (
+            <DropdownMenuItem onSelect={() => { void wake(); }}>
+              <Zap />
+              Wake
+            </DropdownMenuItem>
+          )}
+          {canRestart && (
+            <DropdownMenuItem onSelect={() => setPending('restart')}>
+              <RotateCw />
+              Restart
+            </DropdownMenuItem>
+          )}
+          {canShutdown && (canWake || canRestart) && <DropdownMenuSeparator />}
+          {canShutdown && (
+            <DropdownMenuItem variant="destructive" onSelect={() => setPending('shutdown')}>
+              <Power />
+              Shut down
+            </DropdownMenuItem>
+          )}
         </DropdownMenuContent>
       </DropdownMenu>
 

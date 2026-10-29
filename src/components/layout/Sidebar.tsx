@@ -12,6 +12,7 @@ import {
   House,
   KeyRound,
   KeySquare,
+  ShieldCheck,
   LayoutDashboard,
   LineChart,
   Network,
@@ -35,7 +36,6 @@ import { readJson } from '@/lib/api/readJson';
 import { ensureArray } from '@/lib/api/ensureArray';
 import { useShell } from './ShellContext';
 import { useAuth } from '@/hooks/useAuth';
-import { hasRole } from '@/lib/auth/levels';
 import { DASHBOARDS_CHANGED, notifyDashboardsChanged } from '@/lib/dashboards/events';
 import { DashboardNameDialog } from '@/components/dashboard/DashboardNameDialog';
 import { EditableDashboardRow } from './EditableDashboardRow';
@@ -73,6 +73,7 @@ const SETTINGS_NAV: NavItem[] = [
   { href: '/settings/servers', label: 'Servers', icon: ServerIcon },
   { href: '/settings/ssh-keys', label: 'SSH Keys', icon: KeyRound },
   { href: '/settings/users', label: 'Users', icon: Users },
+  { href: '/settings/permissions', label: 'Permissions', icon: ShieldCheck },
   { href: '/settings/api-access', label: 'API Access', icon: KeySquare },
   { href: '/settings/cluster', label: 'Cluster', icon: Network },
   { href: '/settings/database', label: 'Database', icon: Database },
@@ -178,8 +179,8 @@ function SidebarNav({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?
   const pathname = usePathname() || '/';
   const router = useRouter();
   const { servers, dashboards, setDashboards } = useNavData();
-  const { user } = useAuth();
-  const canEdit = hasRole(user?.role, 'operator');
+  const { can } = useAuth();
+  const canEdit = can('dashboards.edit');
   const [editing, setEditing] = useState(false);
   const [creating, setCreating] = useState(false);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
