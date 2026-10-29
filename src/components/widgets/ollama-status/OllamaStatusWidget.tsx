@@ -8,6 +8,7 @@ import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { WidgetLoading } from '@/components/widgets/WidgetLoading';
 import { WidgetError } from '@/components/widgets/WidgetError';
 import { ConfirmActionDialog, apiAction } from '@/components/widgets/shared/ConfirmActionDialog';
+import { OllamaServicePanel } from './OllamaServicePanel';
 
 interface Model {
   name: string;
@@ -135,6 +136,8 @@ export function OllamaStatusWidget({ widgetId, serverId }: Props) {
           );
         })()}
       </div>
+
+      <OllamaServicePanel serverId={serverId} onChanged={refresh} />
 
       {canPull && ollama.status === 'running' && (
         <form className="flex gap-1.5" onSubmit={e => { e.preventDefault(); startPull(); }}>

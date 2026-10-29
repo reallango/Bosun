@@ -13,6 +13,7 @@
 
 const macs = require('./macs');
 const { metricsSection } = require('./metrics-section');
+const { parseInstall } = require('./ollama-install');
 
 const MARK = '@@BOSUN ';
 
@@ -62,7 +63,25 @@ ollama) m ollama
       curl -s -m 5 http://127.0.0.1:11434/api/tags 2>/dev/null; echo
       curl -s -m 3 http://127.0.0.1:11434/api/ps 2>/dev/null; echo
     else echo DOWN; fi
-  else echo NOCURL; fi ;;
+  else echo NOCURL; fi
+  echo '@@INSTALL'
+  if have docker; then
+    echo DOCKER_AVAILABLE=1
+    D=docker; docker ps >/dev/null 2>&1 || { have sudo && sudo -n docker ps >/dev/null 2>&1 && D='sudo -n docker'; }
+    c=$($D ps -a --format '{{.Names}} {{.Image}}' 2>/dev/null | awk '$2 ~ /(^|\/)ollama\/ollama/ {print $1; exit}')
+    if [ -n "$c" ]; then
+      echo "DOCKER_NAME=$c"
+      echo "DOCKER_STATE=$($D inspect -f '{{.State.Status}}' "$c" 2>/dev/null)"
+      echo "DOCKER_RESTART=$($D inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$c" 2>/dev/null)"
+      echo "DOCKER_IMAGE=$($D inspect -f '{{.Config.Image}}' "$c" 2>/dev/null)"
+    fi
+  else echo DOCKER_AVAILABLE=0; fi
+  have ollama && echo "HOST_BIN=$(command -v ollama)"
+  if have systemctl && systemctl cat ollama.service >/dev/null 2>&1; then
+    echo UNIT=ollama
+    echo "UNIT_ACTIVE=$(systemctl is-active ollama 2>/dev/null)"
+    echo "UNIT_ENABLED=$(systemctl is-enabled ollama 2>/dev/null)"
+  fi ;;
 services) m services
   if have systemctl; then systemctl list-units --type=service --all --no-pager --plain --no-legend 2>/dev/null | head -n 400
   else echo NONE; fi ;;
@@ -263,7 +282,14 @@ function parseDocker(text) {
   return { available: true, containers };
 }
 
-function parseOllama(text) {
+/** The Ollama API answers, then (optionally) the `@@INSTALL` block that says how it is installed. */
+function parseOllama(raw) {
+  const [text, installText] = String(raw || '').split('\n@@INSTALL\n');
+  const o = parseOllamaApi(text);
+  return installText === undefined ? o : { ...o, install: parseInstall(installText, o.status === 'running') };
+}
+
+function parseOllamaApi(text) {
   if (!text || text === 'DOWN' || text === 'NOCURL') return { status: text === 'NOCURL' ? 'unknown' : 'stopped', models: [], running: [] };
   const [v, tags, ps] = text.split('\n');
   const safe = s => { try { return JSON.parse(s); } catch { return null; } };

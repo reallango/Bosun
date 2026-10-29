@@ -60,7 +60,26 @@ foreach ($p in $Probes) {
         Write-Output $v.Content
         Write-Output (Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 http://127.0.0.1:11434/api/tags).Content
         Write-Output (Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 http://127.0.0.1:11434/api/ps).Content
-      } catch { Write-Output 'DOWN' } }
+      } catch { Write-Output 'DOWN' }
+      Write-Output '@@INSTALL'
+      $s = Get-CimInstance Win32_Service | Where-Object { $_.Name -eq 'Ollama' -or $_.Name -like '*ollama*' } | Sort-Object { if ($_.Name -eq 'Ollama') { 0 } else { 1 } } | Select-Object -First 1
+      if ($s) {
+        Write-Output ('SVC_NAME=' + $s.Name)
+        Write-Output ('SVC_STATE=' + $s.State)
+        Write-Output ('SVC_START=' + $s.StartMode)
+        Write-Output ('SVC_DELAYED=' + $s.DelayedAutoStart)
+        $exe = ($s.PathName -replace '^"?([^"]+?)"?(\s.*)?$', '$1')
+        if ($s.PathName -match 'nssm') {
+          Write-Output 'SVC_WRAPPER=nssm'
+          $app = (Get-ItemProperty ('HKLM:\SYSTEM\CurrentControlSet\Services\' + $s.Name + '\Parameters') -ErrorAction SilentlyContinue).Application
+          if ($app) { $exe = $app }
+        }
+        Write-Output ('SVC_EXE=' + $exe)
+      } else {
+        $p = Get-Process -Name ollama -ErrorAction SilentlyContinue | Select-Object -First 1
+        $std = Get-ChildItem 'C:\Users\*\AppData\Local\Programs\Ollama\ollama.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($p -and $p.Path) { Write-Output ('STANDARD_PATH=' + $p.Path) } elseif ($std) { Write-Output ('STANDARD_PATH=' + $std.FullName) }
+      } }
     'services' { M 'services'
       J @(Get-Service | Select-Object -First 400 | ForEach-Object { @{ name = $_.Name; status = [string]$_.Status; display = $_.DisplayName; start = [string]$_.StartType } }) }
     'system' { M 'system'

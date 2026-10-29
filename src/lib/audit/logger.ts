@@ -55,6 +55,7 @@ export const AuditActions = {
   CONTAINER_ACTION: 'docker.container_action',
   OLLAMA_PULL: 'ollama.pull',
   OLLAMA_DELETE: 'ollama.delete',
+  OLLAMA_SERVICE: 'ollama.service',
   USER_CREATE: 'user.create',
   USER_UPDATE: 'user.update',
   USER_DISABLE: 'user.disable',
