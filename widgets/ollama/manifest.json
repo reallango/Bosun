@@ -2,8 +2,8 @@
   "schema": 1,
   "id": "ollama",
   "name": "Ollama Status",
-  "version": "1.0.0",
-  "description": "Models, loaded models and their CPU/GPU memory split; pull and delete models. Installed by default. The view and the pull and delete flows are built into Bosun; this package carries its permissions, size and tracked statistics.",
+  "version": "1.1.0",
+  "description": "Models, loaded models and their CPU/GPU memory split; pull and delete models; shows how Ollama is installed (service, nssm, Docker), updates it, starts and stops it, sets its startup method or restart policy, and installs it. Installed by default. The view and these flows are built into Bosun; this package carries its permissions, size and tracked statistics.",
   "author": "Bosun",
   "permissions": [
     {
@@ -22,6 +22,15 @@
       "group": "Ollama",
       "defaultLevel": "operator",
       "risk": "medium",
+      "scope": "server"
+    },
+    {
+      "id": "ollama.service",
+      "label": "Install, update and control Ollama",
+      "description": "Install Ollama on the host (a Windows service with nssm, a Docker container or a systemd service), update it, start and stop it, change its startup method or restart policy.",
+      "group": "Ollama",
+      "defaultLevel": "admin",
+      "risk": "high",
       "scope": "server"
     },
     {
