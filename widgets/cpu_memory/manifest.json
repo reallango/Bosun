@@ -1,0 +1,57 @@
+{
+  "schema": 1,
+  "id": "cpu_memory",
+  "name": "CPU/Memory",
+  "version": "1.0.0",
+  "description": "CPU and memory usage with load averages, swap and temperature. Installed by default; tracks CPU, load, temperature, memory and swap as history.",
+  "author": "Bosun",
+  "permissions": [
+    {
+      "id": "cpu_memory.view",
+      "label": "See CPU and memory",
+      "description": "See the CPU/Memory widget and the CPU and memory data of a server.",
+      "group": "CPU and memory",
+      "defaultLevel": "viewer",
+      "risk": "low",
+      "scope": "server"
+    }
+  ],
+  "widgets": [
+    {
+      "type": "cpu_memory",
+      "display_name": "CPU/Memory",
+      "description": "CPU and memory usage with load averages",
+      "icon": "cpu",
+      "category": "system",
+      "default_size": { "w": 8, "h": 6 },
+      "min_size": { "w": 4, "h": 4 },
+      "refresh_interval": 5,
+      "supports_linux": true,
+      "supports_windows": true,
+      "spec": {
+        "version": 1,
+        "data": { "source": "snapshot", "section": "cpu_memory", "permission": "cpu_memory.view" },
+        "metrics": [
+          { "name": "cpu.usage", "label": "CPU usage", "unit": "%" },
+          { "name": "cpu.load1", "label": "Load (1 min)" },
+          { "name": "cpu.temp", "label": "CPU temperature", "unit": "°C" },
+          { "name": "mem.used_pct", "label": "Memory used", "unit": "%" },
+          { "name": "mem.used_mb", "label": "Memory used", "unit": "MB" },
+          { "name": "swap.used_mb", "label": "Swap used", "unit": "MB" }
+        ],
+        "view": {
+          "type": "fields",
+          "fields": [
+            { "label": "CPU", "value": "{cpu.usagePercent}", "format": "percent", "bar": "{cpu.usagePercent}" },
+            { "label": "Memory", "value": "{memory.usagePercent}", "format": "percent", "bar": "{memory.usagePercent}" },
+            { "label": "Load (1 / 5 / 15 min)", "value": "{cpu.loadAvg1} / {cpu.loadAvg5} / {cpu.loadAvg15}", "format": "text" },
+            { "label": "RAM used", "value": "{memory.usedMB}", "format": "mb" },
+            { "label": "RAM total", "value": "{memory.totalMB}", "format": "mb" },
+            { "label": "Swap used", "value": "{memory.swapUsedMB}", "format": "mb", "when": { "field": "memory.swapUsedMB", "exists": true } },
+            { "label": "Temperature", "value": "{cpu.temperature}", "format": "temp", "when": { "field": "cpu.temperature", "exists": true } }
+          ]
+        }
+      }
+    }
+  ]
+}

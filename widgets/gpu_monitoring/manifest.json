@@ -1,0 +1,58 @@
+{
+  "schema": 1,
+  "id": "gpu_monitoring",
+  "name": "GPU Monitoring",
+  "version": "1.0.0",
+  "description": "NVIDIA GPU utilisation, memory, temperature and power. Installed by default; tracks each GPU as history.",
+  "author": "Bosun",
+  "permissions": [
+    {
+      "id": "gpu_monitoring.view",
+      "label": "See GPUs",
+      "description": "See the GPU Monitoring widget and the GPU data of a server.",
+      "group": "GPU monitoring",
+      "defaultLevel": "viewer",
+      "risk": "low",
+      "scope": "server"
+    }
+  ],
+  "widgets": [
+    {
+      "type": "gpu_monitoring",
+      "display_name": "GPU Monitoring",
+      "description": "NVIDIA GPU stats (VRAM, utilization, temperature)",
+      "icon": "cpu",
+      "category": "system",
+      "default_size": { "w": 8, "h": 6 },
+      "min_size": { "w": 6, "h": 4 },
+      "refresh_interval": 10,
+      "supports_linux": true,
+      "supports_windows": true,
+      "spec": {
+        "version": 1,
+        "data": { "source": "snapshot", "section": "gpus", "permission": "gpu_monitoring.view" },
+        "metrics": [
+          { "name": "gpu*.util", "label": "GPU utilisation", "unit": "%" },
+          { "name": "gpu*.vram_mb", "label": "VRAM used", "unit": "MB" },
+          { "name": "gpu*.temp", "label": "GPU temperature", "unit": "°C" },
+          { "name": "gpu*.power_w", "label": "GPU power", "unit": "W" }
+        ],
+        "view": {
+          "type": "list",
+          "empty": "No GPUs detected on this host",
+          "row": {
+            "title": "#{index} {name}",
+            "fields": [
+              { "label": "Utilisation", "value": "{utilization_percent}", "format": "percent", "bar": "{utilization_percent}" },
+              { "label": "VRAM used", "value": "{vram_used_mb}", "format": "mb", "bar": "{vram_percent}" },
+              { "label": "VRAM total", "value": "{vram_total_mb}", "format": "mb" },
+              { "label": "Temperature", "value": "{temperature_c}", "format": "temp" },
+              { "label": "Power (W)", "value": "{power_watts}", "format": "text" }
+            ],
+            "actions": []
+          }
+        }
+      }
+    }
+  ]
+}

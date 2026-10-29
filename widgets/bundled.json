@@ -1,1 +1,1 @@
-["docker", "disk_usage", "system_services", "network", "os_info"]
+["docker", "disk_usage", "system_services", "network", "os_info", "cpu_memory", "gpu_monitoring", "server_summary"]
