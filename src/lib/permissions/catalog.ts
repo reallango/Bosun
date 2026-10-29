@@ -65,20 +65,14 @@ export const CATALOG: readonly PermissionDef[] = [
     implies: ['updates.check'],
     description: 'Install pending operating-system updates on the host.' },
 
-  // ---- Docker (widget) ---------------------------------------------------
-  { id: 'docker.logs', label: 'View container logs', group: 'Docker', source: 'widget:docker_containers', defaultLevel: 'operator', risk: 'low', scope: 'server',
-    description: 'Read the recent log output of a container.' },
-  { id: 'docker.containers.control', label: 'Start, stop and restart containers', group: 'Docker', source: 'widget:docker_containers', defaultLevel: 'operator', risk: 'medium', scope: 'server',
-    description: 'Change the running state of containers on the host.' },
+  // The Docker permissions (docker.view, docker.logs, docker.containers.control, docker.shell) are provided
+  // by the bundled "docker" widget package; see widgets/docker.
 
   // ---- Ollama (widget) ---------------------------------------------------
   { id: 'ollama.models.pull', label: 'Pull Ollama models', group: 'Ollama', source: 'widget:ollama_status', defaultLevel: 'operator', risk: 'medium', scope: 'server',
     description: 'Download models onto the host (and cancel a download).' },
   { id: 'ollama.models.delete', label: 'Delete Ollama models', group: 'Ollama', source: 'widget:ollama_status', defaultLevel: 'operator', risk: 'medium', scope: 'server',
     description: 'Remove downloaded models from the host.' },
-
-  { id: 'docker.shell', label: 'Open a shell in a container (API)', group: 'Docker', source: 'widget:docker_containers', defaultLevel: 'admin', risk: 'high', scope: 'server',
-    description: 'Open an interactive shell inside a container through the API, and nothing else on the host. Containers that would give access to the host (privileged, Docker socket, host mounts) are refused. API keys only; the web terminal still asks for your own login.' },
 
   // ---- Shell (API) -------------------------------------------------------
   { id: 'shell.user', label: 'Terminal and commands as the non-admin account (API)', group: 'Shell', source: 'core', defaultLevel: 'admin', risk: 'high', scope: 'server',

@@ -39,11 +39,11 @@ describe('validateManifest', () => {
 
   it('refuses to take over system packages, widget types and built-in permissions', () => {
     const { types, ids } = reservedPackageNames();
-    expect(ids).toContain('docker_containers');
-    expect(validateManifest({ ...good(), id: 'docker_containers' }, { reservedIds: ids, reservedTypes: types }).ok).toBe(false);
+    expect(ids).toContain('server_summary');
+    expect(validateManifest({ ...good(), id: 'server_summary' }, { reservedIds: ids, reservedTypes: types }).ok).toBe(false);
     const m: any = good(); m.widgets[0].type = 'os_info';
     expect(validateManifest(m, { reservedIds: ids, reservedTypes: types }).ok).toBe(false);
-    const p: any = good(); p.permissions[0].id = 'docker.logs';
+    const p: any = good(); p.permissions[0].id = 'updates.check';
     expect(validateManifest(p).ok).toBe(false);
     const q: any = good(); q.permissions[0].id = 'other_pkg.run';
     expect(validateManifest(q).ok).toBe(false);
@@ -121,9 +121,9 @@ describe('system packages', () => {
   it('lists every compiled widget plus Ollama Status at 0.0.1', () => {
     const all = systemPackages();
     const ids = all.map(p => p.id);
-    for (const id of ['server_summary', 'docker_containers', 'ollama_status', 'os_update_check', 'custom_command']) expect(ids).toContain(id);
+    for (const id of ['server_summary', 'ollama_status', 'os_update_check', 'custom_command']) expect(ids).toContain(id);
     expect(all.every(p => p.version === '0.0.1')).toBe(true);
-    expect(all.find(p => p.id === 'docker_containers')?.permissions).toContain('docker.logs');
+    expect(all.find(p => p.id === 'ollama_status')?.permissions).toContain('ollama.models.pull');
   });
 });
 
@@ -137,7 +137,7 @@ describe('packages shipped in the repository', () => {
   const dirs = fs.existsSync(root) ? fs.readdirSync(root, { withFileTypes: true }).filter(d => d.isDirectory() && !d.name.startsWith('_')) : [];
 
   it('has at least the Docker package', () => {
-    expect(dirs.map(d => d.name)).toContain('docker_package');
+    expect(dirs.map(d => d.name)).toContain('docker');
   });
 
   for (const d of dirs) {
@@ -154,14 +154,14 @@ describe('packages shipped in the repository', () => {
   }
 
   it('the Docker package offers what the built-in Docker widget does', () => {
-    const raw = JSON.parse(fs.readFileSync(path.join(root, 'docker_package', 'manifest.json'), 'utf8'));
+    const raw = JSON.parse(fs.readFileSync(path.join(root, 'docker', 'manifest.json'), 'utf8'));
     const r = validateManifest(raw);
     if (!r.ok) throw new Error(r.error);
     const spec = r.value.widgets[0].spec!;
     expect(spec.actions.map(a => a.id).sort()).toEqual(['logs', 'restart', 'shell', 'start', 'stop']);
     // The shell button opens the web terminal in the container; it runs no command.
     const shell = spec.actions.find(a => a.id === 'shell')!;
-    expect(shell).toMatchObject({ kind: 'terminal', terminal: { container: 'name' }, permission: 'docker_package.shell', command: '' });
+    expect(shell).toMatchObject({ kind: 'terminal', terminal: { container: 'name' }, permission: 'docker.shell', command: '' });
     expect(spec.view.row?.actions).toEqual(['logs', 'shell', 'restart', 'stop', 'start']);
     expect(spec.view.filter?.fields).toEqual(['name', 'image']);
     expect(spec.view.toggles?.[0].key).toBe('stopped');

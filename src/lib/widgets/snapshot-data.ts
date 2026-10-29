@@ -17,7 +17,6 @@ export const WIDGET_SECTIONS: Record<string, string[]> = {
   system_services: ['services'],
   gpu_monitoring: ['gpus'],
   ollama_status: ['ollama'],
-  docker_containers: ['docker'],
   os_update_check: ['updates'],
   metrics_chart: [],
 };
@@ -97,8 +96,6 @@ export function widgetDataFromSnapshots(type: string, s: Sections, server: Serve
       return d('gpus') ?? null;
     case 'ollama_status':
       return d('ollama') ?? null;
-    case 'docker_containers':
-      return d('docker') ?? null;
     case 'os_update_check':
       return d('updates') ?? null;
     case 'metrics_chart':

@@ -11,7 +11,6 @@ import { SystemServicesWidget } from '@/components/widgets/system-services';
 import { ServerSummaryWidget } from '@/components/widgets/server-summary';
 import { GPUMonitoringWidget } from '@/components/widgets/gpu-monitoring';
 import { MetricsChartWidget } from '@/components/widgets/metrics-chart';
-import { DockerContainersWidget } from '@/components/widgets/docker-containers';
 import { CustomCommandWidget } from '@/components/widgets/custom-command';
 import { OSUpdateCheckWidget } from '@/components/widgets/os-update-check';
 import { WidgetErrorBoundary } from '@/components/widgets/WidgetErrorBoundary';
@@ -89,8 +88,6 @@ function WidgetContent({ widgetId, widgetType, serverId, serverName }: { widgetI
       return <GPUMonitoringWidget widgetId={widgetId} serverId={serverId} />;
     case 'ssh_terminal':
       return <SSHTerminalWidget widgetId={widgetId} serverId={serverId} />;
-    case 'docker_containers':
-      return <DockerContainersWidget widgetId={widgetId} serverId={serverId} />;
     case 'custom_command':
       return <CustomCommandWidget widgetId={widgetId} serverId={serverId} />;
     case 'metrics_chart':
