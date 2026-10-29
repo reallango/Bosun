@@ -9,9 +9,6 @@ export type Sections = Record<string, { data: any; collectedAt: number }>;
 
 /** Snapshot sections each widget type needs. */
 export const WIDGET_SECTIONS: Record<string, string[]> = {
-  server_summary: ['cpu_memory', 'disks', 'gpus', 'system', 'net_rates'],
-  cpu_memory: ['cpu_memory'],
-  gpu_monitoring: ['gpus'],
   ollama_status: ['ollama'],
   os_update_check: ['updates'],
   metrics_chart: [],
@@ -42,34 +39,6 @@ function formatUptime(sec: number | null | undefined): string {
 export function widgetDataFromSnapshots(type: string, s: Sections, server: ServerRow, cfg: Record<string, any> = {}): any {
   const d = (name: string) => s[name]?.data;
   switch (type) {
-    case 'server_summary': {
-      const cm = d('cpu_memory');
-      const disks = d('disks') as any[] | undefined;
-      const root = disks?.find(x => x.mountPoint === '/' || /^C:/i.test(x.mountPoint));
-      const gpus = d('gpus') as any[] | undefined;
-      return {
-        is_online: !!server.is_online,
-        name: server.name,
-        hostname: server.hostname,
-        platform: server.platform || 'linux',
-        os_type: server.os_type,
-        os_version: server.os_version,
-        os_pretty: d('system')?.prettyName ?? null,
-        last_seen: server.last_seen ?? null,
-        last_error: server.last_error ?? null,
-        cpu_percent: cm?.cpu?.usagePercent ?? null,
-        mem_percent: cm?.memory?.usagePercent ?? null,
-        disk_percent: root?.usagePercent ?? null,
-        uptime_seconds: cm?.uptimeSeconds ?? null,
-        gpu_percent: gpus?.length ? Math.max(...gpus.map(g => g.utilization_percent || 0)) : null,
-        net_rx_bps: d('net_rates')?.rxBps ?? null,
-        net_tx_bps: d('net_rates')?.txBps ?? null,
-      };
-    }
-    case 'cpu_memory':
-      return d('cpu_memory') ?? null;
-    case 'gpu_monitoring':
-      return d('gpus') ?? null;
     case 'ollama_status':
       return d('ollama') ?? null;
     case 'os_update_check':

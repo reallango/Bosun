@@ -3,9 +3,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import dynamic from 'next/dynamic';
 import { EllipsisVertical, GripVertical, RefreshCw, Settings2, Trash2 } from 'lucide-react';
-import { CPUMemoryWidget } from '@/components/widgets/cpu-memory';
-import { ServerSummaryWidget } from '@/components/widgets/server-summary';
-import { GPUMonitoringWidget } from '@/components/widgets/gpu-monitoring';
 import { MetricsChartWidget } from '@/components/widgets/metrics-chart';
 import { CustomCommandWidget } from '@/components/widgets/custom-command';
 import { OSUpdateCheckWidget } from '@/components/widgets/os-update-check';
@@ -64,13 +61,6 @@ function SSHTerminalGate({ widgetId, serverId }: { widgetId: string; serverId: s
 
 function WidgetContent({ widgetId, widgetType, serverId, serverName }: { widgetId: string; widgetType: string; serverId: string; serverName?: string }) {
   switch (widgetType) {
-    case 'cpu_memory':
-    case 'cpu-memory':
-      return <CPUMemoryWidget widgetId={widgetId} />;
-    case 'server_summary':
-      return <ServerSummaryWidget widgetId={widgetId} serverId={serverId} serverName={serverName} />;
-    case 'gpu_monitoring':
-      return <GPUMonitoringWidget widgetId={widgetId} serverId={serverId} />;
     case 'ssh_terminal':
       return <SSHTerminalWidget widgetId={widgetId} serverId={serverId} />;
     case 'custom_command':

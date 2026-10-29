@@ -175,12 +175,14 @@ function parseGpu(text) {
   return text.split('\n').map(l => l.split(',').map(s => s.trim())).filter(p => p.length >= 7 && /^\d+$/.test(p[0]))
     .map(p => {
       const n = v => (v === undefined || /N\/A|Not Supported|\[/.test(v) ? null : num(v, null));
-      return {
+      const g = {
         index: num(p[0]), name: p[1],
         vram_total_mb: n(p[2]) ?? 0, vram_used_mb: n(p[3]) ?? 0,
         utilization_percent: n(p[4]) ?? 0, temperature_c: n(p[5]) ?? 0,
         power_watts: n(p[6]) ?? 0, power_limit_watts: n(p[7]), fan_percent: n(p[8]),
       };
+      g.vram_percent = g.vram_total_mb > 0 ? Math.round((g.vram_used_mb / g.vram_total_mb) * 100) : 0;
+      return g;
     });
 }
 

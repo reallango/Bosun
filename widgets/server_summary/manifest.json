@@ -1,0 +1,53 @@
+{
+  "schema": 1,
+  "id": "server_summary",
+  "name": "Server Summary",
+  "version": "1.0.0",
+  "description": "Compact overview: online status, address, operating system and the main vitals. Installed by default.",
+  "author": "Bosun",
+  "permissions": [
+    {
+      "id": "server_summary.view",
+      "label": "See the server summary",
+      "description": "See the Server Summary widget and the overview of a server.",
+      "group": "Server summary",
+      "defaultLevel": "viewer",
+      "risk": "low",
+      "scope": "server"
+    }
+  ],
+  "widgets": [
+    {
+      "type": "server_summary",
+      "display_name": "Server Summary",
+      "description": "Compact overview showing server name, online status, and basic vitals",
+      "icon": "server",
+      "category": "utility",
+      "default_size": { "w": 6, "h": 4 },
+      "min_size": { "w": 4, "h": 3 },
+      "refresh_interval": 15,
+      "supports_linux": true,
+      "supports_windows": true,
+      "spec": {
+        "version": 1,
+        "data": { "source": "snapshot", "section": "metrics", "also": ["system"], "server": true, "permission": "server_summary.view" },
+        "view": {
+          "type": "fields",
+          "fields": [
+            { "label": "Status", "value": "Online", "format": "text", "when": { "field": "server.is_online", "equals": true } },
+            { "label": "Status", "value": "Offline: {server.last_error}", "format": "text", "when": { "field": "server.is_online", "equals": false } },
+            { "label": "Server", "value": "{server.name} ({server.hostname})", "format": "text" },
+            { "label": "OS", "value": "{system.prettyName}", "format": "text" },
+            { "label": "CPU", "value": "{metrics.cpu.usage}", "format": "percent", "bar": "{metrics.cpu.usage}", "when": { "field": "metrics.cpu.usage", "exists": true } },
+            { "label": "Memory", "value": "{metrics.mem.used_pct}", "format": "percent", "bar": "{metrics.mem.used_pct}", "when": { "field": "metrics.mem.used_pct", "exists": true } },
+            { "label": "Disk", "value": "{metrics.disk.root_used_pct}", "format": "percent", "bar": "{metrics.disk.root_used_pct}", "when": { "field": "metrics.disk.root_used_pct", "exists": true } },
+            { "label": "GPU", "value": "{metrics.gpu0.util}", "format": "percent", "bar": "{metrics.gpu0.util}", "when": { "field": "metrics.gpu0.util", "exists": true } },
+            { "label": "Network in /s", "value": "{metrics.net.rx_bps}", "format": "bytes", "when": { "field": "metrics.net.rx_bps", "exists": true } },
+            { "label": "Network out /s", "value": "{metrics.net.tx_bps}", "format": "bytes", "when": { "field": "metrics.net.tx_bps", "exists": true } },
+            { "label": "Uptime", "value": "{metrics.sys.uptime_s}", "format": "duration", "when": { "field": "metrics.sys.uptime_s", "exists": true } }
+          ]
+        }
+      }
+    }
+  ]
+}

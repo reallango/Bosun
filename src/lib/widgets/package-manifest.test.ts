@@ -39,8 +39,8 @@ describe('validateManifest', () => {
 
   it('refuses to take over system packages, widget types and built-in permissions', () => {
     const { types, ids } = reservedPackageNames();
-    expect(ids).toContain('server_summary');
-    expect(validateManifest({ ...good(), id: 'server_summary' }, { reservedIds: ids, reservedTypes: types }).ok).toBe(false);
+    expect(ids).toContain('ssh_terminal');
+    expect(validateManifest({ ...good(), id: 'ssh_terminal' }, { reservedIds: ids, reservedTypes: types }).ok).toBe(false);
     const m: any = good(); m.widgets[0].type = 'ssh_terminal';
     expect(validateManifest(m, { reservedIds: ids, reservedTypes: types }).ok).toBe(false);
     const p: any = good(); p.permissions[0].id = 'updates.check';
@@ -121,7 +121,7 @@ describe('system packages', () => {
   it('lists every compiled widget plus Ollama Status at 0.0.1', () => {
     const all = systemPackages();
     const ids = all.map(p => p.id);
-    for (const id of ['server_summary', 'ollama_status', 'os_update_check', 'custom_command']) expect(ids).toContain(id);
+    for (const id of ['ssh_terminal', 'ollama_status', 'os_update_check', 'custom_command']) expect(ids).toContain(id);
     expect(all.every(p => p.version === '0.0.1')).toBe(true);
     expect(all.find(p => p.id === 'ollama_status')?.permissions).toContain('ollama.models.pull');
   });
