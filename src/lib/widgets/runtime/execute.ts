@@ -7,7 +7,7 @@
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { runOnServerId } from '@/lib/ssh/connection-pool';
 import { loadShellTarget, assertShellAccountSafe, runOnShellTarget, ShellUnavailableError } from '@/lib/ssh/shell-target';
-import { validateWidgetSpec, type ActionSpec, type DataSpec, type RunAs, type WidgetSpec } from '@/lib/widgets/runtime/spec';
+import { validateWidgetSpec, applyConfigFilters, evalCond, fillTemplate, type ActionSpec, type DataSpec, type RunAs, type WidgetSpec } from '@/lib/widgets/runtime/spec';
 import { commandFor, renderCommand, validateParams } from '@/lib/widgets/runtime/command';
 import { shapeData } from '@/lib/widgets/runtime/data';
 
@@ -119,10 +119,12 @@ export interface RuntimeData {
   data: unknown;
   collectedAt: string | null;
   pending: boolean;
+  /** Set when the host cannot provide this data (for example Docker is not installed): shown instead of rows. */
+  unavailable?: string;
 }
 
 /** A widget's data: the poller's snapshot section, or the output of its command (cached and shared between viewers). */
-export async function loadRuntimeData(serverId: string, loaded: LoadedSpec, force = false): Promise<RuntimeData> {
+export async function loadRuntimeData(serverId: string, loaded: LoadedSpec, force = false, config: Record<string, unknown> = {}): Promise<RuntimeData> {
   const ds: DataSpec = loaded.spec.data;
   if (ds.source === 'snapshot') {
     const r = await rqlite.query('SELECT data, collected_at FROM host_snapshots WHERE server_id = ? AND section = ?', [serverId, ds.section]);
@@ -130,7 +132,9 @@ export async function loadRuntimeData(serverId: string, loaded: LoadedSpec, forc
     if (!row) return { data: null, collectedAt: null, pending: true };
     let parsed: unknown = null;
     try { parsed = JSON.parse(String(row[0])); } catch { parsed = null; }
-    return { data: shapeData(ds, parsed), collectedAt: new Date(Number(row[1])).toISOString(), pending: false };
+    const collectedAt = new Date(Number(row[1])).toISOString();
+    if (ds.unavailable && evalCond(ds.unavailable.when, parsed)) return { data: null, collectedAt, pending: false, unavailable: fillTemplate(ds.unavailable.message, parsed) };
+    return { data: applyConfigFilters(shapeData(ds, parsed), ds.filter, config), collectedAt, pending: false };
   }
 
   // Command-sourced data is collected by the poller (see lib/collect/packages.js) and stored as the host
@@ -145,7 +149,7 @@ export async function loadRuntimeData(serverId: string, loaded: LoadedSpec, forc
     const msg = stored.error || 'The command failed';
     throw new RuntimeError(msg, /Windows hosts/.test(msg) ? 409 : 502, /Windows hosts/.test(msg) ? 'PLATFORM_UNSUPPORTED' : 'COMMAND_FAILED');
   }
-  return { data: stored.data ?? null, collectedAt: new Date(Number(row[1])).toISOString(), pending: false };
+  return { data: applyConfigFilters(stored.data ?? null, ds.filter, config), collectedAt: new Date(Number(row[1])).toISOString(), pending: false };
 }
 
 /** Ask the poller to collect this host now (when a widget has no data yet, or the person pressed Refresh). Not more than once every 10 s. */

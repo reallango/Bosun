@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { validateWidgetSpec, evalCond, fillTemplate, publicSpec, placeholders, type WidgetSpec } from './spec';
+import { validateWidgetSpec, evalCond, fillTemplate, publicSpec, placeholders, applyConfigFilters, type WidgetSpec } from './spec';
 import { quoteSh, quotePs, validateParams, renderCommand, commandFor, ParamError } from './command';
 import { parseOutput, shapeData, applyMap } from './data';
 import { validateManifest } from '@/lib/widgets/package-manifest';
@@ -260,5 +260,33 @@ describe('terminal actions', () => {
     const pub = publicSpec(r.value);
     expect(pub.actions.find(a => a.id === 'shell')).toMatchObject({ kind: 'terminal', terminal: { container: 'name' } });
     expect(JSON.stringify(pub)).not.toMatch(/"command":|"as":/);
+  });
+});
+
+describe('data.filter and data.unavailable', () => {
+  const snap = (extra: object) => ({
+    version: 1, view: { type: 'list', row: { title: '{name}', actions: [] } },
+    data: { source: 'snapshot', section: 'services', permission: 'dk.view', ...extra },
+  });
+
+  it('validates the settings filter and the unavailable notice', () => {
+    const ok = validateWidgetSpec(snap({
+      filter: [{ field: 'status', config: 'filter', all: 'all', default: 'running' }],
+      unavailable: { when: { field: 'available', equals: false }, message: 'Not available: {error}' },
+    }), PERMS);
+    expect(ok.ok).toBe(true);
+    expect(validateWidgetSpec(snap({ filter: [{ field: 'status', config: 'Bad Name' }] }), PERMS).ok).toBe(false);
+    expect(validateWidgetSpec(snap({ filter: [] }), PERMS).ok).toBe(false);
+    expect(validateWidgetSpec(snap({ unavailable: { when: { field: 'x', equals: 1 } } }), PERMS).ok).toBe(false);
+  });
+
+  it('keeps the rows that match the widget setting', () => {
+    const rows = [{ name: 'a', status: 'running' }, { name: 'b', status: 'stopped' }, { name: 'c', status: 'failed' }];
+    const f = [{ field: 'status', config: 'filter', all: 'all', default: 'running' }];
+    expect(applyConfigFilters(rows, f, {})).toEqual([rows[0]]);                           // default
+    expect(applyConfigFilters(rows, f, { filter: 'failed' })).toEqual([rows[2]]);
+    expect(applyConfigFilters(rows, f, { filter: 'all' })).toEqual(rows);
+    expect(applyConfigFilters({ not: 'rows' }, f, {})).toEqual({ not: 'rows' });
+    expect(applyConfigFilters(rows, undefined, {})).toBe(rows);
   });
 });
