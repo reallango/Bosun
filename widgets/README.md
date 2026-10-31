@@ -81,7 +81,7 @@ Each action is also an API endpoint, `POST /api/servers/:serverId/widget-actions
 ## Packages installed by default
 
 `bundled.json` lists the package ids that every Bosun image installs on start (Docker Containers, Disk Usage,
-System Services, Network, OS Info, CPU/Memory, GPU Monitoring, Server Summary, Metrics History, Ollama Status,
+System Services, Network, OS Info, CPU/Memory, GPU Monitoring, Server Summary, Metrics History,
 OS Update Check and Custom Command). They are ordinary packages: an admin can remove them (a removed one is not
 brought back at the next start, only by installing it again) and upgrade them from GitHub. A newer bundled
 version replaces an older one that came from the image; a package the admin installed from GitHub or a zip is

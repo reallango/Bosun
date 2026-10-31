@@ -36,7 +36,7 @@ import { readJson } from '@/lib/api/readJson';
 import { ensureArray } from '@/lib/api/ensureArray';
 import { useShell } from './ShellContext';
 import { useAuth } from '@/hooks/useAuth';
-import { DASHBOARDS_CHANGED, notifyDashboardsChanged } from '@/lib/dashboards/events';
+import { DASHBOARDS_CHANGED, SERVERS_CHANGED, notifyDashboardsChanged } from '@/lib/dashboards/events';
 import { DashboardNameDialog } from '@/components/dashboard/DashboardNameDialog';
 import { EditableDashboardRow } from './EditableDashboardRow';
 
@@ -88,6 +88,8 @@ function isActive(pathname: string, href: string, exact?: boolean) {
   return pathname === href || pathname.startsWith(href + '/');
 }
 
+const SERVER_REFRESH_MS = 15_000;
+
 function useNavData() {
   const [servers, setServers] = useState<Server[]>([]);
   const [dashboards, setDashboards] = useState<Dashboard[]>([]);
@@ -100,18 +102,39 @@ function useNavData() {
     return () => window.removeEventListener(DASHBOARDS_CHANGED, bump);
   }, []);
 
+  // Servers: loaded now, again when one is added, edited or removed, and every 15 s while the tab is visible (online status changes).
   useEffect(() => {
     let cancelled = false;
-    fetchWithAuth('/api/servers')
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      .then(r => readJson<any>(r))
-      .then(j => {
-        if (!cancelled) setServers(ensureArray<Server>(j?.data?.servers ?? j?.servers));
-      })
-      .catch(err => {
-        console.error('Failed to load servers', err);
-        if (!cancelled) setServers([]);
-      });
+    let first = true;
+    const load = () => {
+      fetchWithAuth('/api/servers')
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .then(r => readJson<any>(r))
+        .then(j => {
+          if (!cancelled) setServers(ensureArray<Server>(j?.data?.servers ?? j?.servers));
+        })
+        .catch(err => {
+          // A failed refresh keeps the list that is shown; only the first load falls back to empty.
+          if (first) console.error('Failed to load servers', err);
+          if (first && !cancelled) setServers([]);
+        })
+        .finally(() => { first = false; });
+    };
+    load();
+    const timer = window.setInterval(() => { if (document.visibilityState === 'visible') load(); }, SERVER_REFRESH_MS);
+    const onVisible = () => { if (document.visibilityState === 'visible') load(); };
+    window.addEventListener(SERVERS_CHANGED, load);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+      window.removeEventListener(SERVERS_CHANGED, load);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
     fetchWithAuth('/api/dashboards')
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .then(r => readJson<any>(r))

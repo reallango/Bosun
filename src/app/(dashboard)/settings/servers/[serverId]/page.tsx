@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import { notifyServersChanged } from '@/lib/dashboards/events';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { useToast } from '@/components/ui/toast';
 import { DeleteConfirmDialog } from '@/components/dialogs/DeleteConfirmDialog';
@@ -76,14 +77,14 @@ export default function EditServerPage() {
                 body: JSON.stringify(form),
             });
             if (!r.ok) { const d = await r.json(); setError(d.error?.message || 'Failed'); return; }
-            router.push('/settings/servers');
+            notifyServersChanged(); router.push('/settings/servers');
         } catch { setError('Network error'); }
         finally { setSaving(false); }
     };
 
     const del = async () => {
         await fetchWithAuth(`/api/servers/${serverId}`, { method: 'DELETE' });
-        router.push('/settings/servers');
+        notifyServersChanged(); router.push('/settings/servers');
     };
 
     const test = async () => {

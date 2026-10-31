@@ -4,7 +4,6 @@ import os from 'os';
 import path from 'path';
 import { spawnSync } from 'child_process';
 import { buildScriptInvocation, parseStateOutput, parseScriptOutput } from './runtime/script-run';
-import { readBundledPackages } from './bundled';
 
 // These run the package's Linux scripts against fake `curl`, `docker`, `systemctl` and `sudo` programs placed first on the
 // PATH. That needs a real POSIX shell (Linux, as in the Docker build), not Git Bash on Windows.
@@ -27,8 +26,11 @@ const lastLine = (out: string) => out.split('\n').filter(Boolean).at(-1);
 
 describe('the Ollama package', () => {
   it('holds a script file for every script its manifest names, and every file of the scripts folder is used', () => {
-    const pkg = readBundledPackages(path.join(process.cwd(), 'widgets')).packages.find(p => p.manifest.id === 'ollama');
-    expect(pkg).toBeTruthy();
+    // Ollama is an optional package (not in widgets/bundled.json), so it is read from its folder.
+    const folder = path.join(process.cwd(), 'widgets', 'ollama');
+    const files: Record<string, string> = {};
+    for (const f of fs.readdirSync(path.join(folder, 'scripts'))) files[`scripts/${f}`] = fs.readFileSync(path.join(folder, 'scripts', f), 'utf8');
+    const pkg = { manifest: JSON.parse(fs.readFileSync(path.join(folder, 'manifest.json'), 'utf8')) as { widgets: { spec?: { scripts?: Record<string, { linux?: string; windows?: string }> } }[] }, files };
     const named = new Set<string>();
     for (const s of Object.values(pkg!.manifest.widgets[0].spec?.scripts ?? {})) { if (s.linux) named.add(s.linux); if (s.windows) named.add(s.windows); }
     for (const f of Array.from(named)) expect(pkg!.files[f], f).toBeTruthy();
@@ -49,6 +51,27 @@ esac`);
     expect(j.ps.models[0].size_vram).toBe(4000000000);
     fake('curl', 'exit 7');
     expect(JSON.parse(run('status.sh').stdout)).toEqual({ down: true });
+  });
+
+  it.skipIf(!hasSh)('adds what `ollama ps` shows to every loaded model: the share on CPU and GPU, and the short id', () => {
+    const digest = 'a80c4f17acd55265feec403c7aef86be0c25983ab279d83f3bcd3abbcb5b8b72';
+    const ps = JSON.stringify({ models: [
+      { name: 'gpu:1b', model: 'gpu:1b', size: 1000, digest, details: { parameter_size: '1B' }, expires_at: '2030-01-01T00:00:00Z', size_vram: 1000, context_length: 4096 },
+      { name: 'cpu:7b', model: 'cpu:7b', size: 2000, digest, size_vram: 0 },
+      { name: 'split:8b', model: 'split:8b', size: 5000, digest, size_vram: 2600 },
+    ] });
+    fake('curl', `case "$*" in
+*api/version*) echo '{"version":"0.5.1"}' ;;
+*api/tags*) echo '{"models":[]}' ;;
+*api/ps*) echo '${ps}' ;;
+esac`);
+    const m = JSON.parse(run('status.sh').stdout).ps.models;
+    expect(m.map((x: { processor: string }) => x.processor)).toEqual(['100% GPU', '100% CPU', '48%/52% CPU/GPU']);
+    expect(m.every((x: { id: string }) => x.id === 'a80c4f17acd5')).toBe(true);
+    expect(m[0]).toMatchObject({ name: 'gpu:1b', size: 1000, size_vram: 1000, context_length: 4096, expires_at: '2030-01-01T00:00:00Z', details: { parameter_size: '1B' } });
+    // nothing loaded stays as it was
+    fake('curl', `case "$*" in *api/version*) echo '{"version":"0.5.1"}' ;; *api/tags*) echo '{"models":[]}' ;; *api/ps*) echo '{"models":[]}' ;; esac`);
+    expect(JSON.parse(run('status.sh').stdout).ps).toEqual({ models: [] });
   });
 });
 
