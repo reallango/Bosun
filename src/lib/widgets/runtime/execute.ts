@@ -15,6 +15,7 @@ import { typedParams, selectVariant, resolveScriptArgs, type ActionContext } fro
 import { getPackageFile } from '@/lib/widgets/materialize-db';
 import { loadLookups } from '@/lib/widgets/runtime/lookups';
 import { dataSectionFor } from '@/lib/widgets/runtime/store-data';
+import { getPackageSecrets } from '@/lib/widgets/package-secrets';
 
 export class RuntimeError extends Error {
   status: number;
@@ -157,10 +158,15 @@ export async function runScript(serverId: string, loaded: LoadedSpec, scriptId: 
   const text = await getPackageFile(loaded.packageId, file);
   if (text === null) throw new RuntimeError(`The package file "${file}" is missing`, 500, 'SCRIPT_MISSING');
   const values = validateParamValues(script.params, args);
-  const inv = buildScriptInvocation(server.platform, text, values, { jobId: ext.jobId });
-  const out = await runAs(server, script.as, inv.command, script.timeoutSec, inv.stdin, { onData: ext.onData, signal: ext.signal });
-  const stdout = out.stdout.slice(0, MAX_OUTPUT);
-  return { ...out, stdout, stderr: out.stderr.slice(0, 64 * 1024), success: out.exitCode === 0 && !out.timedOut, protocol: parseScriptOutput(stdout) };
+  const secrets = script.secrets?.length ? await getPackageSecrets(loaded.packageId, script.secrets) : {};
+  const inv = buildScriptInvocation(server.platform, text, values, { jobId: ext.jobId, secrets });
+  // Whatever a script prints, a secret it was given never leaves it (live output included).
+  const secretValues = Object.values(secrets).filter(v => v.length >= 4);
+  const scrub = (s: string) => secretValues.reduce((acc, v) => acc.split(v).join('***'), s);
+  const onData = ext.onData && secretValues.length ? (t: string, isErr: boolean) => ext.onData!(scrub(t), isErr) : ext.onData;
+  const out = await runAs(server, script.as, inv.command, script.timeoutSec, inv.stdin, { onData, signal: ext.signal });
+  const stdout = scrub(out.stdout).slice(0, MAX_OUTPUT);
+  return { ...out, stdout, stderr: scrub(out.stderr).slice(0, 64 * 1024), success: out.exitCode === 0 && !out.timedOut, protocol: parseScriptOutput(stdout) };
 }
 
 const datasetCache = new Map<string, { at: number; value: unknown }>();

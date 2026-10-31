@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Download, Lock, Package, RefreshCw, Settings as Cog, Trash2, Upload } from 'lucide-react';
+import { Download, KeyRound, Lock, Package, RefreshCw, Settings as Cog, Trash2, Upload } from 'lucide-react';
 import Header from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
@@ -10,6 +10,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { readJson } from '@/lib/api/readJson';
 import WidgetTypeSettings, { WidgetTypeRow } from '@/components/settings/WidgetTypeSettings';
+import PackageSecrets from '@/components/settings/PackageSecrets';
 
 interface InstalledItem {
   id: string;
@@ -22,6 +23,7 @@ interface InstalledItem {
   sourceRef: string | null;
   widgetTypes: string[];
   permissions: string[];
+  secrets?: { id: string; label: string; description: string }[];
 }
 
 interface AvailableItem {
@@ -41,7 +43,7 @@ interface PackageReview {
   widgets: {
     type: string; name: string;
     commands: { what: string; as: 'service' | 'shell' | 'terminal'; command: string; windowsCommand?: string; permission?: string; confirm: boolean }[];
-    scripts: { id: string; as: 'service' | 'shell'; timeoutSec: number; params: string[]; usedBy: string[]; files: { platform: 'linux' | 'windows'; file: string; sha256?: string; text?: string; truncated?: boolean }[] }[];
+    scripts: { id: string; as: 'service' | 'shell'; timeoutSec: number; params: string[]; secrets?: string[]; usedBy: string[]; files: { platform: 'linux' | 'windows'; file: string; sha256?: string; text?: string; truncated?: boolean }[] }[];
   }[];
   permissions: { id: string; label: string; risk: string; defaultLevel: string }[];
   network: string[];
@@ -98,6 +100,7 @@ export default function WidgetPackagesPage() {
   const [reviewing, setReviewing] = useState<Reviewing | null>(null);
   const [rows, setRows] = useState<Record<string, WidgetTypeRow>>({});
   const [openCog, setOpenCog] = useState<string | null>(null);
+  const [openSecrets, setOpenSecrets] = useState<string | null>(null);
 
   const askInstall = (p: AvailableItem, upgrade: boolean) => {
     if (p.review.commandCount === 0) install(p.id, upgrade);
@@ -304,7 +307,7 @@ export default function WidgetPackagesPage() {
                             <span className={`rounded px-1 uppercase ${s.as === 'service' ? 'bg-amber-500/20 text-amber-700 dark:text-amber-400' : 'bg-muted text-muted-foreground'}`}>
                               {s.as === 'service' ? 'service account' : 'non-admin account'}
                             </span>
-                            <span className="text-muted-foreground">up to {s.timeoutSec} s{s.params.length ? `, takes ${s.params.join(', ')}` : ''}</span>
+                            <span className="text-muted-foreground">up to {s.timeoutSec} s{s.params.length ? `, takes ${s.params.join(', ')}` : ''}{s.secrets?.length ? `, receives the secret ${s.secrets.join(', ')}` : ''}</span>
                           </div>
                           {s.usedBy.length > 0 && <div className="mt-0.5 text-muted-foreground">Used by {s.usedBy.join('; ')}</div>}
                           {s.files.map(f => (
@@ -426,6 +429,10 @@ export default function WidgetPackagesPage() {
                                 {single && rows[single].enabled !== 1 && <span className="ml-2 rounded bg-yellow-500/15 px-1 text-[10px] uppercase text-yellow-700 dark:text-yellow-400">disabled</span>}
                               </span>
                               <div className="flex items-center gap-1">
+                                {(p.secrets?.length ?? 0) > 0 && (
+                                  <Button variant="ghost" size="icon-sm" aria-expanded={openSecrets === p.id} aria-label={`Secrets of ${p.name}`} title="Secrets"
+                                    onClick={() => setOpenSecrets(openSecrets === p.id ? null : p.id)}><KeyRound /></Button>
+                                )}
                                 {single && (
                                   <Button variant="ghost" size="icon-sm" aria-expanded={openCog === single} aria-label={`Settings of ${rows[single].display_name}`} title="Widget settings"
                                     onClick={() => setOpenCog(openCog === single ? null : single)}><Cog /></Button>
@@ -438,6 +445,7 @@ export default function WidgetPackagesPage() {
                                 </Button>
                               </div>
                             </div>
+                            {openSecrets === p.id && <div className="pl-7"><PackageSecrets packageId={p.id} /></div>}
                             {single && openCog === single && <div className="pl-7"><WidgetTypeSettings row={rows[single]} onChanged={loadInstalled} /></div>}
                             {!single && own.length > 1 && (
                               <ul className="mt-2 space-y-1 pl-7">

@@ -34,6 +34,8 @@ export interface ReviewScript {
   as: 'service' | 'shell';
   timeoutSec: number;
   params: string[];
+  /** Secrets of the package the script receives. */
+  secrets?: string[];
   files: ReviewScriptFile[];
   /** What uses it: the widget's data, its state probe, or the actions that name it. */
   usedBy: string[];
@@ -106,7 +108,7 @@ export function reviewPackage(m: PackageManifest, files?: PackageFiles): Package
       commands.push({ what: a.label, actionId: a.id, permission: a.permission, as: a.as, command: a.command, ...(a.windowsCommand ? { windowsCommand: a.windowsCommand } : {}), confirm: !!a.confirm });
     }
     const scripts: ReviewScript[] = Object.entries(spec?.scripts ?? {}).map(([id, s]) => ({
-      id, as: s.as, timeoutSec: s.timeoutSec, params: Object.keys(s.params), files: scriptFiles(s, files), usedBy: usedBy.get(id) ?? [],
+      id, as: s.as, timeoutSec: s.timeoutSec, params: Object.keys(s.params), ...(s.secrets?.length ? { secrets: s.secrets } : {}), files: scriptFiles(s, files), usedBy: usedBy.get(id) ?? [],
     }));
     return { type: w.type, name: String(w.columns.display_name ?? w.type), dataSource: spec ? spec.data.source : null, commands, scripts };
   });

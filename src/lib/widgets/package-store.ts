@@ -225,6 +225,7 @@ export async function removePackage(id: string, removeWidgets: boolean): Promise
   stmts.push({ sql: 'DELETE FROM permission_definitions WHERE source = ?', params: [`package:${id}`] });
   stmts.push({ sql: 'DELETE FROM custom_widgets WHERE package_id = ?', params: [id] });
   stmts.push({ sql: 'DELETE FROM metric_definitions WHERE package_id = ?', params: [id] });
+  stmts.push({ sql: 'DELETE FROM app_config WHERE key LIKE ?', params: [`pkgsecret.${id}.%`] });   // the package's secrets go with it
   stmts.push({ sql: 'DELETE FROM widget_packages WHERE id = ?', params: [id] });
   await rqlite.executeBatch(stmts as { sql: string; params?: never[] }[], { transaction: true });
   await materializeNow(id).catch(() => undefined);   // the row is gone, so this removes the files of this node

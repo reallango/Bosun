@@ -33,6 +33,8 @@ export interface ScriptSpec {
   linux?: string;
   windows?: string;
   params: Record<string, ParamSpec>;
+  /** Secrets of the package (declared in its manifest) this script receives as BOSUN_SECRET_<id> (Linux hosts only). */
+  secrets?: string[];
 }
 
 export type StateFieldType = 'string' | 'number' | 'boolean';
@@ -160,7 +162,15 @@ export function validateScripts(raw: unknown): Validated<Record<string, ScriptSp
         params[name] = v.value;
       }
     }
-    out[id] = { as: s.as, timeoutSec, ...files, params };
+    let secrets: string[] | undefined;
+    if (s.secrets !== undefined) {
+      if (!Array.isArray(s.secrets) || s.secrets.length < 1 || s.secrets.length > 4 || !s.secrets.every(x => typeof x === 'string' && /^[a-z][a-z0-9_]{0,29}$/.test(x))) {
+        return fail(`${where}: "secrets" must list up to 4 secret ids of the package`);
+      }
+      if (files.windows) return fail(`${where}: a script that uses secrets cannot have a Windows file (secrets are not available there)`);
+      secrets = s.secrets as string[];
+    }
+    out[id] = { as: s.as, timeoutSec, ...files, params, ...(secrets ? { secrets } : {}) };
   }
   return { ok: true, value: out };
 }

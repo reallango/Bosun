@@ -51,7 +51,11 @@ export interface PackageManifest {
   permissions: PackagePermission[];
   /** Host names the package's lookups may contact (shown in the install review; anything else is refused). */
   network: string[];
+  /** Secrets an admin sets for the package (a token); only scripts that name them receive them. */
+  secrets: PackageSecret[];
 }
+
+export interface PackageSecret { id: string; label: string; description: string }
 
 /** Text files shipped next to the manifest (relative path -> content). */
 export type PackageFiles = Record<string, string>;
@@ -130,6 +134,19 @@ export function validateManifest(
     }
   }
 
+  const secrets: PackageSecret[] = [];
+  if (m.secrets !== undefined) {
+    if (!Array.isArray(m.secrets) || m.secrets.length > 5) return fail('"secrets" must be a list of at most 5 entries');
+    for (const s of m.secrets as Record<string, unknown>[]) {
+      const sid = typeof s?.id === 'string' ? s.id : '';
+      if (!/^[a-z][a-z0-9_]{0,29}$/.test(sid) || secrets.some(x => x.id === sid)) return fail(`secret ids are lowercase letters, digits and underscores, and unique (got "${sid}")`);
+      const label = str(s.label, 80);
+      const desc = s.description === undefined ? '' : str(s.description, 300);
+      if (!label || desc === null) return fail(`secret "${sid}" needs a label (max 80 characters) and an optional description (max 300)`);
+      secrets.push({ id: sid, label, description: desc ?? '' });
+    }
+  }
+
   const network: string[] = [];
   if (m.network !== undefined) {
     if (!Array.isArray(m.network) || m.network.length > 8) return fail('"network" must list at most 8 host names');
@@ -157,6 +174,9 @@ export function validateManifest(
       const s = validateWidgetSpec(w.spec, permissions.map(p => p.id), id);
       if (!s.ok) return fail(`widget "${type}": ${s.error}`);
       spec = s.value;
+      for (const sc of Object.values(spec.scripts ?? {})) {
+        for (const sid of sc.secrets ?? []) if (!secrets.some(x => x.id === sid)) return fail(`widget "${type}": a script uses the secret "${sid}", which the manifest does not declare under "secrets"`);
+      }
       for (const host of lookupHosts(spec.lookups)) {
         if (!network.includes(host)) return fail(`widget "${type}": a lookup contacts ${host}, which the manifest does not list under "network"`);
       }
@@ -170,7 +190,7 @@ export function validateManifest(
     widgets.push({ type, columns: v.values, spec });
   }
 
-  return { ok: true, value: { schema: MANIFEST_SCHEMA, id, name, version, description, author, widgets, permissions, network } };
+  return { ok: true, value: { schema: MANIFEST_SCHEMA, id, name, version, description, author, widgets, permissions, network, secrets } };
 }
 
 /** Validate the extra files of a package: text only, sane names, bounded size. */
@@ -203,6 +223,7 @@ export function manifestToJson(m: PackageManifest): Record<string, unknown> {
     schema: m.schema, id: m.id, name: m.name, version: m.version, description: m.description, author: m.author,
     permissions: m.permissions,
     ...(m.network.length ? { network: m.network } : {}),
+    ...(m.secrets.length ? { secrets: m.secrets } : {}),
     widgets: m.widgets.map(w => {
       const c = w.columns;
       const j = (s: unknown) => { try { return JSON.parse(String(s)); } catch { return undefined; } };
