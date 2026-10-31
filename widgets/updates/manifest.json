@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "updates",
   "name": "OS Update Check",
-  "version": "2.0.1",
+  "version": "1.0.1",
   "description": "Check for and install operating system updates (apt, dnf and yum on Linux, Windows Update on Windows).",
   "author": "Bosun",
   "permissions": [

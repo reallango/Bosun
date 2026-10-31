@@ -259,7 +259,7 @@ hosts, the live tests in section 8. Do not push to `main` until the owner has te
    by `requires_permission` (`config-guard`, used by the three widget routes and the settings dialog), `stores: "data"` and
    `after: "refresh"` (also for quick actions: the poller looks again at once), the `ago` format, `collectedAt` in the view
    context, script parameters with defaults need no mapping, alert metrics of the chosen server come from what it records.
-   Verified live: upgrade from the previous image keeps every widget and its settings (packages 1.0.0 to 2.0.0); Custom Command
+   Verified live: upgrade from the previous image keeps every widget and its settings (packages 1.0.0 to 1.0.1); Custom Command
    output and the permission rule (an operator may not add or change a command); OS Update Check collected by the poller, check
    now and install as jobs, the list refreshing after an install; Ollama against a real container (detect, pull with progress,
    delete with confirmation, recreate for a setting with ports, volume and restart policy kept, update to a newer release,
@@ -312,7 +312,7 @@ hosts, the live tests in section 8. Do not push to `main` until the owner has te
    widget" card and the `POST /api/widget-definitions` it used, and `docker` from `SNAPSHOT_SECTIONS`. The one real dependency the
    test found was the ad-hoc command API using the Custom Command package's `commands.run`: it now has the core permission
    `exec.service`, and migration 13 copies every grant and deny of `commands.run` to it (nobody gains or loses access);
-   Custom Command is 2.0.1. Docs: `docs/create-your-own-widget.md`, with `docs/examples/hello_host` (a package that is not in
+   Custom Command is 1.0.1 (all bundled packages stay on 1.0.x; Ollama is 1.0.2). Docs: `docs/create-your-own-widget.md`, with `docs/examples/hello_host` (a package that is not in
    `bundled.json`) validated and run by `example-package.test.ts`; `widgets/README.md` no longer describes compiled views.
 10. **Hardening and release**: upgrade test from the previous image (all widget types on a dashboard, then switch the
     image), multi-node test, a Read-only user's view, then ask the owner before any push to `main`.
