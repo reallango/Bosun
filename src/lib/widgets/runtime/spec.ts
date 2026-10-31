@@ -14,6 +14,9 @@
  * Pure (no I/O) so it can be used from the routes, the browser and the tests.
  */
 
+import { cond, fail, FIELD_RE, ID_RE, PARAM_RE, intIn, isObj, scalar, text, validateParam, type Obj, type Validated } from './spec-util';
+export type { Validated } from './spec-util';
+
 export const SPEC_VERSION = 1;
 export const SNAPSHOT_SECTIONS = ['cpu_memory', 'disks', 'gpus', 'system', 'net_rates', 'network', 'services', 'ollama', 'docker', 'updates', 'metrics'] as const;
 export const ICONS = ['play', 'square', 'rotate-cw', 'scroll-text', 'trash-2', 'download', 'upload', 'power', 'refresh-cw', 'terminal-square', 'pause', 'info'] as const;
@@ -24,11 +27,23 @@ export const PARSERS = ['json', 'jsonlines', 'lines', 'text'] as const;
 export type RunAs = 'service' | 'shell';
 
 export interface Cond {
-  field: string;
+  /** The value to test: a dotted path into the row (version 1) or into the context (`state.x`, `config.x`, `lookups.x`, ...). */
+  field?: string;
   equals?: string | number | boolean;
   notEquals?: string | number | boolean;
   in?: (string | number | boolean)[];
   exists?: boolean;
+  /** Version 2: numeric comparisons. */
+  gt?: number;
+  gte?: number;
+  lt?: number;
+  lte?: number;
+  /** Version 2: true when the version at `field` is newer than the version at this path (both x.y.z). */
+  newerThan?: string;
+  /** Version 2: combinations of conditions. */
+  all?: Cond[];
+  any?: Cond[];
+  not?: Cond;
 }
 
 /** Keep the rows whose `field` equals the widget setting `config` (an instance setting from the widget's config_schema); `all` is the setting value that keeps every row. */
@@ -117,40 +132,9 @@ export interface WidgetSpec {
   metrics?: MetricSpec[];
 }
 
-export type Validated<T> = { ok: true; value: T } | { ok: false; error: string };
-const fail = (error: string): { ok: false; error: string } => ({ ok: false, error });
 
-const ID_RE = /^[a-z][a-z0-9_]{0,39}$/;
-const FIELD_RE = /^[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*$/;
-const PARAM_RE = /^[a-z][a-zA-Z0-9_]{0,29}$/;
 const PLACEHOLDER_RE = /\{\{([a-z][a-zA-Z0-9_]*)\}\}/g;
 export const MAX_COMMAND_LENGTH = 2000;
-
-type Obj = Record<string, unknown>;
-const isObj = (v: unknown): v is Obj => !!v && typeof v === 'object' && !Array.isArray(v);
-const text = (v: unknown, max: number): string | null => (typeof v === 'string' && v.trim().length > 0 && v.length <= max ? v : null);
-const scalar = (v: unknown): v is string | number | boolean => typeof v === 'string' || typeof v === 'boolean' || (typeof v === 'number' && Number.isFinite(v));
-
-function intIn(v: unknown, min: number, max: number, def: number): number | null {
-  if (v === undefined) return def;
-  return typeof v === 'number' && Number.isInteger(v) && v >= min && v <= max ? v : null;
-}
-
-function cond(raw: unknown, where: string): Validated<Cond> {
-  if (!isObj(raw)) return fail(`${where}: must be an object like {"field": "state", "equals": "running"}`);
-  if (typeof raw.field !== 'string' || !FIELD_RE.test(raw.field)) return fail(`${where}: "field" must be a field name`);
-  const c: Cond = { field: raw.field };
-  let n = 0;
-  if (raw.equals !== undefined) { if (!scalar(raw.equals)) return fail(`${where}: "equals" must be a string, number or boolean`); c.equals = raw.equals; n++; }
-  if (raw.notEquals !== undefined) { if (!scalar(raw.notEquals)) return fail(`${where}: "notEquals" must be a string, number or boolean`); c.notEquals = raw.notEquals; n++; }
-  if (raw.in !== undefined) {
-    if (!Array.isArray(raw.in) || raw.in.length > 50 || !raw.in.every(scalar)) return fail(`${where}: "in" must be a list of up to 50 values`);
-    c.in = raw.in as (string | number | boolean)[]; n++;
-  }
-  if (raw.exists !== undefined) { if (typeof raw.exists !== 'boolean') return fail(`${where}: "exists" must be true or false`); c.exists = raw.exists; n++; }
-  if (n !== 1) return fail(`${where}: give exactly one of equals, notEquals, in or exists`);
-  return { ok: true, value: c };
-}
 
 function fieldMap(raw: unknown, where: string): Validated<Record<string, string> | undefined> {
   if (raw === undefined) return { ok: true, value: undefined };
@@ -186,52 +170,6 @@ function validateCommand(command: unknown, params: Record<string, ParamSpec> | n
     }
   }
   return { ok: true, value: command };
-}
-
-function validateParam(name: string, raw: unknown, where: string): Validated<ParamSpec> {
-  if (!PARAM_RE.test(name)) return fail(`${where}: parameter names are letters, digits and underscores, starting with a lowercase letter`);
-  if (!isObj(raw)) return fail(`${where}: parameter "${name}" must be an object`);
-  const from = raw.from === undefined ? undefined : (typeof raw.from === 'string' && FIELD_RE.test(raw.from) ? raw.from : null);
-  if (from === null) return fail(`${where}: parameter "${name}": "from" must be a field name`);
-  const description = raw.description === undefined ? undefined : text(raw.description, 200);
-  if (description === null) return fail(`${where}: parameter "${name}": description is too long`);
-  const common = { ...(from ? { from } : {}), ...(description ? { description } : {}) };
-  // A default is only a value the widget's form starts with; callers of the API must still send every parameter.
-  const dflt = raw.default;
-  if (raw.type === 'boolean') {
-    if (dflt !== undefined && typeof dflt !== 'boolean') return fail(`${where}: default of "${name}" must be true or false`);
-    return { ok: true, value: { type: 'boolean', ...common, ...(dflt !== undefined ? { default: dflt } : {}) } };
-  }
-  if (raw.type === 'number') {
-    if (typeof raw.min !== 'number' || typeof raw.max !== 'number' || !Number.isFinite(raw.min) || !Number.isFinite(raw.max) || raw.min > raw.max) {
-      return fail(`${where}: number parameter "${name}" needs numeric "min" and "max"`);
-    }
-    if (dflt !== undefined && (typeof dflt !== 'number' || dflt < raw.min || dflt > raw.max)) return fail(`${where}: default of "${name}" must be a number between min and max`);
-    return { ok: true, value: { type: 'number', min: raw.min, max: raw.max, integer: raw.integer !== false, ...common, ...(dflt !== undefined ? { default: dflt as number } : {}) } };
-  }
-  if (raw.type === 'string') {
-    const maxLength = intIn(raw.maxLength, 1, 200, 200);
-    if (maxLength === null) return fail(`${where}: "maxLength" of "${name}" must be 1-200`);
-    let values: string[] | undefined;
-    if (raw.values !== undefined) {
-      if (!Array.isArray(raw.values) || raw.values.length < 1 || raw.values.length > 100 || !raw.values.every(v => typeof v === 'string' && v.length <= 200)) {
-        return fail(`${where}: "values" of "${name}" must be a list of 1-100 strings`);
-      }
-      values = raw.values as string[];
-    }
-    let pattern: string | undefined;
-    if (raw.pattern !== undefined) {
-      if (typeof raw.pattern !== 'string' || raw.pattern.length > 200 || !raw.pattern.startsWith('^') || !raw.pattern.endsWith('$')) {
-        return fail(`${where}: "pattern" of "${name}" must be a regular expression anchored with ^ and $ (max 200 characters)`);
-      }
-      try { new RegExp(raw.pattern); } catch { return fail(`${where}: "pattern" of "${name}" is not a valid regular expression`); }
-      pattern = raw.pattern;
-    }
-    if (!pattern && !values) return fail(`${where}: string parameter "${name}" needs an anchored "pattern" or a list of "values"`);
-    if (dflt !== undefined && (typeof dflt !== 'string' || dflt.length > maxLength || (pattern && !new RegExp(pattern).test(dflt)) || (values && !values.includes(dflt)))) return fail(`${where}: default of "${name}" does not satisfy its own rules`);
-    return { ok: true, value: { type: 'string', maxLength, ...(pattern ? { pattern } : {}), ...(values ? { values } : {}), ...common, ...(dflt !== undefined ? { default: dflt as string } : {}) } };
-  }
-  return fail(`${where}: parameter "${name}" has an unknown type (use string, number or boolean)`);
 }
 
 const SETTING_RE = /^[a-z][a-zA-Z0-9_]{0,29}$/;
@@ -622,11 +560,32 @@ export function validateWidgetSpec(raw: unknown, ownPermissions: readonly string
 
 /** Does a row satisfy a condition? Used by the view and, for toggles and summaries, the renderer. */
 export function evalCond(c: Cond, row: unknown): boolean {
+  if (c.all) return c.all.every(x => evalCond(x, row));
+  if (c.any) return c.any.some(x => evalCond(x, row));
+  if (c.not) return !evalCond(c.not, row);
+  if (c.field === undefined) return false;
   const v = getPath(row, c.field);
+  const num = Number(v);
+  const isNum = v !== undefined && v !== null && v !== '' && Number.isFinite(num);
+  if (c.gt !== undefined) return isNum && num > c.gt;
+  if (c.gte !== undefined) return isNum && num >= c.gte;
+  if (c.lt !== undefined) return isNum && num < c.lt;
+  if (c.lte !== undefined) return isNum && num <= c.lte;
+  if (c.newerThan !== undefined) return isNewerVersion(v, getPath(row, c.newerThan));
   if (c.exists !== undefined) return (v !== undefined && v !== null && v !== '') === c.exists;
   if (c.equals !== undefined) return v === c.equals || (v !== undefined && v !== null && String(v) === String(c.equals));
   if (c.notEquals !== undefined) return !(v === c.notEquals || (v !== undefined && v !== null && String(v) === String(c.notEquals)));
   if (c.in !== undefined) return c.in.some(x => v === x || (v !== undefined && v !== null && String(v) === String(x)));
+  return false;
+}
+
+/** Is `candidate` a newer x.y.z version than `current`? False when either has no version. */
+export function isNewerVersion(candidate: unknown, current: unknown): boolean {
+  const parse = (v: unknown) => { const m = String(v ?? '').match(/(\d+)\.(\d+)\.(\d+)/); return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null; };
+  const a = parse(candidate);
+  const b = parse(current);
+  if (!a || !b) return false;
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] > b[i];
   return false;
 }
 
