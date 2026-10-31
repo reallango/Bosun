@@ -76,7 +76,39 @@ export interface FormField {
   options?: { value: string; label: string }[];
 }
 
-export const EDITOR_INPUTS = ['text', 'number', 'select', 'checkbox', 'textarea', 'lines', 'pairs', 'heading'] as const;
+export const EDITOR_INPUTS = ['text', 'number', 'select', 'checkbox', 'textarea', 'lines', 'pairs', 'rows', 'button', 'heading'] as const;
+
+/** One column of a `rows` field: a labelled box (text, number or a drop-down). */
+export interface RowColumn {
+  name: string;
+  label: string;
+  input: 'text' | 'number' | 'select';
+  placeholder?: string;
+  options?: { value: string; label: string }[];
+  /** The value of a new row, and of a stored line that lacks this column. */
+  default?: string;
+  /** Suggestions for a text column from a list in the context (a datalist): `path` to the list, `value` the field of each item. */
+  suggest?: { path: string; value: string };
+}
+
+/**
+ * How the columns of a row become one line of the settings blob (`format`) and back (`parse`, a regular expression with a named
+ * group per column). A part is left out when its column is empty and `optional`, or when the value is one of `omit`.
+ * `derive` fills a column from another one after parsing (a folder when the source starts with "/", otherwise a volume).
+ */
+export interface RowFormatPart { col: string; prefix?: string; suffix?: string; optional?: boolean; omit?: string[] }
+export interface RowDerive { from: string; startsWith: string; then: string; else: string }
+
+/** Options fetched from the host while the form is open (the branches of a repository): a dataset called with arguments from the form. */
+export interface RemoteOptions {
+  dataset: string;
+  /** Dataset parameter -> `values.<field>`, `context.<path>` or `literal:<text>`. The options load once every `values.` argument has a value. */
+  args: Record<string, string>;
+  /** Path to the list in the dataset's answer, and the fields of each item (a string item needs no `value`). */
+  path: string;
+  value?: string;
+  label?: string;
+}
 
 /**
  * One field of an `editor` block. Its value goes into the settings blob (see serializeEditor) under `key` (default: the name):
@@ -99,6 +131,23 @@ export interface EditorField {
   required?: boolean;
   /** Shown only while this holds; it reads the current form values as `values.<name>`. */
   when?: Cond;
+  /** Text area: its height in lines (default 6), and whether a file can be loaded into it. */
+  height?: number;
+  upload?: boolean;
+  /** Not part of the settings: a box used by a button (text to convert) or by the person only. */
+  transient?: boolean;
+  /** Heading: the fields up to the next heading are hidden until the person opens it. */
+  collapsed?: boolean;
+  /** Select: also offer "Custom", which shows a box to type a value (and is chosen when the host finds no options). */
+  custom?: string;
+  remote?: RemoteOptions;
+  /** Rows: the columns and how a row is written to and read from a line of the settings. */
+  columns?: RowColumn[];
+  format?: RowFormatPart[];
+  parse?: string;
+  derive?: Record<string, RowDerive>;
+  /** Button: asks the host to fill fields. The dataset answers { fill: { <field key>: value }, errors?: [], notes?: [] }. */
+  tool?: { dataset: string; args: Record<string, string>; busy?: string };
 }
 
 export interface EditorSubmit {
@@ -110,6 +159,7 @@ export interface EditorSubmit {
 }
 
 export type Block =
+  | { type: 'code'; title?: string; value: string; filename?: string; when?: Cond }
   | { type: 'tabs'; tabs: { id: string; label: string; blocks: Block[] }[]; when?: Cond }
   | { type: 'editor'; fields: EditorField[]; /** The text parameter of the submit actions that receives the settings blob (none: the fields are mapped one by one in each submit's params). */ param?: string; submits: EditorSubmit[]; when?: Cond }
   | { type: 'section'; title: string; defaultOpen: boolean; badges: Badge[]; summary?: string; blocks: Block[]; when?: Cond }
@@ -295,7 +345,7 @@ function options(raw: unknown, where: string, max = 20): Validated<{ value: stri
 }
 
 function validateEditorFields(raw: unknown, where: string): Validated<EditorField[]> {
-  if (!Array.isArray(raw) || raw.length < 1 || raw.length > 80) return fail(`${where}: "fields" must list 1-80 fields`);
+  if (!Array.isArray(raw) || raw.length < 1 || raw.length > 120) return fail(`${where}: "fields" must list 1-120 fields`);
   const out: EditorField[] = [];
   for (const f of raw as unknown[]) {
     if (!isObj(f) || typeof f.name !== 'string' || !ID_RE.test(f.name)) return fail(`${where}: each field needs a "name" (lowercase letters, digits, underscores)`);
@@ -327,6 +377,94 @@ function validateEditorFields(raw: unknown, where: string): Validated<EditorFiel
         field.optionsFrom = { path: of.path, value: of.value, ...(of.label ? { label: of.label } : {}) };
       }
       if (!field.options && !field.optionsFrom) return fail(`${where}: select field "${f.name}" needs "options" or "optionsFrom"`);
+    }
+    const ref = (s: unknown) => typeof s === 'string' && (s.startsWith('literal:') ? /^[A-Za-z0-9_.:/ -]{0,100}$/.test(s.slice(8)) : FIELD_RE.test(s));
+    const refs = (a: unknown): Record<string, string> | null => {
+      if (!isObj(a) || Object.keys(a).length > 8) return null;
+      const out: Record<string, string> = {};
+      for (const [k, v] of Object.entries(a)) { if (!PARAM_RE.test(k) || !ref(v)) return null; out[k] = v as string; }
+      return out;
+    };
+    if (f.height !== undefined) {
+      if (f.input !== 'textarea' || typeof f.height !== 'number' || !Number.isInteger(f.height) || f.height < 3 || f.height > 80) return fail(`${where}: field "${f.name}": "height" (3-80 lines) is for text areas`);
+      field.height = f.height;
+    }
+    for (const k of ['upload', 'transient', 'collapsed'] as const) {
+      if (f[k] === undefined) continue;
+      if (typeof f[k] !== 'boolean' || (k === 'upload' && f.input !== 'textarea') || (k === 'collapsed' && f.input !== 'heading')) return fail(`${where}: field "${f.name}": "${k}" is not allowed here`);
+      field[k] = f[k] as boolean;
+    }
+    if (f.input === 'select') {
+      if (f.custom !== undefined) { const c = text(f.custom, 40); if (!c) return fail(`${where}: field "${f.name}": "custom" must be a short label`); field.custom = c; }
+      if (f.remote !== undefined) {
+        const r = f.remote;
+        const args = isObj(r) ? refs(r.args ?? {}) : null;
+        if (!isObj(r) || typeof r.dataset !== 'string' || !ID_RE.test(r.dataset) || !args || typeof r.path !== 'string' || !FIELD_RE.test(r.path)
+          || (r.value !== undefined && (typeof r.value !== 'string' || !FIELD_RE.test(r.value))) || (r.label !== undefined && (typeof r.label !== 'string' || !FIELD_RE.test(r.label)))) {
+          return fail(`${where}: field "${f.name}": "remote" needs "dataset", "args" (${'values.<field>'} or literals), "path" and optionally "value" and "label"`);
+        }
+        field.remote = { dataset: r.dataset, args, path: r.path, ...(r.value ? { value: r.value } : {}), ...(r.label ? { label: r.label } : {}) };
+      }
+    }
+    if (f.input === 'button') {
+      const t = f.tool;
+      const args = isObj(t) ? refs(t.args ?? {}) : null;
+      if (!isObj(t) || typeof t.dataset !== 'string' || !ID_RE.test(t.dataset) || !args) return fail(`${where}: button "${f.name}" needs "tool": { "dataset", "args" }`);
+      const busy = t.busy === undefined ? undefined : text(t.busy, 60);
+      if (busy === null) return fail(`${where}: button "${f.name}": "tool.busy" must be short text`);
+      field.tool = { dataset: t.dataset, args, ...(busy ? { busy } : {}) };
+    }
+    if (f.input === 'rows') {
+      if (!Array.isArray(f.columns) || f.columns.length < 2 || f.columns.length > 6) return fail(`${where}: rows field "${f.name}" needs 2-6 "columns"`);
+      const cols: RowColumn[] = [];
+      for (const c of f.columns as unknown[]) {
+        if (!isObj(c) || typeof c.name !== 'string' || !ID_RE.test(c.name) || cols.some(x => x.name === c.name)) return fail(`${where}: rows field "${f.name}": each column needs a unique "name"`);
+        const clabel = text(c.label, 40);
+        if (!clabel || (c.input !== 'text' && c.input !== 'number' && c.input !== 'select')) return fail(`${where}: rows field "${f.name}": column "${c.name}" needs a label and an input (text, number or select)`);
+        const col: RowColumn = { name: c.name, label: clabel, input: c.input };
+        if (c.placeholder !== undefined) { const p = text(c.placeholder, 40); if (!p) return fail(`${where}: column "${c.name}": "placeholder" must be short text`); col.placeholder = p; }
+        if (c.default !== undefined) { if (typeof c.default !== 'string' || c.default.length > 60) return fail(`${where}: column "${c.name}": "default" must be short text`); col.default = c.default; }
+        if (c.input === 'select') { const o = options(c.options, `${where} column "${c.name}"`, 30); if (!o.ok) return o; col.options = o.value; }
+        if (c.suggest !== undefined) {
+          if (!isObj(c.suggest) || typeof c.suggest.path !== 'string' || !FIELD_RE.test(c.suggest.path) || typeof c.suggest.value !== 'string' || !FIELD_RE.test(c.suggest.value)) return fail(`${where}: column "${c.name}": "suggest" needs "path" and "value"`);
+          col.suggest = { path: c.suggest.path, value: c.suggest.value };
+        }
+        cols.push(col);
+      }
+      field.columns = cols;
+      const names = new Set(cols.map(c => c.name));
+      if (!Array.isArray(f.format) || f.format.length < 1 || f.format.length > 8) return fail(`${where}: rows field "${f.name}" needs a "format" (1-8 parts)`);
+      const fmt: RowFormatPart[] = [];
+      for (const p of f.format as unknown[]) {
+        if (!isObj(p) || typeof p.col !== 'string' || !names.has(p.col)) return fail(`${where}: rows field "${f.name}": every format part names a column`);
+        const part: RowFormatPart = { col: p.col };
+        for (const k of ['prefix', 'suffix'] as const) {
+          if (p[k] === undefined) continue;
+          if (typeof p[k] !== 'string' || (p[k] as string).length > 4 || /[\u0000-\u001f]/.test(p[k] as string)) return fail(`${where}: rows field "${f.name}": "${k}" is up to 4 characters`);
+          part[k] = p[k] as string;
+        }
+        if (p.optional !== undefined) { if (typeof p.optional !== 'boolean') return fail(`${where}: rows field "${f.name}": "optional" is true or false`); part.optional = p.optional; }
+        if (p.omit !== undefined) { if (!Array.isArray(p.omit) || p.omit.length > 5 || !p.omit.every(x => typeof x === 'string' && x.length <= 40)) return fail(`${where}: rows field "${f.name}": "omit" lists up to 5 values`); part.omit = p.omit as string[]; }
+        fmt.push(part);
+      }
+      field.format = fmt;
+      if (typeof f.parse !== 'string' || f.parse.length > 300 || !f.parse.startsWith('^') || !f.parse.endsWith('$')) return fail(`${where}: rows field "${f.name}": "parse" must be a regular expression anchored with ^ and $ (max 300 characters)`);
+      let re: RegExp;
+      try { re = new RegExp(f.parse); } catch { return fail(`${where}: rows field "${f.name}": "parse" is not a valid regular expression`); }
+      const groups = Array.from(f.parse.matchAll(/\(\?<([A-Za-z_][A-Za-z0-9_]*)>/g)).map(m => m[1]);
+      if (!groups.length || !groups.every(g => names.has(g))) return fail(`${where}: rows field "${f.name}": the named groups of "parse" must be columns`);
+      void re;
+      field.parse = f.parse;
+      if (f.derive !== undefined) {
+        if (!isObj(f.derive) || Object.keys(f.derive).length > 3) return fail(`${where}: rows field "${f.name}": "derive" is an object of up to 3 columns`);
+        const d: Record<string, RowDerive> = {};
+        for (const [col, rule] of Object.entries(f.derive)) {
+          if (!names.has(col) || !isObj(rule) || typeof rule.from !== 'string' || !names.has(rule.from) || typeof rule.startsWith !== 'string' || rule.startsWith.length > 4
+            || typeof rule.then !== 'string' || typeof rule.else !== 'string') return fail(`${where}: rows field "${f.name}": "derive.${col}" needs from, startsWith, then and else`);
+          d[col] = { from: rule.from, startsWith: rule.startsWith, then: rule.then, else: rule.else };
+        }
+        field.derive = d;
+      }
     }
     if (f.required !== undefined) { if (typeof f.required !== 'boolean') return fail(`${where}: field "${f.name}": "required" must be true or false`); field.required = f.required; }
     if (f.when !== undefined) { const c = cond(f.when, `${where} field "${f.name}" "when"`); if (!c.ok) return c; field.when = c.value; }
@@ -442,6 +580,14 @@ export function validateLayout(
         case 'jobProgress':
           out.push({ type: 'jobProgress', ...base });
           break;
+        case 'code': {
+          if (typeof b.value !== 'string' || !FIELD_RE.test(b.value)) return fail(`${w}: "value" must be a path into the context`);
+          const title = b.title === undefined ? undefined : text(b.title, 80);
+          if (title === null) return fail(`${w}: "title" must be short text`);
+          if (b.filename !== undefined && (typeof b.filename !== 'string' || !/^[A-Za-z0-9._-]{1,60}$/.test(b.filename))) return fail(`${w}: "filename" must be a plain file name`);
+          out.push({ type: 'code', ...(title ? { title } : {}), value: b.value, ...(b.filename ? { filename: b.filename as string } : {}), ...base });
+          break;
+        }
         case 'tabs': {
           if (!Array.isArray(b.tabs) || b.tabs.length < 1 || b.tabs.length > 12) return fail(`${w}: "tabs" must list 1-12 tabs`);
           const tabs: { id: string; label: string; blocks: Block[] }[] = [];
@@ -492,7 +638,7 @@ export function validateLayout(
           break;
         }
         default:
-          return fail(`${w}: unknown block type "${b.type}" (section, tabs, kv, text, notice, buttons, form, editor, select, jobProgress or view)`);
+          return fail(`${w}: unknown block type "${b.type}" (section, tabs, kv, text, code, notice, buttons, form, editor, select, jobProgress or view)`);
       }
     }
     return { ok: true, value: out };

@@ -127,7 +127,7 @@ export function validateScreens(
     }
     const blocks = validateLayout(s.blocks, actionIds, innerView, fields);
     if (!blocks.ok) return fail(`${where}: ${blocks.error}`);
-    const bad = checkEditors(blocks.value, actions);
+    const bad = checkEditors(blocks.value, actions, datasets, scripts);
     if (bad) return fail(`${where}: ${bad}`);
     out[id] = { kind: s.kind, title, ...(description ? { description } : {}), size: size as ScreenSpec['size'], load, blocks: blocks.value, keepOpenAfterSubmit: s.keepOpenAfterSubmit === true };
   }
@@ -135,14 +135,28 @@ export function validateScreens(
 }
 
 /** Every submit of an editor must call an action that has the editor's text parameter and only parameters the editor can fill. */
-function checkEditors(blocks: Block[], actions: ActionSpec[]): string | null {
+function checkEditors(blocks: Block[], actions: ActionSpec[], datasets: Record<string, DatasetSpec> = {}, scripts: Record<string, ScriptSpec> = {}): string | null {
   const byId = new Map(actions.map(a => [a.id, a]));
   for (const b of blocks) {
     if (b.type === 'section' || b.type === 'tabs') {
       const inner = b.type === 'section' ? [b.blocks] : b.tabs.map(t => t.blocks);
-      for (const list of inner) { const e = checkEditors(list, actions); if (e) return e; }
+      for (const list of inner) { const e = checkEditors(list, actions, datasets, scripts); if (e) return e; }
     }
     if (b.type !== 'editor') continue;
+    const fieldNames = new Set(b.fields.map(f => f.name));
+    const needs = (what: string, ds: string, args: Record<string, string>): string | null => {
+      const d = datasets[ds];
+      if (!d) return `${what} uses the dataset "${ds}", which is not declared`;
+      const params = scripts[d.script]?.params ?? {};
+      for (const k of Object.keys(args)) if (!(k in params)) return `${what}: the dataset "${ds}" has no parameter "${k}"`;
+      for (const [k, p] of Object.entries(params)) if (!(k in args) && p.default === undefined) return `${what}: the dataset "${ds}" needs the parameter "${k}"`;
+      for (const v of Object.values(args)) if (v.startsWith('values.') && !fieldNames.has(v.slice(7))) return `${what}: "${v}" is not a field of this editor`;
+      return null;
+    };
+    for (const f of b.fields) {
+      if (f.remote) { const e = needs(`field "${f.name}"`, f.remote.dataset, f.remote.args); if (e) return e; }
+      if (f.tool) { const e = needs(`button "${f.name}"`, f.tool.dataset, f.tool.args); if (e) return e; }
+    }
     for (const s of b.submits) {
       const a = byId.get(s.action);
       if (!a) return `an editor submits to the unknown action "${s.action}"`;

@@ -116,10 +116,16 @@ export function selectCurrent(block: Extract<Block, { type: 'select' }>, ctx: Vi
 
 // ---- editor blocks (screens) ----------------------------------------------------------------------------------
 
-export type EditorValue = string | boolean | string[];
+export type RowValue = Record<string, string>;
+export type EditorValue = string | boolean | string[] | RowValue[];
 export type EditorValues = Record<string, EditorValue>;
 
 const asLines = (v: unknown): string[] => (Array.isArray(v) ? v.map(x => String(x)) : typeof v === 'string' && v !== '' ? v.split('\n') : []);
+const isRowsField = (f: EditorField): boolean => f.input === 'rows';
+const isListField = (f: EditorField): boolean => f.input === 'lines' || f.input === 'pairs';
+/** Fields that carry a value into the settings (no headings, no buttons, nothing marked transient). */
+export const carriesValue = (f: EditorField): boolean => f.input !== 'heading' && f.input !== 'button';
+const inSettings = (f: EditorField): boolean => carriesValue(f) && !f.transient;
 
 /** Options of a select field: its own list, or one built from a list in the context (a dataset). */
 export function editorOptions(f: EditorField, ctx: ViewContext): { value: string; label: string }[] {
@@ -134,17 +140,65 @@ export function editorOptions(f: EditorField, ctx: ViewContext): { value: string
   }).filter(o => o.value !== '');
 }
 
+/** The options a select got from the host (`remote`): the list at `path` of the dataset's answer. */
+export function remoteOptions(f: EditorField, answer: unknown): { value: string; label: string }[] {
+  if (!f.remote) return [];
+  const list = f.remote.path ? getPath(answer, f.remote.path) : answer;
+  if (!Array.isArray(list)) return [];
+  return list.map(item => {
+    const value = f.remote!.value ? getPath(item, f.remote!.value) : item;
+    const label = f.remote!.label ? getPath(item, f.remote!.label) : value;
+    return { value: String(value ?? ''), label: String(label ?? value ?? '') };
+  }).filter(o => o.value !== '');
+}
+
+/** A row of a `rows` field from a stored line (`parse`), with column defaults and `derive` applied; null when the line does not fit. */
+export function parseRowLine(f: EditorField, line: string): RowValue | null {
+  if (!f.parse || !f.columns) return null;
+  const m = new RegExp(f.parse).exec(line.trim());
+  if (!m) return null;
+  const row: RowValue = {};
+  for (const c of f.columns) row[c.name] = m.groups?.[c.name] ?? c.default ?? '';
+  for (const [col, rule] of Object.entries(f.derive ?? {})) row[col] = (row[rule.from] ?? '').startsWith(rule.startsWith) ? rule.then : rule.else;
+  return row;
+}
+
+/** One line of the settings from a row, or null when the row is empty (so a blank row is simply dropped). */
+export function formatRow(f: EditorField, row: RowValue): string | null {
+  if (!f.format || !f.columns) return null;
+  // A row nobody has typed in (every box empty or still at its starting value, like a protocol that starts on TCP) is dropped.
+  const untouched = (f.columns ?? []).every(c => { const v = String(row[c.name] ?? '').trim(); return v === '' || v === (c.default ?? (c.input === 'select' ? (c.options?.[0]?.value ?? '') : '')); });
+  if (untouched) return null;
+  let out = '';
+  for (const p of f.format) {
+    const v = String(row[p.col] ?? '').trim();
+    if ((v === '' && p.optional) || (p.omit && p.omit.includes(v))) continue;
+    out += (p.prefix ?? '') + v + (p.suffix ?? '');
+  }
+  return out.replace(/[\r\n]+/g, ' ');
+}
+
+const newRow = (f: EditorField): RowValue => Object.fromEntries((f.columns ?? []).map(c => [c.name, c.default ?? (c.input === 'select' ? (c.options?.[0]?.value ?? '') : '')]));
+export { newRow as newEditorRow };
+
+/** The rows of a `rows` field from the lines the context holds. Lines that do not fit keep their text in the first column. */
+function rowsFromLines(f: EditorField, v: unknown): RowValue[] {
+  return asLines(v).filter(l => l.trim() !== '').map(l => parseRowLine(f, l) ?? { ...newRow(f), [f.columns![0].name]: l.trim() });
+}
+
 /** The starting values of an editor: what each field's path holds in the context. */
 export function editorInitial(fields: EditorField[], ctx: ViewContext): EditorValues {
   const out: EditorValues = {};
   for (const f of fields) {
-    if (f.input === 'heading') continue;
+    if (!carriesValue(f)) continue;
     const v = f.value ? getPath(ctx, f.value) : undefined;
-    if (f.input === 'lines' || f.input === 'pairs' || f.input === 'textarea') out[f.name] = f.input === 'textarea' ? asLines(v).join('\n') : asLines(v);
+    if (isRowsField(f)) out[f.name] = rowsFromLines(f, v);
+    else if (isListField(f) || f.input === 'textarea') out[f.name] = f.input === 'textarea' ? asLines(v).join('\n') : asLines(v);
     else if (f.input === 'checkbox') out[f.name] = v === true || v === 'true';
     else if (f.input === 'select') {
       const cur = v === undefined || v === null ? '' : String(v);
-      out[f.name] = cur !== '' || editorOptions(f, ctx).some(o => o.value === '') ? cur : (editorOptions(f, ctx)[0]?.value ?? '');
+      const opts = editorOptions(f, ctx);
+      out[f.name] = cur !== '' || opts.some(o => o.value === '') || f.remote || f.custom ? cur : (opts[0]?.value ?? '');
     } else out[f.name] = v === undefined || v === null ? '' : String(v);
   }
   return out;
@@ -155,18 +209,36 @@ export const editorFieldVisible = (f: EditorField, values: EditorValues): boolea
 const oneLine = (s: string): string => s.replace(/[\r\n]+/g, ' ');
 
 /**
+ * Which fields are hidden because they sit under a collapsed heading the person has not opened. `open` holds the names of the
+ * headings that are open.
+ */
+export function hiddenByHeading(fields: EditorField[], open: ReadonlySet<string>): Set<string> {
+  const hidden = new Set<string>();
+  let closed = false;
+  for (const f of fields) {
+    if (f.input === 'heading') { closed = f.collapsed === true && !open.has(f.name); continue; }
+    if (closed) hidden.add(f.name);
+  }
+  return hidden;
+}
+
+/**
  * The settings blob an editor hands to its action: one `key=value` line per value, in field order. Text, number and select
- * fields give a line when they are not empty, a checkbox always gives `true` or `false`, `lines`, `pairs` and text areas give one
- * line per non-empty row. Fields hidden by their `when` give nothing.
+ * fields give a line when they are not empty, a checkbox always gives `true` or `false`, `lines`, `pairs`, `rows` and text areas give
+ * one line per non-empty row. Fields hidden by their `when`, transient fields, headings and buttons give nothing.
  */
 export function serializeEditor(fields: EditorField[], values: EditorValues): string {
   const lines: string[] = [];
   for (const f of fields) {
-    if (f.input === 'heading' || !editorFieldVisible(f, values)) continue;
+    if (!inSettings(f) || !editorFieldVisible(f, values)) continue;
     const key = f.key ?? f.name;
     const v = values[f.name];
     if (f.input === 'checkbox') { lines.push(`${key}=${v === true ? 'true' : 'false'}`); continue; }
-    if (f.input === 'lines' || f.input === 'pairs' || f.input === 'textarea') {
+    if (isRowsField(f)) {
+      for (const r of (Array.isArray(v) ? v : []) as RowValue[]) { const line = formatRow(f, r); if (line) lines.push(`${key}=${line}`); }
+      continue;
+    }
+    if (isListField(f) || f.input === 'textarea') {
       const rows = Array.isArray(v) ? v : typeof v === 'string' ? v.split('\n') : [];
       for (const r of rows) { const t = oneLine(String(r)).trim(); if (t !== '') lines.push(`${key}=${t}`); }
       continue;
@@ -177,18 +249,59 @@ export function serializeEditor(fields: EditorField[], values: EditorValues): st
   return lines.join('\n');
 }
 
+const isEmptyValue = (v: EditorValue | undefined): boolean => (
+  Array.isArray(v) ? (v as unknown[]).every(x => (typeof x === 'string' ? x.trim() === '' : Object.values(x as RowValue).every(c => c.trim() === ''))) : String(v ?? '').trim() === ''
+);
+
 /** The labels of required, visible fields that are empty. */
 export function editorMissing(fields: EditorField[], values: EditorValues): string[] {
-  return fields.filter(f => f.required && f.input !== 'heading' && f.input !== 'checkbox' && editorFieldVisible(f, values) && (
-    Array.isArray(values[f.name]) ? (values[f.name] as string[]).every(x => x.trim() === '') : String(values[f.name] ?? '').trim() === ''
-  )).map(f => f.label);
+  return fields.filter(f => f.required && carriesValue(f) && f.input !== 'checkbox' && editorFieldVisible(f, values) && isEmptyValue(values[f.name])).map(f => f.label);
 }
 
 /** The risky-looking fields the person has filled in (their `warn` texts), shown before saving. */
 export function editorWarnings(fields: EditorField[], values: EditorValues): string[] {
-  return fields.filter(f => f.warn && editorFieldVisible(f, values) && (
-    f.input === 'checkbox' ? values[f.name] === true : Array.isArray(values[f.name]) ? (values[f.name] as string[]).some(x => x.trim() !== '') : String(values[f.name] ?? '').trim() !== ''
-  )).map(f => f.warn as string);
+  return fields.filter(f => f.warn && editorFieldVisible(f, values) && (f.input === 'checkbox' ? values[f.name] === true : !isEmptyValue(values[f.name]))).map(f => f.warn as string);
+}
+
+/**
+ * Apply what a button's dataset answered: `fill` maps field keys (or names) to values. A list or rows field takes a list of lines, a
+ * text area takes lines joined, a checkbox "true"/"false". Keys that match no field come back in `unknown`.
+ */
+export function applyFill(fields: EditorField[], values: EditorValues, fill: unknown, ctx: ViewContext): { values: EditorValues; unknown: string[] } {
+  const next: EditorValues = { ...values };
+  const unknown: string[] = [];
+  if (!fill || typeof fill !== 'object' || Array.isArray(fill)) return { values: next, unknown };
+  for (const [k, v] of Object.entries(fill as Record<string, unknown>)) {
+    const f = fields.find(x => carriesValue(x) && (x.key ?? x.name) === k) ?? fields.find(x => carriesValue(x) && x.name === k);
+    if (!f) { unknown.push(k); continue; }
+    if (isRowsField(f)) next[f.name] = rowsFromLines(f, v);
+    else if (isListField(f)) next[f.name] = asLines(v);
+    else if (f.input === 'textarea') next[f.name] = asLines(v).join('\n');
+    else if (f.input === 'checkbox') next[f.name] = v === true || v === 'true';
+    else next[f.name] = v === undefined || v === null ? '' : String(v);
+    void ctx;
+  }
+  return { values: next, unknown };
+}
+
+/** The value of an argument source: `values.<field>` (the form now), `literal:<text>` or a path into the context. */
+export function sourceValue(src: string, values: EditorValues, ctx: ViewContext): string | undefined {
+  if (src.startsWith('literal:')) return src.slice(8);
+  let raw: unknown;
+  if (src.startsWith('values.')) { const v = values[src.slice(7)]; raw = Array.isArray(v) ? (v as unknown[]).map(x => (typeof x === 'string' ? x : JSON.stringify(x))).join('\n') : v; } else raw = getPath(ctx, src);
+  if (raw === undefined || raw === null || raw === '') return undefined;
+  return String(raw);
+}
+
+/** The arguments for a dataset call from the form; `missing` lists the sources that have no value yet. */
+export function datasetArgsFromForm(args: Record<string, string>, values: EditorValues, ctx: ViewContext): { args: Record<string, string>; missing: string[] } {
+  const out: Record<string, string> = {};
+  const missing: string[] = [];
+  for (const [name, src] of Object.entries(args)) {
+    const v = sourceValue(src, values, ctx);
+    if (v === undefined) missing.push(src); else out[name] = v;
+  }
+  return { args: out, missing };
 }
 
 /**
@@ -206,8 +319,12 @@ export function editorSubmitParams(
     let raw: unknown;
     if (src === undefined) raw = undefined;
     else if (src.startsWith('literal:')) raw = src.slice(8);
-    else if (src.startsWith('values.')) { const v = values[src.slice(7)]; raw = Array.isArray(v) ? v.join('\n') : v; }
-    else raw = getPath(ctx, src);
+    else if (src.startsWith('values.')) {
+      const f = fields.find(x => x.name === src.slice(7));
+      const v = values[src.slice(7)];
+      // A select with "Custom" or remote options holds its text; a checkbox its boolean; a list its lines.
+      raw = Array.isArray(v) ? (f && isRowsField(f) ? (v as RowValue[]).map(r => formatRow(f, r)).filter(Boolean).join('\n') : (v as string[]).join('\n')) : v;
+    } else raw = getPath(ctx, src);
     const v = coerceParam(spec, raw);
     const value = v !== undefined ? v : defaultOf(spec);
     if (value === undefined) missing.push(name); else params[name] = value;
