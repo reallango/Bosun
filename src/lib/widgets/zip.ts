@@ -11,7 +11,7 @@ export interface ZipLimits {
   maxTotalBytes: number;
 }
 
-export const DEFAULT_ZIP_LIMITS: ZipLimits = { maxEntries: 60, maxEntryBytes: 512 * 1024, maxTotalBytes: 2 * 1024 * 1024 };
+export const DEFAULT_ZIP_LIMITS: ZipLimits = { maxEntries: 120, maxEntryBytes: 2 * 1024 * 1024, maxTotalBytes: 8 * 1024 * 1024 };
 
 let crcTable: Uint32Array | null = null;
 export function crc32(buf: Uint8Array): number {

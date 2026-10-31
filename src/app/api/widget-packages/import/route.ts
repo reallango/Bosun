@@ -8,7 +8,7 @@ import { installPackage, getInstalledPackage } from '@/lib/widgets/package-store
 import { reviewPackage } from '@/lib/widgets/runtime/review';
 import { requirePackageAdmin, requestIp } from '@/lib/widgets/package-routes';
 
-const MAX_UPLOAD_BYTES = 2 * 1024 * 1024;
+const MAX_UPLOAD_BYTES = 8 * 1024 * 1024;
 
 /**
  * Import a package zip: the request body is the zip itself (Content-Type: application/zip).
@@ -20,10 +20,10 @@ export async function POST(request: NextRequest) {
   if (auth instanceof NextResponse) return auth;
   try {
     const declared = Number(request.headers.get('content-length') || 0);
-    if (declared > MAX_UPLOAD_BYTES) return fail('The zip is larger than 2 MB', 413);
+    if (declared > MAX_UPLOAD_BYTES) return fail('The zip is larger than 8 MB', 413);
     const buf = Buffer.from(await request.arrayBuffer());
     if (!buf.length) return fail('Send the zip file as the request body');
-    if (buf.length > MAX_UPLOAD_BYTES) return fail('The zip is larger than 2 MB', 413);
+    if (buf.length > MAX_UPLOAD_BYTES) return fail('The zip is larger than 8 MB', 413);
 
     let entries: Record<string, Buffer>;
     try { entries = readZip(buf); } catch (err) {
