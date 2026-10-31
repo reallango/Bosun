@@ -1,7 +1,7 @@
 'use client';
 
 import { forwardRef } from 'react';
-import { Download, Info, Pause, Play, Power, RefreshCw, RotateCw, ScrollText, Square, TerminalSquare, Trash2, Upload } from 'lucide-react';
+import { Copy, Download, ExternalLink, Info, Layers, Pause, Pencil, Play, Plus, Power, RefreshCw, RotateCw, ScrollText, Settings, Square, TerminalSquare, Trash2, Upload } from 'lucide-react';
 import { evalCond, fillTemplate, type FieldSpec } from '@/lib/widgets/runtime/spec';
 
 /** Small pieces shared by the version 1 views and the layout blocks of the declarative widget. */
@@ -9,6 +9,7 @@ import { evalCond, fillTemplate, type FieldSpec } from '@/lib/widgets/runtime/sp
 export const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   play: Play, square: Square, 'rotate-cw': RotateCw, 'scroll-text': ScrollText, 'trash-2': Trash2, download: Download, upload: Upload,
   power: Power, 'refresh-cw': RefreshCw, 'terminal-square': TerminalSquare, pause: Pause, info: Info,
+  pencil: Pencil, plus: Plus, copy: Copy, settings: Settings, 'external-link': ExternalLink, layers: Layers,
 };
 
 export const DOT: Record<string, string> = {

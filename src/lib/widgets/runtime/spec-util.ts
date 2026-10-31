@@ -119,5 +119,20 @@ export function validateParam(name: string, raw: unknown, where: string): Valida
     if (dflt !== undefined && (typeof dflt !== 'string' || dflt.length > maxLength || (pattern && !new RegExp(pattern).test(dflt)) || (values && !values.includes(dflt)))) return fail(`${where}: default of "${name}" does not satisfy its own rules`);
     return { ok: true, value: { type: 'string', maxLength, ...(pattern ? { pattern } : {}), ...(values ? { values } : {}), ...common, ...(dflt !== undefined ? { default: dflt as string } : {}) } };
   }
-  return fail(`${where}: parameter "${name}" has an unknown type (use string, number or boolean)`);
+  if (raw.type === 'text') {
+    const maxLength = intIn(raw.maxLength, 1, 65536, 8000);
+    const maxLines = intIn(raw.maxLines, 1, 2000, 200);
+    if (maxLength === null || maxLines === null) return fail(`${where}: "maxLength" of "${name}" must be 1-65536 and "maxLines" 1-2000`);
+    let linePattern: string | undefined;
+    if (raw.linePattern !== undefined) {
+      if (typeof raw.linePattern !== 'string' || raw.linePattern.length > 300 || !raw.linePattern.startsWith('^') || !raw.linePattern.endsWith('$')) {
+        return fail(`${where}: "linePattern" of "${name}" must be a regular expression anchored with ^ and $ (max 300 characters)`);
+      }
+      try { new RegExp(raw.linePattern); } catch { return fail(`${where}: "linePattern" of "${name}" is not a valid regular expression`); }
+      linePattern = raw.linePattern;
+    }
+    if (dflt !== undefined && typeof dflt !== 'string') return fail(`${where}: default of "${name}" must be text`);
+    return { ok: true, value: { type: 'text', maxLength, maxLines, ...(linePattern ? { linePattern } : {}), ...common, ...(dflt !== undefined ? { default: dflt as string } : {}) } };
+  }
+  return fail(`${where}: parameter "${name}" has an unknown type (use string, number, boolean or text)`);
 }

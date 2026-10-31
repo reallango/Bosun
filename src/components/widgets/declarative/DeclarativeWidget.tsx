@@ -2,43 +2,63 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { Dialog } from 'radix-ui';
-import dynamic from 'next/dynamic';
+import { useRouter } from 'next/navigation';
 import { Info, Loader2, Search, X } from 'lucide-react';
+import { LayoutGrid, List, Package, Plus, RefreshCw, Settings, SquareTerminal } from 'lucide-react';
 import { useWidgetData } from '@/hooks/useWidgetData';
-import { useWidgetJob } from '@/hooks/useWidgetJob';
 import { useAuth } from '@/hooks/useAuth';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { readJson } from '@/lib/api/readJson';
 import { WidgetLoading } from '@/components/widgets/WidgetLoading';
 import { WidgetError } from '@/components/widgets/WidgetError';
-import { ConfirmActionDialog, apiAction } from '@/components/widgets/shared/ConfirmActionDialog';
-import { evalCond, fillTemplate, getPath, type ViewSpec, type ParamSpec } from '@/lib/widgets/runtime/spec';
+import { useWidgetFrame } from '@/components/dashboard/widget-context';
+import { evalCond, fillTemplate, getPath, type ViewSpec } from '@/lib/widgets/runtime/spec';
 import type { Block } from '@/lib/widgets/runtime/spec-v2';
-import type { PublicActionLike, ViewContext } from '@/lib/widgets/runtime/layout';
-import { hasRole } from '@/lib/auth/levels';
+import type { MenuEntry, ScreenSpec } from '@/lib/widgets/runtime/spec-screens';
+import type { ViewContext } from '@/lib/widgets/runtime/layout';
 import { MetricsChartWidget } from '@/components/widgets/metrics-chart/MetricsChartWidget';
 import { Bar, DOT, Fields, formatValue, ICONS, IconBtn, type Row } from './parts';
 import { LayoutBlocks, type LayoutUi } from './LayoutView';
-
-// The terminal (xterm) loads only when a container shell is opened.
-const SSHTerminalWidget = dynamic(
-  () => import('@/components/widgets/ssh-terminal').then(m => m.SSHTerminalWidget),
-  { ssr: false, loading: () => <WidgetLoading /> },
-);
+import { ScreenView } from './ScreenView';
+import { useActionRunner, type PublicAction } from './useActionRunner';
 
 /** What the browser gets from /api/widget-runtime/:type (no commands, no scripts). */
-type PublicAction = PublicActionLike;
-interface PublicSpec { version: number; view: ViewSpec & { blocks?: Block[] }; data: { source: string }; actions: PublicAction[] }
-
-/** The values an action is called with: a parameter's `from` field of the row, else its default. */
-function paramsFor(action: PublicAction, row: Row | null): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [name, p] of Object.entries(action.params) as [string, ParamSpec][]) {
-    const fromRow = p.from && row ? getPath(row, p.from) : undefined;
-    out[name] = fromRow !== undefined && fromRow !== null ? (p.type === 'number' ? Number(fromRow) : p.type === 'boolean' ? Boolean(fromRow) : String(fromRow)) : p.default;
-  }
-  return out;
+export interface PublicSpec {
+  version: number;
+  view: ViewSpec & { blocks?: Block[] };
+  data: { source: string };
+  actions: PublicAction[];
+  screens?: Record<string, ScreenSpec>;
+  menu?: MenuEntry[];
 }
+
+/** Fetches the public spec of a widget type (shared by the widget and the full-page screens). */
+export function usePublicSpec(widgetType: string) {
+  const [spec, setSpec] = useState<PublicSpec | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        const res = await fetchWithAuth(`/api/widget-runtime/${encodeURIComponent(widgetType)}`);
+        const json = await readJson<{ data?: { spec: PublicSpec }; error?: { message?: string } }>(res);
+        if (!live) return;
+        if (!res.ok || !json.data) { setError(json.error?.message || 'This widget has no definition'); return; }
+        setSpec(json.data.spec);
+      } catch (err) {
+        if (live) setError(err instanceof Error ? err.message : String(err));
+      }
+    })();
+    return () => { live = false; };
+  }, [widgetType]);
+  return { spec, error };
+}
+
+const MENU_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+  plus: Plus, settings: Settings, 'layout-grid': LayoutGrid, list: List, package: Package, download: ICONS.download, terminal: SquareTerminal, 'refresh-cw': RefreshCw, info: Info,
+};
+
+const DIALOG_WIDTH: Record<string, string> = { md: 'sm:max-w-lg', lg: 'sm:max-w-3xl', xl: 'sm:max-w-5xl' };
 
 interface V1Props {
   view: ViewSpec;
@@ -172,43 +192,54 @@ interface Props {
   serverId: string;
 }
 
-interface Pending { action: PublicAction; row: Row | null; params?: Record<string, unknown> }
-
 /**
  * Renders a package widget from its declarative spec: a list, table or text view over the widget's data (version 1), or a
  * layout of sections, forms, buttons and job progress (version 2). Actions call the same endpoint API keys use
  * (/api/servers/:id/widget-actions/...), so they are subject to the same permission, confirmation and validation rules.
+ * Version 2 widgets can also declare screens: pop-ups opened by a row action or a menu entry of the widget, and full pages.
  */
 export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
   const { data, isLoading, error, refresh, unavailable, extra } = useWidgetData(widgetId, 15);
-  const { user, can } = useAuth();
-  const [shellFor, setShellFor] = useState<{ token: string; label: string } | null>(null);
-  const [spec, setSpec] = useState<PublicSpec | null>(null);
-  const [specError, setSpecError] = useState<string | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [pending, setPending] = useState<Pending | null>(null);
-  const [output, setOutput] = useState<{ title: string; text: string } | null>(null);
-  const { job, refresh: refreshJob, cancel } = useWidgetJob(serverId, widgetType, !!spec?.actions.some(a => a.job));
-
-  useEffect(() => {
-    let live = true;
-    (async () => {
-      try {
-        const res = await fetchWithAuth(`/api/widget-runtime/${encodeURIComponent(widgetType)}`);
-        const json = await readJson<{ data?: { spec: PublicSpec }; error?: { message?: string } }>(res);
-        if (!live) return;
-        if (!res.ok || !json.data) { setSpecError(json.error?.message || 'This widget has no definition'); return; }
-        setSpec(json.data.spec);
-      } catch (err) {
-        if (live) setSpecError(err instanceof Error ? err.message : String(err));
-      }
-    })();
-    return () => { live = false; };
-  }, [widgetType]);
+  const { can } = useAuth();
+  const router = useRouter();
+  const frame = useWidgetFrame();
+  const { spec, error: specError } = usePublicSpec(widgetType);
+  const [screen, setScreen] = useState<{ id: string; row: Row | null } | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
 
   const view = spec?.view;
   const isLayout = view?.type === 'layout';
+  const rowTitle = useMemo(() => (view?.type === 'list' && view.row ? (r: Row) => fillTemplate(view.row!.title, r) : undefined), [view]);
+  const ctx: ViewContext = { data, collectedAt: extra.collectedAt, state: extra.state, config: extra.config, lookups: extra.lookups, server: extra.server };
+
+  const runner = useActionRunner({
+    actions: spec?.actions ?? [], version: spec?.version ?? 1, serverId, widgetType, widgetId, templateContext: ctx, rowTitle,
+    changed: () => { refresh(); setReloadToken(n => n + 1); },
+    openScreen: (id, row) => {
+      const s = spec?.screens?.[id];
+      if (!s) return;
+      if (s.kind === 'page') router.push(`/widgets/${encodeURIComponent(widgetId)}/${encodeURIComponent(id)}`);
+      else setScreen({ id, row });
+    },
+  });
+  const { busy, notice, setNotice, job, allowed, start } = runner;
+
+  // The package's own entries of the widget's ⋮ menu (New container, Manage, ...), for those who may use what they open.
+  const menuKey = JSON.stringify((spec?.menu ?? []).map(m => [m.id, m.label, m.screen, m.permission]));
+  useEffect(() => {
+    if (!frame || !spec?.menu?.length) return;
+    const items = spec.menu.filter(m => !m.permission || can(m.permission, serverId)).map(m => ({
+      id: m.id, label: m.label, icon: m.icon ? MENU_ICONS[m.icon] : undefined,
+      onSelect: () => {
+        const s = spec.screens?.[m.screen];
+        if (!s) return;
+        if (s.kind === 'page') router.push(`/widgets/${encodeURIComponent(widgetId)}/${encodeURIComponent(m.screen)}`);
+        else setScreen({ id: m.screen, row: null });
+      },
+    }));
+    return frame.registerMenu(items);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [frame, menuKey, can, serverId, widgetId]);
 
   if (specError) return <div className="p-2 text-sm text-gray-500">{specError}</div>;
   if (!spec || !view) return <WidgetLoading />;
@@ -217,40 +248,7 @@ export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
   if (unavailable) return <div className="p-2 text-sm text-gray-500">{unavailable}</div>;
 
   const actionsById = new Map(spec.actions.map(a => [a.id, a]));
-  // A web terminal asks for the person's own login and is only available to Full access; the action's permission still applies.
-  const allowed = (a: PublicAction) => can(a.permission, serverId) && (a.kind !== 'terminal' || hasRole(user?.role, 'admin'));
-  const ctx: ViewContext = { data, collectedAt: extra.collectedAt, state: extra.state, config: extra.config, lookups: extra.lookups, server: extra.server, job };
-
-  const run = async (action: PublicAction, row: Row | null, override?: Record<string, unknown>) => {
-    setBusy(action.id);
-    try {
-      const d = await apiAction(fetchWithAuth, `/api/servers/${serverId}/widget-actions/${encodeURIComponent(widgetType)}/${encodeURIComponent(action.id)}`, 'POST', {
-        params: override ?? paramsFor(action, row), ...(action.confirm ? { confirm: true } : {}), ...(spec.version >= 2 ? { widgetId } : {}),
-      }) as { success?: boolean; output?: string; error?: string; exitCode?: number; timedOut?: boolean; message?: string; jobId?: string };
-      if (d.jobId) { await refreshJob(); return; }   // started in the background: the job block follows it
-      const text = [d.output, d.error].filter(s => s && s.trim()).join('\n').trim();
-      if (!d.success) throw new Error((d.message || text).slice(0, 300) || (d.timedOut ? 'The command timed out' : `The command failed (exit ${d.exitCode})`));
-      if (action.result === 'text') setOutput({ title: `${action.label}${row && view.type === 'list' ? `: ${fillTemplate(view.row?.title ?? '', row)}` : ''}`, text: text || '(no output)' });
-      else if (action.result === 'toast') setNotice(`${action.label}: ${d.message || (text ? text.split('\n')[0].slice(0, 120) : 'done')}`);
-      if (action.after === 'refresh') setTimeout(refresh, 2500);
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const start = (action: PublicAction, row: Row | null, params?: Record<string, unknown>) => {
-    if (action.kind === 'terminal') {
-      const ref = action.terminal ? String(getPath(row, action.terminal.ref) ?? '') : '';
-      if (!ref) { setNotice(`${action.label}: this row has nothing to open it in`); return; }
-      // The server checks the target and signs the command the package declared; the terminal then asks for the person's own login.
-      apiAction(fetchWithAuth, `/api/servers/${serverId}/widget-actions/${encodeURIComponent(widgetType)}/${encodeURIComponent(action.id)}`, 'POST', { ref })
-        .then(d => { const x = d as { token?: string; label?: string }; if (x.token) setShellFor({ token: x.token, label: x.label || ref }); else setNotice(`${action.label}: no terminal token was returned`); })
-        .catch(err => setNotice(`${action.label}: ${err instanceof Error ? err.message : String(err)}`));
-      return;
-    }
-    if (action.confirm) setPending({ action, row, params });
-    else run(action, row, params).catch(err => setNotice(`${action.label} failed: ${err instanceof Error ? err.message : String(err)}`));
-  };
+  const fullCtx: ViewContext = { ...ctx, job };
 
   const v1 = (v: ViewSpec, d: unknown) => (
     <V1View view={v} data={d} widgetId={widgetId} serverId={serverId} actions={actionsById} allowed={allowed} busy={busy} start={start} />
@@ -262,19 +260,21 @@ export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
     busy,
     onAction: (a, params) => start(a, null, params),
     renderView: v1,
-    onCancelJob: () => { cancel().catch(err => setNotice(`Cancel failed: ${err instanceof Error ? err.message : String(err)}`)); },
+    onCancelJob: () => { runner.cancelJob().catch(err => setNotice(`Cancel failed: ${err instanceof Error ? err.message : String(err)}`)); },
+    submit: runner.submit,
   };
 
   const body = isLayout
     ? (
       <div className="min-h-0 flex-1 overflow-auto">
         {extra.stateError && <div role="alert" className="mb-2 rounded-md border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">Checking this host failed: {extra.stateError}</div>}
-        <LayoutBlocks blocks={view.blocks ?? []} ctx={ctx} ui={ui} />
+        <LayoutBlocks blocks={view.blocks ?? []} ctx={fullCtx} ui={ui} />
       </div>
     )
     : v1(view, data);
 
-  const confirmCtx = (pending?.row ?? ctx) as unknown;
+  const open = screen ? spec.screens?.[screen.id] : undefined;
+  const screenCtx: ViewContext = { ...fullCtx, context: screen?.row ?? undefined };
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-2 text-sm">
@@ -285,44 +285,25 @@ export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
         </div>
       )}
       {body}
+      {runner.dialogs}
 
-      <ConfirmActionDialog
-        open={!!pending}
-        onOpenChange={o => { if (!o) setPending(null); }}
-        title={pending?.action.confirm ? fillTemplate(pending.action.confirm.title, confirmCtx) : ''}
-        description={pending?.action.confirm?.text ? fillTemplate(pending.action.confirm.text, confirmCtx) : (pending?.action.label ?? '')}
-        confirmLabel={pending?.action.label ?? ''}
-        destructive={!!pending?.action.confirm?.destructive}
-        requireText={pending?.action.confirm?.requireText ? fillTemplate(pending.action.confirm.requireText, confirmCtx) : undefined}
-        onConfirm={() => (pending ? run(pending.action, pending.row, pending.params) : undefined)}
-      />
-
-      <Dialog.Root open={!!shellFor} onOpenChange={o => { if (!o) setShellFor(null); }}>
+      <Dialog.Root open={!!open} onOpenChange={o => { if (!o) setScreen(null); }}>
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
-          <Dialog.Content className="fixed inset-0 z-50 flex flex-col bg-white p-2 shadow-xl dark:bg-gray-900 sm:inset-6 sm:rounded-xl sm:border sm:border-gray-700 lg:inset-x-[8%]">
-            <div className="mb-2 flex items-center justify-between gap-2 px-1">
-              <Dialog.Title className="truncate font-semibold">{shellFor?.label}</Dialog.Title>
-              <Dialog.Description className="sr-only">Interactive terminal session</Dialog.Description>
-              <Dialog.Close asChild><IconBtn label="Close shell"><X /></IconBtn></Dialog.Close>
-            </div>
-            <div className="min-h-0 flex-1">
-              {shellFor && <SSHTerminalWidget widgetId={`${widgetId}:exec:${shellFor.label}`} serverId={serverId} cmdToken={shellFor.token} cmdLabel={shellFor.label} />}
-            </div>
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>
-
-      <Dialog.Root open={!!output} onOpenChange={o => { if (!o) setOutput(null); }}>
-        <Dialog.Portal>
-          <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
-          <Dialog.Content className="fixed inset-2 z-50 flex flex-col rounded-xl border border-gray-200 bg-white p-3 shadow-xl dark:border-gray-700 dark:bg-gray-900 sm:inset-8 lg:inset-x-[10%]">
-            <div className="mb-2 flex items-center justify-between gap-2">
-              <Dialog.Title className="truncate font-semibold">{output?.title}</Dialog.Title>
-              <Dialog.Description className="sr-only">Output of the action</Dialog.Description>
+          <Dialog.Content
+            className={`fixed inset-x-2 top-4 z-50 mx-auto flex max-h-[92vh] flex-col rounded-xl border border-gray-200 bg-white p-4 shadow-xl dark:border-gray-700 dark:bg-gray-900 ${DIALOG_WIDTH[open?.size ?? 'lg']}`}
+            aria-describedby={undefined}
+          >
+            <div className="mb-3 flex items-start justify-between gap-2">
+              <Dialog.Title className="min-w-0 truncate text-base font-semibold">{open ? fillTemplate(open.title, screenCtx) : ''}</Dialog.Title>
               <Dialog.Close asChild><IconBtn label="Close"><X /></IconBtn></Dialog.Close>
             </div>
-            <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded bg-gray-950 p-2 font-mono text-[11px] leading-snug text-gray-100">{output?.text}</pre>
+            <div className="min-h-0 flex-1 overflow-auto pr-1">
+              {open && screen && (
+                <ScreenView key={screen.id + JSON.stringify(screen.row ?? {})} screen={open} context={screenCtx} serverId={serverId} widgetType={widgetType}
+                  ui={ui} reloadToken={reloadToken} onDone={() => { if (!open.keepOpenAfterSubmit) setScreen(null); refresh(); }} />
+              )}
+            </div>
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>

@@ -126,6 +126,7 @@ export const MAX_OUTPUT = 256 * 1024;
 
 /** Validate the parameters, render the command for the host's platform and run it. */
 export async function runAction(serverId: string, action: ActionSpec, params: unknown): Promise<ActionResult> {
+  if (action.kind === 'screen') throw new RuntimeError('This action only opens a screen in the web UI', 400, 'NOT_RUNNABLE');
   if (action.kind === 'terminal') {
     throw new RuntimeError('This action opens a terminal, not a command: call it through the widget-actions endpoint to get an API terminal token.', 400, 'NOT_RUNNABLE');
   }
@@ -160,6 +161,41 @@ export async function runScript(serverId: string, loaded: LoadedSpec, scriptId: 
   const out = await runAs(server, script.as, inv.command, script.timeoutSec, inv.stdin, { onData: ext.onData, signal: ext.signal });
   const stdout = out.stdout.slice(0, MAX_OUTPUT);
   return { ...out, stdout, stderr: out.stderr.slice(0, 64 * 1024), success: out.exitCode === 0 && !out.timedOut, protocol: parseScriptOutput(stdout) };
+}
+
+const datasetCache = new Map<string, { at: number; value: unknown }>();
+const MAX_DATASET_CACHE = 200;
+
+/**
+ * Load a dataset of a screen: run its (read-only) script and parse the JSON it printed. Results are reused for the dataset's
+ * `cacheSec` (per server and arguments), so several people looking at the same screen cost one run. The run goes through the
+ * shared connection of the host, like an action; it is started by a person with a screen open, never in the background.
+ */
+export async function loadDataset(serverId: string, loaded: LoadedSpec, datasetId: string, rawArgs: unknown): Promise<{ data: unknown; collectedAt: string }> {
+  const ds = loaded.spec.datasets?.[datasetId];
+  const script = ds ? loaded.spec.scripts?.[ds.script] : undefined;
+  if (!ds || !script) throw new RuntimeError('Unknown dataset', 404, 'NOT_FOUND');
+  const given = rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? { ...(rawArgs as Record<string, unknown>) } : {};
+  for (const [name, spec] of Object.entries(script.params)) if (given[name] === undefined && spec.default !== undefined) given[name] = spec.default;
+  const values = validateParamValues(script.params, given);
+  const key = `${serverId}|${loaded.type}|${datasetId}|${JSON.stringify(values)}`;
+  const hit = datasetCache.get(key);
+  if (ds.cacheSec > 0 && hit && Date.now() - hit.at < ds.cacheSec * 1000) return { data: hit.value, collectedAt: new Date(hit.at).toISOString() };
+  const r = await runScript(serverId, loaded, ds.script, values);
+  if (r.protocol.error) throw new RuntimeError(r.protocol.error, 502, 'DATASET_FAILED');
+  if (r.timedOut) throw new RuntimeError('The host took too long to answer', 504, 'DATASET_TIMEOUT');
+  const out = r.stdout.trim();
+  let data: unknown;
+  try { data = JSON.parse(out); } catch {
+    // Tolerate banners or warnings before the document: the document is the last line that starts a JSON value.
+    const line = out.split('\n').reverse().find(l => /^[[{]/.test(l.trim()));
+    try { data = line ? JSON.parse(line) : undefined; } catch { data = undefined; }
+  }
+  if (data === undefined) throw new RuntimeError(r.success ? 'The script did not print JSON' : (r.stderr.trim().split('\n').pop() || 'The script failed').slice(0, 300), 502, 'DATASET_FAILED');
+  if (datasetCache.size >= MAX_DATASET_CACHE) datasetCache.delete(datasetCache.keys().next().value as string);
+  const now = Date.now();
+  if (ds.cacheSec > 0) datasetCache.set(key, { at: now, value: data });
+  return { data, collectedAt: new Date(now).toISOString() };
 }
 
 /** Stop a running job's script on the host (best effort; nothing happens when it has already finished). */

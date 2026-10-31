@@ -36,6 +36,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     // A terminal action runs one command the package declared in an interactive terminal: API keys get a token for an
     // API terminal (after the action's check), a signed-in Full access user a token for the web terminal. The target is
     // `ref`; see lib/widgets/runtime/terminal-action.ts.
+    if (action.kind === 'screen') return fail('This action only opens a screen in the web UI', 400, 'NOT_RUNNABLE');
     if (action.kind === 'terminal') {
       return openTerminalAction(auth, serverId, loaded, action, typeof body.ref === 'string' ? body.ref.trim() : '');
     }
