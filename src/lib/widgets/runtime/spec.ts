@@ -16,8 +16,12 @@
 
 import { cond, fail, FIELD_RE, ID_RE, PARAM_RE, intIn, isObj, scalar, text, validateParam, type Obj, type Validated } from './spec-util';
 export type { Validated } from './spec-util';
+import { validateLayout, validateLookups, validateScripts, validateState, validateVariants, type ActionVariant, type Block, type LookupSpec, type ScriptSpec, type StateSpec } from './spec-v2';
+export type { ActionVariant, Block, LookupSpec, ScriptSpec, StateSpec } from './spec-v2';
 
 export const SPEC_VERSION = 1;
+/** Versions the validators accept. Version 2 adds scripts, state, lookups, script actions and layout views (spec-v2.ts). */
+export const SPEC_VERSIONS = [1, 2] as const;
 export const SNAPSHOT_SECTIONS = ['cpu_memory', 'disks', 'gpus', 'system', 'net_rates', 'network', 'services', 'ollama', 'docker', 'updates', 'metrics'] as const;
 export const ICONS = ['play', 'square', 'rotate-cw', 'scroll-text', 'trash-2', 'download', 'upload', 'power', 'refresh-cw', 'terminal-square', 'pause', 'info'] as const;
 export const DOT_COLORS = ['green', 'amber', 'red', 'gray', 'blue'] as const;
@@ -57,7 +61,8 @@ interface DataCommon { filter?: ConfigFilter[]; unavailable?: Unavailable }
 export type DataSpec =
   | ({ source: 'snapshot'; section: string; also?: string[]; server?: boolean; path?: string; map?: Record<string, string>; permission: string } & DataCommon)
   | ({
-      source: 'command'; as: RunAs; command: string; windowsCommand?: string; parse: (typeof PARSERS)[number];
+      /** Version 2: `script` names a package script that produces the data instead of an inline `command` (then empty); `args` gives its parameters from instance settings, `cacheSecFrom` takes the interval from one. */
+      source: 'command'; as: RunAs; command: string; script?: string; args?: Record<string, string>; cacheSecFrom?: string; initialDelaySec?: number; windowsCommand?: string; parse: (typeof PARSERS)[number];
       path?: string; map?: Record<string, string>; cacheSec: number; timeoutSec: number; permission: string;
     } & DataCommon);
 
@@ -72,8 +77,17 @@ export interface ActionSpec {
   description?: string;
   icon?: (typeof ICONS)[number];
   permission: string;
-  /** `command` runs a command on the host; `terminal` opens the web terminal in a container (see `terminal`). */
-  kind: 'command' | 'terminal';
+  /**
+   * `command` runs a command on the host; `terminal` opens the web terminal in a container (see `terminal`);
+   * `script` (version 2) runs the first of `variants` whose condition holds.
+   */
+  kind: 'command' | 'terminal' | 'script';
+  /** Script actions only. */
+  variants?: ActionVariant[];
+  /** Script actions only: the output of the script (parsed like `data.parse`) replaces the widget's stored data (a "check now" action). */
+  stores?: 'data';
+  /** Script actions only: run as a long-running job (answers 202; progress and result through the job endpoint). */
+  job?: boolean;
   /** Terminal actions only: the row field that holds the container name. */
   terminal?: { container: string };
   as: RunAs;
@@ -82,7 +96,8 @@ export interface ActionSpec {
   params: Record<string, ParamSpec>;
   timeoutSec: number;
   when?: Cond;
-  confirm?: { title: string; text?: string; destructive: boolean };
+  /** `requireText`: a template (`{name}`) the person must type to confirm (for deleting something). */
+  confirm?: { title: string; text?: string; destructive: boolean; requireText?: string };
   result: 'toast' | 'text' | 'none';
   after: 'refresh' | 'none';
 }
@@ -91,7 +106,9 @@ export interface ActionSpec {
 export interface FieldSpec { label: string; value: string; format: (typeof FORMATS)[number]; bar?: string; when?: Cond }
 
 export interface ViewSpec {
-  type: 'list' | 'table' | 'text' | 'fields' | 'chart';
+  type: 'list' | 'table' | 'text' | 'fields' | 'chart' | 'layout';
+  /** A layout view (version 2): sections, forms, buttons and the other views as blocks. */
+  blocks?: Block[];
   /** A chart view: the history of tracked metrics, drawn as lines. `metrics` are the ones shown until a person picks others. */
   chart?: { metrics: string[] };
   /** A fields view: the labelled values (gauges, key and value pairs) of one data object. */
@@ -130,6 +147,10 @@ export interface WidgetSpec {
   view: ViewSpec;
   actions: ActionSpec[];
   metrics?: MetricSpec[];
+  /** Version 2: host scripts of the package, the widget's state probe and its external lookups (see spec-v2.ts). */
+  scripts?: Record<string, ScriptSpec>;
+  state?: StateSpec;
+  lookups?: Record<string, LookupSpec>;
 }
 
 
@@ -211,7 +232,7 @@ export function applyConfigFilters(rows: unknown, filters: ConfigFilter[] | unde
   }, rows);
 }
 
-function validateData(raw: unknown, ownPerms: ReadonlySet<string>): Validated<DataSpec> {
+function validateData(raw: unknown, ownPerms: ReadonlySet<string>, v2?: { scripts: Record<string, ScriptSpec> }): Validated<DataSpec> {
   if (!isObj(raw)) return fail('"data" is required');
   // Required: it decides who can see the widget on a dashboard and read its data.
   const perm = typeof raw.permission === 'string' && ownPerms.has(raw.permission) ? raw.permission : null;
@@ -237,6 +258,44 @@ function validateData(raw: unknown, ownPerms: ReadonlySet<string>): Validated<Da
     if (raw.server !== undefined && typeof raw.server !== 'boolean') return fail('data.server must be true or false');
     return { ok: true, value: { source: 'snapshot', section: raw.section, ...(also?.length ? { also } : {}), ...(raw.server === true ? { server: true } : {}), ...base } };
   }
+  if (raw.source === 'command' && raw.script !== undefined) {
+    // Version 2: the data comes from a package script (run by the poller like an inline command).
+    if (!v2) return fail('data.script needs spec version 2');
+    if (typeof raw.script !== 'string' || !(raw.script in v2.scripts)) return fail('data.script must name one of the package scripts');
+    const script = v2.scripts[raw.script];
+    // The script's parameters get their values from the instance settings (`config.<key>`), never from a request.
+    const args: Record<string, string> = {};
+    if (raw.args !== undefined) {
+      if (!isObj(raw.args)) return fail('data.args must map script parameters to instance settings');
+      for (const [name, path] of Object.entries(raw.args)) {
+        if (!(name in script.params)) return fail(`data.args: script "${raw.script}" has no parameter "${name}"`);
+        if (typeof path !== 'string' || !path.startsWith('config.') || !FIELD_RE.test(path)) return fail(`data.args: "${name}" must be an instance setting such as "config.command"`);
+        args[name] = path;
+      }
+    }
+    for (const name of Object.keys(script.params)) {
+      if (!(name in args)) return fail(`data.args: script "${raw.script}" needs the parameter "${name}": map it to an instance setting`);
+    }
+    if (!(PARSERS as readonly string[]).includes(String(raw.parse))) return fail(`data.parse must be one of: ${PARSERS.join(', ')}`);
+    // A script may collect rarely (an update check runs every few hours) and take minutes.
+    const cacheSec = intIn(raw.cacheSec, 5, 86400, 10);
+    const timeoutSec = intIn(raw.timeoutSec, 1, 900, 20);
+    const initialDelaySec = intIn(raw.initialDelaySec, 0, 3600, 0);
+    if (cacheSec === null || timeoutSec === null || initialDelaySec === null) return fail('data.cacheSec must be 5-86400, data.timeoutSec 1-900 and data.initialDelaySec 0-3600');
+    let cacheSecFrom: string | undefined;
+    if (raw.cacheSecFrom !== undefined) {
+      // The interval can be an instance setting (seconds), clamped to 5..cacheSec.
+      if (typeof raw.cacheSecFrom !== 'string' || !raw.cacheSecFrom.startsWith('config.') || !FIELD_RE.test(raw.cacheSecFrom)) return fail('data.cacheSecFrom must be an instance setting such as "config.interval"');
+      cacheSecFrom = raw.cacheSecFrom;
+    }
+    return {
+      ok: true,
+      value: {
+        source: 'command', as: script.as, command: '', script: raw.script, ...(Object.keys(args).length ? { args } : {}), parse: raw.parse as (typeof PARSERS)[number],
+        cacheSec, timeoutSec, ...(initialDelaySec ? { initialDelaySec } : {}), ...(cacheSecFrom ? { cacheSecFrom } : {}), ...base,
+      },
+    };
+  }
   if (raw.source === 'command') {
     if (raw.as !== 'service' && raw.as !== 'shell') return fail('data.as must be "service" (the privileged account) or "shell" (the non-admin account)');
     const command = validateCommand(raw.command, null, 'data');
@@ -259,7 +318,46 @@ function validateData(raw: unknown, ownPerms: ReadonlySet<string>): Validated<Da
   return fail('data.source must be "snapshot" or "command"');
 }
 
-function validateAction(raw: unknown, ownPerms: ReadonlySet<string>): Validated<ActionSpec> {
+/** The declared parameters of an action. */
+function actionParams(raw: Obj, where: string): Validated<Record<string, ParamSpec>> {
+  const params: Record<string, ParamSpec> = {};
+  if (raw.params !== undefined) {
+    if (!isObj(raw.params) || Object.keys(raw.params).length > 10) return fail(`${where}: "params" must be an object of up to 10 parameters`);
+    for (const [name, p] of Object.entries(raw.params)) {
+      const v = validateParam(name, p, where);
+      if (!v.ok) return v;
+      params[name] = v.value;
+    }
+  }
+  return { ok: true, value: params };
+}
+
+/** The parts every kind of action shares: when it is offered, its confirmation, what it shows afterwards. */
+function actionTail(raw: Obj, where: string): Validated<Pick<ActionSpec, 'when' | 'confirm' | 'result' | 'after'>> {
+  let when: Cond | undefined;
+  if (raw.when !== undefined) {
+    const c = cond(raw.when, `${where} "when"`);
+    if (!c.ok) return c;
+    when = c.value;
+  }
+  let confirm: ActionSpec['confirm'];
+  if (raw.confirm !== undefined) {
+    if (!isObj(raw.confirm)) return fail(`${where}: "confirm" must be an object with a title`);
+    const title = text(raw.confirm.title, 120);
+    const body = raw.confirm.text === undefined ? undefined : text(raw.confirm.text, 400);
+    if (!title || body === null) return fail(`${where}: confirm needs a title (max 120 characters) and optional text (max 400)`);
+    const requireText = raw.confirm.requireText === undefined ? undefined : text(raw.confirm.requireText, 100);
+    if (requireText === null) return fail(`${where}: confirm.requireText must be short text`);
+    confirm = { title, ...(body ? { text: body } : {}), destructive: raw.confirm.destructive === true, ...(requireText ? { requireText } : {}) };
+  }
+  const result = raw.result === undefined ? 'toast' : raw.result;
+  if (result !== 'toast' && result !== 'text' && result !== 'none') return fail(`${where}: result must be toast, text or none`);
+  const after = raw.after === undefined ? 'none' : raw.after;
+  if (after !== 'refresh' && after !== 'none') return fail(`${where}: after must be refresh or none`);
+  return { ok: true, value: { ...(when ? { when } : {}), ...(confirm ? { confirm } : {}), result, after } };
+}
+
+function validateAction(raw: unknown, ownPerms: ReadonlySet<string>, v2?: { scripts: Record<string, ScriptSpec> }): Validated<ActionSpec> {
   if (!isObj(raw)) return fail('each action must be an object');
   const id = typeof raw.id === 'string' ? raw.id : '';
   if (!ID_RE.test(id)) return fail(`action id "${id}" must be lowercase letters, digits and underscores`);
@@ -297,50 +395,50 @@ function validateAction(raw: unknown, ownPerms: ReadonlySet<string>): Validated<
     };
   }
 
+  if (raw.kind === 'script') {
+    // Version 2: runs the first variant whose condition holds (a script of the package, as the account it declares).
+    if (!v2) return fail(`${where}: script actions need spec version 2`);
+    if (raw.command !== undefined || raw.windowsCommand !== undefined || raw.as !== undefined) return fail(`${where}: a script action has "variants" instead of a command`);
+    const sparams = actionParams(raw, where);
+    if (!sparams.ok) return sparams;
+    const variants = validateVariants(raw.variants, where, v2.scripts, sparams.value);
+    if (!variants.ok) return variants;
+    const stail = actionTail(raw, where);
+    if (!stail.ok) return stail;
+    if (raw.job !== undefined && typeof raw.job !== 'boolean') return fail(`${where}: "job" must be true or false`);
+    if (raw.stores !== undefined && raw.stores !== 'data') return fail(`${where}: "stores" must be "data" or left out`);
+    return {
+      ok: true,
+      value: {
+        id, label, ...(description ? { description } : {}), ...(raw.icon ? { icon: raw.icon as ActionSpec['icon'] } : {}), permission: raw.permission,
+        kind: 'script', as: v2.scripts[variants.value[0].script].as, command: '', params: sparams.value, timeoutSec: 30,
+        variants: variants.value, ...(raw.job === true ? { job: true } : {}), ...(raw.stores === 'data' ? { stores: 'data' as const } : {}), ...stail.value,
+      },
+    };
+  }
+  if (raw.kind !== undefined && raw.kind !== 'command') return fail(`${where}: "kind" must be "command", "script" or left out`);
+
   if (raw.as !== 'service' && raw.as !== 'shell') return fail(`${where}: "as" must be "service" (the privileged account) or "shell" (the non-admin account)`);
 
-  const params: Record<string, ParamSpec> = {};
-  if (raw.params !== undefined) {
-    if (!isObj(raw.params) || Object.keys(raw.params).length > 10) return fail(`${where}: "params" must be an object of up to 10 parameters`);
-    for (const [name, p] of Object.entries(raw.params)) {
-      const v = validateParam(name, p, where);
-      if (!v.ok) return v;
-      params[name] = v.value;
-    }
-  }
-  const command = validateCommand(raw.command, params, where);
+  const params = actionParams(raw, where);
+  if (!params.ok) return params;
+  const command = validateCommand(raw.command, params.value, where);
   if (!command.ok) return command;
   let windowsCommand: string | undefined;
   if (raw.windowsCommand !== undefined) {
-    const w = validateCommand(raw.windowsCommand, params, `${where} windowsCommand`);
+    const w = validateCommand(raw.windowsCommand, params.value, `${where} windowsCommand`);
     if (!w.ok) return w;
     windowsCommand = w.value;
   }
   const timeoutSec = intIn(raw.timeoutSec, 1, 300, 30);
   if (timeoutSec === null) return fail(`${where}: timeoutSec must be 1-300`);
-  let when: Cond | undefined;
-  if (raw.when !== undefined) {
-    const c = cond(raw.when, `${where} "when"`);
-    if (!c.ok) return c;
-    when = c.value;
-  }
-  let confirm: ActionSpec['confirm'];
-  if (raw.confirm !== undefined) {
-    if (!isObj(raw.confirm)) return fail(`${where}: "confirm" must be an object with a title`);
-    const title = text(raw.confirm.title, 120);
-    const body = raw.confirm.text === undefined ? undefined : text(raw.confirm.text, 400);
-    if (!title || body === null) return fail(`${where}: confirm needs a title (max 120 characters) and optional text (max 400)`);
-    confirm = { title, ...(body ? { text: body } : {}), destructive: raw.confirm.destructive === true };
-  }
-  const result = raw.result === undefined ? 'toast' : raw.result;
-  if (result !== 'toast' && result !== 'text' && result !== 'none') return fail(`${where}: result must be toast, text or none`);
-  const after = raw.after === undefined ? 'none' : raw.after;
-  if (after !== 'refresh' && after !== 'none') return fail(`${where}: after must be refresh or none`);
+  const tail = actionTail(raw, where);
+  if (!tail.ok) return tail;
   return {
     ok: true,
     value: {
       id, label, ...(description ? { description } : {}), ...(raw.icon ? { icon: raw.icon as ActionSpec['icon'] } : {}), permission: raw.permission, kind: 'command', as: raw.as,
-      command: command.value, ...(windowsCommand ? { windowsCommand } : {}), params, timeoutSec, ...(when ? { when } : {}), ...(confirm ? { confirm } : {}), result, after,
+      command: command.value, ...(windowsCommand ? { windowsCommand } : {}), params: params.value, timeoutSec, ...tail.value,
     },
   };
 }
@@ -371,10 +469,19 @@ function validateFields(raw: unknown, where: string): Validated<FieldSpec[]> {
   return { ok: true, value: out };
 }
 
-function validateView(raw: unknown, actionIds: ReadonlySet<string>): Validated<ViewSpec> {
+function validateView(raw: unknown, actionIds: ReadonlySet<string>, v2 = false): Validated<ViewSpec> {
   if (!isObj(raw)) return fail('"view" is required');
-  if (raw.type !== 'list' && raw.type !== 'table' && raw.type !== 'text' && raw.type !== 'fields' && raw.type !== 'chart') return fail('view.type must be "list", "table", "fields", "chart" or "text"');
+  if (raw.type !== 'list' && raw.type !== 'table' && raw.type !== 'text' && raw.type !== 'fields' && raw.type !== 'chart' && raw.type !== 'layout') {
+    return fail('view.type must be "list", "table", "fields", "chart", "layout" or "text"');
+  }
   const view: ViewSpec = { type: raw.type };
+  if (raw.type === 'layout') {
+    if (!v2) return fail('layout views need spec version 2');
+    const blocks = validateLayout(raw.blocks, actionIds, inner => validateView(inner, actionIds, true), validateFields);
+    if (!blocks.ok) return blocks;
+    view.blocks = blocks.value;
+    return { ok: true, value: view };
+  }
   if (raw.type === 'chart') {
     const c = raw.chart;
     if (!isObj(c) || !Array.isArray(c.metrics) || c.metrics.length < 1 || c.metrics.length > 6 || !c.metrics.every(m => typeof m === 'string' && /^[a-z0-9_.]{1,64}$/.test(m))) {
@@ -531,31 +638,50 @@ function validateMetrics(raw: unknown, packageId: string | undefined): Validated
 
 export function validateWidgetSpec(raw: unknown, ownPermissions: readonly string[], packageId?: string): Validated<WidgetSpec> {
   if (!isObj(raw)) return fail('"spec" must be an object');
-  if (raw.version !== SPEC_VERSION) return fail(`spec.version must be ${SPEC_VERSION}`);
+  if (raw.version !== 1 && raw.version !== 2) return fail('spec.version must be 1 or 2');
+  const v2on = raw.version === 2;
+  if (!v2on) {
+    for (const k of ['scripts', 'state', 'lookups'] as const) if (raw[k] !== undefined) return fail(`"${k}" needs spec version 2`);
+  }
   const own = new Set(ownPermissions);
-  const data = validateData(raw.data, own);
+  const scripts = v2on ? validateScripts(raw.scripts) : { ok: true as const, value: {} as Record<string, ScriptSpec> };
+  if (!scripts.ok) return scripts;
+  const v2 = v2on ? { scripts: scripts.value } : undefined;
+  const data = validateData(raw.data, own, v2);
   if (!data.ok) return data;
   const actions: ActionSpec[] = [];
   const ids = new Set<string>();
   if (raw.actions !== undefined) {
     if (!Array.isArray(raw.actions) || raw.actions.length > 20) return fail('"actions" must be a list of up to 20 actions');
     for (const a of raw.actions) {
-      const v = validateAction(a, own);
+      const v = validateAction(a, own, v2);
       if (!v.ok) return v;
       if (ids.has(v.value.id)) return fail(`action "${v.value.id}" is listed twice`);
       ids.add(v.value.id);
       actions.push(v.value);
     }
   }
-  const view = validateView(raw.view, ids);
+  const view = validateView(raw.view, ids, v2on);
   if (!view.ok) return view;
+  const state = v2on ? validateState(raw.state, scripts.value) : { ok: true as const, value: undefined };
+  if (!state.ok) return state;
+  const lookups = v2on ? validateLookups(raw.lookups) : { ok: true as const, value: {} as Record<string, LookupSpec> };
+  if (!lookups.ok) return lookups;
   let metrics: MetricSpec[] | undefined;
   if (raw.metrics !== undefined) {
     const m = validateMetrics(raw.metrics, packageId);
     if (!m.ok) return m;
     metrics = m.value;
   }
-  return { ok: true, value: { version: SPEC_VERSION, data: data.value, view: view.value, actions, ...(metrics ? { metrics } : {}) } };
+  return {
+    ok: true,
+    value: {
+      version: raw.version, data: data.value, view: view.value, actions, ...(metrics ? { metrics } : {}),
+      ...(Object.keys(scripts.value).length ? { scripts: scripts.value } : {}),
+      ...(state.value ? { state: state.value } : {}),
+      ...(Object.keys(lookups.value).length ? { lookups: lookups.value } : {}),
+    },
+  };
 }
 
 /** Does a row satisfy a condition? Used by the view and, for toggles and summaries, the renderer. */
@@ -612,18 +738,20 @@ export function fillTemplate(template: string, row: unknown): string {
  * The part of a spec the browser needs: how to draw the widget and which actions exist, but
  * not the commands that implement them.
  */
-export function publicSpec(spec: WidgetSpec): Omit<WidgetSpec, 'data' | 'actions'> & {
+export function publicSpec(spec: WidgetSpec): Omit<WidgetSpec, 'data' | 'actions' | 'scripts' | 'state' | 'lookups'> & {
   data: { source: DataSpec['source'] };
-  actions: Omit<ActionSpec, 'command' | 'windowsCommand' | 'as' | 'timeoutSec'>[];
+  actions: (Omit<ActionSpec, 'command' | 'windowsCommand' | 'as' | 'timeoutSec' | 'variants'> & { variants?: { when?: Cond }[] })[];
 } {
+  // Scripts, the state probe, lookups and the arguments of script variants are never sent to the browser; it only
+  // gets what it needs to draw the widget and to decide which actions to offer (a variant's condition).
   return {
     version: spec.version,
     view: spec.view,
     data: { source: spec.data.source },
     actions: spec.actions.map(a => {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { command, windowsCommand, as, timeoutSec, ...rest } = a;
-      return rest;
+      const { command, windowsCommand, as, timeoutSec, variants, ...rest } = a;
+      return { ...rest, ...(variants ? { variants: variants.map(v => (v.when ? { when: v.when } : {})) } : {}) };
     }),
   };
 }
