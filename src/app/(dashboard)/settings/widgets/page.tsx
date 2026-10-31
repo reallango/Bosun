@@ -403,7 +403,7 @@ export default function WidgetPackagesPage() {
                 <ul className="space-y-3">
                   {added.map(p => (
                     <li key={p.id} className="rounded-xl border bg-card p-4">
-                      <div className="flex flex-wrap items-start gap-3">
+                      <div className="flex items-start gap-3">
                         <Package className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
@@ -413,32 +413,50 @@ export default function WidgetPackagesPage() {
                             <span className="rounded bg-muted px-1 text-[10px] uppercase text-muted-foreground">{p.source === 'github' ? `github:${p.sourceRef}` : p.source === 'bundled' ? 'preinstalled' : 'zip import'}</span>
                           </div>
                           {p.description && <p className="mt-0.5 text-sm text-muted-foreground">{p.description}</p>}
-                          {p.permissions.length > 0 && (
-                            <p className="mt-1 text-xs text-muted-foreground">{p.permissions.length} permission{p.permissions.length === 1 ? '' : 's'}</p>
-                          )}
-                          <ul className="mt-2 space-y-1">
-                            {p.widgetTypes.map(t => rows[t] && (
-                              <li key={t}>
-                                <div className="flex items-center gap-2 text-sm">
-                                  <span className={rows[t].enabled === 1 ? 'text-muted-foreground' : 'text-muted-foreground line-through'}>{rows[t].display_name === p.name ? 'Widget settings' : rows[t].display_name}</span>
-                                  {rows[t].enabled !== 1 && <span className="rounded bg-yellow-500/15 px-1 text-[10px] uppercase text-yellow-700 dark:text-yellow-400">disabled</span>}
-                                  <Button variant="ghost" size="icon-sm" className="ml-auto" aria-expanded={openCog === t} aria-label={`Settings of ${rows[t].display_name}`}
-                                    onClick={() => setOpenCog(openCog === t ? null : t)}><Cog /></Button>
-                                </div>
-                                {openCog === t && <WidgetTypeSettings row={rows[t]} onChanged={loadInstalled} />}
-                              </li>
-                            ))}
-                          </ul>
-                        </div>
-                        <div className="flex items-center gap-1">
-                          <a className="inline-flex size-8 items-center justify-center rounded-md hover:bg-muted" href={`/api/widget-packages/${encodeURIComponent(p.id)}/export`} download aria-label={`Export ${p.name}`} title="Export zip">
-                            <Download className="size-4" />
-                          </a>
-                          <Button variant="ghost" size="icon-sm" onClick={() => setConfirmRemove(confirmRemove === p.id ? null : p.id)} disabled={busy !== null} aria-label={`Remove ${p.name}`}>
-                            <Trash2 className="text-destructive" />
-                          </Button>
                         </div>
                       </div>
+                      {(() => {
+                        const own = p.widgetTypes.filter(t => rows[t]);
+                        const single = own.length === 1 ? own[0] : null;   // one widget: its cog sits with the package's own buttons
+                        return (
+                          <>
+                            <div className="mt-1 flex items-end justify-between gap-2 pl-7">
+                              <span className="text-xs text-muted-foreground">
+                                {p.permissions.length > 0 ? `${p.permissions.length} permission${p.permissions.length === 1 ? '' : 's'}` : ''}
+                                {single && rows[single].enabled !== 1 && <span className="ml-2 rounded bg-yellow-500/15 px-1 text-[10px] uppercase text-yellow-700 dark:text-yellow-400">disabled</span>}
+                              </span>
+                              <div className="flex items-center gap-1">
+                                {single && (
+                                  <Button variant="ghost" size="icon-sm" aria-expanded={openCog === single} aria-label={`Settings of ${rows[single].display_name}`} title="Widget settings"
+                                    onClick={() => setOpenCog(openCog === single ? null : single)}><Cog /></Button>
+                                )}
+                                <a className="inline-flex size-8 items-center justify-center rounded-md hover:bg-muted" href={`/api/widget-packages/${encodeURIComponent(p.id)}/export`} download aria-label={`Export ${p.name}`} title="Export zip">
+                                  <Download className="size-4" />
+                                </a>
+                                <Button variant="ghost" size="icon-sm" onClick={() => setConfirmRemove(confirmRemove === p.id ? null : p.id)} disabled={busy !== null} aria-label={`Remove ${p.name}`}>
+                                  <Trash2 className="text-destructive" />
+                                </Button>
+                              </div>
+                            </div>
+                            {single && openCog === single && <div className="pl-7"><WidgetTypeSettings row={rows[single]} onChanged={loadInstalled} /></div>}
+                            {!single && own.length > 1 && (
+                              <ul className="mt-2 space-y-1 pl-7">
+                                {own.map(wt => (
+                                  <li key={wt}>
+                                    <div className="flex items-center gap-2 text-sm">
+                                      <span className={rows[wt].enabled === 1 ? 'text-muted-foreground' : 'text-muted-foreground line-through'}>{rows[wt].display_name}</span>
+                                      {rows[wt].enabled !== 1 && <span className="rounded bg-yellow-500/15 px-1 text-[10px] uppercase text-yellow-700 dark:text-yellow-400">disabled</span>}
+                                      <Button variant="ghost" size="icon-sm" className="ml-auto" aria-expanded={openCog === wt} aria-label={`Settings of ${rows[wt].display_name}`}
+                                        onClick={() => setOpenCog(openCog === wt ? null : wt)}><Cog /></Button>
+                                    </div>
+                                    {openCog === wt && <WidgetTypeSettings row={rows[wt]} onChanged={loadInstalled} />}
+                                  </li>
+                                ))}
+                              </ul>
+                            )}
+                          </>
+                        );
+                      })()}
                       {confirmRemove === p.id && (
                         <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg bg-muted p-2 text-sm" role="alertdialog" aria-label={`Confirm removing ${p.name}`}>
                           <span className="min-w-0 flex-1">Remove <strong>{p.name}</strong>? Its permissions and any dashboard widgets that use it are removed too.</span>
