@@ -39,6 +39,8 @@ export interface WidgetDefinition {
   packageId?: string;
   /** Database-defined (custom_widgets) rather than compiled into the registry. */
   isCustom?: boolean;
+  /** Where a package widget comes from: the Bosun repository ("optional") or a zip someone imported ("custom"). */
+  origin?: 'optional' | 'custom';
   /** Platform support; both default to true. */
   supportsLinux?: boolean;
   supportsWindows?: boolean;

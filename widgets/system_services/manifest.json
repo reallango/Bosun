@@ -2,8 +2,8 @@
   "schema": 1,
   "id": "system_services",
   "name": "System Services",
-  "version": "1.0.0",
-  "description": "System services with their status; show the running ones, the failed ones or all. Installed by default.",
+  "version": "1.0.1",
+  "description": "System services with their status; show the running ones, the failed ones or all.",
   "author": "Bosun",
   "permissions": [
     {

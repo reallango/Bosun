@@ -2,8 +2,8 @@
   "schema": 1,
   "id": "gpu_monitoring",
   "name": "GPU Monitoring",
-  "version": "1.0.0",
-  "description": "NVIDIA GPU utilisation, memory, temperature and power. Installed by default; tracks each GPU as history.",
+  "version": "1.0.1",
+  "description": "NVIDIA GPU utilisation, memory, temperature and power. Tracks each GPU as history.",
   "author": "Bosun",
   "permissions": [
     {

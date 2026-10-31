@@ -2,8 +2,8 @@
   "schema": 1,
   "id": "updates",
   "name": "OS Update Check",
-  "version": "2.0.0",
-  "description": "Check for and install operating system updates (apt, dnf and yum on Linux, Windows Update on Windows). Installed by default. Everything it does is in this package: the scripts that check and install, and its screen. On Windows an install runs in the background on the host as a scheduled task and the host is never restarted automatically.",
+  "version": "2.0.1",
+  "description": "Check for and install operating system updates (apt, dnf and yum on Linux, Windows Update on Windows).",
   "author": "Bosun",
   "permissions": [
     {

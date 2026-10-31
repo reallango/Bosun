@@ -2,8 +2,8 @@
   "schema": 1,
   "id": "ollama",
   "name": "Ollama Status",
-  "version": "2.0.0",
-  "description": "Models, loaded models and their memory split; pull and delete models; shows how Ollama is installed (Windows service with nssm, systemd service, Docker container), updates it, starts and stops it, sets its startup method, restart policy and settings, and installs it. Installed by default. Everything it does is in this package: the scripts for each platform and install kind, and its screen.",
+  "version": "2.0.1",
+  "description": "Models, loaded models and their memory split; pull and delete models; shows how Ollama is installed (Windows service with nssm, systemd service, Docker container), updates it, starts and stops it, sets its startup method, restart policy and settings, and installs it.",
   "author": "Bosun",
   "network": [
     "api.github.com"

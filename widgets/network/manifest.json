@@ -2,8 +2,8 @@
   "schema": 1,
   "id": "network",
   "name": "Network",
-  "version": "1.0.0",
-  "description": "Network interfaces with their addresses and live traffic. Installed by default; tracks total receive and transmit rates as history.",
+  "version": "1.0.1",
+  "description": "Network interfaces with their addresses and live traffic. Tracks total receive and transmit rates as history.",
   "author": "Bosun",
   "permissions": [
     {

@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Download, Lock, Package, RefreshCw, Trash2, Upload } from 'lucide-react';
+import { Download, Lock, Package, RefreshCw, Settings as Cog, Trash2, Upload } from 'lucide-react';
 import Header from '@/components/layout/Header';
 import { Button } from '@/components/ui/button';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
@@ -9,6 +9,7 @@ import { useToast } from '@/components/ui/toast';
 import { useAuth } from '@/hooks/useAuth';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { readJson } from '@/lib/api/readJson';
+import WidgetTypeSettings, { WidgetTypeRow } from '@/components/settings/WidgetTypeSettings';
 
 interface InstalledItem {
   id: string;
@@ -95,6 +96,8 @@ export default function WidgetPackagesPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState<Reviewing | null>(null);
+  const [rows, setRows] = useState<Record<string, WidgetTypeRow>>({});
+  const [openCog, setOpenCog] = useState<string | null>(null);
 
   const askInstall = (p: AvailableItem, upgrade: boolean) => {
     if (p.review.commandCount === 0) install(p.id, upgrade);
@@ -106,6 +109,8 @@ export default function WidgetPackagesPage() {
       const d = await api<{ installed: InstalledItem[]; source: SourceInfo }>('/api/widget-packages');
       setInstalled(d.installed);
       setSource(d.source);
+      const w = await api<{ widgets: WidgetTypeRow[] }>('/api/custom-widgets');
+      setRows(Object.fromEntries(w.widgets.map(r => [r.type, r])));
     } catch (err) {
       toast('Failed to load widget packages', { variant: 'error', description: errText(err) });
     } finally {
@@ -237,7 +242,7 @@ export default function WidgetPackagesPage() {
       <div className="page max-w-6xl space-y-4">
         <p className="text-sm text-muted-foreground">
           Widget packages add widgets and the permissions they need. Available packages come from the <code className="rounded bg-muted px-1">widgets/</code> folder
-          of the Bosun repository; you can also import a package zip. System widgets are built in to Bosun.
+          of the Bosun repository; you can also import a package zip. System widgets are built in to Bosun. Optional widgets come from that repository; custom ones were imported from a zip. Use the cog of an installed widget to change its sizes, refresh interval and platforms.
         </p>
 
         <div className="flex flex-wrap items-center gap-3 rounded-xl border bg-card p-3 text-sm">
@@ -404,13 +409,26 @@ export default function WidgetPackagesPage() {
                           <div className="flex flex-wrap items-center gap-2">
                             <span className="font-medium">{p.name}</span>
                             <span className="rounded bg-muted px-1 text-xs">v{p.version}</span>
+                            <span className={`rounded px-1 text-[10px] uppercase ${p.source === 'upload' ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}`}>{p.source === 'upload' ? 'custom' : 'optional'}</span>
                             <span className="rounded bg-muted px-1 text-[10px] uppercase text-muted-foreground">{p.source === 'github' ? `github:${p.sourceRef}` : p.source === 'bundled' ? 'preinstalled' : 'zip import'}</span>
                           </div>
                           {p.description && <p className="mt-0.5 text-sm text-muted-foreground">{p.description}</p>}
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {p.widgetTypes.join(', ')}
-                            {p.permissions.length > 0 && <> · {p.permissions.length} permission{p.permissions.length === 1 ? '' : 's'}</>}
-                          </p>
+                          {p.permissions.length > 0 && (
+                            <p className="mt-1 text-xs text-muted-foreground">{p.permissions.length} permission{p.permissions.length === 1 ? '' : 's'}</p>
+                          )}
+                          <ul className="mt-2 space-y-1">
+                            {p.widgetTypes.map(t => rows[t] && (
+                              <li key={t}>
+                                <div className="flex items-center gap-2 text-sm">
+                                  <span className={rows[t].enabled === 1 ? 'text-muted-foreground' : 'text-muted-foreground line-through'}>{rows[t].display_name === p.name ? 'Widget settings' : rows[t].display_name}</span>
+                                  {rows[t].enabled !== 1 && <span className="rounded bg-yellow-500/15 px-1 text-[10px] uppercase text-yellow-700 dark:text-yellow-400">disabled</span>}
+                                  <Button variant="ghost" size="icon-sm" className="ml-auto" aria-expanded={openCog === t} aria-label={`Settings of ${rows[t].display_name}`}
+                                    onClick={() => setOpenCog(openCog === t ? null : t)}><Cog /></Button>
+                                </div>
+                                {openCog === t && <WidgetTypeSettings row={rows[t]} onChanged={loadInstalled} />}
+                              </li>
+                            ))}
+                          </ul>
                         </div>
                         <div className="flex items-center gap-1">
                           <a className="inline-flex size-8 items-center justify-center rounded-md hover:bg-muted" href={`/api/widget-packages/${encodeURIComponent(p.id)}/export`} download aria-label={`Export ${p.name}`} title="Export zip">

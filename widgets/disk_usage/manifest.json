@@ -2,8 +2,8 @@
   "schema": 1,
   "id": "disk_usage",
   "name": "Disk Usage",
-  "version": "1.0.0",
-  "description": "Per-mount disk usage with usage bars. Installed by default; tracks the fullest disk and the root disk as history.",
+  "version": "1.0.1",
+  "description": "Per-mount disk usage with usage bars. Tracks the fullest disk and the root disk as history.",
   "author": "Bosun",
   "permissions": [
     {

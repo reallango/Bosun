@@ -2,8 +2,8 @@
   "schema": 1,
   "id": "os_info",
   "name": "OS Info",
-  "version": "1.0.0",
-  "description": "Operating system, kernel, architecture, hostname and uptime. Installed by default.",
+  "version": "1.0.1",
+  "description": "Operating system, kernel, architecture, hostname and uptime.",
   "author": "Bosun",
   "permissions": [
     {

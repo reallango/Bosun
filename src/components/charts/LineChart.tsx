@@ -120,7 +120,7 @@ export function LineChart({ series, unit, from, to, yMax, height = 180, showBand
             </text>
           </g>
         ))}
-        {[0, 0.25, 0.5, 0.75, 1].map(f => (
+        {(w >= 380 ? [0, 0.25, 0.5, 0.75, 1] : [0, 0.5, 1]).map(f => (   // fewer labels when the chart is narrow, so they never overlap
           <text key={f} x={pad.l + f * w} y={height - 4} textAnchor={f === 0 ? 'start' : f === 1 ? 'end' : 'middle'}
             className="fill-gray-500 dark:fill-gray-400" fontSize={10}>
             {formatTime(from + f * span, span)}

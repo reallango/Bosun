@@ -169,8 +169,11 @@ export function AddWidgetModal({ isOpen, onClose, serverId, onAdd }: AddWidgetMo
                 <span className="min-w-0">
                   <span className="flex items-center gap-1.5 text-sm font-medium">
                     {w.displayName}
-                    {w.isCustom && (
+                    {w.origin === 'custom' && (
                       <span className="rounded bg-primary/10 px-1 text-[10px] font-normal uppercase tracking-wide text-primary">custom</span>
+                    )}
+                    {w.origin === 'optional' && (
+                      <span className="rounded bg-muted px-1 text-[10px] font-normal uppercase tracking-wide text-muted-foreground">optional</span>
                     )}
                   </span>
                   <span className="block text-xs text-muted-foreground">{w.description}</span>
