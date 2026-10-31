@@ -10,6 +10,9 @@ import { loadShellTarget, assertShellAccountSafe, runOnShellTarget, ShellUnavail
 import { validateWidgetSpec, applyConfigFilters, evalCond, fillTemplate, type ActionSpec, type DataSpec, type RunAs, type WidgetSpec } from '@/lib/widgets/runtime/spec';
 import { commandFor, renderCommand, validateParams } from '@/lib/widgets/runtime/command';
 import { shapeData } from '@/lib/widgets/runtime/data';
+import { buildScriptInvocation, parseScriptOutput, scriptFileFor, validateParamValues } from '@/lib/widgets/runtime/script-run';
+import { getPackageFile } from '@/lib/widgets/materialize-db';
+import { loadLookups } from '@/lib/widgets/runtime/lookups';
 
 export class RuntimeError extends Error {
   status: number;
@@ -25,6 +28,8 @@ export interface LoadedSpec {
   type: string;
   packageId: string;
   spec: WidgetSpec;
+  /** Hosts the package's manifest lets its lookups contact. */
+  network: string[];
 }
 
 const SPEC_TTL_MS = 15_000;
@@ -53,10 +58,18 @@ export async function loadWidgetSpec(type: string): Promise<LoadedSpec | null> {
     let raw: unknown = null;
     try { raw = JSON.parse(String(row.spec)); } catch { raw = null; }
     const v = validateWidgetSpec(raw, (perms.values ?? []).map(p => String(p[0])), String(row.package_id));
-    if (v.ok) value = { type, packageId: String(row.package_id), spec: v.value };
+    if (v.ok) value = { type, packageId: String(row.package_id), spec: v.value, network: await networkOf(String(row.package_id)) };
   }
   specCache.set(type, { at: Date.now(), value });
   return value;
+}
+
+async function networkOf(packageId: string): Promise<string[]> {
+  const r = rowsToObjects(await rqlite.query('SELECT manifest FROM widget_packages WHERE id = ?', [packageId]))[0];
+  try {
+    const m = JSON.parse(String(r?.manifest ?? '{}'));
+    return Array.isArray(m.network) ? m.network.filter((h: unknown): h is string => typeof h === 'string') : [];
+  } catch { return []; }
 }
 
 interface ServerInfo { id: string; platform: 'linux' | 'windows' }
@@ -79,15 +92,15 @@ export interface CommandOutput {
  * Run a command as the account the spec asks for: `service` is the privileged service account,
  * `shell` the non-admin account (re-verified first, Linux only).
  */
-async function runAs(server: ServerInfo, as: RunAs, command: string, timeoutSec: number): Promise<CommandOutput> {
+async function runAs(server: ServerInfo, as: RunAs, command: string, timeoutSec: number, stdin?: string): Promise<CommandOutput> {
   try {
     if (as === 'shell') {
       const target = await loadShellTarget(server.id);
       await assertShellAccountSafe(target);
-      const r = await runOnShellTarget(target, command, { timeoutMs: timeoutSec * 1000 });
+      const r = await runOnShellTarget(target, command, { timeoutMs: timeoutSec * 1000, stdin });
       return { stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode, timedOut: !!r.timedOut };
     }
-    const r = await runOnServerId(server.id, command, { timeoutMs: timeoutSec * 1000 });
+    const r = await runOnServerId(server.id, command, { timeoutMs: timeoutSec * 1000, stdin });
     return { stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode, timedOut: !!r.timedOut };
   } catch (err) {
     if (err instanceof ShellUnavailableError) throw new RuntimeError(err.message, err.status, err.code);
@@ -115,12 +128,40 @@ export async function runAction(serverId: string, action: ActionSpec, params: un
   return { ...out, stdout: out.stdout.slice(0, MAX_OUTPUT), stderr: out.stderr.slice(0, 64 * 1024), success: out.exitCode === 0 && !out.timedOut };
 }
 
+export interface ScriptResult extends ActionResult {
+  /** The generic output protocol of the script (steps, progress, DONE / ERROR). */
+  protocol: ReturnType<typeof parseScriptOutput>;
+}
+
+/**
+ * Run one of a package's host scripts on a server, as the account the script declares. The parameters are validated
+ * against the script's declaration and reach the script as data (environment variables), never as part of its text.
+ */
+export async function runScript(serverId: string, loaded: LoadedSpec, scriptId: string, args: unknown): Promise<ScriptResult> {
+  const script = loaded.spec.scripts?.[scriptId];
+  if (!script) throw new RuntimeError(`The package has no script "${scriptId}"`, 404, 'SCRIPT_NOT_FOUND');
+  const server = await loadServer(serverId);
+  const file = scriptFileFor(script, server.platform);
+  if (!file) throw new RuntimeError(`This script is not available on ${server.platform === 'windows' ? 'Windows' : 'Linux'} hosts`, 409, 'PLATFORM_UNSUPPORTED');
+  const text = await getPackageFile(loaded.packageId, file);
+  if (text === null) throw new RuntimeError(`The package file "${file}" is missing`, 500, 'SCRIPT_MISSING');
+  const values = validateParamValues(script.params, args);
+  const inv = buildScriptInvocation(server.platform, text, values);
+  const out = await runAs(server, script.as, inv.command, script.timeoutSec, inv.stdin);
+  const stdout = out.stdout.slice(0, MAX_OUTPUT);
+  return { ...out, stdout, stderr: out.stderr.slice(0, 64 * 1024), success: out.exitCode === 0 && !out.timedOut, protocol: parseScriptOutput(stdout) };
+}
+
 export interface RuntimeData {
   data: unknown;
   collectedAt: string | null;
   pending: boolean;
   /** Set when the host cannot provide this data (for example Docker is not installed): shown instead of rows. */
   unavailable?: string;
+  /** Version 2: what the widget's state probe found on the host (null until the first run) and the values of its lookups. */
+  state?: unknown;
+  stateError?: string;
+  lookups?: Record<string, string | null>;
 }
 
 /**
@@ -144,7 +185,24 @@ async function withExtras(serverId: string, ds: Extract<DataSpec, { source: 'sna
 }
 
 /** A widget's data: the poller's snapshot section, or the output of its command (cached and shared between viewers). */
-export async function loadRuntimeData(serverId: string, loaded: LoadedSpec, force = false, config: Record<string, unknown> = {}): Promise<RuntimeData> {
+export async function loadRuntimeData(serverId: string, loaded: LoadedSpec, force = false, config: Record<string, unknown> = {}, instanceId?: string): Promise<RuntimeData> {
+  const base = await loadMainData(serverId, loaded, force, config, instanceId);
+  const spec = loaded.spec;
+  if (!spec.state && !spec.lookups) return base;
+  const extra: Pick<RuntimeData, 'state' | 'stateError' | 'lookups'> = {};
+  if (spec.state) {
+    const r = await rqlite.query('SELECT data FROM host_snapshots WHERE server_id = ? AND section = ?', [serverId, `pkg:${loaded.type}:state`]);
+    if (!r.values?.length) { extra.state = null; if (force) await requestPoll(serverId, true); } else {
+      let s: { ok?: boolean; data?: unknown; error?: string } = {};
+      try { s = JSON.parse(String(r.values[0][0])); } catch { s = { ok: false, error: 'The stored state is unreadable' }; }
+      if (s.ok === false) { extra.state = null; extra.stateError = s.error || 'The state check failed'; } else extra.state = s.data ?? null;
+    }
+  }
+  if (spec.lookups) extra.lookups = await loadLookups(loaded.packageId, spec.lookups, loaded.network);
+  return { ...base, ...extra };
+}
+
+async function loadMainData(serverId: string, loaded: LoadedSpec, force: boolean, config: Record<string, unknown>, instanceId?: string): Promise<RuntimeData> {
   const ds: DataSpec = loaded.spec.data;
   if (ds.source === 'snapshot') {
     const r = await rqlite.query('SELECT data, collected_at FROM host_snapshots WHERE server_id = ? AND section = ?', [serverId, ds.section]);
@@ -160,7 +218,7 @@ export async function loadRuntimeData(serverId: string, loaded: LoadedSpec, forc
 
   // Command-sourced data is collected by the poller (see lib/collect/packages.js) and stored as the host
   // snapshot section `pkg:<type>`, so opening a dashboard never runs an SSH command from the web process.
-  const r = await rqlite.query('SELECT data, collected_at FROM host_snapshots WHERE server_id = ? AND section = ?', [serverId, `pkg:${loaded.type}`]);
+  const r = await rqlite.query('SELECT data, collected_at FROM host_snapshots WHERE server_id = ? AND section = ?', [serverId, ds.source === 'command' && ds.script && (ds.cacheSecFrom || (ds.args && Object.keys(ds.args).length)) && instanceId ? `pkg:${loaded.type}#${instanceId}` : `pkg:${loaded.type}`]);
   const row = r.values?.[0];
   if (force || !row) await requestPoll(serverId, force);
   if (!row) return { data: null, collectedAt: null, pending: true };

@@ -85,7 +85,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
     if (loaded && !WIDGET_SECTIONS[widget.widget_type]) {
       try {
-        const rt = await loadRuntimeData(server.id, loaded, force, cfg);
+        const rt = await loadRuntimeData(server.id, loaded, force, cfg, widgetId);
         return NextResponse.json({ ...rt, stale: false, server: { is_online: !!server.is_online, last_error: server.last_error ?? null } },
           { headers: { 'Cache-Control': 'no-store' } });
       } catch (err) {

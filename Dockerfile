@@ -59,8 +59,8 @@ COPY --from=builder /app/src/lib/secrets.js ./src/lib/secrets.js
 # API terminal (ws-server.js): session handler, pure helpers and the shell-account checks.
 COPY --from=builder /app/src/lib/terminal ./src/lib/terminal
 COPY --from=builder /app/src/lib/ssh/shell-account.js /app/src/lib/ssh/windows-shell-account.js ./src/lib/ssh/
-# Package widget data shaping, shared by the web app and the poller.
-COPY --from=builder /app/src/lib/widgets/runtime/data.js ./src/lib/widgets/runtime/data.js
+# Package widget data shaping and host script running, shared by the web app and the poller.
+COPY --from=builder /app/src/lib/widgets/runtime/data.js /app/src/lib/widgets/runtime/script-run.js ./src/lib/widgets/runtime/
 # Widget packages installed by default (see widgets/bundled.json).
 COPY --from=builder /app/widgets ./widgets
 # Cluster settings + the start-time helper used by the rqlite service.

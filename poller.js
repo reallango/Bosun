@@ -35,6 +35,7 @@ const store = require('./src/lib/collect/store');
 const alerts = require('./src/lib/collect/alerts');
 const mailer = require('./src/lib/collect/mailer');
 const packages = require('./src/lib/collect/packages');
+const packageState = require('./src/lib/collect/package-state');
 const { extractMetrics, shapeData } = require('./src/lib/widgets/runtime/data');
 const { SHELL_VERIFY_COMMAND, parseShellVerification } = require('./src/lib/ssh/shell-account');
 const { WINDOWS_SHELL_VERIFY_COMMAND, parseWindowsShellVerification } = require('./src/lib/ssh/windows-shell-account');
@@ -234,10 +235,11 @@ class HostAgent {
     const now = Date.now();
     if (!force && this.pkgListAt && now - this.pkgListAt < 30000) return this.pkgList;
     const rows = await query(
-      'SELECT DISTINCT c.type AS type, c.spec AS spec FROM widgets w ' +
+      'SELECT c.type AS type, c.spec AS spec, p.files AS files, w.id AS widget_id, w.config AS config FROM widgets w ' +
       'JOIN custom_widgets c ON c.type = w.widget_type JOIN widget_packages p ON p.id = c.package_id ' +
-      'WHERE w.server_id = ? AND c.spec IS NOT NULL AND c.enabled = 1', [this.id]);
+      'WHERE w.server_id = ? AND c.spec IS NOT NULL AND c.enabled = 1 ORDER BY w.id', [this.id]);
     this.pkgList = packages.collectorsFrom(rows);
+    this.pkgProbes = packageState.stateProbesFrom(rows);
     this.pkgTrackers = packages.snapshotTrackersFrom(rows);
     this.pkgListAt = now;
     return this.pkgList;
@@ -292,23 +294,45 @@ class HostAgent {
       const collectors = await this.packageCollectors(force);
       this.pkgLast = this.pkgLast || {};
       const now = Date.now();
+      this.pkgSeen = this.pkgSeen || {};
       for (const c of collectors) {
-        if (!packages.isDue(c, this.pkgLast[c.type], now, force)) continue;
-        this.pkgLast[c.type] = now;
+        const key = c.key || c.type;
+        if (this.pkgSeen[key] === undefined) this.pkgSeen[key] = now;
+        if (!packages.isDue(c, this.pkgLast[key], now, force, this.pkgSeen[key])) continue;
+        this.pkgLast[key] = now;
         const exec = async (command, opts) => {
           const conn = c.as === 'shell' ? await this.ensureShellClient() : client;
-          return ssh.exec(conn, command, { timeoutMs: opts.timeoutMs });
+          return ssh.exec(conn, command, { timeoutMs: opts.timeoutMs, stdin: opts.stdin });
         };
         const result = await packages.runCollector(c, this.platform, exec);
         const json = JSON.stringify(result);
         await executeBatch([{
           sql: 'INSERT INTO host_snapshots (server_id, section, data, data_hash, collected_at) VALUES (?, ?, ?, ?, ?) ' +
             'ON CONFLICT(server_id, section) DO UPDATE SET data = excluded.data, data_hash = excluded.data_hash, collected_at = excluded.collected_at',
-          params: [this.id, packages.sectionFor(c.type), json, null, Date.now()],
+          params: [this.id, packages.sectionFor(c.type, c.instanceId), json, null, Date.now()],
         }]);
         const tracked = packages.metricsOf(c, result);
         if (Object.keys(tracked).length) await executeBatch(store.metricStatements(this.id, tracked, Date.now()));
         if (!result.ok) warn(`${this.row.name}: ${c.type}: ${result.error}`);
+      }
+      // State probes of version 2 packages: what a widget needs to know about this host, stored as `pkg:<type>:state`.
+      this.probeLast = this.probeLast || {};
+      for (const p of this.pkgProbes || []) {
+        const skey = `state:${p.type}`;
+        if (this.pkgSeen[skey] === undefined) this.pkgSeen[skey] = now;
+        if (!packageState.isStateDue(p, this.probeLast[p.type], this.pkgSeen[skey], now, force)) continue;
+        this.probeLast[p.type] = now;
+        const exec = async (command, opts) => {
+          const conn = p.script.as === 'shell' ? await this.ensureShellClient() : client;
+          return ssh.exec(conn, command, { timeoutMs: opts.timeoutMs, stdin: opts.stdin });
+        };
+        const result = await packageState.runStateProbe(p, this.platform, exec);
+        await executeBatch([{
+          sql: 'INSERT INTO host_snapshots (server_id, section, data, data_hash, collected_at) VALUES (?, ?, ?, ?, ?) ' +
+            'ON CONFLICT(server_id, section) DO UPDATE SET data = excluded.data, data_hash = excluded.data_hash, collected_at = excluded.collected_at',
+          params: [this.id, packageState.stateSectionFor(p.type), JSON.stringify(result), null, Date.now()],
+        }]);
+        if (!result.ok) warn(`${this.row.name}: ${p.type} state: ${result.error}`);
       }
       // Statistics computed from the stored sections of snapshot-sourced widgets.
       for (const t of this.pkgTrackers || []) {

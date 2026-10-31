@@ -55,7 +55,7 @@ export async function POST(request: NextRequest) {
     // dry_run=1: validate and describe what the package can run, without installing it.
     if (query.get('dry_run') === '1') {
       const have = await getInstalledPackage(manifest.value.id);
-      return ok({ id: manifest.value.id, name: manifest.value.name, version: manifest.value.version, installedVersion: have?.pkg.version ?? null, review: reviewPackage(manifest.value) });
+      return ok({ id: manifest.value.id, name: manifest.value.name, version: manifest.value.version, installedVersion: have?.pkg.version ?? null, review: reviewPackage(manifest.value, files.value) });
     }
     const replace = query.get('replace') === '1';
     const result = await installPackage({ manifest: manifest.value, files: files.value, source: 'upload', userId: auth.userId, allowSameOrOlder: replace });

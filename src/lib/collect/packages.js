@@ -12,12 +12,13 @@
 
 const windows = require('./windows');
 const { parseOutput, shapeData, extractMetrics } = require('../widgets/runtime/data');
+const scripts = require('./package-state');
 
 const SECTION_PREFIX = 'pkg:';
 const MIN_INTERVAL_SEC = 5;
 
 /** Snapshot section name for a widget type. */
-const sectionFor = (type) => `${SECTION_PREFIX}${type}`;
+const sectionFor = (type, instanceId) => (instanceId ? `${SECTION_PREFIX}${type}#${instanceId}` : `${SECTION_PREFIX}${type}`);
 
 /**
  * The collectors for a list of `{ type, spec }` rows (spec as stored JSON): only command-sourced widgets,
@@ -25,11 +26,52 @@ const sectionFor = (type) => `${SECTION_PREFIX}${type}`;
  */
 function collectorsFrom(rows) {
   const out = [];
+  const have = new Set();
   for (const row of rows || []) {
     let spec = row.spec;
     if (typeof spec === 'string') { try { spec = JSON.parse(spec); } catch { continue; } }
     const d = spec && spec.data;
     if (!d || d.source !== 'command' || (d.as !== 'service' && d.as !== 'shell') || typeof d.command !== 'string') continue;
+    if (d.script) {
+      // Version 2: the data comes from a package script. Arguments and the interval may come from the settings of the
+      // widget, so such a collector runs per widget instance and stores its own section.
+      const src = scripts.scriptSource(spec, d.script, row.files);
+      if (!src) continue;
+      const perInstance = !!(d.args && Object.keys(d.args).length) || !!d.cacheSecFrom;
+      if (perInstance && !row.widget_id) continue;
+      let config = row.config;
+      if (typeof config === 'string') { try { config = JSON.parse(config); } catch { config = {}; } }
+      config = config && typeof config === 'object' ? config : {};
+      let sec = Number(d.cacheSec) || 10;
+      if (d.cacheSecFrom) {
+        const n = Number(config[String(d.cacheSecFrom).replace(/^config./, '')]);
+        if (Number.isFinite(n) && n > 0) sec = n;
+      }
+      const k = perInstance ? `${row.type}#${row.widget_id}` : String(row.type);
+      if (have.has(k)) continue;
+      have.add(k);
+      out.push({
+        type: String(row.type),
+        key: perInstance ? `${row.type}#${row.widget_id}` : String(row.type),
+        instanceId: perInstance ? String(row.widget_id) : null,
+        as: src.as,
+        command: '',
+        windowsCommand: null,
+        script: src,
+        args: d.args || {},
+        config,
+        parse: d.parse,
+        path: d.path,
+        map: d.map,
+        intervalMs: Math.max(MIN_INTERVAL_SEC, sec) * 1000,
+        initialDelayMs: Math.max(0, Number(d.initialDelaySec) || 0) * 1000,
+        timeoutMs: Math.min(900, Math.max(1, src.timeoutSec || 20)) * 1000,
+        metrics: computedMetrics(spec),
+      });
+      continue;
+    }
+    if (have.has(String(row.type))) continue;
+    have.add(String(row.type));
     out.push({
       type: String(row.type),
       as: d.as,
@@ -57,12 +99,14 @@ function computedMetrics(spec) {
  */
 function snapshotTrackersFrom(rows) {
   const out = [];
+  const have = new Set();
   for (const row of rows || []) {
     let spec = row.spec;
     if (typeof spec === 'string') { try { spec = JSON.parse(spec); } catch { continue; } }
     const d = spec && spec.data;
     const metrics = computedMetrics(spec);
-    if (!d || d.source !== 'snapshot' || typeof d.section !== 'string' || !metrics.length) continue;
+    if (!d || d.source !== 'snapshot' || typeof d.section !== 'string' || !metrics.length || have.has(String(row.type))) continue;
+    have.add(String(row.type));
     out.push({ type: String(row.type), section: d.section, path: d.path, map: d.map, metrics });
   }
   return out;
@@ -74,7 +118,9 @@ function metricsOf(collector, result) {
 }
 
 /** Is a collector due? `last` is when it last ran (ms) or undefined. A forced poll runs everything. */
-function isDue(collector, last, now, force = false) {
+function isDue(collector, last, now, force = false, firstSeen = undefined) {
+  // A collector with an initial delay (a slow check) first runs once that time has passed since it was first seen.
+  if (last === undefined && collector.initialDelayMs) return now - (firstSeen === undefined ? now : firstSeen) >= collector.initialDelayMs;
   return force || last === undefined || now - last >= collector.intervalMs;
 }
 
@@ -83,6 +129,7 @@ function isDue(collector, last, now, force = false) {
  * account the collector needs. Returns what to store: `{ ok: true, data }` or `{ ok: false, error }`.
  */
 async function runCollector(collector, platform, exec) {
+  if (collector.script) return scripts.runScriptCollector(collector, platform, exec);
   const template = platform === 'windows' ? collector.windowsCommand : collector.command;
   if (!template) return { ok: false, error: 'This widget is not available on Windows hosts' };
   const command = platform === 'windows' ? windows.powershellCommand(template) : template;
@@ -104,4 +151,4 @@ async function runCollector(collector, platform, exec) {
   }
 }
 
-module.exports = { SECTION_PREFIX, sectionFor, collectorsFrom, snapshotTrackersFrom, metricsOf, isDue, runCollector };
+module.exports = { SECTION_PREFIX, stateSectionFor: scripts.stateSectionFor, sectionFor, collectorsFrom, snapshotTrackersFrom, metricsOf, isDue, runCollector };
