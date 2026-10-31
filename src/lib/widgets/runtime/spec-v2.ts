@@ -21,14 +21,17 @@ export const MAX_SCRIPTS = 20;
 export const MAX_BLOCKS = 60;
 const MAX_BLOCK_DEPTH = 3;
 const BADGE_COLORS = ['green', 'amber', 'red', 'gray', 'blue'] as const;
+const LITERAL_RE = /^[A-Za-z0-9_.:/ -]{0,100}$/;
 const STATE_KEY_RE = /^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$/;
+const IPV4_RE = /^[0-9]+(\.[0-9]+){3}$/;
 const HOST_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
 
 export interface ScriptSpec {
   as: RunAs;
   timeoutSec: number;
   /** Package file per platform (`linux` ends in .sh, `windows` in .ps1); a script need not exist on both. */
-  files: { linux?: string; windows?: string };
+  linux?: string;
+  windows?: string;
   params: Record<string, ParamSpec>;
 }
 
@@ -80,7 +83,8 @@ export type Block =
   | { type: 'form'; title?: string; fields: FormField[]; submit: { action: string; label: string; params: Record<string, string> }; when?: Cond }
   | { type: 'select'; label: string; value: string; options: { value: string; label: string }[]; action: string; param: string; when?: Cond }
   | { type: 'jobProgress'; when?: Cond }
-  | { type: 'view'; view: ViewSpec; when?: Cond };
+  /** `path`: the part of the widget's data the inner view shows (default: all of it). */
+  | { type: 'view'; view: ViewSpec; path?: string; when?: Cond };
 
 /** What the validators of version 1 give version 2 to work with. */
 export interface V2Context {
@@ -102,7 +106,7 @@ export function validateScripts(raw: unknown): Validated<Record<string, ScriptSp
     if (s.as !== 'service' && s.as !== 'shell') return fail(`${where}: "as" must be "service" (the privileged account) or "shell" (the non-admin account)`);
     const timeoutSec = intIn(s.timeoutSec, 1, 3600, 60);
     if (timeoutSec === null) return fail(`${where}: timeoutSec must be 1-3600`);
-    const files: ScriptSpec['files'] = {};
+    const files: { linux?: string; windows?: string } = {};
     for (const [platform, ext] of [['linux', '.sh'], ['windows', '.ps1']] as const) {
       const f = (s as Obj)[platform];
       if (f === undefined) continue;
@@ -121,7 +125,7 @@ export function validateScripts(raw: unknown): Validated<Record<string, ScriptSp
         params[name] = v.value;
       }
     }
-    out[id] = { as: s.as, timeoutSec, files, params };
+    out[id] = { as: s.as, timeoutSec, ...files, params };
   }
   return { ok: true, value: out };
 }
@@ -160,7 +164,7 @@ export function validateLookups(raw: unknown): Validated<Record<string, LookupSp
     if (typeof l.url !== 'string' || l.url.length > 300) return fail(`${where}: "url" is required`);
     let u: URL;
     try { u = new URL(l.url); } catch { return fail(`${where}: "url" is not a valid URL`); }
-    if (u.protocol !== 'https:' || u.username || u.password || u.port || u.hash || !HOST_RE.test(u.hostname)) {
+    if (u.protocol !== 'https:' || u.username || u.password || u.port || u.hash || !HOST_RE.test(u.hostname) || IPV4_RE.test(u.hostname)) {
       return fail(`${where}: "url" must be a plain https URL on a host name (no credentials, port or fragment)`);
     }
     if (typeof l.path !== 'string' || !FIELD_RE.test(l.path)) return fail(`${where}: "path" must be a dotted path into the JSON answer`);
@@ -207,7 +211,9 @@ export function validateVariants(
       if (!isObj(v.args)) return fail(`${where}: "args" must map script parameters to paths`);
       for (const [name, path] of Object.entries(v.args)) {
         if (!(name in script.params)) return fail(`${where}: script "${v.script}" has no parameter "${name}"`);
-        if (typeof path !== 'string' || !FIELD_RE.test(path)) return fail(`${where}: argument "${name}" must be a path such as "state.install.name" or "param.value"`);
+        // A path into the context, or a fixed text written as "literal:<text>" (for a script that serves several settings).
+        const isLiteral = typeof path === 'string' && path.startsWith('literal:') && LITERAL_RE.test(path.slice(8));
+        if (typeof path !== 'string' || (!isLiteral && !FIELD_RE.test(path))) return fail(`${where}: argument "${name}" must be a path such as "state.install.name" or "param.value", or "literal:<text>"`);
         if (path.startsWith('param.') && !(path.slice(6) in actionParams)) return fail(`${where}: argument "${name}" refers to the action parameter "${path.slice(6)}", which is not declared`);
         args[name] = path;
       }
@@ -353,7 +359,8 @@ export function validateLayout(
           const v = innerView(b.view);
           if (!v.ok) return v;
           if (v.value.type === 'layout') return fail(`${w}: a view block cannot hold another layout`);
-          out.push({ type: 'view', view: v.value, ...base });
+          if (b.path !== undefined && (typeof b.path !== 'string' || !FIELD_RE.test(b.path))) return fail(`${w}: "path" must be a dotted path into the widget's data`);
+          out.push({ type: 'view', view: v.value, ...(typeof b.path === 'string' ? { path: b.path } : {}), ...base });
           break;
         }
         default:

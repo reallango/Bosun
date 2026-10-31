@@ -138,7 +138,7 @@ export interface MetricSpec {
   rawHours?: number;
   rollup5mDays?: number;
   rollup1hDays?: number;
-  from?: { field?: string; agg: (typeof METRIC_AGGS)[number]; where?: Cond };
+  from?: { field?: string; path?: string; agg: (typeof METRIC_AGGS)[number]; where?: Cond };
 }
 
 export interface WidgetSpec {
@@ -398,7 +398,8 @@ function validateAction(raw: unknown, ownPerms: ReadonlySet<string>, v2?: { scri
   if (raw.kind === 'script') {
     // Version 2: runs the first variant whose condition holds (a script of the package, as the account it declares).
     if (!v2) return fail(`${where}: script actions need spec version 2`);
-    if (raw.command !== undefined || raw.windowsCommand !== undefined || raw.as !== undefined) return fail(`${where}: a script action has "variants" instead of a command`);
+    // (An empty `command`, and `as`/`timeoutSec`, are what a stored script action carries; the script decides those.)
+    if ((typeof raw.command === 'string' && raw.command !== '') || raw.windowsCommand !== undefined) return fail(`${where}: a script action has "variants" instead of a command`);
     const sparams = actionParams(raw, where);
     if (!sparams.ok) return sparams;
     const variants = validateVariants(raw.variants, where, v2.scripts, sparams.value);
@@ -629,7 +630,10 @@ function validateMetrics(raw: unknown, packageId: string | undefined): Validated
       if (agg !== 'count' && !field) return fail(`metric "${name}": "${agg}" needs from.field`);
       let where: Cond | undefined;
       if (m.from.where !== undefined) { const c = cond(m.from.where, `metric "${name}" "where"`); if (!c.ok) return c; where = c.value; }
-      item.from = { agg: agg as (typeof METRIC_AGGS)[number], ...(field ? { field } : {}), ...(where ? { where } : {}) };
+      // The rows to aggregate: the widget's data, or the list at this dotted path inside it (version 2 data is often an object).
+      const from = m.from.path === undefined ? undefined : (typeof m.from.path === 'string' && FIELD_RE.test(m.from.path) ? m.from.path : null);
+      if (from === null) return fail(`metric "${name}": from.path must be a dotted path into the data`);
+      item.from = { agg: agg as (typeof METRIC_AGGS)[number], ...(field ? { field } : {}), ...(from ? { path: from } : {}), ...(where ? { where } : {}) };
     }
     out.push(item);
   }
