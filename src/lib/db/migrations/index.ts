@@ -549,6 +549,33 @@ const V11_PACKAGE_HASH: string[] = [
     `ALTER TABLE widget_packages ADD COLUMN content_hash TEXT`,
 ];
 
+// ---- Version 12: jobs of package widgets ----
+// A long-running action of a package widget (an install, an update, a download) is a job: its state lives here so it
+// survives a restart and is visible on every node. The partial unique index allows one running job per widget type on
+// a server, whichever node starts it. `updated_at` is a heartbeat: a job nobody has updated for a while is `lost`.
+const V12_PACKAGE_JOBS: string[] = [
+    `CREATE TABLE IF NOT EXISTS package_jobs (
+        id TEXT PRIMARY KEY,
+        package_id TEXT NOT NULL,
+        widget_type TEXT NOT NULL,
+        action_id TEXT NOT NULL,
+        server_id TEXT NOT NULL,
+        user_id TEXT,
+        status TEXT NOT NULL DEFAULT 'running',
+        params TEXT NOT NULL DEFAULT '{}',
+        steps TEXT NOT NULL DEFAULT '[]',
+        percent INTEGER,
+        message TEXT,
+        cancel_requested INTEGER NOT NULL DEFAULT 0,
+        node TEXT,
+        started_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        finished_at INTEGER
+    )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_package_jobs_running ON package_jobs(server_id, widget_type) WHERE status = 'running'`,
+    `CREATE INDEX IF NOT EXISTS idx_package_jobs_lookup ON package_jobs(server_id, widget_type, started_at)`,
+];
+
 export const MIGRATIONS: Migration[] = [
     {
         version: 1,
@@ -569,6 +596,7 @@ export const MIGRATIONS: Migration[] = [
     { version: 9, name: 'bundled_packages', statements: V9_BUNDLED },
     { version: 10, name: 'metric_definitions', statements: V10_METRIC_DEFINITIONS },
     { version: 11, name: 'package_content_hash', statements: V11_PACKAGE_HASH },
+    { version: 12, name: 'package_jobs', statements: V12_PACKAGE_JOBS },
 ];
 
 /** The schema version this build expects. */

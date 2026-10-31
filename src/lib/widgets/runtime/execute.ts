@@ -10,7 +10,8 @@ import { loadShellTarget, assertShellAccountSafe, runOnShellTarget, ShellUnavail
 import { validateWidgetSpec, applyConfigFilters, evalCond, fillTemplate, type ActionSpec, type DataSpec, type RunAs, type WidgetSpec } from '@/lib/widgets/runtime/spec';
 import { commandFor, renderCommand, validateParams } from '@/lib/widgets/runtime/command';
 import { shapeData } from '@/lib/widgets/runtime/data';
-import { buildScriptInvocation, parseScriptOutput, scriptFileFor, validateParamValues } from '@/lib/widgets/runtime/script-run';
+import { buildScriptInvocation, buildCancelInvocation, parseScriptOutput, scriptFileFor, validateParamValues } from '@/lib/widgets/runtime/script-run';
+import { typedParams, selectVariant, resolveScriptArgs, type ActionContext } from '@/lib/widgets/runtime/script-action';
 import { getPackageFile } from '@/lib/widgets/materialize-db';
 import { loadLookups } from '@/lib/widgets/runtime/lookups';
 
@@ -86,22 +87,30 @@ export interface CommandOutput {
   stderr: string;
   exitCode: number;
   timedOut: boolean;
+  /** Stopped because the caller aborted (a cancelled job). */
+  aborted?: boolean;
+}
+
+/** Extras for a long-running run: live output and a way to stop it. */
+export interface RunExtras {
+  onData?: (text: string, isErr: boolean) => void;
+  signal?: AbortSignal;
 }
 
 /**
  * Run a command as the account the spec asks for: `service` is the privileged service account,
  * `shell` the non-admin account (re-verified first, Linux only).
  */
-async function runAs(server: ServerInfo, as: RunAs, command: string, timeoutSec: number, stdin?: string): Promise<CommandOutput> {
+async function runAs(server: ServerInfo, as: RunAs, command: string, timeoutSec: number, stdin?: string, extra: RunExtras = {}): Promise<CommandOutput> {
   try {
     if (as === 'shell') {
       const target = await loadShellTarget(server.id);
       await assertShellAccountSafe(target);
-      const r = await runOnShellTarget(target, command, { timeoutMs: timeoutSec * 1000, stdin });
-      return { stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode, timedOut: !!r.timedOut };
+      const r = await runOnShellTarget(target, command, { timeoutMs: timeoutSec * 1000, stdin, ...extra });
+      return { stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode, timedOut: !!r.timedOut, aborted: !!r.aborted };
     }
-    const r = await runOnServerId(server.id, command, { timeoutMs: timeoutSec * 1000, stdin });
-    return { stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode, timedOut: !!r.timedOut };
+    const r = await runOnServerId(server.id, command, { timeoutMs: timeoutSec * 1000, stdin, ...extra });
+    return { stdout: r.stdout, stderr: r.stderr, exitCode: r.exitCode, timedOut: !!r.timedOut, aborted: !!r.aborted };
   } catch (err) {
     if (err instanceof ShellUnavailableError) throw new RuntimeError(err.message, err.status, err.code);
     throw err;
@@ -137,7 +146,7 @@ export interface ScriptResult extends ActionResult {
  * Run one of a package's host scripts on a server, as the account the script declares. The parameters are validated
  * against the script's declaration and reach the script as data (environment variables), never as part of its text.
  */
-export async function runScript(serverId: string, loaded: LoadedSpec, scriptId: string, args: unknown): Promise<ScriptResult> {
+export async function runScript(serverId: string, loaded: LoadedSpec, scriptId: string, args: unknown, ext: RunExtras & { jobId?: string } = {}): Promise<ScriptResult> {
   const script = loaded.spec.scripts?.[scriptId];
   if (!script) throw new RuntimeError(`The package has no script "${scriptId}"`, 404, 'SCRIPT_NOT_FOUND');
   const server = await loadServer(serverId);
@@ -146,10 +155,55 @@ export async function runScript(serverId: string, loaded: LoadedSpec, scriptId: 
   const text = await getPackageFile(loaded.packageId, file);
   if (text === null) throw new RuntimeError(`The package file "${file}" is missing`, 500, 'SCRIPT_MISSING');
   const values = validateParamValues(script.params, args);
-  const inv = buildScriptInvocation(server.platform, text, values);
-  const out = await runAs(server, script.as, inv.command, script.timeoutSec, inv.stdin);
+  const inv = buildScriptInvocation(server.platform, text, values, { jobId: ext.jobId });
+  const out = await runAs(server, script.as, inv.command, script.timeoutSec, inv.stdin, { onData: ext.onData, signal: ext.signal });
   const stdout = out.stdout.slice(0, MAX_OUTPUT);
   return { ...out, stdout, stderr: out.stderr.slice(0, 64 * 1024), success: out.exitCode === 0 && !out.timedOut, protocol: parseScriptOutput(stdout) };
+}
+
+/** Stop a running job's script on the host (best effort; nothing happens when it has already finished). */
+export async function cancelScript(serverId: string, loaded: LoadedSpec, scriptId: string, jobId: string): Promise<void> {
+  const script = loaded.spec.scripts?.[scriptId];
+  if (!script) return;
+  const server = await loadServer(serverId);
+  const inv = buildCancelInvocation(server.platform, jobId);
+  await runAs(server, script.as, inv.command, 20);
+}
+
+export interface InstanceRef { id: string; config: Record<string, unknown> }
+
+/** The settings of one widget on a server, when the caller names it and it is a widget of this type on this server. */
+export async function loadInstance(serverId: string, widgetType: string, widgetId: unknown): Promise<InstanceRef | null> {
+  if (typeof widgetId !== 'string' || !widgetId) return null;
+  const r = rowsToObjects(await rqlite.query('SELECT id, config FROM widgets WHERE id = ? AND server_id = ? AND widget_type = ?', [widgetId, serverId, widgetType]))[0];
+  if (!r) throw new RuntimeError('That widget is not a widget of this type on this server', 404, 'NOT_FOUND');
+  let config: Record<string, unknown> = {};
+  try { const c = JSON.parse(String(r.config ?? '{}')); if (c && typeof c === 'object' && !Array.isArray(c)) config = c; } catch { /* keep {} */ }
+  return { id: String(r.id), config };
+}
+
+/** What conditions and arguments of a script action read: state, data, settings, lookups, the server and the parameters. */
+export async function buildActionContext(serverId: string, loaded: LoadedSpec, instance: InstanceRef | null, param: ActionContext['param']): Promise<ActionContext> {
+  const s = rowsToObjects(await rqlite.query('SELECT name, hostname, platform FROM servers WHERE id = ?', [serverId]))[0];
+  if (!s) throw new RuntimeError('Server not found', 404, 'NOT_FOUND');
+  const rt = await loadRuntimeData(serverId, loaded, false, instance?.config ?? {}, instance?.id).catch(() => null);
+  return {
+    state: rt?.state ?? null, data: rt?.data ?? null, config: instance?.config ?? {}, lookups: rt?.lookups ?? {},
+    server: { name: s.name, hostname: s.hostname, platform: s.platform === 'windows' ? 'windows' : 'linux' }, param,
+  };
+}
+
+export interface PreparedScript { scriptId: string; args: Record<string, unknown> }
+
+/** Validate the action's parameters, pick the variant that applies to this host and work out the script's arguments. */
+export async function prepareScriptAction(serverId: string, loaded: LoadedSpec, action: ActionSpec, rawParams: unknown, instance: InstanceRef | null): Promise<PreparedScript> {
+  const validated = validateParams(action, rawParams);
+  const ctx = await buildActionContext(serverId, loaded, instance, typedParams(action.params, validated));
+  const variant = selectVariant(action, ctx);
+  if (!variant) throw new RuntimeError(`"${action.label}" does not apply to this host right now`, 409, 'NOT_APPLICABLE');
+  const script = loaded.spec.scripts?.[variant.script];
+  if (!script) throw new RuntimeError(`The package has no script "${variant.script}"`, 404, 'SCRIPT_NOT_FOUND');
+  return { scriptId: variant.script, args: resolveScriptArgs(variant, script, ctx) };
 }
 
 export interface RuntimeData {

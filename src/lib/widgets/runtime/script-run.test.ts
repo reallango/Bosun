@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { spawnSync } from 'child_process';
-import { buildScriptInvocation, parseScriptOutput, parseStateOutput, quotePs, quoteSh, scriptFileFor } from './script-run';
+import { spawn, spawnSync } from 'child_process';
+import { buildScriptInvocation, buildCancelInvocation, parseScriptOutput, parseStateOutput, quotePs, quoteSh, scriptFileFor } from './script-run';
 
 const hasSh = spawnSync('sh', ['-c', 'exit 0']).status === 0;
+// Stopping a whole process tree needs pgrep or a ps that can list parents (as on any real host).
+const canKillTree = hasSh && spawnSync('sh', ['-c', 'command -v pgrep >/dev/null 2>&1 || ps -eo pid=,ppid= >/dev/null 2>&1']).status === 0;
 
 describe('building a script invocation', () => {
   it('Linux: the script travels on stdin and parameters as quoted environment variables, never in the script text', () => {
@@ -51,6 +53,45 @@ describe('building a script invocation', () => {
     expect(r.status).toBe(3);
     expect(r.stderr).toContain('oops');
   });
+});
+
+describe('jobs and cancelling', () => {
+  const id = 'testjob-1234-abcd';
+  it('a job records its process id; the cancel command is built for the same id', () => {
+    const inv = buildScriptInvocation('linux', 'sleep 1\n', {}, { jobId: id });
+    expect(inv.command).toContain(`/tmp/bosun-job-${id}.pid`);
+    expect(buildCancelInvocation('linux', id).command).toContain(`/tmp/bosun-job-${id}.pid`);
+    expect(buildScriptInvocation('windows', 'x', {}, { jobId: id }).command).toContain(`bosun-job-${id}.pid`);
+    expect(buildCancelInvocation('windows', id).command).toContain('taskkill.exe');
+  });
+
+  it('refuses a job id that is not a plain identifier', () => {
+    for (const bad of ['a b', '../x', 'x;rm', "x'y", 'short']) {
+      expect(() => buildScriptInvocation('linux', 'x', {}, { jobId: bad }), bad).toThrow(/invalid job id/);
+      expect(() => buildCancelInvocation('linux', bad), bad).toThrow(/invalid job id/);
+    }
+  });
+
+  it.skipIf(!canKillTree)('cancel stops a running script and removes the process id file; a finished job leaves nothing behind', async () => {
+    const pidFile = `/tmp/bosun-job-${id}.pid`;
+    const exists = () => spawnSync('sh', ['-c', `[ -f ${pidFile} ]`]).status === 0;   // through sh: its /tmp is the one the script uses
+    const inv = buildScriptInvocation('linux', 'echo started\nsleep 20\necho never\n', {}, { jobId: id });
+    const child = spawn('sh', ['-c', inv.command], { stdio: ['pipe', 'pipe', 'pipe'] });
+    let out = '';
+    child.stdout.on('data', d => { out += d; });
+    child.stdin.end(inv.stdin);
+    const exited = new Promise<number | null>(res => child.on('close', code => res(code)));
+    for (let i = 0; i < 100 && !(out.includes('started') && exists()); i++) await new Promise(r => setTimeout(r, 50));
+    expect(exists()).toBe(true);
+    const started = Date.now();
+    spawnSync('sh', ['-c', buildCancelInvocation('linux', id).command]);
+    const code = await Promise.race([exited, new Promise<string>(r => setTimeout(() => r('still running'), 8000))]);
+    expect(code).not.toBe('still running');
+    expect(Date.now() - started).toBeLessThan(8000);
+    expect(out).not.toContain('never');
+    expect(exists()).toBe(false);
+    spawnSync('sh', ['-c', buildCancelInvocation('linux', id).command]);   // nothing to do, no error
+  }, 15000);
 });
 
 describe('the output protocol', () => {

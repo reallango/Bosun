@@ -111,6 +111,7 @@ export function buildOpenApi(widgets: OpenApiWidget[], serverUrl = '/'): Json {
       const names = Object.keys(a.params);
       const props: Json = { ...(names.length ? { params: { type: 'object', required: names, additionalProperties: false, properties: Object.fromEntries(names.map(n => [n, paramSchema(a.params[n])])) } } : {}) };
       if (a.confirm) props.confirm = { type: 'boolean', enum: [true], description: 'Must be true: this action asks for confirmation in the widget' };
+      if (a.kind === 'script') props.widgetId = { type: 'string', description: 'The widget (instance) whose settings the action reads, when it uses any' };
       const required = [...(names.length ? ['params'] : []), ...(a.confirm ? ['confirm'] : [])];
       paths[`/api/servers/{serverId}/widget-actions/${w.type}/${a.id}`] = {
         post: {
@@ -119,12 +120,33 @@ export function buildOpenApi(widgets: OpenApiWidget[], serverUrl = '/'): Json {
             a.description,
             `Needs the "${w.permissionLabels[a.permission] ?? a.permission}" permission. Runs on the host as the ${a.as === 'service' ? 'privileged service account' : 'non-admin shell account'}.`,
             a.confirm ? `Asks for confirmation: ${a.confirm.title}` : undefined,
+            a.job ? `Runs as a job: answers 202 with a jobId at once; follow it with GET /api/servers/{serverId}/widget-jobs/${w.type}.` : undefined,
           ].filter(Boolean).join(' '),
           parameters: [serverIdParam],
           ...(Object.keys(props).length ? { requestBody: { required: required.length > 0, content: { 'application/json': { schema: { type: 'object', ...(required.length ? { required } : {}), properties: props } } } } } : {}),
-          responses: { '200': { description: 'success, output, error, exitCode, timedOut' }, ...errorResponses },
+          responses: a.job ? { '202': { description: 'jobId, status: the job was started' }, ...errorResponses } : { '200': { description: 'success, output, error, exitCode, timedOut' }, ...errorResponses },
           'x-bosun-permission': a.permission,
           'x-bosun-runs-as': a.as,
+        },
+      };
+    }
+    const jobActions = w.spec.actions.filter(a => a.kind === 'script' && a.job);
+    if (jobActions.length) {
+      paths[`/api/servers/{serverId}/widget-jobs/${w.type}`] = {
+        get: {
+          operationId: `widgetJob_${w.type}`, summary: `Newest job of the ${w.displayName} widget`, tags: [tag],
+          description: `Status, steps and progress of the running or last job. ${dataPerm ? `Needs the "${w.permissionLabels[dataPerm] ?? dataPerm}" permission.` : 'Any API key.'}`,
+          parameters: [serverIdParam, { name: 'id', in: 'query', required: false, schema: { type: 'string' }, description: 'A specific job id' }],
+          responses: { '200': { description: 'job: { id, actionId, status (running, success, error, cancelled, lost), steps, percent, message } or null' }, ...errorResponses },
+          ...(dataPerm ? { 'x-bosun-permission': dataPerm } : {}),
+        },
+      };
+      paths[`/api/servers/{serverId}/widget-jobs/${w.type}/{jobId}/cancel`] = {
+        post: {
+          operationId: `widgetJobCancel_${w.type}`, summary: `Cancel a job of the ${w.displayName} widget`, tags: [tag],
+          description: 'Needs the permission of the action that started the job. Stops the script on the host (best effort).',
+          parameters: [serverIdParam, { name: 'jobId', in: 'path', required: true, schema: { type: 'string' } }],
+          responses: { '200': { description: 'cancelRequested' }, ...errorResponses },
         },
       };
     }

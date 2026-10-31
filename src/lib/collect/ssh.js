@@ -94,10 +94,10 @@ function connect(opts) {
 /**
  * @param {any} client
  * @param {string} command
- * @param {{ stdin?: string, timeoutMs?: number, maxBytes?: number, pty?: object }} [opts]
+ * @param {{ stdin?: string, timeoutMs?: number, maxBytes?: number, pty?: object, onData?: (text: string, isErr: boolean) => void, signal?: AbortSignal }} [opts]
  */
 function exec(client, command, opts = {}) {
-  const { stdin, timeoutMs = 30000, maxBytes = 4 * 1024 * 1024, pty } = opts;
+  const { stdin, timeoutMs = 30000, maxBytes = 4 * 1024 * 1024, pty, onData, signal } = opts;
   const start = Date.now();
   return new Promise((resolve, reject) => {
     const cb = (err, stream) => {
@@ -112,7 +112,14 @@ function exec(client, command, opts = {}) {
         try { if (stream.signal) stream.signal('KILL'); } catch { /* not supported everywhere */ }
         try { stream.close(); } catch { /* ignore */ }
       }, timeoutMs);
+      let aborted = false;
+      const onAbort = () => {
+        aborted = true;
+        try { stream.close(); } catch { /* ignore */ }
+      };
+      if (signal) { if (signal.aborted) onAbort(); else signal.addEventListener('abort', onAbort, { once: true }); }
       const take = (chunk, toErr) => {
+        if (onData) { try { onData(chunk.toString('utf8'), toErr); } catch { /* a faulty listener must not break the command */ } }
         bytes += chunk.length;
         if (bytes > maxBytes) {
           truncated = true;
@@ -124,7 +131,8 @@ function exec(client, command, opts = {}) {
       stream.stderr.on('data', d => take(d, true));
       stream.on('close', (code) => {
         clearTimeout(timer);
-        resolve({ stdout, stderr, exitCode: typeof code === 'number' ? code : (timedOut ? 124 : -1), durationMs: Date.now() - start, timedOut, truncated });
+        if (signal) signal.removeEventListener('abort', onAbort);
+        resolve({ stdout, stderr, exitCode: typeof code === 'number' ? code : (timedOut ? 124 : -1), durationMs: Date.now() - start, timedOut, truncated, aborted });
       });
       if (stdin !== undefined) stream.end(stdin); else stream.end();
     };
