@@ -98,8 +98,8 @@ export function validateParam(name: string, raw: unknown, where: string): Valida
     return { ok: true, value: { type: 'number', min: raw.min, max: raw.max, integer: raw.integer !== false, ...common, ...(dflt !== undefined ? { default: dflt as number } : {}) } };
   }
   if (raw.type === 'string') {
-    const maxLength = intIn(raw.maxLength, 1, 200, 200);
-    if (maxLength === null) return fail(`${where}: "maxLength" of "${name}" must be 1-200`);
+    const maxLength = intIn(raw.maxLength, 1, 2000, 200);
+    if (maxLength === null) return fail(`${where}: "maxLength" of "${name}" must be 1-2000`);
     let values: string[] | undefined;
     if (raw.values !== undefined) {
       if (!Array.isArray(raw.values) || raw.values.length < 1 || raw.values.length > 100 || !raw.values.every(v => typeof v === 'string' && v.length <= 200)) {

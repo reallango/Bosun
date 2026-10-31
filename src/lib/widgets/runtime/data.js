@@ -93,10 +93,12 @@ function matchCond(c, row) {
 function extractMetrics(metrics, data) {
   const out = {};
   if (!Array.isArray(metrics) || data === null || data === undefined) return out;
-  const rows = Array.isArray(data) ? data : [data];
   for (const m of metrics) {
     if (!m || !m.from) continue;
     const f = m.from;
+    // `from.path`: the rows are the list at that dotted path inside the data (a missing list has no rows).
+    const base = f.path ? getPath(data, f.path) : data;
+    const rows = Array.isArray(base) ? base : (base === null || base === undefined ? [] : [base]);
     const sel = f.where ? rows.filter((r) => matchCond(f.where, r)) : rows;
     if (f.agg === 'count') { out[m.name] = sel.length; continue; }
     const nums = sel.map((r) => Number(getPath(r, f.field))).filter((n) => Number.isFinite(n));

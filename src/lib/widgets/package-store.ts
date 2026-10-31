@@ -9,7 +9,7 @@
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { invalidatePermissionCache } from '@/lib/permissions/store';
 import { invalidateRuntimeCache } from '@/lib/widgets/runtime/execute';
-import { compareVersions, validateManifest, manifestToJson, type PackageManifest, type PackageFiles } from '@/lib/widgets/package-manifest';
+import { compareVersions, validateManifest, validateScriptFiles, manifestToJson, type PackageManifest, type PackageFiles } from '@/lib/widgets/package-manifest';
 import { reservedPackageNames } from '@/lib/widgets/system-packages';
 import { markBundledRemoved, unmarkBundledRemoved, isBundledId } from '@/lib/widgets/bundled';
 
@@ -98,6 +98,8 @@ export interface InstallResult {
 /** Install a validated package, or upgrade the installed one. */
 export async function installPackage(opts: InstallOptions): Promise<InstallResult> {
   const { manifest, files } = opts;
+  const scriptCheck = validateScriptFiles(manifest, files);
+  if (!scriptCheck.ok) throw new PackageError(scriptCheck.error, 400, 'MISSING_SCRIPT');
   const { ids, types } = reservedPackageNames();
   if (ids.includes(manifest.id) || manifest.widgets.some(w => types.includes(w.type))) {
     throw new PackageError('That package would replace a system widget, which is not allowed', 409, 'SYSTEM_PACKAGE');

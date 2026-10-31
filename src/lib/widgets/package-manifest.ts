@@ -8,6 +8,7 @@
 import { sanitizeCustomWidget, type CustomWidgetColumns } from '@/lib/widgets/custom-widget-input';
 import { CATALOG } from '@/lib/permissions/catalog';
 import { validateWidgetSpec, type WidgetSpec } from '@/lib/widgets/runtime/spec';
+import { lookupHosts } from '@/lib/widgets/runtime/spec-v2';
 
 export const MANIFEST_SCHEMA = 1;
 export const PACKAGE_ID_RE = /^[a-z][a-z0-9_]{1,39}$/;
@@ -17,7 +18,7 @@ export const VERSION_RE = /^\d{1,6}\.\d{1,6}\.\d{1,6}$/;
 export const MAX_FILE_BYTES = 256 * 1024;
 export const MAX_FILES_BYTES = 1024 * 1024;
 export const MAX_FILES = 40;
-export const MAX_SPEC_BYTES = 64 * 1024;
+export const MAX_SPEC_BYTES = 128 * 1024;
 const FILE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*(\/[A-Za-z0-9][A-Za-z0-9._-]*)*$/;
 
 export interface PackageWidget {
@@ -48,6 +49,8 @@ export interface PackageManifest {
   author: string;
   widgets: PackageWidget[];
   permissions: PackagePermission[];
+  /** Host names the package's lookups may contact (shown in the install review; anything else is refused). */
+  network: string[];
 }
 
 /** Text files shipped next to the manifest (relative path -> content). */
@@ -127,6 +130,15 @@ export function validateManifest(
     }
   }
 
+  const network: string[] = [];
+  if (m.network !== undefined) {
+    if (!Array.isArray(m.network) || m.network.length > 8) return fail('"network" must list at most 8 host names');
+    for (const h of m.network as unknown[]) {
+      if (typeof h !== 'string' || !NETWORK_HOST_RE.test(h)) return fail(`network host "${String(h)}" must be a lowercase host name such as api.github.com`);
+      if (!network.includes(h)) network.push(h);
+    }
+  }
+
   if (!Array.isArray(m.widgets) || m.widgets.length < 1 || m.widgets.length > 10) return fail('"widgets" must list 1-10 widget types');
   const widgets: PackageWidget[] = [];
   const types = new Set<string>();
@@ -145,11 +157,20 @@ export function validateManifest(
       const s = validateWidgetSpec(w.spec, permissions.map(p => p.id), id);
       if (!s.ok) return fail(`widget "${type}": ${s.error}`);
       spec = s.value;
+      for (const host of lookupHosts(spec.lookups)) {
+        if (!network.includes(host)) return fail(`widget "${type}": a lookup contacts ${host}, which the manifest does not list under "network"`);
+      }
+    }
+    // A settings field can require a permission of the package to be changed (for example the command of a Custom Command).
+    for (const field of parseSchema(v.values.config_schema)) {
+      if (field.requires_permission !== undefined && !permissions.some(p => p.id === field.requires_permission)) {
+        return fail(`widget "${type}": setting "${field.key}" requires the permission "${field.requires_permission}", which this package does not declare`);
+      }
     }
     widgets.push({ type, columns: v.values, spec });
   }
 
-  return { ok: true, value: { schema: MANIFEST_SCHEMA, id, name, version, description, author, widgets, permissions } };
+  return { ok: true, value: { schema: MANIFEST_SCHEMA, id, name, version, description, author, widgets, permissions, network } };
 }
 
 /** Validate the extra files of a package: text only, sane names, bounded size. */
@@ -181,6 +202,7 @@ export function manifestToJson(m: PackageManifest): Record<string, unknown> {
   return {
     schema: m.schema, id: m.id, name: m.name, version: m.version, description: m.description, author: m.author,
     permissions: m.permissions,
+    ...(m.network.length ? { network: m.network } : {}),
     widgets: m.widgets.map(w => {
       const c = w.columns;
       const j = (s: unknown) => { try { return JSON.parse(String(s)); } catch { return undefined; } };
@@ -193,4 +215,35 @@ export function manifestToJson(m: PackageManifest): Record<string, unknown> {
       };
     }),
   };
+}
+
+const NETWORK_HOST_RE = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/;
+
+/** The fields of a stored `config_schema` (JSON text), tolerant of anything unreadable. */
+function parseSchema(raw: unknown): { key: string; requires_permission?: string }[] {
+  try {
+    const list = JSON.parse(String(raw ?? '[]'));
+    return Array.isArray(list) ? list.filter(f => f && typeof f.key === 'string') : [];
+  } catch { return []; }
+}
+
+/** Every script file the specs of a package name (relative paths inside the package). */
+export function scriptFilesOf(m: PackageManifest): string[] {
+  const out = new Set<string>();
+  for (const w of m.widgets) {
+    for (const s of Object.values(w.spec?.scripts ?? {})) {
+      if (s.linux) out.add(s.linux);
+      if (s.windows) out.add(s.windows);
+    }
+  }
+  return Array.from(out);
+}
+
+/** Do the files shipped with a package include every script its specs name? */
+export function validateScriptFiles(m: PackageManifest, files: PackageFiles): Validated<true> {
+  for (const f of scriptFilesOf(m)) {
+    if (typeof files[f] !== 'string') return fail(`the package does not contain the script file "${f}"`);
+    if (files[f].trim().length === 0) return fail(`the script file "${f}" is empty`);
+  }
+  return { ok: true, value: true };
 }

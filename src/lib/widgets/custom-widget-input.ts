@@ -33,6 +33,8 @@ function schema(v: any): string | null {
       ...(f.placeholder ? { placeholder: String(f.placeholder).slice(0, 100) } : {}),
       ...(f.default !== undefined ? { default: f.default } : {}),
       ...(Array.isArray(f.options) ? { options: f.options.map(String).slice(0, 30) } : {}),
+      // Changing this setting needs this permission (a package declares it; the manifest check makes sure it exists).
+      ...(typeof f.requires_permission === 'string' && /^[a-z][a-z0-9_.]{0,60}$/.test(f.requires_permission) ? { requires_permission: f.requires_permission } : {}),
     });
   }
   return JSON.stringify(out);
