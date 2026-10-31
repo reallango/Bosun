@@ -2,8 +2,8 @@
   "schema": 1,
   "id": "docker",
   "name": "Docker Containers",
-  "version": "1.0.1",
-  "description": "Containers on the host with logs, a shell in each container, and start, stop and restart.",
+  "version": "1.0.2",
+  "description": "Containers on the host with logs, a shell, start, stop and restart; edit a container, create containers and stacks (a compose file, or one from a GitHub repository), and a Manage page for images, volumes and networks.",
   "author": "Bosun",
   "permissions": [
     {
@@ -41,13 +41,40 @@
       "defaultLevel": "admin",
       "risk": "high",
       "scope": "server"
+    },
+    {
+      "id": "docker.manage",
+      "label": "Create and change containers and stacks",
+      "description": "Edit a container (it is replaced by a new one with the new settings), create containers, pull images and create volumes and networks, and deploy, change and restart stacks. Also lets you read the settings of a container, including its environment variables.",
+      "group": "Docker",
+      "defaultLevel": "admin",
+      "risk": "high",
+      "scope": "server"
+    },
+    {
+      "id": "docker.privileged",
+      "label": "Use elevated container options",
+      "description": "Set options that can give a container control over the host: privileged mode, host network or process namespace, extra capabilities, devices, security profiles, the Docker socket and sensitive host folders.",
+      "group": "Docker",
+      "defaultLevel": "admin",
+      "risk": "high",
+      "scope": "server"
+    },
+    {
+      "id": "docker.delete",
+      "label": "Remove containers, images, volumes, networks and stacks",
+      "description": "Delete things from the host, including pruning unused images, volumes and networks.",
+      "group": "Docker",
+      "defaultLevel": "admin",
+      "risk": "high",
+      "scope": "server"
     }
   ],
   "widgets": [
     {
       "type": "docker_containers",
       "display_name": "Docker Containers",
-      "description": "Containers on the host with logs and start, stop and restart.",
+      "description": "Containers on the host with logs, a shell, edit, start, stop and restart; a Manage page and New container / New stack in the menu.",
       "icon": "box",
       "category": "system",
       "default_size": {
@@ -119,6 +146,383 @@
                 "type": "string",
                 "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$",
                 "maxLength": 128
+              }
+            }
+          },
+          "inspect": {
+            "as": "service",
+            "timeoutSec": 60,
+            "linux": "scripts/inspect.sh",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$",
+                "maxLength": 128
+              }
+            }
+          },
+          "images": {
+            "as": "service",
+            "timeoutSec": 60,
+            "linux": "scripts/images.sh",
+            "params": {}
+          },
+          "volumes": {
+            "as": "service",
+            "timeoutSec": 60,
+            "linux": "scripts/volumes.sh",
+            "params": {}
+          },
+          "networks": {
+            "as": "service",
+            "timeoutSec": 60,
+            "linux": "scripts/networks.sh",
+            "params": {}
+          },
+          "system": {
+            "as": "service",
+            "timeoutSec": 60,
+            "linux": "scripts/system.sh",
+            "params": {}
+          },
+          "stacks": {
+            "as": "service",
+            "timeoutSec": 60,
+            "linux": "scripts/stacks.sh",
+            "params": {}
+          },
+          "stack_get": {
+            "as": "service",
+            "timeoutSec": 60,
+            "linux": "scripts/stack_get.sh",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
+                "maxLength": 63
+              }
+            }
+          },
+          "container_create": {
+            "as": "service",
+            "timeoutSec": 900,
+            "linux": "scripts/container_create.sh",
+            "params": {
+              "settings": {
+                "type": "text",
+                "maxLength": 20000,
+                "maxLines": 400,
+                "linePattern": "^(#.*|[a-z_]+=.*)$"
+              },
+              "allow_risky": {
+                "type": "string",
+                "values": [
+                  "true",
+                  "false"
+                ],
+                "maxLength": 20,
+                "default": "false"
+              }
+            }
+          },
+          "container_recreate": {
+            "as": "service",
+            "timeoutSec": 900,
+            "linux": "scripts/container_recreate.sh",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$",
+                "maxLength": 128
+              },
+              "settings": {
+                "type": "text",
+                "maxLength": 20000,
+                "maxLines": 400,
+                "linePattern": "^(#.*|[a-z_]+=.*)$"
+              },
+              "allow_risky": {
+                "type": "string",
+                "values": [
+                  "true",
+                  "false"
+                ],
+                "maxLength": 20,
+                "default": "false"
+              }
+            }
+          },
+          "container_remove": {
+            "as": "service",
+            "timeoutSec": 120,
+            "linux": "scripts/container_remove.sh",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$",
+                "maxLength": 128
+              },
+              "volumes": {
+                "type": "string",
+                "values": [
+                  "true",
+                  "false"
+                ],
+                "maxLength": 20,
+                "default": "false"
+              }
+            }
+          },
+          "image_pull": {
+            "as": "service",
+            "timeoutSec": 1800,
+            "linux": "scripts/image_pull.sh",
+            "params": {
+              "ref": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_./:@-]{0,254}$",
+                "maxLength": 255
+              }
+            }
+          },
+          "image_remove": {
+            "as": "service",
+            "timeoutSec": 120,
+            "linux": "scripts/image_remove.sh",
+            "params": {
+              "ref": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_./:@-]{0,254}$",
+                "maxLength": 255
+              },
+              "force": {
+                "type": "string",
+                "values": [
+                  "true",
+                  "false"
+                ],
+                "maxLength": 20,
+                "default": "false"
+              }
+            }
+          },
+          "image_prune": {
+            "as": "service",
+            "timeoutSec": 300,
+            "linux": "scripts/image_prune.sh",
+            "params": {
+              "all": {
+                "type": "string",
+                "values": [
+                  "true",
+                  "false"
+                ],
+                "maxLength": 20,
+                "default": "false"
+              }
+            }
+          },
+          "volume_create": {
+            "as": "service",
+            "timeoutSec": 60,
+            "linux": "scripts/volume_create.sh",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$",
+                "maxLength": 128
+              },
+              "driver": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,40}$",
+                "maxLength": 41,
+                "default": "local"
+              }
+            }
+          },
+          "volume_remove": {
+            "as": "service",
+            "timeoutSec": 60,
+            "linux": "scripts/volume_remove.sh",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$",
+                "maxLength": 128
+              }
+            }
+          },
+          "volume_prune": {
+            "as": "service",
+            "timeoutSec": 300,
+            "linux": "scripts/volume_prune.sh",
+            "params": {}
+          },
+          "network_create": {
+            "as": "service",
+            "timeoutSec": 60,
+            "linux": "scripts/network_create.sh",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$",
+                "maxLength": 128
+              },
+              "driver": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,40}$",
+                "maxLength": 41,
+                "default": "bridge"
+              },
+              "subnet": {
+                "type": "string",
+                "pattern": "^(-|[0-9a-fA-F:.]+/[0-9]{1,3})$",
+                "maxLength": 60,
+                "default": "-"
+              },
+              "gateway": {
+                "type": "string",
+                "pattern": "^(-|[0-9a-fA-F:.]+)$",
+                "maxLength": 60,
+                "default": "-"
+              }
+            }
+          },
+          "network_remove": {
+            "as": "service",
+            "timeoutSec": 60,
+            "linux": "scripts/network_remove.sh",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$",
+                "maxLength": 128
+              }
+            }
+          },
+          "network_prune": {
+            "as": "service",
+            "timeoutSec": 120,
+            "linux": "scripts/network_prune.sh",
+            "params": {}
+          },
+          "stack_deploy": {
+            "as": "service",
+            "timeoutSec": 1800,
+            "linux": "scripts/stack_deploy.sh",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
+                "maxLength": 63
+              },
+              "source": {
+                "type": "string",
+                "values": [
+                  "editor",
+                  "git"
+                ],
+                "maxLength": 20
+              },
+              "yaml": {
+                "type": "text",
+                "maxLength": 65536,
+                "maxLines": 2000,
+                "default": ""
+              },
+              "env": {
+                "type": "text",
+                "maxLength": 8000,
+                "maxLines": 200,
+                "linePattern": "^(#.*|[A-Za-z_][A-Za-z0-9_]*=.*)$",
+                "default": ""
+              },
+              "repo": {
+                "type": "string",
+                "pattern": "^(-|https://[A-Za-z0-9.-]+/[A-Za-z0-9._/-]+)$",
+                "maxLength": 300,
+                "default": "-"
+              },
+              "branch": {
+                "type": "string",
+                "pattern": "^(-|[A-Za-z0-9._/-]{1,100})$",
+                "maxLength": 100,
+                "default": "-"
+              },
+              "file": {
+                "type": "string",
+                "pattern": "^(-|[A-Za-z0-9._/-]{1,200})$",
+                "maxLength": 200,
+                "default": "-"
+              },
+              "pull": {
+                "type": "string",
+                "values": [
+                  "true",
+                  "false"
+                ],
+                "maxLength": 20,
+                "default": "false"
+              },
+              "allow_risky": {
+                "type": "string",
+                "values": [
+                  "true",
+                  "false"
+                ],
+                "maxLength": 20,
+                "default": "false"
+              }
+            },
+            "secrets": [
+              "git_token"
+            ]
+          },
+          "stack_action": {
+            "as": "service",
+            "timeoutSec": 900,
+            "linux": "scripts/stack_action.sh",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
+                "maxLength": 63
+              },
+              "op": {
+                "type": "string",
+                "values": [
+                  "up",
+                  "down",
+                  "restart",
+                  "pull",
+                  "stop",
+                  "start"
+                ],
+                "maxLength": 20
+              }
+            },
+            "secrets": [
+              "git_token"
+            ]
+          },
+          "stack_remove": {
+            "as": "service",
+            "timeoutSec": 300,
+            "linux": "scripts/stack_remove.sh",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
+                "maxLength": 63
+              },
+              "volumes": {
+                "type": "string",
+                "values": [
+                  "true",
+                  "false"
+                ],
+                "maxLength": 20,
+                "default": "false"
               }
             }
           }
@@ -204,6 +608,7 @@
             "actions": [
               "logs",
               "shell",
+              "edit",
               "restart",
               "stop",
               "start"
@@ -349,9 +754,2308 @@
                 }
               }
             ]
+          },
+          {
+            "id": "edit",
+            "label": "Edit",
+            "icon": "pencil",
+            "permission": "docker.manage",
+            "kind": "screen",
+            "screen": "edit"
+          },
+          {
+            "id": "run_image",
+            "label": "Run",
+            "icon": "play",
+            "permission": "docker.manage",
+            "kind": "screen",
+            "screen": "create"
+          },
+          {
+            "id": "stack_edit",
+            "label": "Edit",
+            "icon": "pencil",
+            "permission": "docker.manage",
+            "kind": "screen",
+            "screen": "stack_edit"
+          },
+          {
+            "id": "stack_new",
+            "label": "New stack",
+            "icon": "plus",
+            "permission": "docker.manage",
+            "kind": "screen",
+            "screen": "stack_new"
+          },
+          {
+            "id": "new_container",
+            "label": "New container",
+            "icon": "plus",
+            "permission": "docker.manage",
+            "kind": "screen",
+            "screen": "create"
+          },
+          {
+            "id": "create",
+            "label": "Create container",
+            "permission": "docker.manage",
+            "kind": "script",
+            "params": {
+              "settings": {
+                "type": "text",
+                "maxLength": 20000,
+                "maxLines": 400,
+                "linePattern": "^(#.*|[a-z_]+=.*)$"
+              }
+            },
+            "variants": [
+              {
+                "script": "container_create",
+                "args": {
+                  "allow_risky": "literal:false"
+                }
+              }
+            ],
+            "after": "refresh"
+          },
+          {
+            "id": "create_privileged",
+            "label": "Create with elevated options",
+            "permission": "docker.privileged",
+            "kind": "script",
+            "params": {
+              "settings": {
+                "type": "text",
+                "maxLength": 20000,
+                "maxLines": 400,
+                "linePattern": "^(#.*|[a-z_]+=.*)$"
+              }
+            },
+            "variants": [
+              {
+                "script": "container_create",
+                "args": {
+                  "allow_risky": "literal:true"
+                }
+              }
+            ],
+            "after": "refresh"
+          },
+          {
+            "id": "recreate",
+            "label": "Save and replace container",
+            "permission": "docker.manage",
+            "kind": "script",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$",
+                "maxLength": 128,
+                "from": "name"
+              },
+              "settings": {
+                "type": "text",
+                "maxLength": 20000,
+                "maxLines": 400,
+                "linePattern": "^(#.*|[a-z_]+=.*)$"
+              }
+            },
+            "variants": [
+              {
+                "script": "container_recreate",
+                "args": {
+                  "allow_risky": "literal:false"
+                }
+              }
+            ],
+            "after": "refresh",
+            "confirm": {
+              "title": "Replace the container?",
+              "text": "The container is stopped and replaced by a new one with these settings. Its volumes are kept. If the new container cannot start, the old one is put back.",
+              "destructive": false
+            }
+          },
+          {
+            "id": "recreate_privileged",
+            "label": "Save with elevated options",
+            "permission": "docker.privileged",
+            "kind": "script",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$",
+                "maxLength": 128,
+                "from": "name"
+              },
+              "settings": {
+                "type": "text",
+                "maxLength": 20000,
+                "maxLines": 400,
+                "linePattern": "^(#.*|[a-z_]+=.*)$"
+              }
+            },
+            "variants": [
+              {
+                "script": "container_recreate",
+                "args": {
+                  "allow_risky": "literal:true"
+                }
+              }
+            ],
+            "after": "refresh",
+            "confirm": {
+              "title": "Replace the container with elevated options?",
+              "text": "These options can give the container control over the host. The container is stopped and replaced by a new one; volumes are kept.",
+              "destructive": true
+            }
+          },
+          {
+            "id": "remove",
+            "label": "Remove",
+            "permission": "docker.delete",
+            "kind": "script",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$",
+                "maxLength": 128,
+                "from": "name"
+              },
+              "volumes": {
+                "type": "boolean",
+                "default": false
+              }
+            },
+            "variants": [
+              {
+                "script": "container_remove",
+                "args": {
+                  "volumes": "param.volumes"
+                }
+              }
+            ],
+            "icon": "trash-2",
+            "after": "refresh",
+            "confirm": {
+              "title": "Remove {name}?",
+              "text": "The container is stopped and deleted. Named volumes are kept.",
+              "destructive": true,
+              "requireText": "{name}"
+            }
+          },
+          {
+            "id": "image_pull",
+            "label": "Pull image",
+            "permission": "docker.manage",
+            "kind": "script",
+            "params": {
+              "ref": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_./:@-]{0,254}$",
+                "maxLength": 255,
+                "from": "ref"
+              }
+            },
+            "variants": [
+              {
+                "script": "image_pull"
+              }
+            ],
+            "icon": "download",
+            "job": true,
+            "after": "refresh"
+          },
+          {
+            "id": "image_remove",
+            "label": "Remove image",
+            "permission": "docker.delete",
+            "kind": "script",
+            "params": {
+              "ref": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_./:@-]{0,254}$",
+                "maxLength": 255,
+                "from": "ref"
+              }
+            },
+            "variants": [
+              {
+                "script": "image_remove",
+                "args": {
+                  "force": "literal:false"
+                }
+              }
+            ],
+            "icon": "trash-2",
+            "after": "refresh",
+            "confirm": {
+              "title": "Remove image {ref}?",
+              "destructive": true
+            }
+          },
+          {
+            "id": "image_prune",
+            "label": "Remove unused images",
+            "permission": "docker.delete",
+            "kind": "script",
+            "params": {},
+            "variants": [
+              {
+                "script": "image_prune",
+                "args": {
+                  "all": "literal:false"
+                }
+              }
+            ],
+            "after": "refresh",
+            "confirm": {
+              "title": "Remove unused images?",
+              "text": "Dangling images that no container uses are deleted.",
+              "destructive": true
+            }
+          },
+          {
+            "id": "volume_create",
+            "label": "Create volume",
+            "permission": "docker.manage",
+            "kind": "script",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$",
+                "maxLength": 128
+              },
+              "driver": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,40}$",
+                "maxLength": 41,
+                "default": "local"
+              }
+            },
+            "variants": [
+              {
+                "script": "volume_create"
+              }
+            ],
+            "after": "refresh"
+          },
+          {
+            "id": "volume_remove",
+            "label": "Remove volume",
+            "permission": "docker.delete",
+            "kind": "script",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$",
+                "maxLength": 128,
+                "from": "name"
+              }
+            },
+            "variants": [
+              {
+                "script": "volume_remove"
+              }
+            ],
+            "icon": "trash-2",
+            "after": "refresh",
+            "confirm": {
+              "title": "Remove volume {name}?",
+              "text": "The data in the volume is deleted for good.",
+              "destructive": true,
+              "requireText": "{name}"
+            }
+          },
+          {
+            "id": "volume_prune",
+            "label": "Remove unused volumes",
+            "permission": "docker.delete",
+            "kind": "script",
+            "params": {},
+            "variants": [
+              {
+                "script": "volume_prune"
+              }
+            ],
+            "after": "refresh",
+            "confirm": {
+              "title": "Remove unused volumes?",
+              "text": "Every volume that no container uses is deleted, with its data.",
+              "destructive": true
+            }
+          },
+          {
+            "id": "network_create",
+            "label": "Create network",
+            "permission": "docker.manage",
+            "kind": "script",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$",
+                "maxLength": 128
+              },
+              "driver": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,40}$",
+                "maxLength": 41,
+                "default": "bridge"
+              },
+              "subnet": {
+                "type": "string",
+                "pattern": "^(-|[0-9a-fA-F:.]+/[0-9]{1,3})$",
+                "maxLength": 60,
+                "default": "-"
+              },
+              "gateway": {
+                "type": "string",
+                "pattern": "^(-|[0-9a-fA-F:.]+)$",
+                "maxLength": 60,
+                "default": "-"
+              }
+            },
+            "variants": [
+              {
+                "script": "network_create"
+              }
+            ],
+            "after": "refresh"
+          },
+          {
+            "id": "network_remove",
+            "label": "Remove network",
+            "permission": "docker.delete",
+            "kind": "script",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$",
+                "maxLength": 128,
+                "from": "name"
+              }
+            },
+            "variants": [
+              {
+                "script": "network_remove"
+              }
+            ],
+            "icon": "trash-2",
+            "after": "refresh",
+            "confirm": {
+              "title": "Remove network {name}?",
+              "destructive": true
+            }
+          },
+          {
+            "id": "network_prune",
+            "label": "Remove unused networks",
+            "permission": "docker.delete",
+            "kind": "script",
+            "params": {},
+            "variants": [
+              {
+                "script": "network_prune"
+              }
+            ],
+            "after": "refresh",
+            "confirm": {
+              "title": "Remove unused networks?",
+              "destructive": true
+            }
+          },
+          {
+            "id": "stack_deploy",
+            "label": "Deploy stack",
+            "permission": "docker.manage",
+            "kind": "script",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
+                "maxLength": 63
+              },
+              "source": {
+                "type": "string",
+                "values": [
+                  "editor",
+                  "git"
+                ],
+                "maxLength": 20
+              },
+              "yaml": {
+                "type": "text",
+                "maxLength": 65536,
+                "maxLines": 2000,
+                "default": ""
+              },
+              "env": {
+                "type": "text",
+                "maxLength": 8000,
+                "maxLines": 200,
+                "linePattern": "^(#.*|[A-Za-z_][A-Za-z0-9_]*=.*)$",
+                "default": ""
+              },
+              "repo": {
+                "type": "string",
+                "pattern": "^(-|https://[A-Za-z0-9.-]+/[A-Za-z0-9._/-]+)$",
+                "maxLength": 300,
+                "default": "-"
+              },
+              "branch": {
+                "type": "string",
+                "pattern": "^(-|[A-Za-z0-9._/-]{1,100})$",
+                "maxLength": 100,
+                "default": "-"
+              },
+              "file": {
+                "type": "string",
+                "pattern": "^(-|[A-Za-z0-9._/-]{1,200})$",
+                "maxLength": 200,
+                "default": "-"
+              },
+              "pull": {
+                "type": "boolean",
+                "default": false
+              }
+            },
+            "variants": [
+              {
+                "script": "stack_deploy",
+                "args": {
+                  "allow_risky": "literal:false",
+                  "pull": "param.pull"
+                }
+              }
+            ],
+            "icon": "upload",
+            "job": true,
+            "after": "refresh"
+          },
+          {
+            "id": "stack_deploy_privileged",
+            "label": "Deploy with elevated options",
+            "permission": "docker.privileged",
+            "kind": "script",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
+                "maxLength": 63
+              },
+              "source": {
+                "type": "string",
+                "values": [
+                  "editor",
+                  "git"
+                ],
+                "maxLength": 20
+              },
+              "yaml": {
+                "type": "text",
+                "maxLength": 65536,
+                "maxLines": 2000,
+                "default": ""
+              },
+              "env": {
+                "type": "text",
+                "maxLength": 8000,
+                "maxLines": 200,
+                "linePattern": "^(#.*|[A-Za-z_][A-Za-z0-9_]*=.*)$",
+                "default": ""
+              },
+              "repo": {
+                "type": "string",
+                "pattern": "^(-|https://[A-Za-z0-9.-]+/[A-Za-z0-9._/-]+)$",
+                "maxLength": 300,
+                "default": "-"
+              },
+              "branch": {
+                "type": "string",
+                "pattern": "^(-|[A-Za-z0-9._/-]{1,100})$",
+                "maxLength": 100,
+                "default": "-"
+              },
+              "file": {
+                "type": "string",
+                "pattern": "^(-|[A-Za-z0-9._/-]{1,200})$",
+                "maxLength": 200,
+                "default": "-"
+              },
+              "pull": {
+                "type": "boolean",
+                "default": false
+              }
+            },
+            "variants": [
+              {
+                "script": "stack_deploy",
+                "args": {
+                  "allow_risky": "literal:true",
+                  "pull": "param.pull"
+                }
+              }
+            ],
+            "icon": "upload",
+            "job": true,
+            "after": "refresh",
+            "confirm": {
+              "title": "Deploy with elevated options?",
+              "text": "The stack may use privileged mode, the host network, devices, the Docker socket or host folders.",
+              "destructive": true
+            }
+          },
+          {
+            "id": "stack_start",
+            "label": "Start stack",
+            "permission": "docker.manage",
+            "kind": "script",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
+                "maxLength": 63,
+                "from": "name"
+              }
+            },
+            "variants": [
+              {
+                "script": "stack_action",
+                "args": {
+                  "op": "literal:start"
+                }
+              }
+            ],
+            "icon": "play",
+            "job": true,
+            "after": "refresh"
+          },
+          {
+            "id": "stack_stop",
+            "label": "Stop stack",
+            "permission": "docker.manage",
+            "kind": "script",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
+                "maxLength": 63,
+                "from": "name"
+              }
+            },
+            "variants": [
+              {
+                "script": "stack_action",
+                "args": {
+                  "op": "literal:stop"
+                }
+              }
+            ],
+            "icon": "square",
+            "job": false,
+            "after": "refresh",
+            "confirm": {
+              "title": "Stop stack {name}?",
+              "destructive": false
+            }
+          },
+          {
+            "id": "stack_restart",
+            "label": "Restart stack",
+            "permission": "docker.manage",
+            "kind": "script",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
+                "maxLength": 63,
+                "from": "name"
+              }
+            },
+            "variants": [
+              {
+                "script": "stack_action",
+                "args": {
+                  "op": "literal:restart"
+                }
+              }
+            ],
+            "icon": "rotate-cw",
+            "job": false,
+            "after": "refresh",
+            "confirm": {
+              "title": "Restart stack {name}?",
+              "destructive": false
+            }
+          },
+          {
+            "id": "stack_pull",
+            "label": "Pull and redeploy",
+            "permission": "docker.manage",
+            "kind": "script",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
+                "maxLength": 63,
+                "from": "name"
+              }
+            },
+            "variants": [
+              {
+                "script": "stack_action",
+                "args": {
+                  "op": "literal:pull"
+                }
+              }
+            ],
+            "icon": "download",
+            "job": true,
+            "after": "refresh"
+          },
+          {
+            "id": "stack_remove",
+            "label": "Remove stack",
+            "permission": "docker.delete",
+            "kind": "script",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
+                "maxLength": 63,
+                "from": "name"
+              }
+            },
+            "variants": [
+              {
+                "script": "stack_remove",
+                "args": {
+                  "volumes": "literal:false"
+                }
+              }
+            ],
+            "icon": "trash-2",
+            "after": "refresh",
+            "confirm": {
+              "title": "Remove stack {name}?",
+              "text": "Its containers and networks are removed (volumes are kept).",
+              "destructive": true,
+              "requireText": "{name}"
+            }
+          }
+        ],
+        "datasets": {
+          "inspect": {
+            "script": "inspect",
+            "cacheSec": 0,
+            "permission": "docker.manage"
+          },
+          "images": {
+            "script": "images",
+            "cacheSec": 5,
+            "permission": "docker.view"
+          },
+          "volumes": {
+            "script": "volumes",
+            "cacheSec": 5,
+            "permission": "docker.view"
+          },
+          "networks": {
+            "script": "networks",
+            "cacheSec": 5,
+            "permission": "docker.view"
+          },
+          "system": {
+            "script": "system",
+            "cacheSec": 10,
+            "permission": "docker.view"
+          },
+          "stacks": {
+            "script": "stacks",
+            "cacheSec": 5,
+            "permission": "docker.view"
+          },
+          "stack_get": {
+            "script": "stack_get",
+            "cacheSec": 0,
+            "permission": "docker.manage"
+          }
+        },
+        "screens": {
+          "edit": {
+            "kind": "dialog",
+            "size": "xl",
+            "title": "Edit {context.name}",
+            "description": "Saving replaces the running container with a new one that has these settings. Volumes are kept, and so are the settings this screen does not show. If the new container cannot start, the old one is put back.",
+            "load": {
+              "cur": {
+                "dataset": "inspect",
+                "args": {
+                  "name": "context.name"
+                }
+              },
+              "networks": {
+                "dataset": "networks",
+                "args": {}
+              }
+            },
+            "blocks": [
+              {
+                "type": "notice",
+                "level": "warning",
+                "text": "This container already uses elevated options: {datasets.cur.risky_text}",
+                "when": {
+                  "field": "datasets.cur.risky_text",
+                  "exists": true
+                }
+              },
+              {
+                "type": "notice",
+                "level": "warning",
+                "text": "{datasets.cur.readonly_note}",
+                "when": {
+                  "field": "datasets.cur.readonly_note",
+                  "exists": true
+                }
+              },
+              {
+                "type": "notice",
+                "level": "info",
+                "text": "Not shown here, but kept as they are: {datasets.cur.preserved_text}",
+                "when": {
+                  "field": "datasets.cur.preserved_text",
+                  "exists": true
+                }
+              },
+              {
+                "type": "editor",
+                "param": "settings",
+                "fields": [
+                  {
+                    "name": "h_general",
+                    "label": "General",
+                    "input": "heading"
+                  },
+                  {
+                    "name": "name",
+                    "label": "Name",
+                    "input": "text",
+                    "value": "datasets.cur.settings.name",
+                    "required": true,
+                    "placeholder": "my-container"
+                  },
+                  {
+                    "name": "image",
+                    "label": "Image",
+                    "input": "text",
+                    "value": "datasets.cur.settings.image",
+                    "required": true,
+                    "placeholder": "nginx:latest"
+                  },
+                  {
+                    "name": "restart",
+                    "label": "Restart policy",
+                    "input": "select",
+                    "value": "datasets.cur.settings.restart",
+                    "options": [
+                      {
+                        "value": "no",
+                        "label": "Never"
+                      },
+                      {
+                        "value": "unless-stopped",
+                        "label": "Unless stopped"
+                      },
+                      {
+                        "value": "always",
+                        "label": "Always"
+                      },
+                      {
+                        "value": "on-failure",
+                        "label": "On failure"
+                      }
+                    ]
+                  },
+                  {
+                    "name": "cmd",
+                    "label": "Command (one argument per line)",
+                    "input": "lines",
+                    "value": "datasets.cur.settings.cmd",
+                    "placeholder": "argument",
+                    "help": "Leave empty to use the command of the image."
+                  },
+                  {
+                    "name": "entrypoint",
+                    "label": "Entrypoint (one argument per line)",
+                    "input": "lines",
+                    "value": "datasets.cur.settings.entrypoint",
+                    "placeholder": "argument"
+                  },
+                  {
+                    "name": "workdir",
+                    "label": "Working directory",
+                    "input": "text",
+                    "value": "datasets.cur.settings.workdir",
+                    "placeholder": "/app"
+                  },
+                  {
+                    "name": "user",
+                    "label": "User",
+                    "input": "text",
+                    "value": "datasets.cur.settings.user",
+                    "placeholder": "1000:1000"
+                  },
+                  {
+                    "name": "hostname",
+                    "label": "Hostname",
+                    "input": "text",
+                    "value": "datasets.cur.settings.hostname"
+                  },
+                  {
+                    "name": "h_net",
+                    "label": "Ports and network",
+                    "input": "heading"
+                  },
+                  {
+                    "name": "port",
+                    "label": "Published ports",
+                    "input": "lines",
+                    "value": "datasets.cur.settings.port",
+                    "placeholder": "8080:80/tcp",
+                    "help": "host port:container port, optionally with an address (127.0.0.1:8080:80) or /udp."
+                  },
+                  {
+                    "name": "network",
+                    "label": "Network",
+                    "input": "select",
+                    "value": "datasets.cur.settings.network",
+                    "optionsFrom": {
+                      "path": "datasets.networks",
+                      "value": "name"
+                    }
+                  },
+                  {
+                    "name": "network_alias",
+                    "label": "Network aliases",
+                    "input": "lines",
+                    "value": "datasets.cur.settings.network_alias",
+                    "placeholder": "alias"
+                  },
+                  {
+                    "name": "dns",
+                    "label": "DNS servers",
+                    "input": "lines",
+                    "value": "datasets.cur.settings.dns",
+                    "placeholder": "1.1.1.1"
+                  },
+                  {
+                    "name": "add_host",
+                    "label": "Extra hosts",
+                    "input": "lines",
+                    "value": "datasets.cur.settings.add_host",
+                    "placeholder": "host:10.0.0.5"
+                  },
+                  {
+                    "name": "h_storage",
+                    "label": "Storage",
+                    "input": "heading"
+                  },
+                  {
+                    "name": "volume",
+                    "label": "Volumes and folders",
+                    "input": "lines",
+                    "value": "datasets.cur.settings.volume",
+                    "placeholder": "/srv/data:/data  or  my-volume:/data:ro",
+                    "help": "A volume name or an absolute host folder, then the path in the container, optionally :ro."
+                  },
+                  {
+                    "name": "tmpfs",
+                    "label": "Temporary file systems",
+                    "input": "lines",
+                    "value": "datasets.cur.settings.tmpfs",
+                    "placeholder": "/tmp"
+                  },
+                  {
+                    "name": "h_env",
+                    "label": "Environment and labels",
+                    "input": "heading"
+                  },
+                  {
+                    "name": "env",
+                    "label": "Environment variables",
+                    "input": "pairs",
+                    "value": "datasets.cur.settings.env"
+                  },
+                  {
+                    "name": "label",
+                    "label": "Labels",
+                    "input": "pairs",
+                    "value": "datasets.cur.settings.label"
+                  },
+                  {
+                    "name": "h_res",
+                    "label": "Resources",
+                    "input": "heading"
+                  },
+                  {
+                    "name": "memory",
+                    "label": "Memory limit",
+                    "input": "text",
+                    "value": "datasets.cur.settings.memory",
+                    "placeholder": "512m",
+                    "help": "Empty: no limit."
+                  },
+                  {
+                    "name": "cpus",
+                    "label": "CPU limit",
+                    "input": "text",
+                    "value": "datasets.cur.settings.cpus",
+                    "placeholder": "1.5",
+                    "help": "Number of CPUs. Empty: no limit."
+                  },
+                  {
+                    "name": "gpus",
+                    "label": "GPUs",
+                    "input": "select",
+                    "value": "datasets.cur.settings.gpus",
+                    "options": [
+                      {
+                        "value": "",
+                        "label": "None"
+                      },
+                      {
+                        "value": "all",
+                        "label": "All (needs the NVIDIA runtime)"
+                      }
+                    ]
+                  },
+                  {
+                    "name": "h_run",
+                    "label": "Runtime",
+                    "input": "heading"
+                  },
+                  {
+                    "name": "tty",
+                    "label": "Allocate a terminal (TTY)",
+                    "input": "checkbox",
+                    "value": "datasets.cur.settings.tty"
+                  },
+                  {
+                    "name": "interactive",
+                    "label": "Keep input open",
+                    "input": "checkbox",
+                    "value": "datasets.cur.settings.interactive"
+                  },
+                  {
+                    "name": "init",
+                    "label": "Run an init process",
+                    "input": "checkbox",
+                    "value": "datasets.cur.settings.init"
+                  },
+                  {
+                    "name": "read_only",
+                    "label": "Read-only root file system",
+                    "input": "checkbox",
+                    "value": "datasets.cur.settings.read_only"
+                  },
+                  {
+                    "name": "stop_signal",
+                    "label": "Stop signal",
+                    "input": "text",
+                    "value": "datasets.cur.settings.stop_signal",
+                    "placeholder": "SIGTERM"
+                  },
+                  {
+                    "name": "stop_timeout",
+                    "label": "Stop timeout (seconds)",
+                    "input": "number",
+                    "value": "datasets.cur.settings.stop_timeout"
+                  },
+                  {
+                    "name": "log_driver",
+                    "label": "Log driver",
+                    "input": "text",
+                    "value": "datasets.cur.settings.log_driver",
+                    "placeholder": "json-file"
+                  },
+                  {
+                    "name": "log_opt",
+                    "label": "Log options",
+                    "input": "pairs",
+                    "value": "datasets.cur.settings.log_opt"
+                  },
+                  {
+                    "name": "h_health",
+                    "label": "Health check",
+                    "input": "heading"
+                  },
+                  {
+                    "name": "health_cmd",
+                    "label": "Command",
+                    "input": "text",
+                    "value": "datasets.cur.settings.health_cmd",
+                    "placeholder": "curl -f http://localhost/ || exit 1"
+                  },
+                  {
+                    "name": "health_interval",
+                    "label": "Interval",
+                    "input": "text",
+                    "value": "datasets.cur.settings.health_interval",
+                    "placeholder": "30s"
+                  },
+                  {
+                    "name": "health_timeout",
+                    "label": "Timeout",
+                    "input": "text",
+                    "value": "datasets.cur.settings.health_timeout",
+                    "placeholder": "5s"
+                  },
+                  {
+                    "name": "health_retries",
+                    "label": "Retries",
+                    "input": "number",
+                    "value": "datasets.cur.settings.health_retries"
+                  },
+                  {
+                    "name": "h_risky",
+                    "label": "Elevated options (they can give the container control over the host)",
+                    "input": "heading"
+                  },
+                  {
+                    "name": "privileged",
+                    "label": "Privileged mode",
+                    "input": "checkbox",
+                    "value": "datasets.cur.settings.privileged",
+                    "warn": "Privileged containers have full access to the host."
+                  },
+                  {
+                    "name": "pid",
+                    "label": "Process namespace",
+                    "input": "select",
+                    "value": "datasets.cur.settings.pid",
+                    "options": [
+                      {
+                        "value": "",
+                        "label": "Own"
+                      },
+                      {
+                        "value": "host",
+                        "label": "Host"
+                      }
+                    ],
+                    "warn": "The container can see and signal every process of the host."
+                  },
+                  {
+                    "name": "ipc",
+                    "label": "IPC namespace",
+                    "input": "select",
+                    "value": "datasets.cur.settings.ipc",
+                    "options": [
+                      {
+                        "value": "",
+                        "label": "Own"
+                      },
+                      {
+                        "value": "host",
+                        "label": "Host"
+                      }
+                    ],
+                    "warn": "The container shares memory with host processes."
+                  },
+                  {
+                    "name": "cap_add",
+                    "label": "Added capabilities",
+                    "input": "lines",
+                    "value": "datasets.cur.settings.cap_add",
+                    "placeholder": "NET_ADMIN",
+                    "warn": "Extra capabilities can be used to escape the container."
+                  },
+                  {
+                    "name": "cap_drop",
+                    "label": "Dropped capabilities",
+                    "input": "lines",
+                    "value": "datasets.cur.settings.cap_drop",
+                    "placeholder": "MKNOD"
+                  },
+                  {
+                    "name": "device",
+                    "label": "Devices",
+                    "input": "lines",
+                    "value": "datasets.cur.settings.device",
+                    "placeholder": "/dev/ttyUSB0:/dev/ttyUSB0",
+                    "warn": "Host devices are handed to the container."
+                  },
+                  {
+                    "name": "security_opt",
+                    "label": "Security options",
+                    "input": "lines",
+                    "value": "datasets.cur.settings.security_opt",
+                    "placeholder": "seccomp=unconfined",
+                    "warn": "Disabling a security profile removes a protection of the container."
+                  },
+                  {
+                    "name": "sysctl",
+                    "label": "Kernel parameters",
+                    "input": "pairs",
+                    "value": "datasets.cur.settings.sysctl",
+                    "warn": "Kernel parameters of the container can affect the host."
+                  }
+                ],
+                "submits": [
+                  {
+                    "action": "recreate",
+                    "label": "Save and replace",
+                    "params": {
+                      "name": "context.name"
+                    }
+                  },
+                  {
+                    "action": "recreate_privileged",
+                    "label": "Save with elevated options",
+                    "style": "danger",
+                    "params": {
+                      "name": "context.name"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "create": {
+            "kind": "dialog",
+            "size": "xl",
+            "title": "New container",
+            "description": "Creates and starts a container. The image is pulled first when it is not on the host.",
+            "load": {
+              "networks": {
+                "dataset": "networks",
+                "args": {}
+              }
+            },
+            "blocks": [
+              {
+                "type": "editor",
+                "param": "settings",
+                "fields": [
+                  {
+                    "name": "h_general",
+                    "label": "General",
+                    "input": "heading"
+                  },
+                  {
+                    "name": "name",
+                    "label": "Name",
+                    "input": "text",
+                    "required": true,
+                    "placeholder": "my-container"
+                  },
+                  {
+                    "name": "image",
+                    "label": "Image",
+                    "input": "text",
+                    "required": true,
+                    "placeholder": "nginx:latest",
+                    "value": "context.ref",
+                    "help": "Pulled first when it is not on the host."
+                  },
+                  {
+                    "name": "restart",
+                    "label": "Restart policy",
+                    "input": "select",
+                    "options": [
+                      {
+                        "value": "no",
+                        "label": "Never"
+                      },
+                      {
+                        "value": "unless-stopped",
+                        "label": "Unless stopped"
+                      },
+                      {
+                        "value": "always",
+                        "label": "Always"
+                      },
+                      {
+                        "value": "on-failure",
+                        "label": "On failure"
+                      }
+                    ]
+                  },
+                  {
+                    "name": "cmd",
+                    "label": "Command (one argument per line)",
+                    "input": "lines",
+                    "placeholder": "argument",
+                    "help": "Leave empty to use the command of the image."
+                  },
+                  {
+                    "name": "entrypoint",
+                    "label": "Entrypoint (one argument per line)",
+                    "input": "lines",
+                    "placeholder": "argument"
+                  },
+                  {
+                    "name": "workdir",
+                    "label": "Working directory",
+                    "input": "text",
+                    "placeholder": "/app"
+                  },
+                  {
+                    "name": "user",
+                    "label": "User",
+                    "input": "text",
+                    "placeholder": "1000:1000"
+                  },
+                  {
+                    "name": "hostname",
+                    "label": "Hostname",
+                    "input": "text"
+                  },
+                  {
+                    "name": "h_net",
+                    "label": "Ports and network",
+                    "input": "heading"
+                  },
+                  {
+                    "name": "port",
+                    "label": "Published ports",
+                    "input": "lines",
+                    "placeholder": "8080:80/tcp",
+                    "help": "host port:container port, optionally with an address (127.0.0.1:8080:80) or /udp."
+                  },
+                  {
+                    "name": "network",
+                    "label": "Network",
+                    "input": "select",
+                    "optionsFrom": {
+                      "path": "datasets.networks",
+                      "value": "name"
+                    }
+                  },
+                  {
+                    "name": "network_alias",
+                    "label": "Network aliases",
+                    "input": "lines",
+                    "placeholder": "alias"
+                  },
+                  {
+                    "name": "dns",
+                    "label": "DNS servers",
+                    "input": "lines",
+                    "placeholder": "1.1.1.1"
+                  },
+                  {
+                    "name": "add_host",
+                    "label": "Extra hosts",
+                    "input": "lines",
+                    "placeholder": "host:10.0.0.5"
+                  },
+                  {
+                    "name": "h_storage",
+                    "label": "Storage",
+                    "input": "heading"
+                  },
+                  {
+                    "name": "volume",
+                    "label": "Volumes and folders",
+                    "input": "lines",
+                    "placeholder": "/srv/data:/data  or  my-volume:/data:ro",
+                    "help": "A volume name or an absolute host folder, then the path in the container, optionally :ro."
+                  },
+                  {
+                    "name": "tmpfs",
+                    "label": "Temporary file systems",
+                    "input": "lines",
+                    "placeholder": "/tmp"
+                  },
+                  {
+                    "name": "h_env",
+                    "label": "Environment and labels",
+                    "input": "heading"
+                  },
+                  {
+                    "name": "env",
+                    "label": "Environment variables",
+                    "input": "pairs"
+                  },
+                  {
+                    "name": "label",
+                    "label": "Labels",
+                    "input": "pairs"
+                  },
+                  {
+                    "name": "h_res",
+                    "label": "Resources",
+                    "input": "heading"
+                  },
+                  {
+                    "name": "memory",
+                    "label": "Memory limit",
+                    "input": "text",
+                    "placeholder": "512m",
+                    "help": "Empty: no limit."
+                  },
+                  {
+                    "name": "cpus",
+                    "label": "CPU limit",
+                    "input": "text",
+                    "placeholder": "1.5",
+                    "help": "Number of CPUs. Empty: no limit."
+                  },
+                  {
+                    "name": "gpus",
+                    "label": "GPUs",
+                    "input": "select",
+                    "options": [
+                      {
+                        "value": "",
+                        "label": "None"
+                      },
+                      {
+                        "value": "all",
+                        "label": "All (needs the NVIDIA runtime)"
+                      }
+                    ]
+                  },
+                  {
+                    "name": "h_run",
+                    "label": "Runtime",
+                    "input": "heading"
+                  },
+                  {
+                    "name": "tty",
+                    "label": "Allocate a terminal (TTY)",
+                    "input": "checkbox"
+                  },
+                  {
+                    "name": "interactive",
+                    "label": "Keep input open",
+                    "input": "checkbox"
+                  },
+                  {
+                    "name": "init",
+                    "label": "Run an init process",
+                    "input": "checkbox"
+                  },
+                  {
+                    "name": "read_only",
+                    "label": "Read-only root file system",
+                    "input": "checkbox"
+                  },
+                  {
+                    "name": "stop_signal",
+                    "label": "Stop signal",
+                    "input": "text",
+                    "placeholder": "SIGTERM"
+                  },
+                  {
+                    "name": "stop_timeout",
+                    "label": "Stop timeout (seconds)",
+                    "input": "number"
+                  },
+                  {
+                    "name": "log_driver",
+                    "label": "Log driver",
+                    "input": "text",
+                    "placeholder": "json-file"
+                  },
+                  {
+                    "name": "log_opt",
+                    "label": "Log options",
+                    "input": "pairs"
+                  },
+                  {
+                    "name": "h_health",
+                    "label": "Health check",
+                    "input": "heading"
+                  },
+                  {
+                    "name": "health_cmd",
+                    "label": "Command",
+                    "input": "text",
+                    "placeholder": "curl -f http://localhost/ || exit 1"
+                  },
+                  {
+                    "name": "health_interval",
+                    "label": "Interval",
+                    "input": "text",
+                    "placeholder": "30s"
+                  },
+                  {
+                    "name": "health_timeout",
+                    "label": "Timeout",
+                    "input": "text",
+                    "placeholder": "5s"
+                  },
+                  {
+                    "name": "health_retries",
+                    "label": "Retries",
+                    "input": "number"
+                  },
+                  {
+                    "name": "h_risky",
+                    "label": "Elevated options (they can give the container control over the host)",
+                    "input": "heading"
+                  },
+                  {
+                    "name": "privileged",
+                    "label": "Privileged mode",
+                    "input": "checkbox",
+                    "warn": "Privileged containers have full access to the host."
+                  },
+                  {
+                    "name": "pid",
+                    "label": "Process namespace",
+                    "input": "select",
+                    "options": [
+                      {
+                        "value": "",
+                        "label": "Own"
+                      },
+                      {
+                        "value": "host",
+                        "label": "Host"
+                      }
+                    ],
+                    "warn": "The container can see and signal every process of the host."
+                  },
+                  {
+                    "name": "ipc",
+                    "label": "IPC namespace",
+                    "input": "select",
+                    "options": [
+                      {
+                        "value": "",
+                        "label": "Own"
+                      },
+                      {
+                        "value": "host",
+                        "label": "Host"
+                      }
+                    ],
+                    "warn": "The container shares memory with host processes."
+                  },
+                  {
+                    "name": "cap_add",
+                    "label": "Added capabilities",
+                    "input": "lines",
+                    "placeholder": "NET_ADMIN",
+                    "warn": "Extra capabilities can be used to escape the container."
+                  },
+                  {
+                    "name": "cap_drop",
+                    "label": "Dropped capabilities",
+                    "input": "lines",
+                    "placeholder": "MKNOD"
+                  },
+                  {
+                    "name": "device",
+                    "label": "Devices",
+                    "input": "lines",
+                    "placeholder": "/dev/ttyUSB0:/dev/ttyUSB0",
+                    "warn": "Host devices are handed to the container."
+                  },
+                  {
+                    "name": "security_opt",
+                    "label": "Security options",
+                    "input": "lines",
+                    "placeholder": "seccomp=unconfined",
+                    "warn": "Disabling a security profile removes a protection of the container."
+                  },
+                  {
+                    "name": "sysctl",
+                    "label": "Kernel parameters",
+                    "input": "pairs",
+                    "warn": "Kernel parameters of the container can affect the host."
+                  }
+                ],
+                "submits": [
+                  {
+                    "action": "create",
+                    "label": "Create and start"
+                  },
+                  {
+                    "action": "create_privileged",
+                    "label": "Create with elevated options",
+                    "style": "danger"
+                  }
+                ]
+              }
+            ]
+          },
+          "stack_new": {
+            "kind": "dialog",
+            "size": "xl",
+            "title": "New stack",
+            "description": "A stack is a Docker Compose project: write the compose file here, or deploy one from a GitHub repository.",
+            "blocks": [
+              {
+                "type": "editor",
+                "fields": [
+                  {
+                    "name": "name",
+                    "label": "Stack name",
+                    "input": "text",
+                    "required": true,
+                    "placeholder": "my-stack",
+                    "help": "Lowercase letters, digits, - and _."
+                  },
+                  {
+                    "name": "source",
+                    "label": "Compose file from",
+                    "input": "select",
+                    "options": [
+                      {
+                        "value": "editor",
+                        "label": "The editor below"
+                      },
+                      {
+                        "value": "git",
+                        "label": "A GitHub repository"
+                      }
+                    ]
+                  },
+                  {
+                    "name": "yaml",
+                    "label": "docker-compose.yml",
+                    "input": "textarea",
+                    "placeholder": "services:\n  web:\n    image: nginx:latest\n    ports:\n      - \"8080:80\"",
+                    "when": {
+                      "field": "values.source",
+                      "equals": "editor"
+                    }
+                  },
+                  {
+                    "name": "repo",
+                    "label": "Repository (https)",
+                    "input": "text",
+                    "placeholder": "https://github.com/owner/repo",
+                    "when": {
+                      "field": "values.source",
+                      "equals": "git"
+                    }
+                  },
+                  {
+                    "name": "branch",
+                    "label": "Branch",
+                    "input": "text",
+                    "placeholder": "main",
+                    "when": {
+                      "field": "values.source",
+                      "equals": "git"
+                    }
+                  },
+                  {
+                    "name": "file",
+                    "label": "Compose file in the repository",
+                    "input": "text",
+                    "placeholder": "docker-compose.yml",
+                    "when": {
+                      "field": "values.source",
+                      "equals": "git"
+                    },
+                    "help": "Private repository? An admin sets a GitHub access token under Settings, Widgets, Docker Containers (key icon)."
+                  },
+                  {
+                    "name": "env",
+                    "label": "Environment file (.env)",
+                    "input": "textarea",
+                    "placeholder": "KEY=value"
+                  },
+                  {
+                    "name": "pull",
+                    "label": "Pull newer images first",
+                    "input": "checkbox"
+                  }
+                ],
+                "submits": [
+                  {
+                    "action": "stack_deploy",
+                    "label": "Deploy",
+                    "params": {
+                      "name": "values.name",
+                      "source": "values.source",
+                      "yaml": "values.yaml",
+                      "env": "values.env",
+                      "repo": "values.repo",
+                      "branch": "values.branch",
+                      "file": "values.file",
+                      "pull": "values.pull"
+                    }
+                  },
+                  {
+                    "action": "stack_deploy_privileged",
+                    "label": "Deploy with elevated options",
+                    "style": "danger",
+                    "params": {
+                      "name": "values.name",
+                      "source": "values.source",
+                      "yaml": "values.yaml",
+                      "env": "values.env",
+                      "repo": "values.repo",
+                      "branch": "values.branch",
+                      "file": "values.file",
+                      "pull": "values.pull"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "stack_edit": {
+            "kind": "dialog",
+            "size": "xl",
+            "title": "Stack {context.name}",
+            "description": "Deploying again applies the changes: services whose configuration changed are recreated.",
+            "load": {
+              "cur": {
+                "dataset": "stack_get",
+                "args": {
+                  "name": "context.name"
+                }
+              }
+            },
+            "blocks": [
+              {
+                "type": "editor",
+                "fields": [
+                  {
+                    "name": "source",
+                    "label": "Compose file from",
+                    "input": "select",
+                    "value": "datasets.cur.source",
+                    "options": [
+                      {
+                        "value": "editor",
+                        "label": "The editor below"
+                      },
+                      {
+                        "value": "git",
+                        "label": "A GitHub repository"
+                      }
+                    ]
+                  },
+                  {
+                    "name": "yaml",
+                    "label": "docker-compose.yml",
+                    "input": "textarea",
+                    "value": "datasets.cur.yaml",
+                    "placeholder": "services:\n  web:\n    image: nginx:latest\n    ports:\n      - \"8080:80\"",
+                    "when": {
+                      "field": "values.source",
+                      "equals": "editor"
+                    }
+                  },
+                  {
+                    "name": "repo",
+                    "label": "Repository (https)",
+                    "input": "text",
+                    "value": "datasets.cur.repo",
+                    "placeholder": "https://github.com/owner/repo",
+                    "when": {
+                      "field": "values.source",
+                      "equals": "git"
+                    }
+                  },
+                  {
+                    "name": "branch",
+                    "label": "Branch",
+                    "input": "text",
+                    "value": "datasets.cur.branch",
+                    "placeholder": "main",
+                    "when": {
+                      "field": "values.source",
+                      "equals": "git"
+                    }
+                  },
+                  {
+                    "name": "file",
+                    "label": "Compose file in the repository",
+                    "input": "text",
+                    "value": "datasets.cur.file",
+                    "placeholder": "docker-compose.yml",
+                    "when": {
+                      "field": "values.source",
+                      "equals": "git"
+                    },
+                    "help": "Private repository? An admin sets a GitHub access token under Settings, Widgets, Docker Containers (key icon)."
+                  },
+                  {
+                    "name": "env",
+                    "label": "Environment file (.env)",
+                    "input": "textarea",
+                    "value": "datasets.cur.env",
+                    "placeholder": "KEY=value"
+                  },
+                  {
+                    "name": "pull",
+                    "label": "Pull newer images first",
+                    "input": "checkbox"
+                  }
+                ],
+                "submits": [
+                  {
+                    "action": "stack_deploy",
+                    "label": "Deploy",
+                    "params": {
+                      "name": "context.name",
+                      "source": "values.source",
+                      "yaml": "values.yaml",
+                      "env": "values.env",
+                      "repo": "values.repo",
+                      "branch": "values.branch",
+                      "file": "values.file",
+                      "pull": "values.pull"
+                    }
+                  },
+                  {
+                    "action": "stack_deploy_privileged",
+                    "label": "Deploy with elevated options",
+                    "style": "danger",
+                    "params": {
+                      "name": "context.name",
+                      "source": "values.source",
+                      "yaml": "values.yaml",
+                      "env": "values.env",
+                      "repo": "values.repo",
+                      "branch": "values.branch",
+                      "file": "values.file",
+                      "pull": "values.pull"
+                    }
+                  }
+                ]
+              }
+            ]
+          },
+          "manage": {
+            "kind": "page",
+            "title": "Docker on {server.name}",
+            "description": "Containers, images, volumes, networks and stacks of this host.",
+            "load": {
+              "system": {
+                "dataset": "system",
+                "args": {}
+              },
+              "images": {
+                "dataset": "images",
+                "args": {}
+              },
+              "volumes": {
+                "dataset": "volumes",
+                "args": {}
+              },
+              "networks": {
+                "dataset": "networks",
+                "args": {}
+              },
+              "stacks": {
+                "dataset": "stacks",
+                "args": {}
+              }
+            },
+            "blocks": [
+              {
+                "type": "jobProgress"
+              },
+              {
+                "type": "tabs",
+                "tabs": [
+                  {
+                    "id": "overview",
+                    "label": "Overview",
+                    "blocks": [
+                      {
+                        "type": "notice",
+                        "level": "warning",
+                        "text": "Docker Compose is not installed on this host, so stacks are not available.",
+                        "when": {
+                          "field": "datasets.system.compose",
+                          "equals": false
+                        }
+                      },
+                      {
+                        "type": "kv",
+                        "items": [
+                          {
+                            "label": "Docker version",
+                            "value": "{datasets.system.version}",
+                            "format": "text"
+                          },
+                          {
+                            "label": "Containers",
+                            "value": "{datasets.system.containers.running} running, {datasets.system.containers.stopped} stopped, {datasets.system.containers.total} in total",
+                            "format": "text"
+                          },
+                          {
+                            "label": "Images",
+                            "value": "{datasets.system.images}",
+                            "format": "text"
+                          },
+                          {
+                            "label": "Disk used by images",
+                            "value": "{datasets.system.disk.images}",
+                            "format": "text"
+                          },
+                          {
+                            "label": "Disk used by containers",
+                            "value": "{datasets.system.disk.containers}",
+                            "format": "text"
+                          },
+                          {
+                            "label": "Disk used by volumes",
+                            "value": "{datasets.system.disk.volumes}",
+                            "format": "text"
+                          },
+                          {
+                            "label": "Build cache",
+                            "value": "{datasets.system.disk.cache}",
+                            "format": "text"
+                          }
+                        ]
+                      }
+                    ]
+                  },
+                  {
+                    "id": "containers",
+                    "label": "Containers",
+                    "blocks": [
+                      {
+                        "type": "buttons",
+                        "actions": [
+                          "new_container",
+                          "stack_new"
+                        ]
+                      },
+                      {
+                        "type": "view",
+                        "view": {
+                          "type": "table",
+                          "empty": "No containers",
+                          "filter": {
+                            "fields": [
+                              "name",
+                              "image"
+                            ],
+                            "placeholder": "Filter"
+                          },
+                          "columns": [
+                            {
+                              "title": "Name",
+                              "value": "{name}",
+                              "format": "text"
+                            },
+                            {
+                              "title": "Image",
+                              "value": "{image}",
+                              "format": "text"
+                            },
+                            {
+                              "title": "State",
+                              "value": "{state}",
+                              "format": "badge"
+                            },
+                            {
+                              "title": "Status",
+                              "value": "{status}",
+                              "format": "text"
+                            },
+                            {
+                              "title": "Ports",
+                              "value": "{ports}",
+                              "format": "text"
+                            }
+                          ],
+                          "rowActions": [
+                            "edit",
+                            "logs",
+                            "shell",
+                            "restart",
+                            "stop",
+                            "start",
+                            "remove"
+                          ]
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "images",
+                    "label": "Images",
+                    "blocks": [
+                      {
+                        "type": "form",
+                        "title": "Pull an image",
+                        "fields": [
+                          {
+                            "name": "ref",
+                            "label": "Image",
+                            "input": "text",
+                            "placeholder": "nginx:latest"
+                          }
+                        ],
+                        "submit": {
+                          "action": "image_pull",
+                          "label": "Pull",
+                          "params": {
+                            "ref": "ref"
+                          }
+                        }
+                      },
+                      {
+                        "type": "buttons",
+                        "actions": [
+                          "image_prune"
+                        ]
+                      },
+                      {
+                        "type": "view",
+                        "path": "datasets.images",
+                        "view": {
+                          "type": "table",
+                          "empty": "No images",
+                          "columns": [
+                            {
+                              "title": "Repository",
+                              "value": "{repo}",
+                              "format": "text"
+                            },
+                            {
+                              "title": "Tag",
+                              "value": "{tag}",
+                              "format": "text"
+                            },
+                            {
+                              "title": "Id",
+                              "value": "{id}",
+                              "format": "text"
+                            },
+                            {
+                              "title": "Size",
+                              "value": "{size}",
+                              "format": "text"
+                            },
+                            {
+                              "title": "Created",
+                              "value": "{created}",
+                              "format": "text"
+                            },
+                            {
+                              "title": "Containers",
+                              "value": "{containers}",
+                              "format": "text"
+                            }
+                          ],
+                          "rowActions": [
+                            "run_image",
+                            "image_remove"
+                          ],
+                          "filter": {
+                            "fields": [
+                              "repo",
+                              "tag",
+                              "id"
+                            ],
+                            "placeholder": "Filter"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "volumes",
+                    "label": "Volumes",
+                    "blocks": [
+                      {
+                        "type": "form",
+                        "title": "Create a volume",
+                        "fields": [
+                          {
+                            "name": "name",
+                            "label": "Name",
+                            "input": "text",
+                            "placeholder": "my-volume"
+                          },
+                          {
+                            "name": "driver",
+                            "label": "Driver",
+                            "input": "text",
+                            "placeholder": "local"
+                          }
+                        ],
+                        "submit": {
+                          "action": "volume_create",
+                          "label": "Create",
+                          "params": {
+                            "name": "name",
+                            "driver": "driver"
+                          }
+                        }
+                      },
+                      {
+                        "type": "buttons",
+                        "actions": [
+                          "volume_prune"
+                        ]
+                      },
+                      {
+                        "type": "view",
+                        "path": "datasets.volumes",
+                        "view": {
+                          "type": "table",
+                          "empty": "No volumes",
+                          "columns": [
+                            {
+                              "title": "Name",
+                              "value": "{name}",
+                              "format": "text"
+                            },
+                            {
+                              "title": "Driver",
+                              "value": "{driver}",
+                              "format": "text"
+                            },
+                            {
+                              "title": "Size",
+                              "value": "{size}",
+                              "format": "text"
+                            },
+                            {
+                              "title": "Containers",
+                              "value": "{containers}",
+                              "format": "text"
+                            },
+                            {
+                              "title": "Created",
+                              "value": "{created}",
+                              "format": "text"
+                            }
+                          ],
+                          "rowActions": [
+                            "volume_remove"
+                          ],
+                          "filter": {
+                            "fields": [
+                              "name"
+                            ],
+                            "placeholder": "Filter"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "networks",
+                    "label": "Networks",
+                    "blocks": [
+                      {
+                        "type": "form",
+                        "title": "Create a network",
+                        "fields": [
+                          {
+                            "name": "name",
+                            "label": "Name",
+                            "input": "text",
+                            "placeholder": "my-network"
+                          },
+                          {
+                            "name": "driver",
+                            "label": "Driver",
+                            "input": "select",
+                            "options": [
+                              {
+                                "value": "bridge",
+                                "label": "bridge"
+                              },
+                              {
+                                "value": "macvlan",
+                                "label": "macvlan"
+                              },
+                              {
+                                "value": "ipvlan",
+                                "label": "ipvlan"
+                              },
+                              {
+                                "value": "overlay",
+                                "label": "overlay"
+                              }
+                            ]
+                          },
+                          {
+                            "name": "subnet",
+                            "label": "Subnet (optional)",
+                            "input": "text",
+                            "placeholder": "172.30.0.0/16"
+                          },
+                          {
+                            "name": "gateway",
+                            "label": "Gateway (optional)",
+                            "input": "text",
+                            "placeholder": "172.30.0.1"
+                          }
+                        ],
+                        "submit": {
+                          "action": "network_create",
+                          "label": "Create",
+                          "params": {
+                            "name": "name",
+                            "driver": "driver",
+                            "subnet": "subnet",
+                            "gateway": "gateway"
+                          }
+                        }
+                      },
+                      {
+                        "type": "buttons",
+                        "actions": [
+                          "network_prune"
+                        ]
+                      },
+                      {
+                        "type": "view",
+                        "path": "datasets.networks",
+                        "view": {
+                          "type": "table",
+                          "empty": "No networks",
+                          "columns": [
+                            {
+                              "title": "Name",
+                              "value": "{name}",
+                              "format": "text"
+                            },
+                            {
+                              "title": "Driver",
+                              "value": "{driver}",
+                              "format": "text"
+                            },
+                            {
+                              "title": "Scope",
+                              "value": "{scope}",
+                              "format": "text"
+                            },
+                            {
+                              "title": "Subnet",
+                              "value": "{subnet}",
+                              "format": "text"
+                            },
+                            {
+                              "title": "Gateway",
+                              "value": "{gateway}",
+                              "format": "text"
+                            },
+                            {
+                              "title": "Containers",
+                              "value": "{containers}",
+                              "format": "text"
+                            }
+                          ],
+                          "rowActions": [
+                            "network_remove"
+                          ],
+                          "filter": {
+                            "fields": [
+                              "name"
+                            ],
+                            "placeholder": "Filter"
+                          }
+                        }
+                      }
+                    ]
+                  },
+                  {
+                    "id": "stacks",
+                    "label": "Stacks",
+                    "blocks": [
+                      {
+                        "type": "buttons",
+                        "actions": [
+                          "stack_new"
+                        ]
+                      },
+                      {
+                        "type": "view",
+                        "path": "datasets.stacks",
+                        "view": {
+                          "type": "table",
+                          "empty": "No stacks",
+                          "columns": [
+                            {
+                              "title": "Name",
+                              "value": "{name}",
+                              "format": "text"
+                            },
+                            {
+                              "title": "Status",
+                              "value": "{status}",
+                              "format": "badge"
+                            },
+                            {
+                              "title": "Services",
+                              "value": "{services}",
+                              "format": "text"
+                            },
+                            {
+                              "title": "Source",
+                              "value": "{source}",
+                              "format": "text"
+                            },
+                            {
+                              "title": "Updated",
+                              "value": "{updated}",
+                              "format": "text"
+                            }
+                          ],
+                          "rowActions": [
+                            "stack_edit",
+                            "stack_start",
+                            "stack_stop",
+                            "stack_restart",
+                            "stack_pull",
+                            "stack_remove"
+                          ],
+                          "filter": {
+                            "fields": [
+                              "name"
+                            ],
+                            "placeholder": "Filter"
+                          }
+                        }
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        "menu": [
+          {
+            "id": "new_container",
+            "label": "New container",
+            "icon": "plus",
+            "screen": "create",
+            "permission": "docker.manage"
+          },
+          {
+            "id": "new_stack",
+            "label": "New stack",
+            "icon": "package",
+            "screen": "stack_new",
+            "permission": "docker.manage"
+          },
+          {
+            "id": "manage",
+            "label": "Manage",
+            "icon": "settings",
+            "screen": "manage"
           }
         ]
       }
+    }
+  ],
+  "secrets": [
+    {
+      "id": "git_token",
+      "label": "GitHub access token",
+      "description": "Lets stacks be deployed from a private GitHub repository. Not needed for public repositories."
     }
   ]
 }

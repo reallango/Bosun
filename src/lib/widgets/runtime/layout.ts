@@ -196,12 +196,12 @@ export function editorWarnings(fields: EditorField[], values: EditorValues): str
  * literal. Returns what is missing so the editor can say so.
  */
 export function editorSubmitParams(
-  action: Pick<ActionSpec, 'params'>, submit: EditorSubmit, param: string, fields: EditorField[], values: EditorValues, ctx: ViewContext,
+  action: Pick<ActionSpec, 'params'>, submit: EditorSubmit, param: string | undefined, fields: EditorField[], values: EditorValues, ctx: ViewContext,
 ): { params: Record<string, unknown>; missing: string[] } {
   const params: Record<string, unknown> = {};
   const missing: string[] = [];
   for (const [name, spec] of Object.entries(action.params ?? {})) {
-    if (name === param) { params[name] = serializeEditor(fields, values); continue; }
+    if (param !== undefined && name === param) { params[name] = serializeEditor(fields, values); continue; }
     const src = submit.params[name];
     let raw: unknown;
     if (src === undefined) raw = undefined;
