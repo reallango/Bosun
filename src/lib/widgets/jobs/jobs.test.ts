@@ -24,21 +24,21 @@ vi.mock('@/lib/db/rqlite-client', () => ({
         return {};
       }
       if (/^INSERT INTO package_jobs/.test(sql.trim())) {
-        const [id, package_id, widget_type, action_id, server_id, user_id, params, node, started, updated] = p as string[];
-        if (db.rows.some(r => r.server_id === server_id && r.widget_type === widget_type && r.status === 'running')) throw new Error('rqlite execute error: UNIQUE constraint failed: package_jobs.server_id, package_jobs.widget_type');
-        db.rows.push({ id, package_id, widget_type, action_id, server_id, user_id, status: 'running', params, steps: '[]', percent: null, message: null, cancel_requested: 0, node, started_at: Number(started), updated_at: Number(updated), finished_at: null });
+        const [id, package_id, widget_type, action_id, server_id, user_id, params, node, started, updated, widget_id, origin_enc] = p as string[];
+        if (db.rows.some(r => r.server_id === server_id && r.widget_type === widget_type && r.action_id === action_id && r.status === 'running')) throw new Error('rqlite execute error: UNIQUE constraint failed: package_jobs.server_id, package_jobs.widget_type, package_jobs.action_id');
+        db.rows.push({ id, package_id, widget_type, action_id, server_id, user_id, status: 'running', params, steps: '[]', percent: null, message: null, cancel_requested: 0, node, started_at: Number(started), updated_at: Number(updated), finished_at: null, widget_id, origin_enc, log: null });
         return {};
       }
       if (/SET steps = \?, percent = \?, message = COALESCE/.test(sql)) {
-        const [steps, percent, message, updated, id] = p as [string, number | null, string | null, number, string];
+        const [steps, percent, message, log, updated, id] = p as [string, number | null, string | null, string | null, number, string];
         const r = db.rows.find(x => x.id === id && x.status === 'running');
-        if (r) Object.assign(r, { steps, percent, message: message ?? r.message, updated_at: updated });
+        if (r) Object.assign(r, { steps, percent, message: message ?? r.message, log: log ?? r.log, updated_at: updated });
         return {};
       }
       if (/SET status = \?, steps = \?/.test(sql)) {
-        const [status, steps, percent, message, finished, updated, id] = p as [string, string, number | null, string, number, number, string];
+        const [status, steps, percent, message, log, finished, updated, id] = p as [string, string, number | null, string, string | null, number, number, string];
         const r = db.rows.find(x => x.id === id && x.status === 'running');
-        if (r) Object.assign(r, { status, steps, percent, message, finished_at: finished, updated_at: updated });
+        if (r) Object.assign(r, { status, steps, percent, message, log: log ?? r.log, finished_at: finished, updated_at: updated });
         return {};
       }
       if (/SET cancel_requested = 1/.test(sql)) {
@@ -84,7 +84,7 @@ describe('the job store', () => {
     expect(await getJob('nope')).toBeNull();
   });
 
-  it('allows one running job per widget type and server, but not across different ones', async () => {
+  it('allows one running job per widget type, server and action, but not across different ones', async () => {
     await createJob(input, 1000);
     await expect(createJob(input, 1100)).rejects.toBeInstanceOf(JobConflictError);
     await createJob({ ...input, serverId: 's2' }, 1100);

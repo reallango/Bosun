@@ -585,6 +585,16 @@ const V13_EXEC_PERMISSION: string[] = [
        SELECT lower(hex(randomblob(16))), group_id, 'exec.service', scope_type, scope_id, effect FROM permission_grants WHERE permission = 'commands.run'`,
 ];
 
+// ---- Version 14: jobs know the widget and the screen they came from, keep their log, and different actions may run side by side ----
+const V14_JOB_TASKS: string[] = [
+    `ALTER TABLE package_jobs ADD COLUMN widget_id TEXT`,
+    `ALTER TABLE package_jobs ADD COLUMN origin_enc TEXT`,
+    `ALTER TABLE package_jobs ADD COLUMN log TEXT`,
+    `DROP INDEX IF EXISTS idx_package_jobs_running`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_package_jobs_running_action ON package_jobs(server_id, widget_type, action_id) WHERE status = 'running'`,
+    `CREATE INDEX IF NOT EXISTS idx_package_jobs_recent ON package_jobs(started_at)`,
+];
+
 export const MIGRATIONS: Migration[] = [
     {
         version: 1,
@@ -607,6 +617,7 @@ export const MIGRATIONS: Migration[] = [
     { version: 11, name: 'package_content_hash', statements: V11_PACKAGE_HASH },
     { version: 12, name: 'package_jobs', statements: V12_PACKAGE_JOBS },
     { version: 13, name: 'exec_permission', statements: V13_EXEC_PERMISSION },
+    { version: 14, name: 'job_tasks', statements: V14_JOB_TASKS },
 ];
 
 /** The schema version this build expects. */

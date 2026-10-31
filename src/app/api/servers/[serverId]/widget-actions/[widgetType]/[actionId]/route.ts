@@ -10,6 +10,8 @@ import { rqlite } from '@/lib/db/rqlite-client';
 import { storeActionData } from '@/lib/widgets/runtime/store-data';
 import { ParamError } from '@/lib/widgets/runtime/command';
 import { openTerminalAction } from '@/lib/widgets/runtime/terminal-action';
+import { decryptOrigin, editorFieldsOf, encryptOrigin, maskValues, resolveTokens, sanitizeOrigin } from '@/lib/widgets/jobs/origin';
+import { getJob, getOriginEnc } from '@/lib/widgets/jobs/store';
 
 /**
  * Run one action of a package widget: POST /api/servers/:serverId/widget-actions/:widgetType/:actionId
@@ -31,7 +33,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const denied = await requirePermission(auth, action.permission, serverId);
     if (denied) return denied;
 
-    let body: { params?: unknown; confirm?: unknown; ref?: unknown; widgetId?: unknown };
+    let body: { params?: unknown; confirm?: unknown; ref?: unknown; widgetId?: unknown; origin?: unknown; savedFrom?: unknown };
     try { body = await request.json(); } catch { body = {}; }
     // A terminal action runs one command the package declared in an interactive terminal: API keys get a token for an
     // API terminal (after the action's check), a signed-in Full access user a token for the web terminal. The target is
@@ -51,10 +53,30 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     // in the background (answers 202 with the job to follow), otherwise the answer comes when the script ends.
     if (action.kind === 'script') {
       try {
+        // A screen reopened from a job: the placeholders of its saved secrets are replaced by the real values here, on the server.
+        let savedSecrets: string[] = [];
+        if (typeof body.savedFrom === 'string') {
+          const old = await getJob(body.savedFrom);
+          const oldOrigin = old && old.widgetType === widgetType && old.serverId === serverId && (old.userId === auth.userId || auth.role === 'admin') ? decryptOrigin(await getOriginEnc(old.id)) : null;
+          if (!oldOrigin) return fail('The saved values of that task are no longer available: fill the screen in again.', 409, 'SAVED_GONE');
+          savedSecrets = oldOrigin.secrets;
+        }
+        try {
+          if (savedSecrets.length) { body.params = resolveTokens(body.params, savedSecrets); if (body.origin) body.origin = resolveTokens(body.origin, savedSecrets); }
+        } catch (e) { return fail(e instanceof Error ? e.message : 'A saved value is no longer available', 409, 'SAVED_GONE'); }
         const instance = await loadInstance(serverId, widgetType, body.widgetId);
         const prepared = await prepareScriptAction(serverId, loaded, action, body.params, instance);
         if (action.job) {
-          const { job } = await startJob({ serverId, loaded, action, prepared, userId: auth.userId, params: (body.params && typeof body.params === 'object' ? body.params : {}) as Record<string, unknown>, instanceId: instance?.id, ip });
+          // Keep where it came from, with the secrets taken out and encrypted, so the screen can be reopened to correct it.
+          let originEnc: string | null = null;
+          let scrub: string[] = [];
+          const origin = sanitizeOrigin(body.origin);
+          if (origin && instance) {
+            const masked = maskValues(editorFieldsOf(loaded.spec.screens?.[origin.screenId]), origin.values);
+            scrub = masked.secrets;
+            originEnc = encryptOrigin({ screenId: origin.screenId, context: origin.context, values: masked.values, secrets: masked.secrets });
+          }
+          const { job } = await startJob({ serverId, loaded, action, prepared, userId: auth.userId, params: (body.params && typeof body.params === 'object' ? body.params : {}) as Record<string, unknown>, instanceId: instance?.id, ip, originEnc, scrub });
           await logAudit({
             userId: auth.userId, serverId, action: AuditActions.WIDGET_ACTION, status: 'success',
             details: JSON.stringify({ widget: widgetType, action: actionId, job: job.id, started: true, params: body.params ?? {} }).slice(0, 900), ipAddress: ip,

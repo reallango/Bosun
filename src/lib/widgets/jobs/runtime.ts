@@ -34,6 +34,9 @@ export interface StartJobInput {
   /** The widget (instance) whose settings the action reads, when it names one. */
   instanceId?: string;
   ip?: string;
+  /** The encrypted origin (see origin.ts) so the screen can be reopened, and the secret values to keep out of the log. */
+  originEnc?: string | null;
+  scrub?: string[];
 }
 
 /** What the final status and message of a finished script are. */
@@ -60,7 +63,7 @@ export async function startJob(input: StartJobInput): Promise<StartedJob> {
   const { serverId, loaded, action, prepared } = input;
   let job: JobRecord;
   try {
-    job = await createJob({ packageId: loaded.packageId, widgetType: loaded.type, actionId: action.id, serverId, userId: input.userId, params: input.params });
+    job = await createJob({ packageId: loaded.packageId, widgetType: loaded.type, actionId: action.id, serverId, userId: input.userId, params: input.params, widgetId: input.instanceId ?? null, originEnc: input.originEnc ?? null });
   } catch (err) {
     if (err instanceof JobConflictError) throw new RuntimeError(err.message, 409, 'JOB_RUNNING');
     throw err;
@@ -81,6 +84,9 @@ async function run(job: JobRecord, input: StartJobInput, controller: AbortContro
   const { serverId, loaded, action, prepared } = input;
   let out = '';
   let dirty = false;
+  // Whatever the script prints, the secrets the person typed (passwords of the environment) never reach the log.
+  const hide = (input.scrub ?? []).filter(v => v.length >= 4);
+  const scrub = (s: string) => hide.reduce((acc, v) => acc.split(v).join('***'), s);
   const snapshot = () => {
     const p = parseScriptOutput(out);
     return { steps: p.steps, percent: p.progress ? p.progress.percent : null };
@@ -89,7 +95,7 @@ async function run(job: JobRecord, input: StartJobInput, controller: AbortContro
     dirty = false;
     try {
       const s = snapshot();
-      const r = await reportProgress(job.id, s);
+      const r = await reportProgress(job.id, { ...s, log: scrub(out) });
       if ((r.cancelRequested || !r.stillRunning) && !controller.signal.aborted) void cancel();
     } catch { /* the database is briefly unavailable: the next tick tries again */ }
   };
@@ -100,10 +106,10 @@ async function run(job: JobRecord, input: StartJobInput, controller: AbortContro
     const r = await runScript(serverId, loaded, prepared.scriptId, prepared.args, {
       jobId: job.id,
       signal: controller.signal,
-      onData: (text, isErr) => { if (!isErr && out.length < MAX_BUFFER) { out += text; dirty = true; } },
+      onData: (text, isErr) => { if (out.length < MAX_BUFFER) { out += isErr ? `[error output] ${text}` : text; dirty = true; } },
     });
     ({ status, message } = outcomeOf(r));
-    if (!out) out = r.stdout;
+    if (!out) out = r.stdout + (r.stderr ? `\n[error output] ${r.stderr}` : '');
     if (status === 'success') await afterSuccess(input, r.stdout);
   } catch (err) {
     status = 'error';
@@ -113,7 +119,7 @@ async function run(job: JobRecord, input: StartJobInput, controller: AbortContro
     running.delete(job.id);
   }
   const s = snapshot();
-  await finishJob(job.id, status, { steps: s.steps, percent: status === 'success' ? 100 : s.percent, message }).catch(() => undefined);
+  await finishJob(job.id, status, { steps: s.steps, percent: status === 'success' ? 100 : s.percent, message: scrub(message), log: scrub(out) }).catch(() => undefined);
   const final = await getJob(job.id).catch(() => null);
   await logAudit({
     userId: input.userId ?? undefined, serverId, action: AuditActions.WIDGET_ACTION, status: status === 'success' ? 'success' : 'failure',

@@ -37,7 +37,7 @@ export interface LayoutUi {
   renderView: (view: ViewSpec, data: unknown) => React.ReactNode;
   onCancelJob: () => void;
   /** Submit an action from an editor and learn how it went (true = it ran and succeeded). */
-  submit?: (action: PublicActionLike, params: Record<string, unknown>) => Promise<{ ok: boolean; error?: string }>;
+  submit?: (action: PublicActionLike, params: Record<string, unknown>, extra?: { origin?: unknown; savedFrom?: string }) => Promise<{ ok: boolean; error?: string }>;
   /** Call a dataset of the widget with arguments (a button of an editor, or a select that gets its options from the host). */
   loadDataset?: (dataset: string, args: Record<string, string>) => Promise<{ ok: true; data: unknown } | { ok: false; error: string }>;
   /** An editor's submit finished (screens close their dialog on success). */

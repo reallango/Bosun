@@ -31,6 +31,9 @@ export interface ViewContext {
   /** Screens: the row a screen was opened for, and what its `load` fetched (alias -> data). */
   context?: unknown;
   datasets?: Record<string, unknown>;
+  /** The id of the screen being shown, and the values of a task it is reopened from (secrets are placeholders only the server can resolve). */
+  screenId?: string;
+  restore?: { values: Record<string, unknown>; savedFrom: string };
 }
 
 /** An action as the browser has it: the variants carry only their conditions. */
@@ -116,6 +119,10 @@ export function selectCurrent(block: Extract<Block, { type: 'select' }>, ctx: Vi
 
 // ---- editor blocks (screens) ----------------------------------------------------------------------------------
 
+/** Names that look like they hold a secret (a password, a token ...). */
+export const SECRET_NAME_RE = /(pass(word|wd)?|secret|token|api[_-]?key|private[_-]?key|credential|auth|pwd|salt|signing)/i;
+export const isSecretName = (name: string): boolean => SECRET_NAME_RE.test(name);
+
 export type RowValue = Record<string, string>;
 export type EditorValue = string | boolean | string[] | RowValue[];
 export type EditorValues = Record<string, EditorValue>;
@@ -134,7 +141,7 @@ export function editorOptions(f: EditorField, ctx: ViewContext): { value: string
   const list = getPath(ctx, f.optionsFrom.path);
   if (!Array.isArray(list)) return [];
   return list.map(item => {
-    const value = getPath(item, f.optionsFrom!.value);
+    const value = f.optionsFrom!.value ? getPath(item, f.optionsFrom!.value) : item;
     const label = f.optionsFrom!.label ? getPath(item, f.optionsFrom!.label) : value;
     return { value: String(value ?? ''), label: String(label ?? value ?? '') };
   }).filter(o => o.value !== '');
@@ -171,7 +178,8 @@ export function formatRow(f: EditorField, row: RowValue): string | null {
   if (untouched) return null;
   let out = '';
   for (const p of f.format) {
-    const v = String(row[p.col] ?? '').trim();
+    if (p.lit !== undefined) { out += p.lit; continue; }
+    const v = String(row[p.col!] ?? '').trim();
     if ((v === '' && p.optional) || (p.omit && p.omit.includes(v))) continue;
     out += (p.prefix ?? '') + v + (p.suffix ?? '');
   }

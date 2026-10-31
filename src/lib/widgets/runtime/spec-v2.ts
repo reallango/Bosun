@@ -89,6 +89,8 @@ export interface RowColumn {
   default?: string;
   /** Suggestions for a text column from a list in the context (a datalist): `path` to the list, `value` the field of each item. */
   suggest?: { path: string; value: string };
+  /** A select column whose options are the ones the row field's `remote` found (the services of a compose file). */
+  remote?: boolean;
 }
 
 /**
@@ -96,7 +98,7 @@ export interface RowColumn {
  * group per column). A part is left out when its column is empty and `optional`, or when the value is one of `omit`.
  * `derive` fills a column from another one after parsing (a folder when the source starts with "/", otherwise a volume).
  */
-export interface RowFormatPart { col: string; prefix?: string; suffix?: string; optional?: boolean; omit?: string[] }
+export interface RowFormatPart { col?: string; /** Fixed text written as it is (no column). */ lit?: string; prefix?: string; suffix?: string; optional?: boolean; omit?: string[] }
 export interface RowDerive { from: string; startsWith: string; then: string; else: string }
 
 /** Options fetched from the host while the form is open (the branches of a repository): a dataset called with arguments from the form. */
@@ -127,7 +129,7 @@ export interface EditorField {
   warn?: string;
   options?: { value: string; label: string }[];
   /** Options built from a list in the context (for example the networks dataset): `path` to the list, `value` and `label` fields of each item. */
-  optionsFrom?: { path: string; value: string; label?: string };
+  optionsFrom?: { path: string; value?: string; label?: string };
   required?: boolean;
   /** Shown only while this holds; it reads the current form values as `values.<name>`. */
   when?: Cond;
@@ -138,6 +140,8 @@ export interface EditorField {
   transient?: boolean;
   /** Heading: the fields up to the next heading are hidden until the person opens it. */
   collapsed?: boolean;
+  /** `pairs` or `textarea` of KEY=value lines: values of names that look secret (password, token ...) are masked on screen, kept out of logs, and saved encrypted so a screen can be reopened without typing them again. */
+  mask?: 'secret-names';
   /** Select: also offer "Custom", which shows a box to type a value (and is chosen when the host finds no options). */
   custom?: string;
   remote?: RemoteOptions;
@@ -371,10 +375,10 @@ function validateEditorFields(raw: unknown, where: string): Validated<EditorFiel
       if (f.options !== undefined) { const o = options(f.options, `${where} field "${f.name}"`, 100); if (!o.ok) return o; field.options = o.value; }
       if (f.optionsFrom !== undefined) {
         const of = f.optionsFrom;
-        if (!isObj(of) || typeof of.path !== 'string' || !FIELD_RE.test(of.path) || typeof of.value !== 'string' || !FIELD_RE.test(of.value) || (of.label !== undefined && (typeof of.label !== 'string' || !FIELD_RE.test(of.label)))) {
-          return fail(`${where}: field "${f.name}": "optionsFrom" needs "path" (the list), "value" and optionally "label" (fields of each item)`);
+        if (!isObj(of) || typeof of.path !== 'string' || !FIELD_RE.test(of.path) || (of.value !== undefined && (typeof of.value !== 'string' || !FIELD_RE.test(of.value))) || (of.label !== undefined && (typeof of.label !== 'string' || !FIELD_RE.test(of.label)))) {
+          return fail(`${where}: field "${f.name}": "optionsFrom" needs "path" (the list) and optionally "value" and "label" (fields of each item; a list of strings needs neither)`);
         }
-        field.optionsFrom = { path: of.path, value: of.value, ...(of.label ? { label: of.label } : {}) };
+        field.optionsFrom = { path: of.path, ...(of.value ? { value: of.value } : {}), ...(of.label ? { label: of.label } : {}) };
       }
       if (!field.options && !field.optionsFrom) return fail(`${where}: select field "${f.name}" needs "options" or "optionsFrom"`);
     }
@@ -389,13 +393,17 @@ function validateEditorFields(raw: unknown, where: string): Validated<EditorFiel
       if (f.input !== 'textarea' || typeof f.height !== 'number' || !Number.isInteger(f.height) || f.height < 3 || f.height > 80) return fail(`${where}: field "${f.name}": "height" (3-80 lines) is for text areas`);
       field.height = f.height;
     }
+    if (f.mask !== undefined) {
+      if (f.mask !== 'secret-names' || (f.input !== 'pairs' && f.input !== 'textarea')) return fail(`${where}: field "${f.name}": "mask" is "secret-names", for pairs and text areas`);
+      field.mask = 'secret-names';
+    }
     for (const k of ['upload', 'transient', 'collapsed'] as const) {
       if (f[k] === undefined) continue;
       if (typeof f[k] !== 'boolean' || (k === 'upload' && f.input !== 'textarea') || (k === 'collapsed' && f.input !== 'heading')) return fail(`${where}: field "${f.name}": "${k}" is not allowed here`);
       field[k] = f[k] as boolean;
     }
-    if (f.input === 'select') {
-      if (f.custom !== undefined) { const c = text(f.custom, 40); if (!c) return fail(`${where}: field "${f.name}": "custom" must be a short label`); field.custom = c; }
+    if (f.input === 'select' || f.input === 'rows') {
+      if (f.input === 'select' && f.custom !== undefined) { const c = text(f.custom, 40); if (!c) return fail(`${where}: field "${f.name}": "custom" must be a short label`); field.custom = c; }
       if (f.remote !== undefined) {
         const r = f.remote;
         const args = isObj(r) ? refs(r.args ?? {}) : null;
@@ -422,9 +430,10 @@ function validateEditorFields(raw: unknown, where: string): Validated<EditorFiel
         const clabel = text(c.label, 40);
         if (!clabel || (c.input !== 'text' && c.input !== 'number' && c.input !== 'select')) return fail(`${where}: rows field "${f.name}": column "${c.name}" needs a label and an input (text, number or select)`);
         const col: RowColumn = { name: c.name, label: clabel, input: c.input };
+        if (c.remote !== undefined) { if (c.remote !== true || c.input !== 'select') return fail(`${where}: column "${c.name}": "remote" is true, for a select column`); col.remote = true; }
         if (c.placeholder !== undefined) { const p = text(c.placeholder, 40); if (!p) return fail(`${where}: column "${c.name}": "placeholder" must be short text`); col.placeholder = p; }
         if (c.default !== undefined) { if (typeof c.default !== 'string' || c.default.length > 60) return fail(`${where}: column "${c.name}": "default" must be short text`); col.default = c.default; }
-        if (c.input === 'select') { const o = options(c.options, `${where} column "${c.name}"`, 30); if (!o.ok) return o; col.options = o.value; }
+        if (c.input === 'select' && !col.remote) { const o = options(c.options, `${where} column "${c.name}"`, 30); if (!o.ok) return o; col.options = o.value; }
         if (c.suggest !== undefined) {
           if (!isObj(c.suggest) || typeof c.suggest.path !== 'string' || !FIELD_RE.test(c.suggest.path) || typeof c.suggest.value !== 'string' || !FIELD_RE.test(c.suggest.value)) return fail(`${where}: column "${c.name}": "suggest" needs "path" and "value"`);
           col.suggest = { path: c.suggest.path, value: c.suggest.value };
@@ -436,6 +445,11 @@ function validateEditorFields(raw: unknown, where: string): Validated<EditorFiel
       if (!Array.isArray(f.format) || f.format.length < 1 || f.format.length > 8) return fail(`${where}: rows field "${f.name}" needs a "format" (1-8 parts)`);
       const fmt: RowFormatPart[] = [];
       for (const p of f.format as unknown[]) {
+        if (isObj(p) && p.lit !== undefined) {
+          if (typeof p.lit !== 'string' || p.lit.length < 1 || p.lit.length > 16 || /[\u0000-\u001f]/.test(p.lit)) return fail(`${where}: rows field "${f.name}": "lit" is 1-16 characters of fixed text`);
+          fmt.push({ lit: p.lit });
+          continue;
+        }
         if (!isObj(p) || typeof p.col !== 'string' || !names.has(p.col)) return fail(`${where}: rows field "${f.name}": every format part names a column`);
         const part: RowFormatPart = { col: p.col };
         for (const k of ['prefix', 'suffix'] as const) {
