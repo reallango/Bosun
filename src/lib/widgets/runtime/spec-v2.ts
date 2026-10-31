@@ -17,7 +17,7 @@ import type { ActionSpec, Cond, FieldSpec, ParamSpec, RunAs, ViewSpec } from './
 import { cond, fail, FIELD_RE, ID_RE, intIn, isObj, PARAM_RE, text, validateParam, type Obj, type Validated } from './spec-util';
 
 export const SCRIPT_FILE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*(\/[A-Za-z0-9][A-Za-z0-9._-]*)*$/;
-export const MAX_SCRIPTS = 20;
+export const MAX_SCRIPTS = 40;
 export const MAX_BLOCKS = 60;
 const MAX_BLOCK_DEPTH = 5;
 const BADGE_COLORS = ['green', 'amber', 'red', 'gray', 'blue'] as const;
@@ -111,7 +111,7 @@ export interface EditorSubmit {
 
 export type Block =
   | { type: 'tabs'; tabs: { id: string; label: string; blocks: Block[] }[]; when?: Cond }
-  | { type: 'editor'; fields: EditorField[]; /** The text parameter of the submit actions that receives the settings blob. */ param: string; submits: EditorSubmit[]; when?: Cond }
+  | { type: 'editor'; fields: EditorField[]; /** The text parameter of the submit actions that receives the settings blob (none: the fields are mapped one by one in each submit's params). */ param?: string; submits: EditorSubmit[]; when?: Cond }
   | { type: 'section'; title: string; defaultOpen: boolean; badges: Badge[]; summary?: string; blocks: Block[]; when?: Cond }
   | { type: 'kv'; items: FieldSpec[]; when?: Cond }
   | { type: 'text'; text: string; when?: Cond }
@@ -459,7 +459,7 @@ export function validateLayout(
         case 'editor': {
           const fields = validateEditorFields(b.fields, w);
           if (!fields.ok) return fail(fields.error);
-          if (typeof b.param !== 'string' || !PARAM_RE.test(b.param)) return fail(`${w}: "param" must name the text parameter of the submit actions that receives the settings`);
+          if (b.param !== undefined && (typeof b.param !== 'string' || !PARAM_RE.test(b.param))) return fail(`${w}: "param" must name the text parameter of the submit actions that receives the settings`);
           if (!Array.isArray(b.submits) || b.submits.length < 1 || b.submits.length > 4) return fail(`${w}: "submits" must list 1-4 buttons`);
           const submits: EditorSubmit[] = [];
           for (const s of b.submits as unknown[]) {
@@ -480,7 +480,7 @@ export function validateLayout(
             }
             submits.push({ action: s.action as string, label, style: s.style === 'danger' ? 'danger' : 'primary', params });
           }
-          out.push({ type: 'editor', fields: fields.value, param: b.param, submits, ...base });
+          out.push({ type: 'editor', fields: fields.value, ...(typeof b.param === 'string' ? { param: b.param } : {}), submits, ...base });
           break;
         }
         case 'view': {

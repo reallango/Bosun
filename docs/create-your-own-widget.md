@@ -132,3 +132,41 @@ package works on every node of a cluster. Upgrading is installing a higher `vers
   (`src/lib/widgets/guard-rails.test.ts`) fails when it does; the few legitimate exceptions are listed, with the
   reason, in `src/lib/widgets/guard-rails.allow.json`. If the widget you want needs something Bosun cannot do
   for any package, add a **generic** capability to the runtime, not a special case for your widget.
+
+## Bigger widgets: screens, datasets, menu entries and secrets
+
+A widget can have more than its small view. All of this is declared in the spec (version 2) and the package's scripts; Bosun has no
+code for any particular widget. The Docker package (`widgets/docker`) uses every part of it; read its manifest next to this section.
+
+```jsonc
+"datasets": {                                  // read-only scripts a screen loads when it opens
+  "images": { "script": "images", "cacheSec": 5, "permission": "docker.view" }
+},
+"screens": {
+  "create": {
+    "kind": "dialog",                          // a pop-up ("page" = a full page at /widgets/<widget id>/<screen id>)
+    "title": "New container", "size": "xl",    // md | lg | xl
+    "load": { "networks": { "dataset": "networks", "args": {} } },     // datasets.networks in the blocks below
+    "blocks": [ { "type": "editor", "param": "settings", "fields": [ ... ], "submits": [ { "action": "create", "label": "Create" } ] } ]
+  }
+},
+"menu": [ { "id": "new", "label": "New container", "icon": "plus", "screen": "create", "permission": "docker.manage" } ],
+"actions": [ { "id": "edit", "label": "Edit", "icon": "pencil", "kind": "screen", "screen": "edit", "permission": "docker.manage" } ]
+```
+
+- **Screens** are made of the layout blocks (`section`, `kv`, `notice`, `buttons`, `form`, `view` for tables and lists) plus `tabs` and
+  `editor`. A screen opened by a row action (`"kind": "screen"`) gets that row as `context`, and a `load` entry can pass fields of it to a
+  dataset (`"args": { "name": "context.name" }`). A `view` block reads a list with `"path": "datasets.images"`.
+- **Datasets** run one of the package's scripts as the account it declares, with the usual parameter rules, and must print one JSON
+  document. They need a permission of the package and are cached for `cacheSec`. They run when a person opens the screen (over the
+  shared connection of the host), never in the background.
+- **The editor** block has fields `text`, `number`, `select` (fixed `options` or `optionsFrom` a list in the context), `checkbox`,
+  `textarea`, `lines` (a list of values), `pairs` (a list of name and value) and `heading`. Each field has an optional `when` over
+  `values.<field>`, a `warn` text for risky fields, and `required`. A submit calls an action; the fields reach it either as one
+  **`text` parameter** (`"param": "settings"`: a line `key=value` per setting, repeated keys for lists) or one by one
+  (`"params": { "name": "values.name" }`). A `text` parameter may hold several lines (`maxLength`, `maxLines`, and a `linePattern`
+  every line must match); the script parses it as data and must never paste it into a command.
+- **Secrets**: declare `"secrets": [{ "id": "git_token", "label": "GitHub access token" }]` in the manifest and name the ones a script
+  needs (`"secrets": ["git_token"]` on the script, Linux only). An admin sets them under Settings, Widgets (key icon); they are
+  stored encrypted, never shown again, and reach only that script, as `BOSUN_SECRET_git_token`, at the top of the script text on stdin
+  (so not on the command line). Output is scrubbed of their values.

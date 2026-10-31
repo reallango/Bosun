@@ -14,7 +14,7 @@ import type { ViewContext } from '@/lib/widgets/runtime/layout';
 import type { LayoutUi } from './LayoutView';
 import { ScreenView } from './ScreenView';
 import { useActionRunner } from './useActionRunner';
-import { usePublicSpec } from './DeclarativeWidget';
+import { usePublicSpec, V1View } from './DeclarativeWidget';
 
 interface WidgetRow { id: string; widget_type: string; server_id: string; dashboard_id: string }
 
@@ -57,7 +57,7 @@ function Inner({ widget, screenId }: { widget: WidgetRow; screenId: string }) {
     actions: new Map((spec?.actions ?? []).map(a => [a.id, a])),
     allowed: runner.allowed, busy: runner.busy,
     onAction: (a, params) => runner.start(a, null, params),
-    renderView: () => null,
+    renderView: (v, d) => <V1View view={v} data={d} widgetId={widget.id} serverId={widget.server_id} actions={new Map((spec?.actions ?? []).map(a => [a.id, a]))} allowed={runner.allowed} busy={runner.busy} start={runner.start} />,
     onCancelJob: () => { void runner.cancelJob(); },
     submit: runner.submit,
   // eslint-disable-next-line react-hooks/exhaustive-deps

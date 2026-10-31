@@ -60,7 +60,7 @@ const MENU_ICONS: Record<string, React.ComponentType<{ className?: string }>> = 
 
 const DIALOG_WIDTH: Record<string, string> = { md: 'sm:max-w-lg', lg: 'sm:max-w-3xl', xl: 'sm:max-w-5xl' };
 
-interface V1Props {
+export interface V1Props {
   view: ViewSpec;
   data: unknown;
   widgetId: string;
@@ -72,7 +72,7 @@ interface V1Props {
 }
 
 /** A version 1 view (list, table, fields, text, chart) over some data, with its filter, toggles, summary and row actions. */
-function V1View({ view, data, widgetId, serverId, actions, allowed, busy, start }: V1Props) {
+export function V1View({ view, data, widgetId, serverId, actions, allowed, busy, start }: V1Props) {
   const [query, setQuery] = useState('');
   const [toggles, setToggles] = useState<Record<string, boolean>>(() => Object.fromEntries((view.toggles ?? []).map(t => [t.key, t.default])));
 

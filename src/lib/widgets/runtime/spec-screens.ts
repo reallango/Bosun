@@ -147,8 +147,8 @@ function checkEditors(blocks: Block[], actions: ActionSpec[]): string | null {
       const a = byId.get(s.action);
       if (!a) return `an editor submits to the unknown action "${s.action}"`;
       if (a.kind === 'terminal' || a.kind === 'screen') return `an editor cannot submit to the ${a.kind} action "${a.id}"`;
-      const p: ParamSpec | undefined = a.params[b.param];
-      if (!p || p.type !== 'text') return `action "${a.id}" must declare "${b.param}" as a text parameter to receive the editor's settings`;
+      const p: ParamSpec | undefined = b.param ? a.params[b.param] : undefined;
+      if (b.param && (!p || p.type !== 'text')) return `action "${a.id}" must declare "${b.param}" as a text parameter to receive the editor's settings`;
       for (const [name, spec] of Object.entries(a.params)) {
         if (name === b.param) continue;
         if (!(name in s.params) && spec.default === undefined) return `the submit "${s.label}" does not fill the parameter "${name}" of action "${a.id}" (map it in "params" or give the parameter a default)`;
