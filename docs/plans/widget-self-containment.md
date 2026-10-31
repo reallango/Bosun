@@ -1,6 +1,6 @@
 # Plan: self-contained widget packages
 
-Status: **in progress on `dev`. Phase 0 (spec v2) and phase 1 (file store and materialiser) are done and verified; phase 2 (scripts runner, probes, lookups) is next.** Written on the `dev` branch so the work can be picked up later by anyone (or any
+Status: **in progress on `dev`. Phases 0 (spec v2), 1 (file store and materialiser) and 2 (scripts runner, probes, lookups) are done and verified; phase 3 (jobs) is next.** Written on the `dev` branch so the work can be picked up later by anyone (or any
 session). Phases marked "done" are built, tested and pushed to `dev`.
 
 ## 1. The rule
@@ -190,6 +190,21 @@ hosts, the live tests in section 8. Do not push to `main` until the owner has te
    hashes (phase 2). A `.gitattributes` keeps the s6 files LF on Windows checkouts.
 2. **Scripts runner, state probes, lookups** (5.2, 5.3, 5.4): generic runtime, poller integration, install review of
    scripts and network hosts.
+   **DONE** (verified in Docker on a real SSH host, 473 tests): `runtime/script-run.js` (shared with the poller:
+   parameters as environment variables, never in the script text; Linux script on stdin to a temp file, Windows quoted
+   preamble; output protocol; typed key=value state parser; shared parameter validation), `runScript` in
+   `execute.ts`, `collect/package-state.js` (script data collectors, per widget instance when settings feed the
+   arguments, section `pkg:<type>#<widgetId>`; state probes into `pkg:<type>:state`; initial delay and period),
+   `runtime/lookups.ts` (https only, manifest host allowlist, no redirects, refuses loopback/private/reserved addresses
+   at connect time, size and time limits, cached), `loadRuntimeData` returns `state`, `stateError` and `lookups`,
+   install review lists every script (account, file hashes, viewable text) and the network hosts and counts scripts
+   toward the confirmation. The poller copies `script-run.js` in the Dockerfile.
+   Carried forward: (a) a Windows live test of the script preamble waits for the real Windows scripts in phase 5;
+   (b) script parameters reject newlines (as command parameters always did), so Custom Command in phase 5 needs a
+   declared way to allow a multi-line value, or to stay single line; (c) the type-level `widget-data/<type>` route does
+   not know the widget instance, so widgets with per-instance script data are read through `/api/widgets/<id>/data`;
+   (d) the review of a package from the GitHub list shows scripts without text (the list fetches manifests only);
+   (e) the poller refreshes its widget list every 30 s, so a changed setting takes up to 30 s to apply.
 3. **Jobs** (5.5): table (migration), runtime, routes, audit, UI progress.
 4. **Conditions, variants, UI blocks** (5.6, 5.7) in the declarative renderer, with a browser check (see section 8).
 5. **Port the three widgets together (phases 5, 6 and 7 as one step; see 4.1a).**

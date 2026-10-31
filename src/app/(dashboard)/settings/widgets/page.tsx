@@ -37,8 +37,13 @@ interface AvailableItem {
 }
 
 interface PackageReview {
-  widgets: { type: string; name: string; commands: { what: string; as: 'service' | 'shell' | 'terminal'; command: string; windowsCommand?: string; permission?: string; confirm: boolean }[] }[];
+  widgets: {
+    type: string; name: string;
+    commands: { what: string; as: 'service' | 'shell' | 'terminal'; command: string; windowsCommand?: string; permission?: string; confirm: boolean }[];
+    scripts: { id: string; as: 'service' | 'shell'; timeoutSec: number; params: string[]; usedBy: string[]; files: { platform: 'linux' | 'windows'; file: string; sha256?: string; text?: string; truncated?: boolean }[] }[];
+  }[];
   permissions: { id: string; label: string; risk: string; defaultLevel: string }[];
+  network: string[];
   runsAsService: boolean;
   commandCount: number;
 }
@@ -283,8 +288,43 @@ export default function WidgetPackagesPage() {
                     </li>
                   ))}
                 </ul>
+                {w.scripts.length > 0 && (
+                  <div className="space-y-1.5">
+                    <div className="text-xs font-medium text-muted-foreground">Scripts of this widget</div>
+                    <ul className="space-y-1.5">
+                      {w.scripts.map(s => (
+                        <li key={s.id} className="rounded-lg bg-muted/60 p-2 text-xs">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <code className="font-medium">{s.id}</code>
+                            <span className={`rounded px-1 uppercase ${s.as === 'service' ? 'bg-amber-500/20 text-amber-700 dark:text-amber-400' : 'bg-muted text-muted-foreground'}`}>
+                              {s.as === 'service' ? 'service account' : 'non-admin account'}
+                            </span>
+                            <span className="text-muted-foreground">up to {s.timeoutSec} s{s.params.length ? `, takes ${s.params.join(', ')}` : ''}</span>
+                          </div>
+                          {s.usedBy.length > 0 && <div className="mt-0.5 text-muted-foreground">Used by {s.usedBy.join('; ')}</div>}
+                          {s.files.map(f => (
+                            <details key={f.file} className="mt-1">
+                              <summary className="cursor-pointer">
+                                {f.platform === 'windows' ? 'Windows' : 'Linux'}: <code>{f.file}</code>
+                                {f.sha256 && <span className="text-muted-foreground"> sha256 {f.sha256.slice(0, 16)}…</span>}
+                              </summary>
+                              {f.text !== undefined
+                                ? <pre className="mt-1 max-h-64 overflow-auto whitespace-pre-wrap break-all font-mono">{f.text}{f.truncated ? '\n… (shortened)' : ''}</pre>
+                                : <p className="mt-1 text-muted-foreground">The text is shown when you import the package as a zip.</p>}
+                            </details>
+                          ))}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
               </div>
             ))}
+            {reviewing.review.network.length > 0 && (
+              <p className="text-xs text-muted-foreground">
+                May contact over https: {reviewing.review.network.map(h => <code key={h} className="mr-1 rounded bg-muted px-1">{h}</code>)}
+              </p>
+            )}
             {reviewing.review.permissions.length > 0 && (
               <p className="text-xs text-muted-foreground">
                 Adds permissions: {reviewing.review.permissions.map(p => `${p.label} (${p.risk} risk)`).join(', ')}. Nobody holds them until you grant them in a permission group.
