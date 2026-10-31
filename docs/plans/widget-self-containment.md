@@ -1,6 +1,6 @@
 # Plan: self-contained widget packages
 
-Status: **in progress on `dev`. Phases 0 (spec v2), 1 (file store and materialiser) and 2 (scripts runner, probes, lookups) are done and verified; phase 3 (jobs) is next.** Written on the `dev` branch so the work can be picked up later by anyone (or any
+Status: **in progress on `dev`. Phases 0 (spec v2), 1 (file store and materialiser), 2 (scripts runner, probes, lookups) and 3 (jobs) are done and verified; phase 4 (conditions, variants, UI blocks) is next.** Written on the `dev` branch so the work can be picked up later by anyone (or any
 session). Phases marked "done" are built, tested and pushed to `dev`.
 
 ## 1. The rule
@@ -206,6 +206,23 @@ hosts, the live tests in section 8. Do not push to `main` until the owner has te
    (d) the review of a package from the GitHub list shows scripts without text (the list fetches manifests only);
    (e) the poller refreshes its widget list every 30 s, so a changed setting takes up to 30 s to apply.
 3. **Jobs** (5.5): table (migration), runtime, routes, audit, UI progress.
+   **DONE** (verified in Docker on a real SSH host, 505 tests): migration 12 `package_jobs` (one running job per widget
+   type and server through a partial unique index, heartbeat in `updated_at`, a job nobody updated for 90 s is `lost`,
+   finished jobs kept 7 days); `jobs/store.ts`, `jobs/runtime.ts` (the node that gets the request runs the script,
+   reads its output live through the new `onData`/`signal` options of `ssh.exec`, parses the generic protocol and
+   writes steps and percent to the record every 1.5 s; the same write notices a cancel asked for on any node);
+   cancel stops the script and everything it started (the script records its pid in `/tmp/bosun-job-<id>.pid`, the
+   cancel command walks the process tree with pgrep or ps); script actions are now executable
+   (`prepareScriptAction`: validate parameters, build the context state/data/config/lookups/server/param, first
+   variant whose `when` holds, arguments from paths, literals or same-named parameters); routes: widget-actions answers
+   202 `{jobId}` for `job: true` and the script result otherwise (optional `widgetId` for per-instance settings),
+   `GET .../widget-jobs/<type>[?id=]`, `POST .../widget-jobs/<type>/<jobId>/cancel` (needs the starting action's
+   permission); audit entries at start, finish and cancel; OpenAPI describes all of it.
+   Carried forward: (a) the `jobProgress` block that shows a job in the widget is part of phase 4 (the API is ready);
+   (b) `stores: "data"` ("check now") is not executed yet, it belongs to the port of OS Update Check; (c) the Windows
+   side of job cancel (pid file in %TEMP%, taskkill /T) is untested until the Windows scripts exist in phase 5; (d) a job
+   whose node stops is shown as lost, the script on the host may still finish; (e) only stdout carries the protocol; (f) the
+   old in-memory Ollama and OS-update job code is still in core and goes in phase 5.
 4. **Conditions, variants, UI blocks** (5.6, 5.7) in the declarative renderer, with a browser check (see section 8).
 5. **Port the three widgets together (phases 5, 6 and 7 as one step; see 4.1a).**
    **5a. Port Ollama**: write the package v2 (manifest, scripts per platform and install kind, layout view); move the
