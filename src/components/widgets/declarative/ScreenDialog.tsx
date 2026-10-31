@@ -25,7 +25,7 @@ export function ScreenDialog({ id, row, screen, ctx, serverId, widgetType, ui, r
   /** An editor in the dialog was submitted successfully. */
   onDone: () => void;
 }) {
-  const screenCtx: ViewContext = { ...ctx, context: row ?? undefined };
+  const screenCtx: ViewContext = { ...ctx, context: row ?? undefined, screenId: id ?? undefined };
   return (
     <Dialog.Root open={!!screen && !!id} onOpenChange={o => { if (!o) onClose(); }}>
       <Dialog.Portal>

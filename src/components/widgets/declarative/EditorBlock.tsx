@@ -5,7 +5,7 @@ import { AlertTriangle, ChevronDown, ChevronRight, Copy, Download, Loader2, Plus
 import type { Block, EditorField, RowColumn } from '@/lib/widgets/runtime/spec-v2';
 import {
   actionApplies, applyFill, datasetArgsFromForm, editorFieldVisible, editorInitial, editorMissing, editorOptions, editorSubmitParams,
-  editorWarnings, hiddenByHeading, newEditorRow, remoteOptions,
+  editorWarnings, hiddenByHeading, isSecretName, newEditorRow, remoteOptions,
   type EditorValue, type EditorValues, type RowValue, type ViewContext,
 } from '@/lib/widgets/runtime/layout';
 import type { LayoutUi } from './LayoutView';
@@ -99,9 +99,31 @@ function RemoteSelect({ f, value, onChange, ctx, values, ui, cls }: { f: EditorF
   );
 }
 
+/** The options a rows field's `remote` finds on the host (for its select columns marked remote), asked again when the arguments change. */
+function useRemoteList(f: EditorField, values: EditorValues, ctx: ViewContext, ui: LayoutUi): { options: Option[]; loading: boolean; error: string | null } {
+  const remote = f.remote;
+  const { args, missing } = remote ? datasetArgsFromForm(remote.args, values, ctx) : { args: {}, missing: ['x'] };
+  const key = JSON.stringify([remote?.dataset, args]);
+  const [state, setState] = useState<{ options: Option[]; loading: boolean; error: string | null }>({ options: [], loading: false, error: null });
+  useEffect(() => {
+    if (!remote || missing.length || !ui.loadDataset) { setState({ options: [], loading: false, error: null }); return; }
+    let live = true;
+    setState(s => ({ ...s, loading: true, error: null }));
+    const timer = setTimeout(async () => {
+      const r = await ui.loadDataset!(remote.dataset, args);
+      if (!live) return;
+      setState(r.ok ? { options: remoteOptions(f, r.data), loading: false, error: null } : { options: [], loading: false, error: r.error });
+    }, 400);
+    return () => { live = false; clearTimeout(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  return state;
+}
+
 /** The columns of a `rows` field as labelled boxes, one row per entry. */
-function RowsField({ f, rows, onChange, ctx, cls }: { f: EditorField; rows: RowValue[]; onChange: (rows: RowValue[]) => void; ctx: ViewContext; cls: string }) {
+function RowsField({ f, rows, onChange, ctx, cls, values, ui }: { f: EditorField; rows: RowValue[]; onChange: (rows: RowValue[]) => void; ctx: ViewContext; cls: string; values: EditorValues; ui: LayoutUi }) {
   const cols = f.columns as RowColumn[];
+  const remote = useRemoteList(f, values, ctx, ui);
   const widths: Record<string, string> = { text: 'min-w-[7rem] flex-1', number: 'w-24', select: 'w-32' };
   const setCell = (i: number, name: string, v: string) => {
     onChange(rows.map((r, j) => {
@@ -127,12 +149,13 @@ function RowsField({ f, rows, onChange, ctx, cls }: { f: EditorField; rows: RowV
       )}
       {rows.map((r, i) => (
         <div key={i} className="flex items-center gap-1.5">
-          {cols.map(c => c.input === 'select' ? (
+          {cols.map(c => (c.input === 'select' && !(c.remote && remote.options.length === 0)) ? (
             <select key={c.name} className={`${cls} ${widths.select}`} value={r[c.name] ?? ''} aria-label={`${f.label} ${c.label} ${i + 1}`} onChange={e => setCell(i, c.name, e.target.value)}>
-              {!(c.options ?? []).some(o => o.value === (r[c.name] ?? '')) && <option value={r[c.name] ?? ''}>{r[c.name] || '—'}</option>}
-              {(c.options ?? []).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              {!(c.remote ? remote.options : (c.options ?? [])).some(o => o.value === (r[c.name] ?? '')) && <option value={r[c.name] ?? ''}>{r[c.name] || '—'}</option>}
+              {(c.remote ? remote.options : (c.options ?? [])).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           ) : (
+
             <span key={c.name} className={`${widths[c.input]} min-w-0`}>
               <input className={`${cls} font-mono`} type={c.input === 'number' ? 'number' : 'text'} value={r[c.name] ?? ''} placeholder={c.placeholder} spellCheck={false}
                 list={c.suggest ? listId(c) : undefined} aria-label={`${f.label} ${c.label} ${i + 1}`} onChange={e => setCell(i, c.name, e.target.value)} />
@@ -150,7 +173,13 @@ function RowsField({ f, rows, onChange, ctx, cls }: { f: EditorField; rows: RowV
 interface ToolResult { errors: string[]; notes: string[]; applied: boolean }
 
 export function EditorBlock({ block, ctx, ui }: { block: EditorBlockSpec; ctx: ViewContext; ui: LayoutUi }) {
-  const [values, setValues] = useState<EditorValues>(() => editorInitial(block.fields, ctx));
+  const [values, setValues] = useState<EditorValues>(() => {
+    const initial = editorInitial(block.fields, ctx);
+    // Reopened from a task: what was filled in then (secrets come back as placeholders).
+    for (const f of block.fields) { const r = ctx.restore?.values[f.name]; if (r !== undefined && r !== null && f.input !== 'heading' && f.input !== 'button') initial[f.name] = r as EditorValue; }
+    return initial;
+  });
+  const [revealed, setRevealed] = useState<Set<string>>(new Set());
   const [problem, setProblem] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [sending, setSending] = useState<string | null>(null);
@@ -174,7 +203,9 @@ export function EditorBlock({ block, ctx, ui }: { block: EditorBlockSpec; ctx: V
     setProblem(null); setFailure(null);
     setSending(s.action + s.label);
     try {
-      const r = await ui.submit(action, params);
+      const sendable = Object.fromEntries(block.fields.filter(x => x.input !== 'heading' && x.input !== 'button' && !x.transient).map(x => [x.name, values[x.name]]));
+      const extra = ctx.screenId ? { origin: { screenId: ctx.screenId, context: ctx.context ?? null, values: sendable }, ...(ctx.restore ? { savedFrom: ctx.restore.savedFrom } : {}) } : undefined;
+      const r = await ui.submit(action, params, extra);
       if (!r.ok) { setFailure(r.error ?? null); setTimeout(() => errorRef.current?.scrollIntoView({ block: 'nearest' }), 50); }
       ui.onSubmitted?.(r.ok);
     } finally { setSending(null); }
@@ -276,7 +307,7 @@ export function EditorBlock({ block, ctx, ui }: { block: EditorBlockSpec; ctx: V
         control = <div className="space-y-1.5">{control}<div>{fileInput}</div></div>;
       }
     } else if (f.input === 'rows') {
-      control = <RowsField f={f} rows={asRows(values[f.name])} onChange={rows => set(f.name, rows)} ctx={ctx} cls={field} />;
+      control = <RowsField f={f} rows={asRows(values[f.name])} onChange={rows => set(f.name, rows)} ctx={ctx} cls={field} values={values} ui={ui} />;
       labelled = false;
     } else if (f.input === 'lines' || f.input === 'pairs') {
       const rows = asStrings(values[f.name]);
@@ -293,7 +324,14 @@ export function EditorBlock({ block, ctx, ui }: { block: EditorBlockSpec; ctx: V
                   ? (
                     <>
                       <input className={`${field} basis-2/5 font-mono`} value={k} placeholder="name" spellCheck={false} aria-label={`${f.label} name ${i + 1}`} onChange={e => setRow(i, `${e.target.value}=${v}`)} />
-                      <input className={`${field} font-mono`} value={v} placeholder="value" spellCheck={false} aria-label={`${f.label} value ${i + 1}`} onChange={e => setRow(i, `${k}=${e.target.value}`)} />
+                      {f.mask && isSecretName(k) ? (
+                        <>
+                          <input className={`${field} font-mono`} type={revealed.has(`${f.name}:${i}`) ? 'text' : 'password'} value={v} placeholder="value" spellCheck={false} autoComplete="off" aria-label={`${f.label} value ${i + 1}`} onChange={e => setRow(i, `${k}=${e.target.value}`)} />
+                          <button type="button" className="rounded px-1.5 py-0.5 text-[11px] text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800" onClick={() => setRevealed(s => { const n = new Set(s); const key = `${f.name}:${i}`; if (n.has(key)) n.delete(key); else n.add(key); return n; })}>{revealed.has(`${f.name}:${i}`) ? 'Hide' : 'Show'}</button>
+                        </>
+                      ) : (
+                        <input className={`${field} font-mono`} value={v} placeholder="value" spellCheck={false} aria-label={`${f.label} value ${i + 1}`} onChange={e => setRow(i, `${k}=${e.target.value}`)} />
+                      )}
                     </>
                   )
                   : <input className={`${field} font-mono`} value={v} placeholder={f.placeholder} spellCheck={false} aria-label={`${f.label} ${i + 1}`} onChange={e => setRow(i, e.target.value)} />}

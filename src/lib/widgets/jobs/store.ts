@@ -34,6 +34,10 @@ export interface JobRecord {
   startedAt: number;
   updatedAt: number;
   finishedAt: number | null;
+  /** The widget (instance) the action was started from, the output of the script (secrets removed), and whether the screen can be reopened. */
+  widgetId: string | null;
+  log: string;
+  hasOrigin: boolean;
 }
 
 /** What the browser and API clients see of a job (no parameters, no node). */
@@ -52,6 +56,26 @@ export interface JobView {
 
 export const nodeName = (): string => process.env.BOSUN_NODE_ID || os.hostname();
 
+/** How much of a job's output is kept. */
+export const LOG_KEEP = 64 * 1024;
+
+/** Parameters as they are recorded with a job: text parameters (settings, a compose file) are not copied there, only their size. */
+function redactParams(params: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(params).map(([k, v]) => [k, typeof v === 'string' && (v.length > 200 || v.includes('\n')) ? `(${v.length} characters)` : v]));
+}
+
+/** The newest jobs, any server, for the notification area. */
+export async function recentJobs(limit = 30, now = Date.now()): Promise<JobRecord[]> {
+  await expireLostJobs(now);
+  return rowsToObjects(await rqlite.query('SELECT * FROM package_jobs ORDER BY started_at DESC LIMIT ?', [limit])).map(toRecord);
+}
+
+/** The encrypted origin of a job (see origin.ts). */
+export async function getOriginEnc(id: string): Promise<string | null> {
+  const r = rowsToObjects(await rqlite.query('SELECT origin_enc FROM package_jobs WHERE id = ?', [id]))[0];
+  return r?.origin_enc ? String(r.origin_enc) : null;
+}
+
 function parseJson<T>(raw: unknown, fallback: T): T {
   try { const v = JSON.parse(String(raw ?? '')); return v ?? fallback; } catch { return fallback; }
 }
@@ -63,6 +87,7 @@ function toRecord(r: Record<string, unknown>): JobRecord {
     steps: parseJson<string[]>(r.steps, []), percent: r.percent === null || r.percent === undefined ? null : Number(r.percent),
     message: r.message === null || r.message === undefined ? null : String(r.message), cancelRequested: Number(r.cancel_requested) === 1,
     node: r.node ? String(r.node) : null, startedAt: Number(r.started_at), updatedAt: Number(r.updated_at), finishedAt: r.finished_at ? Number(r.finished_at) : null,
+    widgetId: r.widget_id ? String(r.widget_id) : null, log: r.log ? String(r.log) : '', hasOrigin: !!r.origin_enc,
   };
 }
 
@@ -83,7 +108,7 @@ export async function pruneJobs(now = Date.now()): Promise<void> {
   await rqlite.execute(`DELETE FROM package_jobs WHERE status != 'running' AND finished_at IS NOT NULL AND finished_at < ?`, [now - KEEP_FINISHED_MS]);
 }
 
-export interface NewJob { packageId: string; widgetType: string; actionId: string; serverId: string; userId: string | null; params: Record<string, unknown> }
+export interface NewJob { packageId: string; widgetType: string; actionId: string; serverId: string; userId: string | null; params: Record<string, unknown>; widgetId?: string | null; originEnc?: string | null }
 
 /** Create a running job, or throw JobConflictError when the widget already has one on this server. */
 export async function createJob(input: NewJob, now = Date.now()): Promise<JobRecord> {
@@ -91,15 +116,15 @@ export async function createJob(input: NewJob, now = Date.now()): Promise<JobRec
   const id = crypto.randomUUID();
   try {
     await rqlite.execute(
-      `INSERT INTO package_jobs (id, package_id, widget_type, action_id, server_id, user_id, status, params, steps, percent, message, cancel_requested, node, started_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, 'running', ?, '[]', NULL, NULL, 0, ?, ?, ?)`,
-      [id, input.packageId, input.widgetType, input.actionId, input.serverId, input.userId, JSON.stringify(input.params).slice(0, 4000), nodeName(), now, now]);
+      `INSERT INTO package_jobs (id, package_id, widget_type, action_id, server_id, user_id, status, params, steps, percent, message, cancel_requested, node, started_at, updated_at, widget_id, origin_enc)
+       VALUES (?, ?, ?, ?, ?, ?, 'running', ?, '[]', NULL, NULL, 0, ?, ?, ?, ?, ?)`,
+      [id, input.packageId, input.widgetType, input.actionId, input.serverId, input.userId, JSON.stringify(redactParams(input.params)).slice(0, 4000), nodeName(), now, now, input.widgetId ?? null, input.originEnc ?? null]);
   } catch (err) {
     if (/UNIQUE constraint failed/i.test(String(err instanceof Error ? err.message : err))) throw new JobConflictError();
     throw err;
   }
   void pruneJobs(now).catch(() => undefined);
-  return { id, ...input, status: 'running', steps: [], percent: null, message: null, cancelRequested: false, node: nodeName(), startedAt: now, updatedAt: now, finishedAt: null };
+  return { id, packageId: input.packageId, widgetType: input.widgetType, actionId: input.actionId, serverId: input.serverId, userId: input.userId, params: input.params, status: 'running', steps: [], percent: null, message: null, cancelRequested: false, node: nodeName(), startedAt: now, updatedAt: now, finishedAt: null, widgetId: input.widgetId ?? null, log: '', hasOrigin: !!input.originEnc };
 }
 
 export async function getJob(id: string): Promise<JobRecord | null> {
@@ -115,19 +140,19 @@ export async function latestJob(serverId: string, widgetType: string, now = Date
 }
 
 /** Heartbeat and progress of a running job; answers whether a cancel was requested. */
-export async function reportProgress(id: string, p: { steps: string[]; percent: number | null; message?: string | null }, now = Date.now()): Promise<{ cancelRequested: boolean; stillRunning: boolean }> {
+export async function reportProgress(id: string, p: { steps: string[]; percent: number | null; message?: string | null; log?: string }, now = Date.now()): Promise<{ cancelRequested: boolean; stillRunning: boolean }> {
   await rqlite.execute(
-    `UPDATE package_jobs SET steps = ?, percent = ?, message = COALESCE(?, message), updated_at = ? WHERE id = ? AND status = 'running'`,
-    [JSON.stringify(p.steps.slice(-50)), p.percent, p.message ?? null, now, id]);
+    `UPDATE package_jobs SET steps = ?, percent = ?, message = COALESCE(?, message), log = COALESCE(?, log), updated_at = ? WHERE id = ? AND status = 'running'`,
+    [JSON.stringify(p.steps.slice(-50)), p.percent, p.message ?? null, p.log === undefined ? null : p.log.slice(-LOG_KEEP), now, id]);
   const r = rowsToObjects(await rqlite.query('SELECT status, cancel_requested FROM package_jobs WHERE id = ?', [id]))[0];
   return { cancelRequested: !!r && Number(r.cancel_requested) === 1, stillRunning: !!r && r.status === 'running' };
 }
 
 /** Finish a running job. A job that is no longer running (cancelled or lost meanwhile) keeps its status. */
-export async function finishJob(id: string, status: Exclude<JobStatus, 'running'>, p: { steps: string[]; percent: number | null; message: string }, now = Date.now()): Promise<void> {
+export async function finishJob(id: string, status: Exclude<JobStatus, 'running'>, p: { steps: string[]; percent: number | null; message: string; log?: string }, now = Date.now()): Promise<void> {
   await rqlite.execute(
-    `UPDATE package_jobs SET status = ?, steps = ?, percent = ?, message = ?, finished_at = ?, updated_at = ? WHERE id = ? AND status = 'running'`,
-    [status, JSON.stringify(p.steps.slice(-50)), p.percent, p.message.slice(0, 500), now, now, id]);
+    `UPDATE package_jobs SET status = ?, steps = ?, percent = ?, message = ?, log = COALESCE(?, log), finished_at = ?, updated_at = ? WHERE id = ? AND status = 'running'`,
+    [status, JSON.stringify(p.steps.slice(-50)), p.percent, p.message.slice(0, 500), p.log === undefined ? null : p.log.slice(-LOG_KEEP), now, now, id]);
 }
 
 /** Ask for a cancel; the node running the job notices at its next heartbeat. False when the job is not running. */

@@ -33,7 +33,9 @@ export function paramsFor(action: PublicAction, row: Row | null): Record<string,
 }
 
 export type SubmitResult = { ok: boolean; error?: string };
-interface Pending { action: PublicAction; row: Row | null; params?: Record<string, unknown>; resolve?: (r: SubmitResult) => void }
+/** Where an editor submit came from (so the job can be reopened), and the task whose saved secrets it uses. */
+export type SubmitExtra = { origin?: unknown; savedFrom?: string };
+interface Pending { action: PublicAction; row: Row | null; params?: Record<string, unknown>; extra?: SubmitExtra; resolve?: (r: SubmitResult) => void }
 
 interface Options {
   actions: PublicAction[];
@@ -80,11 +82,12 @@ export function useActionRunner(o: Options) {
   const allowed = useCallback((a: PublicAction) => can(a.permission, o.serverId) && (a.kind !== 'terminal' || hasRole(user?.role, 'admin')), [can, o.serverId, user?.role]);
 
   /** Runs the action; throws when it fails (a confirmation dialog shows the message). */
-  const run = useCallback(async (action: PublicAction, row: Row | null, override?: Record<string, unknown>) => {
+  const run = useCallback(async (action: PublicAction, row: Row | null, override?: Record<string, unknown>, extra?: SubmitExtra) => {
     setBusy(action.id);
     try {
       const d = await apiAction(fetchWithAuth, `/api/servers/${o.serverId}/widget-actions/${encodeURIComponent(o.widgetType)}/${encodeURIComponent(action.id)}`, 'POST', {
         params: override ?? paramsFor(action, row), ...(action.confirm ? { confirm: true } : {}), ...(o.version >= 2 ? { widgetId: o.widgetId } : {}),
+        ...(extra?.origin ? { origin: extra.origin } : {}), ...(extra?.savedFrom ? { savedFrom: extra.savedFrom } : {}),
       }) as { success?: boolean; output?: string; error?: string; exitCode?: number; timedOut?: boolean; message?: string; jobId?: string };
       if (d.jobId) { await refreshJob(); return; }   // started in the background: the job block follows it
       const text = [d.output, d.error].filter(s => s && s.trim()).join('\n').trim();
@@ -114,14 +117,14 @@ export function useActionRunner(o: Options) {
   }, [o, run]);
 
   /** Like `start` for a form that wants to know how it went: resolves true when the action ran and succeeded. */
-  const submit = useCallback((action: PublicAction, params: Record<string, unknown>): Promise<SubmitResult> => {
+  const submit = useCallback((action: PublicAction, params: Record<string, unknown>, extra?: SubmitExtra): Promise<SubmitResult> => {
     if (action.confirm) {
       settled.current = false;
       lastConfirmError.current = undefined;
-      return new Promise<SubmitResult>(resolve => setPending({ action, row: null, params, resolve }));
+      return new Promise<SubmitResult>(resolve => setPending({ action, row: null, params, extra, resolve }));
     }
     // The message goes back to the form that asked (it shows it where the person is looking), not to the page behind a pop-up.
-    return run(action, null, params).then(() => ({ ok: true }), err => ({ ok: false, error: err instanceof Error ? err.message : String(err) }));
+    return run(action, null, params, extra).then(() => ({ ok: true }), err => ({ ok: false, error: err instanceof Error ? err.message : String(err) }));
   }, [run]);
 
   const confirmCtx = (pending?.row ?? o.templateContext) as unknown;
@@ -139,7 +142,7 @@ export function useActionRunner(o: Options) {
         onConfirm={async () => {
           if (!pending) return;
           try {
-            await run(pending.action, pending.row, pending.params);   // a failure is shown in the dialog
+            await run(pending.action, pending.row, pending.params, pending.extra);   // a failure is shown in the dialog
           } catch (err) {
             lastConfirmError.current = err instanceof Error ? err.message : String(err);
             throw err;

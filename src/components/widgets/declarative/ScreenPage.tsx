@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowLeft, X } from 'lucide-react';
 import Header from '@/components/layout/Header';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
@@ -46,6 +46,23 @@ function Inner({ widget, screenId }: { widget: WidgetRow; screenId: string }) {
   const router = useRouter();
   const { spec, error } = usePublicSpec(widget.widget_type);
   const { data, refresh, extra } = useWidgetData(widget.id, 15);
+  const jobId = useSearchParams().get('job');
+  // Reopened from a task (the notification area): what was filled in, with secrets as placeholders the server resolves.
+  const [restore, setRestore] = useState<{ values: Record<string, unknown>; context: Row | null; savedFrom: string } | null>(null);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!jobId) return;
+    let live = true;
+    (async () => {
+      try {
+        const res = await fetchWithAuth(`/api/widget-jobs/${encodeURIComponent(jobId)}/origin`);
+        const json = await readJson<{ data?: { values: Record<string, unknown>; context: Row | null }; error?: { message?: string } }>(res);
+        if (!live) return;
+        if (!res.ok || !json.data) setRestoreError(json.error?.message || 'The saved values of that task are not available'); else setRestore({ values: json.data.values, context: json.data.context, savedFrom: jobId });
+      } catch (e) { if (live) setRestoreError(e instanceof Error ? e.message : String(e)); }
+    })();
+    return () => { live = false; };
+  }, [jobId]);
   const [reloadToken, setReloadToken] = useState(0);
   const [dialog, setDialog] = useState<{ id: string; row: Row | null } | null>(null);
   const ctx: ViewContext = useMemo(() => ({ data, collectedAt: extra.collectedAt, state: extra.state, config: extra.config, lookups: extra.lookups, server: extra.server }), [data, extra]);
@@ -59,7 +76,7 @@ function Inner({ widget, screenId }: { widget: WidgetRow; screenId: string }) {
     },
   });
   const screen = spec?.screens?.[screenId];
-  const full: ViewContext = useMemo(() => ({ ...ctx, job: runner.job }), [ctx, runner.job]);
+  const full: ViewContext = useMemo(() => ({ ...ctx, job: runner.job, screenId, context: restore?.context ?? undefined, restore: restore ? { values: restore.values, savedFrom: restore.savedFrom } : undefined }), [ctx, runner.job, screenId, restore]);
   const ui: LayoutUi = useMemo(() => ({
     actions: new Map((spec?.actions ?? []).map(a => [a.id, a])),
     allowed: runner.allowed, busy: runner.busy,
@@ -87,8 +104,13 @@ function Inner({ widget, screenId }: { widget: WidgetRow; screenId: string }) {
         {error ? <p className="text-sm text-muted-foreground">{error}</p>
           : !spec ? <LoadingSpinner />
           : !screen ? <p className="text-sm text-muted-foreground">This widget has no screen called “{screenId}”.</p>
-          : screen.kind !== 'page' ? <p className="text-sm text-muted-foreground">This screen opens as a pop-up from its widget.</p>
-          : <ScreenView screen={screen} context={full} serverId={widget.server_id} widgetType={widget.widget_type} ui={ui} reloadToken={reloadToken} />}
+          : jobId && !restore && !restoreError ? <LoadingSpinner />
+          : <>
+            {restoreError && <p role="alert" className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">{restoreError}. The screen is empty: fill it in again.</p>}
+            {restore && <p className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">This is the screen of an earlier task, with what you filled in then. Passwords and tokens you entered are kept safely on the server: leave them as they are to use them again, or type new ones.</p>}
+            <ScreenView screen={screen} context={full} serverId={widget.server_id} widgetType={widget.widget_type} ui={ui} reloadToken={reloadToken}
+              onDone={screen.kind === 'dialog' ? () => router.push(`/dashboards/${encodeURIComponent(widget.dashboard_id)}`) : undefined} />
+          </>}
         {runner.dialogs}
         <ScreenDialog id={dialog?.id ?? null} row={dialog?.row ?? null} screen={dialog ? spec?.screens?.[dialog.id] : undefined} ctx={full} serverId={widget.server_id} widgetType={widget.widget_type} ui={ui}
           reloadToken={reloadToken} onClose={() => setDialog(null)} onDone={refresh} />
