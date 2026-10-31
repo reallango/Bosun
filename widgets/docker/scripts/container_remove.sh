@@ -10,7 +10,7 @@ $D ps >/dev/null 2>&1 || { echo 'ERROR: Docker is not available to this account'
 set -- rm -f
 [ "$BOSUN_PARAM_volumes" = true ] && set -- "$@" -v
 set -- "$@" "$name"
-echo 'PROGRESS 0/1'
+echo 'PROGRESS 0/1'; echo "[step] Removing the container $name"
 if ! out=$($D "$@" 2>&1); then fail "$(printf '%s\n' "$out" | tr -d '\r' | sed '/^$/d' | tail -n 1 | cut -c1-300)"; fi
 echo 'PROGRESS 1/1'
 echo "DONE removed $name"

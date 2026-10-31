@@ -10,7 +10,7 @@ $D ps >/dev/null 2>&1 || { echo 'ERROR: Docker is not available to this account'
 logf=$(mktemp) || fail 'cannot create a temporary file'
 codef=$(mktemp) || fail 'cannot create a temporary file'
 trap 'rm -f "$logf" "$codef"' EXIT
-echo 'PROGRESS 0/1'
+echo 'PROGRESS 0/1'; echo "[step] Pulling $ref"
 # The pipe hides docker's exit status, so it is added as a last line and written to a file.
 { $D pull "$ref" 2>&1; echo "BSB-EXIT $?"; } | {
   total=0; fin=0; last=''

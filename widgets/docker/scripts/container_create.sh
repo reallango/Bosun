@@ -242,14 +242,17 @@ trap 'rm -f "$errf"' EXIT
 lastline() { tail -n 1 "$errf" | tr -d '\r' | cut -c1-300; }
 
 echo 'PROGRESS 1/4'
+echo "[step] Checking the image $S_IMAGE"
 if ! $D image inspect --format '{{.Id}}' "$S_IMAGE" >/dev/null 2>&1; then
-  $D pull "$S_IMAGE" >/dev/null 2>"$errf" || fail "pulling $S_IMAGE failed: $(lastline)"
+  echo "[step] Pulling $S_IMAGE"; $D pull "$S_IMAGE" >/dev/null 2>"$errf" || fail "pulling $S_IMAGE failed: $(lastline)"
 fi
 echo 'PROGRESS 2/4'
+echo "[step] Creating the container"
 id=$($D create "$@" 2>"$errf") || fail "creating the container failed: $(lastline)"
 id=$(printf '%s\n' "$id" | tail -n 1)
 case "$id" in ''|*[!0-9a-f]*) fail 'docker create gave an unexpected answer' ;; esac
 echo 'PROGRESS 3/4'
+echo '[step] Starting the container'
 if ! $D start "$id" >/dev/null 2>"$errf"; then
   msg=$(lastline)
   $D rm -f "$id" >/dev/null 2>&1

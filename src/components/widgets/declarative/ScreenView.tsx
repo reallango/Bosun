@@ -68,11 +68,24 @@ export function ScreenView({ screen, context, serverId, widgetType, ui, onDone, 
   const { datasets, errors, loading, loadedAt, reload } = useScreenDatasets(serverId, widgetType, screen, context);
   useEffect(() => { if (reloadToken) void reload(); }, [reloadToken, reload]);
   const ctx: ViewContext = useMemo(() => ({ ...context, datasets }), [context, datasets]);
+  const loadDataset = useCallback(async (dataset: string, args: Record<string, string>): Promise<{ ok: true; data: unknown } | { ok: false; error: string }> => {
+    try {
+      const res = await fetchWithAuth(`/api/servers/${serverId}/widget-datasets/${encodeURIComponent(widgetType)}/${encodeURIComponent(dataset)}`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ args }),
+      });
+      const json = await readJson<{ data?: { data: unknown }; error?: { message?: string } }>(res);
+      if (!res.ok || !json.data) return { ok: false, error: json.error?.message || `HTTP ${res.status}` };
+      return { ok: true, data: json.data.data };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }, [serverId, widgetType]);
   const screenUi: LayoutUi = useMemo(() => ({
     ...ui,
     large: true,
+    loadDataset,
     onSubmitted: ok => { if (ok) { onDone?.(); void reload(); } },
-  }), [ui, onDone, reload]);
+  }), [ui, onDone, reload, loadDataset]);
   const failed = Object.entries(errors);
   const waiting = loading && loadedAt === 0;
   return (

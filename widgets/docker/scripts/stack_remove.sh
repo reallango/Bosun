@@ -26,12 +26,13 @@ if [ -d "$DIR" ]; then
 fi
 errf=$(mktemp) || fail 'cannot create a temporary file'
 trap 'rm -f "$errf"' EXIT
-echo 'PROGRESS 0/2'
+echo 'PROGRESS 0/2'; echo "[step] Taking the stack $name down"
 if [ -z "$CF" ]; then $D compose -p "$name" "$@" >/dev/null 2>"$errf"; rc=$?
 elif [ -n "$EF" ]; then $D compose -p "$name" --project-directory "$PD" -f "$CF" --env-file "$EF" "$@" >/dev/null 2>"$errf"; rc=$?
 else $D compose -p "$name" --project-directory "$PD" -f "$CF" "$@" >/dev/null 2>"$errf"; rc=$?; fi
 if [ "$rc" -ne 0 ]; then fail "docker compose down failed: $(tr -d '\r' < "$errf" | sed '/^$/d' | tail -n 3 | tr '\n' ' ' | cut -c1-400)"; fi
 echo 'PROGRESS 1/2'
+echo '[step] Deleting the stored stack files'
 [ ! -d "$DIR" ] || rm -rf "$DIR"
 echo 'PROGRESS 2/2'
 echo "DONE removed stack $name"

@@ -237,7 +237,7 @@ trap 'rm -f "$errf"' EXIT
 lastline() { tail -n 1 "$errf" | tr -d '\r' | cut -c1-300; }
 WAIT=${BOSUN_RECREATE_WAIT:-2}; is_num "$WAIT" || WAIT=2
 
-echo 'PROGRESS 1/6'
+echo 'PROGRESS 1/6'; echo "[step] Reading the container $OLD"
 # The facts about the old container come as lines that start with a random token, so a label value cannot forge one.
 tok=$(od -An -N8 -tx1 /dev/urandom 2>/dev/null | tr -d ' \n')
 [ "${#tok}" -ge 12 ] || tok="bsb$$x$(date +%s)"
@@ -308,13 +308,13 @@ EOS
 
 # Before anything is touched: the image must be here (a bad image fails now, with the old container still running).
 if ! $D image inspect --format '{{.Id}}' "$IMG" >/dev/null 2>&1; then
-  $D pull "$IMG" >/dev/null 2>"$errf" || fail "pulling $IMG failed (the old container was not changed): $(lastline)"
+  echo "[step] Pulling $IMG"; $D pull "$IMG" >/dev/null 2>"$errf" || fail "pulling $IMG failed (the old container was not changed): $(lastline)"
 fi
 BACKUP="$OLD-bosun-old"
 if $D inspect --type container --format '{{.Id}}' "$BACKUP" >/dev/null 2>&1; then
   fail "a container named $BACKUP exists (left over from an earlier edit); remove it first"
 fi
-echo 'PROGRESS 2/6'
+echo 'PROGRESS 2/6'; echo "[step] Renaming $OLD to $BACKUP"
 
 NEWID=''
 # Put the old container back: remove the new one, rename the old one back, start it when it was running.
@@ -328,19 +328,20 @@ rollback() {
 }
 
 $D rename "$OLD" "$BACKUP" >/dev/null 2>"$errf" || fail "the container could not be renamed: $(lastline)"
-echo 'PROGRESS 3/6'
+echo 'PROGRESS 3/6'; echo "[step] Creating the new container $NEWNAME"
 NEWID=$($D create "$@" 2>"$errf") || { NEWID=''; rollback "creating the new container failed: $(lastline)"; }
 NEWID=$(printf '%s\n' "$NEWID" | tail -n 1)
 case "$NEWID" in ''|*[!0-9a-f]*) NEWID=''; rollback 'docker create gave an unexpected answer' ;; esac
-echo 'PROGRESS 4/6'
+echo 'PROGRESS 4/6'; echo '[step] Stopping the old container and starting the new one'
 if [ "$WASRUN" = true ]; then
   $D stop "$BACKUP" >/dev/null 2>"$errf" || rollback "the old container could not be stopped: $(lastline)"
 fi
 $D start "$NEWID" >/dev/null 2>"$errf" || rollback "the new container could not be started: $(lastline)"
-echo 'PROGRESS 5/6'
+echo 'PROGRESS 5/6'; echo '[step] Checking that the new container stays running'
 [ "$WAIT" -eq 0 ] || sleep "$WAIT"
 state=$($D inspect --type container --format '{{.State.Running}} {{.State.Restarting}}' "$NEWID" 2>/dev/null)
 [ "$state" = 'true false' ] || rollback 'the new container did not stay running'
+echo '[step] Removing the old container'
 if $D rm -f "$BACKUP" >/dev/null 2>"$errf"; then
   echo 'PROGRESS 6/6'
   echo "DONE recreated $NEWNAME"

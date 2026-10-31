@@ -32,7 +32,8 @@ export function paramsFor(action: PublicAction, row: Row | null): Record<string,
   return out;
 }
 
-interface Pending { action: PublicAction; row: Row | null; params?: Record<string, unknown>; resolve?: (ok: boolean) => void }
+export type SubmitResult = { ok: boolean; error?: string };
+interface Pending { action: PublicAction; row: Row | null; params?: Record<string, unknown>; resolve?: (r: SubmitResult) => void }
 
 interface Options {
   actions: PublicAction[];
@@ -63,6 +64,7 @@ export function useActionRunner(o: Options) {
   const [shellFor, setShellFor] = useState<{ token: string; label: string } | null>(null);
   const { job, refresh: refreshJob, cancel } = useWidgetJob(o.serverId, o.widgetType, o.actions.some(a => a.job));
   const settled = useRef(false);
+  const lastConfirmError = useRef<string | undefined>(undefined);
 
   // A job (a pull, a stack deploy) changed things on the host when it ends: have the screens and the widget load again.
   const changedRef = useRef(o.changed);
@@ -112,12 +114,14 @@ export function useActionRunner(o: Options) {
   }, [o, run]);
 
   /** Like `start` for a form that wants to know how it went: resolves true when the action ran and succeeded. */
-  const submit = useCallback((action: PublicAction, params: Record<string, unknown>): Promise<boolean> => {
+  const submit = useCallback((action: PublicAction, params: Record<string, unknown>): Promise<SubmitResult> => {
     if (action.confirm) {
       settled.current = false;
-      return new Promise<boolean>(resolve => setPending({ action, row: null, params, resolve }));
+      lastConfirmError.current = undefined;
+      return new Promise<SubmitResult>(resolve => setPending({ action, row: null, params, resolve }));
     }
-    return run(action, null, params).then(() => true, err => { setNotice(`${action.label} failed: ${err instanceof Error ? err.message : String(err)}`); return false; });
+    // The message goes back to the form that asked (it shows it where the person is looking), not to the page behind a pop-up.
+    return run(action, null, params).then(() => ({ ok: true }), err => ({ ok: false, error: err instanceof Error ? err.message : String(err) }));
   }, [run]);
 
   const confirmCtx = (pending?.row ?? o.templateContext) as unknown;
@@ -126,7 +130,7 @@ export function useActionRunner(o: Options) {
     <>
       <ConfirmActionDialog
         open={!!pending}
-        onOpenChange={open => { if (!open) { if (pending?.resolve && !settled.current) pending.resolve(false); setPending(null); } }}
+        onOpenChange={open => { if (!open) { if (pending?.resolve && !settled.current) pending.resolve({ ok: false, error: lastConfirmError.current }); setPending(null); } }}
         title={pending?.action.confirm ? fillTemplate(pending.action.confirm.title, confirmCtx) : ''}
         description={pending?.action.confirm?.text ? fillTemplate(pending.action.confirm.text, confirmCtx) : (pending?.action.label ?? '')}
         confirmLabel={pending?.action.label ?? ''}
@@ -134,9 +138,14 @@ export function useActionRunner(o: Options) {
         requireText={pending?.action.confirm?.requireText ? fillTemplate(pending.action.confirm.requireText, confirmCtx) : undefined}
         onConfirm={async () => {
           if (!pending) return;
-          await run(pending.action, pending.row, pending.params);   // a failure is shown in the dialog
+          try {
+            await run(pending.action, pending.row, pending.params);   // a failure is shown in the dialog
+          } catch (err) {
+            lastConfirmError.current = err instanceof Error ? err.message : String(err);
+            throw err;
+          }
           settled.current = true;
-          pending.resolve?.(true);
+          pending.resolve?.({ ok: true });
         }}
       />
 

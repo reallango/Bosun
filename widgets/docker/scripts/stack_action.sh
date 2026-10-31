@@ -37,7 +37,7 @@ else
 fi
 errf=$(mktemp) || fail 'cannot create a temporary file'
 trap 'rm -f "$errf"' EXIT
-echo 'PROGRESS 0/1'
+echo 'PROGRESS 0/1'; echo "[step] Running docker compose $op for the stack $name"
 if [ -z "$CF" ]; then $D compose -p "$name" "$@" >/dev/null 2>"$errf"; rc=$?
 elif [ -n "$EF" ]; then $D compose -p "$name" --project-directory "$PD" -f "$CF" --env-file "$EF" "$@" >/dev/null 2>"$errf"; rc=$?
 else $D compose -p "$name" --project-directory "$PD" -f "$CF" "$@" >/dev/null 2>"$errf"; rc=$?; fi
