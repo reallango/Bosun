@@ -10,6 +10,12 @@
 # Git over https only; with BOSUN_SECRET_git_token set (exported by Bosun) it is sent as a Basic Authorization header through the
 # environment of the git process only (GIT_CONFIG_*), never on a command line, in a URL, in a file or in the output, and only to
 # github.com.
+# Override (text, may be empty): lines `svc.<service>.<key>=<value>` with the key container_name (one) or port, volume, network
+# (repeatable; each list REPLACES the list of the compose file for that service; a line with an empty value replaces it by nothing).
+# They are written as compose.override.yaml (`!override` tags: Docker Compose 2.24 or newer) next to the stored compose file, passed
+# as a second -f file, and the risky check below reads the MERGED configuration. The lines themselves are stored as bosun.override
+# (stack_get returns them as "override"). No lines: no override file, and an old one is removed.
+# Progress: PROGRESS n/5 lines and plain `[step] text` lines that say what happens.
 fail() { printf 'ERROR: %s\n' "$*"; exit 0; }
 SECRET_TOKEN=$BOSUN_SECRET_git_token; unset BOSUN_SECRET_git_token   # never let docker, compose or git inherit it by accident
 name=$BOSUN_PARAM_name; source=$BOSUN_PARAM_source
@@ -39,6 +45,95 @@ fi
 D=docker; $D ps >/dev/null 2>&1 || { command -v sudo >/dev/null 2>&1 && sudo -n docker ps >/dev/null 2>&1 && D='sudo -n docker'; }
 $D ps >/dev/null 2>&1 || { echo 'ERROR: Docker is not available to this account'; exit 0; }
 $D compose version >/dev/null 2>&1 || fail 'Docker Compose (the docker compose plugin) is not installed on this host'
+
+# ---- the override lines become a compose.override.yaml text (validated before anything is stored) ----
+OVR=${BOSUN_PARAM_override-}; OVRYAML=''
+case "$OVR" in *[![:space:]]*)
+  ovrp=$(mktemp) || fail 'cannot create a temporary file'
+  cat > "$ovrp" <<'BOSUN_AWK_END'
+function bad(m) { print "ERR " m; failed = 1; exit }
+function rng(s) { return s ~ /^[0-9]+(-[0-9]+)?$/ }
+function isip4(s) { return s ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$/ }
+function validname(s) { return s ~ /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/ && length(s) <= 128 }
+function chkport(p,   a, n, rest) {
+  sub(/\/(tcp|udp|sctp)$/, "", p)
+  if (p ~ /^\[/) {
+    if (p !~ /^\[[0-9a-fA-F:]+\]:/) return 0
+    rest = substr(p, index(p, "]:") + 2); n = split(rest, a, ":")
+    return n == 2 && (a[1] == "" || rng(a[1])) && rng(a[2])
+  }
+  n = split(p, a, ":")
+  if (n == 1) return rng(a[1])
+  if (n == 2) return rng(a[1]) && rng(a[2])
+  if (n == 3) return isip4(a[1]) && (a[2] == "" || rng(a[2])) && rng(a[3])
+  return 0
+}
+function lst(s, key, yk,   n, j, r) {
+  if (!((s, key) in has)) return ""
+  n = cnt[s, key] + 0
+  if (n == 0) return "    " yk ": !override []\n"
+  r = "    " yk ": !override\n"
+  for (j = 1; j <= n; j++) r = r "      - \"" item[s, key, j] "\"\n"
+  return r
+}
+{
+  sub(/\r$/, ""); lineno++
+  if (lineno > 200) bad("the override has too many lines (at most 200)")
+  if ($0 ~ /^[ \t]*$/ || $0 ~ /^#/) next
+  if (length($0) > 1000) bad("override line " lineno " is longer than 1000 characters")
+  p = index($0, "=")
+  if (p == 0) bad("override line " lineno " has no '='")
+  k = substr($0, 1, p - 1); v = substr($0, p + 1)
+  if (k !~ /^svc\.[A-Za-z0-9][A-Za-z0-9_.-]*\.(container_name|port|volume|network)$/) bad("override line " lineno ": use svc.<service>.<container_name|port|volume|network>=value")
+  key = k; sub(/^.*\./, "", key); svc = k; sub(/^svc\./, "", svc); sub(/\.[^.]*$/, "", svc)
+  if (v ~ /[^ -~]/ || v ~ /["\\$]/) bad("override line " lineno ": the value has characters that are not allowed (quotes, backslash, $, control characters)")
+  if (!(svc in seen)) { seen[svc] = 1; order[++ns] = svc }
+  if (key == "container_name") {
+    if (v == "") next
+    if (!validname(v)) bad("override line " lineno ": container_name: use letters, digits, _ . - only")
+    if ((svc SUBSEP "cn") in set) bad("override: container_name is given twice for " svc)
+    set[svc SUBSEP "cn"] = v; next
+  }
+  has[svc, key] = 1
+  if (v == "") next
+  if (key == "port") { if (!chkport(v)) bad("override line " lineno ": port: use [hostip:]hostport:containerport[/tcp|udp]") }
+  else if (key == "volume") {
+    n = split(v, a, ":")
+    if (n < 2 || n > 3) bad("override line " lineno ": volume: use source:target[:ro]")
+    if (a[2] !~ /^\//) bad("override line " lineno ": volume: the target must be an absolute path")
+    if (n == 3 && a[3] != "ro" && a[3] != "rw") bad("override line " lineno ": volume: the mode can only be ro or rw")
+    if (a[1] ~ /^\//) { }
+    else if (a[1] ~ /^\.\//) { if (a[1] ~ /(^|\/)\.\.(\/|$)/) bad("override line " lineno ": volume: .. is not allowed in a relative path") }
+    else if (!validname(a[1])) bad("override line " lineno ": volume: the source must be a volume name, an absolute path or a path starting with ./")
+  }
+  else if (!validname(v)) bad("override line " lineno ": network: invalid network name")
+  cnt[svc, key]++; item[svc, key, cnt[svc, key]] = v
+}
+END {
+  if (failed) exit
+  out = ""
+  for (i = 1; i <= ns; i++) {
+    s = order[i]; body = ""
+    if ((s SUBSEP "cn") in set) body = body "    container_name: \"" set[s SUBSEP "cn"] "\"\n"
+    body = body lst(s, "port", "ports") lst(s, "volume", "volumes") lst(s, "network", "networks")
+    if (body != "") out = out "  \"" s "\":\n" body
+  }
+  if (out != "") printf "services:\n%s", out
+}
+BOSUN_AWK_END
+  OVRYAML=$(printf '%s\n' "$OVR" | awk -f "$ovrp"); rm -f "$ovrp"
+  case "$OVRYAML" in 'ERR '*) fail "${OVRYAML#ERR }" ;; esac
+  if [ -n "$OVRYAML" ]; then
+    # `!override` needs Docker Compose 2.24
+    cv=$($D compose version --short 2>/dev/null | tail -n 1); cv=${cv#v}; cmaj=${cv%%.*}; crest=${cv#*.}; cmin=${crest%%.*}
+    case "$cmaj$cmin" in ''|*[!0-9]*) ;; *)
+      if [ "$cmaj" -lt 2 ] || { [ "$cmaj" -eq 2 ] && [ "$cmin" -lt 24 ]; }; then
+        fail "Overriding ports, volumes, networks or the container name needs Docker Compose 2.24 or newer (this host has $cv)"
+      fi ;;
+    esac
+  fi ;;
+esac
+
 errf=$(mktemp) || fail 'cannot create a temporary file'
 trap 'rm -f "$errf"' EXIT
 lastline() { tr -d '\r' < "$errf" | sed '/^$/d' | tail -n 3 | tr '\n' ' ' | cut -c1-400; }
@@ -51,7 +146,7 @@ NEWDIR=0; [ -d "$DIR" ] || NEWDIR=1
 mkdir -p "$DIR" || fail 'cannot create the stack folder'
 GITFRESH=0; GITPREV=''
 undo() { # a failed or refused deployment leaves the stack as it was
-  rm -f "$DIR/compose.yaml.new" "$DIR/.env.new"
+  rm -f "$DIR/compose.yaml.new" "$DIR/.env.new" "$DIR/compose.override.yaml.new" "$DIR/bosun.override.new"
   if [ "$NEWDIR" -eq 1 ]; then rm -rf "$DIR"
   elif [ "$source" = git ]; then
     if [ "$GITFRESH" -eq 1 ]; then rm -rf "$DIR/repo"
@@ -69,14 +164,17 @@ gitrun() { # the token reaches git only through its environment
     exec git "$@"
   )
 }
-dc() {
-  if [ -n "$EF" ]; then $D compose -p "$name" --project-directory "$PD" -f "$CF" --env-file "$EF" "$@"
+dc() { # the compose file, the override file when there is one, the .env file when there is one
+  if [ -n "$EF" ] && [ -n "$OF" ]; then $D compose -p "$name" --project-directory "$PD" -f "$CF" -f "$OF" --env-file "$EF" "$@"
+  elif [ -n "$EF" ]; then $D compose -p "$name" --project-directory "$PD" -f "$CF" --env-file "$EF" "$@"
+  elif [ -n "$OF" ]; then $D compose -p "$name" --project-directory "$PD" -f "$CF" -f "$OF" "$@"
   else $D compose -p "$name" --project-directory "$PD" -f "$CF" "$@"; fi
 }
 
 echo 'PROGRESS 1/5'
-EF=''
+EF=''; OF=''
 if [ "$source" = editor ]; then
+  echo '[step] Reading the compose file'
   printf '%s' "$BOSUN_PARAM_yaml" > "$DIR/compose.yaml.new" || die 'cannot write the compose file'
   case "$BOSUN_PARAM_yaml" in *"$nl") ;; *) echo >> "$DIR/compose.yaml.new" ;; esac
   CF="$DIR/compose.yaml.new"; PD=$DIR
@@ -97,10 +195,12 @@ else
   fi
   tok=''
   if [ -d "$DIR/repo/.git" ] && [ "$(gitrun -C "$DIR/repo" config --get remote.origin.url 2>/dev/null)" = "$repo" ]; then
+    echo "[step] Fetching $branch from $repo"
     GITPREV=$(gitrun -C "$DIR/repo" rev-parse HEAD 2>/dev/null)
     gitrun -C "$DIR/repo" fetch --depth 1 origin "$branch" >/dev/null 2>"$errf" || die "git fetch failed: $(lastline)"
     gitrun -C "$DIR/repo" reset --hard FETCH_HEAD >/dev/null 2>"$errf" || die "git checkout failed: $(lastline)"
   else
+    echo "[step] Cloning $repo ($branch)"
     rm -rf "$DIR/repo"; GITFRESH=1
     gitrun clone --depth 1 --single-branch --branch "$branch" -- "$repo" "$DIR/repo" >/dev/null 2>"$errf" || die "git clone failed: $(lastline)"
   fi
@@ -116,7 +216,12 @@ case "$BOSUN_PARAM_env" in *[![:space:]]*)
   case "$BOSUN_PARAM_env" in *"$nl") ;; *) echo >> "$DIR/.env.new" ;; esac
   EF="$DIR/.env.new" ;;
 esac
+if [ -n "$OVRYAML" ]; then
+  printf '%s\n' "$OVRYAML" > "$DIR/compose.override.yaml.new" || die 'cannot write the override file'
+  OF="$DIR/compose.override.yaml.new"
+fi
 echo 'PROGRESS 2/5'
+echo '[step] Checking the compose file'
 
 cfg=$(dc config --format json 2>"$errf") || die "the compose file is not valid: $(lastline)"
 
@@ -195,6 +300,7 @@ if [ -n "$RISKY" ] && [ "$BOSUN_PARAM_allow_risky" != true ]; then
   die "needs the permission to use elevated container options: $RISKY"
 fi
 echo 'PROGRESS 3/5'
+echo '[step] Storing the stack files'
 
 # ---- the checked files become the stack ----
 if [ "$source" = editor ]; then
@@ -203,6 +309,12 @@ if [ "$source" = editor ]; then
 fi
 if [ -f "$DIR/.env.new" ]; then mv -f "$DIR/.env.new" "$DIR/.env" || die 'cannot store the .env file'; EF="$DIR/.env"
 else rm -f "$DIR/.env"; EF=''; fi
+if [ -n "$OVRYAML" ]; then
+  mv -f "$DIR/compose.override.yaml.new" "$DIR/compose.override.yaml" || die 'cannot store the override file'
+  OF="$DIR/compose.override.yaml"
+  printf '%s' "$OVR" > "$DIR/bosun.override.new" && case "$OVR" in *"$nl") ;; *) echo >> "$DIR/bosun.override.new" ;; esac
+  mv -f "$DIR/bosun.override.new" "$DIR/bosun.override" || die 'cannot store the override'
+else rm -f "$DIR/compose.override.yaml" "$DIR/bosun.override"; OF=''; fi
 {
   printf 'source=%s\n' "$source"
   printf 'repo=%s\n' "$repo"
@@ -213,9 +325,11 @@ else rm -f "$DIR/.env"; EF=''; fi
 NEWDIR=0; GITFRESH=0; GITPREV=''
 
 if [ "$BOSUN_PARAM_pull" = true ]; then
+  echo '[step] Pulling the images'
   dc pull >/dev/null 2>"$errf" || fail "pulling the images failed: $(lastline)"
 fi
 echo 'PROGRESS 4/5'
+echo "[step] Starting the stack $name"
 dc up -d --remove-orphans >/dev/null 2>"$errf" || fail "docker compose up failed: $(lastline)"
 echo 'PROGRESS 5/5'
 echo "DONE deployed $name"

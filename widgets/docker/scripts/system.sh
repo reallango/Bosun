@@ -13,7 +13,7 @@ case "$info" in *[![:digit:][:space:]]*|'') ;; *) set -f; set -- $info; set +f ;
 [ "$#" -eq 5 ] || set -- 0 0 0 0 0
 disk=$($D system df --format '{{.Type}}|{{.Size}}' 2>/dev/null)
 size_of() { printf '%s\n' "$disk" | awk -F '|' -v t="$1" '$1 == t { print $2; exit }' | tr -d '\r'; }
-esc() { printf '%s' "$1" | tr -d '[:cntrl:]' | sed -e 's/\/\\/g' -e 's/"/\\"/g'; }
+esc() { printf '%s' "$1" | tr -d '[:cntrl:]' | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'; }
 if $D compose version >/dev/null 2>&1; then compose=true; else compose=false; fi
 # drivers: one tagged line per driver (V volume, N network); anything else the daemon prints is ignored
 dfmt='{{range .Plugins.Volume}}V {{.}}
@@ -22,7 +22,7 @@ dfmt='{{range .Plugins.Volume}}V {{.}}
 drivers=$($D info --format "$dfmt" 2>/dev/null | tr -d '\r')
 list_drivers() { # $1 = V or N; a JSON array of the valid names, or the fallback in $2
   printf '%s\n' "$drivers" | awk -v t="$1" -v fb="$2" '
-    $1 == t && $2 ~ /^[A-Za-z0-9][A-Za-z0-9_.:\/-]*$/ && length($2) <= 100 && !($2 in seen) { seen[$2] = 1; o = o (n++ ? "," : "") "\"" $2 "\"" }
+    $1 == t && NF == 2 && $2 ~ /^[A-Za-z0-9][A-Za-z0-9_.:\/-]*$/ && length($2) <= 100 && !($2 in seen) { seen[$2] = 1; o = o (n++ ? "," : "") "\"" $2 "\"" }
     END { if (n == 0) o = fb; printf "[%s]", o }'
 }
 printf '{"version":%s,"containers":{"total":%s,"running":%s,"paused":%s,"stopped":%s},"images":%s,' "$version" "$1" "$2" "$3" "$4" "$5"

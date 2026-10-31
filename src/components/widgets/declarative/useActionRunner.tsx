@@ -89,7 +89,7 @@ export function useActionRunner(o: Options) {
         params: override ?? paramsFor(action, row), ...(action.confirm ? { confirm: true } : {}), ...(o.version >= 2 ? { widgetId: o.widgetId } : {}),
         ...(extra?.origin ? { origin: extra.origin } : {}), ...(extra?.savedFrom ? { savedFrom: extra.savedFrom } : {}),
       }) as { success?: boolean; output?: string; error?: string; exitCode?: number; timedOut?: boolean; message?: string; jobId?: string };
-      if (d.jobId) { await refreshJob(); return; }   // started in the background: the job block follows it
+      if (d.jobId) { setNotice(`${action.label} started. Follow it with the bell at the top (Tasks): its steps, its log, and the way back to this screen.`); await refreshJob(); return; }   // started in the background
       const text = [d.output, d.error].filter(s => s && s.trim()).join('\n').trim();
       if (!d.success) throw new Error((d.message || text).slice(0, 300) || (d.timedOut ? 'The command timed out' : `The command failed (exit ${d.exitCode})`));
       if (action.result === 'text') setOutput({ title: `${action.label}${row && o.rowTitle ? `: ${o.rowTitle(row)}` : ''}`, text: text || '(no output)' });

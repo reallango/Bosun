@@ -1,7 +1,9 @@
 #!/bin/sh
 # Docker (Linux), dataset: the stored files of a stack as one JSON object, every field a string:
-#   {"name","source" ("editor"|"git"|"external"),"repo","branch","file","yaml","env"}
-# A Bosun-managed stack lives in $HOME/bosun-stacks/<name>/ (compose.yaml, .env, bosun.meta, and repo/ for the git source).
+#   {"name","source" ("editor"|"git"|"external"),"repo","branch","file","yaml","env","override"}
+# "override" is the text of the override lines stack_deploy stored (svc.<service>.<key>=value, bosun.override), "" when there are none.
+# A Bosun-managed stack lives in $HOME/bosun-stacks/<name>/ (compose.yaml, .env, bosun.override, compose.override.yaml, bosun.meta,
+# and repo/ for the git source).
 # A stack Bosun did not create (external) is only known to docker compose: its yaml is read from the project's first config file
 # when that file is readable, else it is empty. Parameter: name.
 fail() { echo "$*" >&2; exit 1; }
@@ -28,8 +30,8 @@ if [ -d "$DIR" ]; then
     # a link inside the repository must not lead the reader somewhere else
     if [ -n "$yamlf" ] && { [ -L "$yamlf" ] || [ ! -f "$yamlf" ]; }; then yamlf=''; fi
   else yamlf="$DIR/compose.yaml"; fi
-  printf '{"name":%s,"source":%s,"repo":%s,"branch":%s,"file":%s,"yaml":%s,"env":%s}\n' \
-    "$(jstr "$name")" "$(jstr "$source")" "$(jstr "$repo")" "$(jstr "$branch")" "$(jstr "$file")" "$(jfile "$yamlf")" "$(jfile "$DIR/.env")"
+  printf '{"name":%s,"source":%s,"repo":%s,"branch":%s,"file":%s,"yaml":%s,"env":%s,"override":%s}\n' \
+    "$(jstr "$name")" "$(jstr "$source")" "$(jstr "$repo")" "$(jstr "$branch")" "$(jstr "$file")" "$(jfile "$yamlf")" "$(jfile "$DIR/.env")" "$(jfile "$DIR/bosun.override")"
   exit 0
 fi
 
@@ -41,4 +43,4 @@ found=$($D ps -a --filter "label=com.docker.compose.project=$name" -q 2>/dev/nul
 [ -n "$cfg" ] || [ -n "$found" ] || fail "stack $name not found"
 first=${cfg%%,*}
 case "$first" in /*) ;; *) first='' ;; esac
-printf '{"name":%s,"source":"external","repo":"","branch":"","file":"","yaml":%s,"env":""}\n' "$(jstr "$name")" "$(jfile "$first")"
+printf '{"name":%s,"source":"external","repo":"","branch":"","file":"","yaml":%s,"env":"","override":""}\n' "$(jstr "$name")" "$(jfile "$first")"

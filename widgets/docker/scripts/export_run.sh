@@ -154,75 +154,75 @@ function capname(s) { sub(/^CAP_/, "", s); return s }
     else if (tag == "HEALTHJ") ihealthj = rest
     next
   }
-  if (tag == "ID") id = toknext()
-  else if (tag == "NAME") cname = toknext()
-  else if (tag == "IMAGE") image = toknext()
-  else if (tag == "IMGID") imgid = rest
-  else if (tag == "ENV") { v = toknext(); if (!(v in ienv)) env[++ne] = v }
-  else if (tag == "CMDJ") cmdj = rest
-  else if (tag == "EPJ") epj = rest
-  else if (tag == "CMD") cmd[++ncmd] = toknext()
-  else if (tag == "EP") ep[++nep] = toknext()
-  else if (tag == "LABEL") { v = toknext(); if (v ~ /^com\.docker\.compose\./) ncomp++; else if (!(v in ilabel)) lab[++nlab] = v }
-  else if (tag == "PORT") { np++; pip[np] = toknext(); php[np] = toknext(); pcp[np] = toknext() }
-  else if (tag == "MNT") { nm++; mtype[nm] = toknext(); mname[nm] = toknext(); msrc[nm] = toknext(); mdst[nm] = toknext(); mrw[nm] = toknext() }
-  else if (tag == "TMPFS") tm[++ntm] = toknext()
-  else if (tag == "NETMODE") netmode = toknext()
-  else if (tag == "NETN") netn[++nnet] = toknext()
-  else if (tag == "ALIAS") { nal++; alnet[nal] = toknext(); alname[nal] = toknext() }
-  else if (tag == "IP4") { k = toknext(); ip4[k] = toknext() }
-  else if (tag == "IP6") { k = toknext(); ip6[k] = toknext() }
-  else if (tag == "RP") rp = toknext()
-  else if (tag == "RPN") rpn = rest
-  else if (tag == "HOSTNAME") host = toknext()
-  else if (tag == "USER") { userj = rest; user = toknext() }
-  else if (tag == "WORKDIR") { wdj = rest; wd = toknext() }
-  else if (tag == "MEM") mem = rest
-  else if (tag == "NANO") nano = rest
-  else if (tag == "DNS") dns[++ndns] = toknext()
-  else if (tag == "EXTRAHOST") xh[++nxh] = toknext()
-  else if (tag == "LOGT") logt = toknext()
-  else if (tag == "LOGO") lo[++nlo] = toknext()
-  else if (tag == "STOPSIG") { stopj = rest; stopsig = toknext() }
-  else if (tag == "STOPTO") stopto = rest
-  else if (tag == "TTY") tty = rest
-  else if (tag == "OPEN") open = rest
-  else if (tag == "INIT") init = rest
-  else if (tag == "RO") ro = rest
-  else if (tag == "HEALTHJ") healthj = rest
-  else if (tag == "HKIND") hkind = toknext()
-  else if (tag == "HARG") ha[++nha] = toknext()
-  else if (tag == "HINT") hint = rest
-  else if (tag == "HTO") hto = rest
-  else if (tag == "HRET") hret = rest
-  else if (tag == "HSTART") hstart = rest
-  else if (tag == "PRIV") priv = rest
-  else if (tag == "PIDM") pidm = toknext()
-  else if (tag == "IPCM") ipcm = toknext()
-  else if (tag == "CAPADD") cadd[++ncadd] = capname(toknext())
-  else if (tag == "CAPDROP") cdrop[++ncdrop] = capname(toknext())
-  else if (tag == "DEVICE") dev[++ndev] = toknext()
-  else if (tag == "SECOPT") sec[++nsec] = toknext()
-  else if (tag == "SYSCTL") sys[++nsys] = toknext()
-  else if (tag == "GPU") gpu = rest
-  else if (tag == "DCR") dcr[++ndcr] = toknext()
-  else if (tag == "ULIM") { nul++; ulname[nul] = toknext(); ulsoft[nul] = toknext(); ulhard[nul] = toknext() }
-  else if (tag == "GRP") grp[++ngrp] = toknext()
-  else if (tag == "SOPT") sop[++nsop] = toknext()
-  else if (tag == "SHM") shm = rest
-  else if (tag == "OOM") oom = rest
-  else if (tag == "CGP") cgp = toknext()
-  else if (tag == "RT") rt = toknext()
-  else if (tag == "LINK") links = links (links == "" ? "" : ", ") toknext()
-  else if (tag == "VFROM") vfrom = vfrom (vfrom == "" ? "" : ", ") toknext()
-  else if (tag == "CPUSET") cpuset = toknext()
-  else if (tag == "DNSS") dnss[++ndnss] = toknext()
-  else if (tag == "DNSO") dnso[++ndnso] = toknext()
-  else if (tag == "CPUSHARES") cpushares = rest
-  else if (tag == "PIDSLIM") pidslim = rest
-  else if (tag == "MEMRES") memres = rest
-  else if (tag == "UTS") uts = toknext()
-  else if (tag == "USERNS") userns = toknext()
+  if (tag == "ID") { id = toknext(); next }
+  if (tag == "NAME") { cname = toknext(); next }
+  if (tag == "IMAGE") { image = toknext(); next }
+  if (tag == "IMGID") { imgid = rest; next }
+  if (tag == "ENV") { v = toknext(); if (!(v in ienv)) env[++ne] = v; next }
+  if (tag == "CMDJ") { cmdj = rest; next }
+  if (tag == "EPJ") { epj = rest; next }
+  if (tag == "CMD") { cmd[++ncmd] = toknext(); next }
+  if (tag == "EP") { ep[++nep] = toknext(); next }
+  if (tag == "LABEL") { v = toknext(); if (v ~ /^com\.docker\.compose\./) ncomp++; else if (!(v in ilabel)) lab[++nlab] = v; next }
+  if (tag == "PORT") { np++; pip[np] = toknext(); php[np] = toknext(); pcp[np] = toknext(); next }
+  if (tag == "MNT") { nm++; mtype[nm] = toknext(); mname[nm] = toknext(); msrc[nm] = toknext(); mdst[nm] = toknext(); mrw[nm] = toknext(); next }
+  if (tag == "TMPFS") { tm[++ntm] = toknext(); next }
+  if (tag == "NETMODE") { netmode = toknext(); next }
+  if (tag == "NETN") { netn[++nnet] = toknext(); next }
+  if (tag == "ALIAS") { nal++; alnet[nal] = toknext(); alname[nal] = toknext(); next }
+  if (tag == "IP4") { k = toknext(); ip4[k] = toknext(); next }
+  if (tag == "IP6") { k = toknext(); ip6[k] = toknext(); next }
+  if (tag == "RP") { rp = toknext(); next }
+  if (tag == "RPN") { rpn = rest; next }
+  if (tag == "HOSTNAME") { host = toknext(); next }
+  if (tag == "USER") { userj = rest; user = toknext(); next }
+  if (tag == "WORKDIR") { wdj = rest; wd = toknext(); next }
+  if (tag == "MEM") { mem = rest; next }
+  if (tag == "NANO") { nano = rest; next }
+  if (tag == "DNS") { dns[++ndns] = toknext(); next }
+  if (tag == "EXTRAHOST") { xh[++nxh] = toknext(); next }
+  if (tag == "LOGT") { logt = toknext(); next }
+  if (tag == "LOGO") { lo[++nlo] = toknext(); next }
+  if (tag == "STOPSIG") { stopj = rest; stopsig = toknext(); next }
+  if (tag == "STOPTO") { stopto = rest; next }
+  if (tag == "TTY") { tty = rest; next }
+  if (tag == "OPEN") { open = rest; next }
+  if (tag == "INIT") { init = rest; next }
+  if (tag == "RO") { ro = rest; next }
+  if (tag == "HEALTHJ") { healthj = rest; next }
+  if (tag == "HKIND") { hkind = toknext(); next }
+  if (tag == "HARG") { ha[++nha] = toknext(); next }
+  if (tag == "HINT") { hint = rest; next }
+  if (tag == "HTO") { hto = rest; next }
+  if (tag == "HRET") { hret = rest; next }
+  if (tag == "HSTART") { hstart = rest; next }
+  if (tag == "PRIV") { priv = rest; next }
+  if (tag == "PIDM") { pidm = toknext(); next }
+  if (tag == "IPCM") { ipcm = toknext(); next }
+  if (tag == "CAPADD") { cadd[++ncadd] = capname(toknext()); next }
+  if (tag == "CAPDROP") { cdrop[++ncdrop] = capname(toknext()); next }
+  if (tag == "DEVICE") { dev[++ndev] = toknext(); next }
+  if (tag == "SECOPT") { sec[++nsec] = toknext(); next }
+  if (tag == "SYSCTL") { sys[++nsys] = toknext(); next }
+  if (tag == "GPU") { gpu = rest; next }
+  if (tag == "DCR") { dcr[++ndcr] = toknext(); next }
+  if (tag == "ULIM") { nul++; ulname[nul] = toknext(); ulsoft[nul] = toknext(); ulhard[nul] = toknext(); next }
+  if (tag == "GRP") { grp[++ngrp] = toknext(); next }
+  if (tag == "SOPT") { sop[++nsop] = toknext(); next }
+  if (tag == "SHM") { shm = rest; next }
+  if (tag == "OOM") { oom = rest; next }
+  if (tag == "CGP") { cgp = toknext(); next }
+  if (tag == "RT") { rt = toknext(); next }
+  if (tag == "LINK") { links = links (links == "" ? "" : ", ") toknext(); next }
+  if (tag == "VFROM") { vfrom = vfrom (vfrom == "" ? "" : ", ") toknext(); next }
+  if (tag == "CPUSET") { cpuset = toknext(); next }
+  if (tag == "DNSS") { dnss[++ndnss] = toknext(); next }
+  if (tag == "DNSO") { dnso[++ndnso] = toknext(); next }
+  if (tag == "CPUSHARES") { cpushares = rest; next }
+  if (tag == "PIDSLIM") { pidslim = rest; next }
+  if (tag == "MEMRES") { memres = rest; next }
+  if (tag == "UTS") { uts = toknext(); next }
+  if (tag == "USERNS") { userns = toknext(); next }
 }
 # The settings of the container as a person would give them (what differs from the image and from Docker's defaults).
 function derive(   i, c) {

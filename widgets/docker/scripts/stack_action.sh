@@ -38,8 +38,12 @@ fi
 errf=$(mktemp) || fail 'cannot create a temporary file'
 trap 'rm -f "$errf"' EXIT
 echo 'PROGRESS 0/1'; echo "[step] Running docker compose $op for the stack $name"
+# the override file of a stack deployed with overrides (ports, volumes, networks, container name) belongs to every operation
+OF=''; [ -z "$CF" ] || [ ! -f "$DIR/compose.override.yaml" ] || OF="$DIR/compose.override.yaml"
 if [ -z "$CF" ]; then $D compose -p "$name" "$@" >/dev/null 2>"$errf"; rc=$?
+elif [ -n "$EF" ] && [ -n "$OF" ]; then $D compose -p "$name" --project-directory "$PD" -f "$CF" -f "$OF" --env-file "$EF" "$@" >/dev/null 2>"$errf"; rc=$?
 elif [ -n "$EF" ]; then $D compose -p "$name" --project-directory "$PD" -f "$CF" --env-file "$EF" "$@" >/dev/null 2>"$errf"; rc=$?
+elif [ -n "$OF" ]; then $D compose -p "$name" --project-directory "$PD" -f "$CF" -f "$OF" "$@" >/dev/null 2>"$errf"; rc=$?
 else $D compose -p "$name" --project-directory "$PD" -f "$CF" "$@" >/dev/null 2>"$errf"; rc=$?; fi
 if [ "$rc" -ne 0 ]; then fail "docker compose $op failed: $(tr -d '\r' < "$errf" | sed '/^$/d' | tail -n 3 | tr '\n' ' ' | cut -c1-400)"; fi
 echo 'PROGRESS 1/1'

@@ -380,7 +380,7 @@ function validateEditorFields(raw: unknown, where: string): Validated<EditorFiel
         }
         field.optionsFrom = { path: of.path, ...(of.value ? { value: of.value } : {}), ...(of.label ? { label: of.label } : {}) };
       }
-      if (!field.options && !field.optionsFrom) return fail(`${where}: select field "${f.name}" needs "options" or "optionsFrom"`);
+      if (!field.options && !field.optionsFrom && f.remote === undefined) return fail(`${where}: select field "${f.name}" needs "options", "optionsFrom" or "remote"`);
     }
     const ref = (s: unknown) => typeof s === 'string' && (s.startsWith('literal:') ? /^[A-Za-z0-9_.:/ -]{0,100}$/.test(s.slice(8)) : FIELD_RE.test(s));
     const refs = (a: unknown): Record<string, string> | null => {
