@@ -92,7 +92,7 @@ describe('validateWidgetSpec', () => {
     expect(bad(s => { s.data.map = { x: 'a; b' }; }).ok).toBe(false);
     expect(bad(s => { s.actions[0].timeoutSec = 9999; }).ok).toBe(false);
     expect(bad(s => { s.actions.push(s.actions[0]); }).ok).toBe(false);
-    expect(bad(s => { s.version = 2; }).ok).toBe(false);
+    expect(bad(s => { s.version = 3; }).ok).toBe(false);
     expect(bad(s => { s.actions[0].icon = 'skull'; }).ok).toBe(false);
     expect(bad(s => { s.view.type = 'iframe'; }).ok).toBe(false);
     expect(bad(s => { s.view.toggles[0].hideWhen = { field: 'state' }; }).ok).toBe(false);
