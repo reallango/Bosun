@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "cpu_memory",
   "name": "CPU/Memory",
-  "version": "1.0.2",
+  "version": "1.0.1",
   "description": "CPU and memory usage with load averages, swap and temperature. Tracks CPU, load, temperature, memory and swap as history.",
   "author": "Bosun",
   "permissions": [

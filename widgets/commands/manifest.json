@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "commands",
   "name": "Custom Command",
-  "version": "2.0.2",
+  "version": "1.0.1",
   "description": "Run a command on the host as its non-admin account (PowerShell on Windows) and show its output, repeated at the interval you choose.",
   "author": "Bosun",
   "permissions": [
