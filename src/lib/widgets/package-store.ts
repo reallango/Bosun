@@ -117,8 +117,8 @@ export async function installPackage(opts: InstallOptions): Promise<InstallResul
   const clash = await rqlite.query(
     `SELECT type, package_id, builtin FROM custom_widgets WHERE type IN (${placeholders(newTypes.length)})`, newTypes);
   for (const row of rowsToObjects(clash)) {
-    // A bundled package takes over the seeded row of the widget it replaces (the old built-in).
-    if (opts.source === 'bundled' && !row.package_id && Number(row.builtin) === 1) continue;
+    // A package takes over the seeded row of the widget it replaces (an old built-in that no package provides).
+    if (!row.package_id && Number(row.builtin) === 1) continue;
     if (row.package_id !== manifest.id) throw new PackageError(`Widget type "${row.type}" already exists`, 409, 'TYPE_EXISTS');
   }
   // Permissions may not collide with another package's.

@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "ollama",
   "name": "Ollama Status",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Models, loaded models and their memory split; pull and delete models; shows how Ollama is installed (Windows service with nssm, systemd service, Docker container), updates it, starts and stops it, sets its startup method, restart policy and settings, and installs it.",
   "author": "Bosun",
   "network": [
@@ -1433,71 +1433,33 @@
               ]
             },
             {
-              "type": "form",
-              "title": "Pull a model",
-              "fields": [
-                {
-                  "name": "model",
-                  "label": "Model",
-                  "input": "text",
-                  "placeholder": "llama3.2:1b"
-                }
-              ],
-              "submit": {
-                "action": "pull",
-                "label": "Pull",
-                "params": {
-                  "model": "model"
-                }
-              },
-              "when": {
-                "field": "data.version",
-                "exists": true
-              }
-            },
-            {
-              "type": "section",
-              "title": "Loaded models",
-              "defaultOpen": true,
-              "when": {
-                "field": "data.version",
-                "exists": true
-              },
-              "blocks": [
-                {
-                  "type": "view",
-                  "path": "ps.models",
-                  "view": {
-                    "type": "list",
-                    "empty": "No model is loaded",
-                    "row": {
-                      "title": "{name}",
-                      "fields": [
-                        {
-                          "label": "Memory",
-                          "value": "{size}",
-                          "format": "bytes"
-                        },
-                        {
-                          "label": "In GPU memory",
-                          "value": "{size_vram}",
-                          "format": "bytes"
-                        }
-                      ]
-                    }
-                  }
-                }
-              ]
-            },
-            {
               "type": "section",
               "title": "Models",
-              "defaultOpen": true,
+              "defaultOpen": false,
               "when": {
                 "field": "data.version",
                 "exists": true
               },
               "blocks": [
+                {
+                  "type": "form",
+                  "title": "Pull a model",
+                  "fields": [
+                    {
+                      "name": "model",
+                      "label": "Model",
+                      "input": "text",
+                      "placeholder": "llama3.2:1b"
+                    }
+                  ],
+                  "submit": {
+                    "action": "pull",
+                    "label": "Pull",
+                    "params": {
+                      "model": "model"
+                    }
+                  }
+                },
                 {
                   "type": "view",
                   "path": "tags.models",
@@ -1516,6 +1478,51 @@
                       ],
                       "actions": [
                         "delete"
+                      ]
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "section",
+              "title": "Loaded models",
+              "defaultOpen": true,
+              "when": {
+                "field": "data.version",
+                "exists": true
+              },
+              "blocks": [
+                {
+                  "type": "view",
+                  "path": "ps.models",
+                  "view": {
+                    "type": "list",
+                    "empty": "No model is loaded",
+                    "row": {
+                      "title": "{name}",
+                      "subtitle": "{id}",
+                      "fields": [
+                        {
+                          "label": "Size",
+                          "value": "{size}",
+                          "format": "bytes"
+                        },
+                        {
+                          "label": "Processor",
+                          "value": "{processor}",
+                          "format": "text"
+                        },
+                        {
+                          "label": "Context",
+                          "value": "{context_length}",
+                          "format": "text"
+                        },
+                        {
+                          "label": "Until",
+                          "value": "{expires_at}",
+                          "format": "until"
+                        }
                       ]
                     }
                   }

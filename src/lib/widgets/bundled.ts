@@ -26,6 +26,15 @@ export function bundledIds(dir = widgetsDir()): string[] {
   }
 }
 
+/** Every package folder of the image (the catalog), bundled or not. */
+export function catalogIds(dir = widgetsDir()): string[] {
+  try {
+    return fs.readdirSync(dir, { withFileTypes: true }).filter(e => e.isDirectory() && !e.name.startsWith('_')).map(e => e.name);
+  } catch {
+    return [];
+  }
+}
+
 export function isBundledId(id: string): boolean {
   return bundledIds().includes(id);
 }
@@ -46,11 +55,11 @@ export interface BundledPackage {
 }
 
 /** Read and validate the bundled packages; invalid ones are reported and skipped. */
-export function readBundledPackages(dir = widgetsDir()): { packages: BundledPackage[]; errors: string[] } {
+export function readBundledPackages(dir = widgetsDir(), only: string[] = bundledIds(dir)): { packages: BundledPackage[]; errors: string[] } {
   const packages: BundledPackage[] = [];
   const errors: string[] = [];
   const { types, ids } = reservedPackageNames();
-  for (const id of bundledIds(dir)) {
+  for (const id of only) {
     try {
       const folder = path.join(dir, id);
       const raw = JSON.parse(fs.readFileSync(path.join(folder, 'manifest.json'), 'utf8'));

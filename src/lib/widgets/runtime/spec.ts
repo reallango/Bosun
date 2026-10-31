@@ -25,7 +25,7 @@ export const SPEC_VERSIONS = [1, 2] as const;
 export const SNAPSHOT_SECTIONS = ['cpu_memory', 'disks', 'gpus', 'system', 'net_rates', 'network', 'services', 'metrics'] as const;
 export const ICONS = ['play', 'square', 'rotate-cw', 'scroll-text', 'trash-2', 'download', 'upload', 'power', 'refresh-cw', 'terminal-square', 'pause', 'info'] as const;
 export const DOT_COLORS = ['green', 'amber', 'red', 'gray', 'blue'] as const;
-export const FORMATS = ['text', 'bytes', 'percent', 'badge', 'bar', 'duration', 'mb', 'temp', 'ago'] as const;
+export const FORMATS = ['text', 'bytes', 'percent', 'badge', 'bar', 'duration', 'mb', 'temp', 'ago', 'until'] as const;
 export const PARSERS = ['json', 'jsonlines', 'lines', 'text'] as const;
 
 export type RunAs = 'service' | 'shell';

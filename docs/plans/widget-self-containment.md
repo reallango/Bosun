@@ -327,6 +327,14 @@ hosts, the live tests in section 8. Do not push to `main` until the owner has te
     widgets at default and smallest size raised the smallest size of CPU/Memory (4x5), Metrics History (6x5) and Server Summary
     (4x5, default 6x5), removed stale wording from the package descriptions, stopped command output breaking mid-word, and shows
     fewer chart time labels on narrow charts. Widgets already on dashboards keep the minimum they were created with.
+    Later, at the owner's request: Ollama is no longer preinstalled (an optional package, 1.0.3: Models under Installation, closed,
+    Pull a model at its top, loaded models show what `ollama ps` shows, with a new generic `until` format); the sidebar reloads its
+    servers every 15 s while visible and at once when a server is added, edited or removed. Un-preinstalling exposed that the seeded
+    `ollama_status` type of old migrations would be orphaned, so at start a package of the image is installed when dashboards already
+    use a type nothing provides, seeded types nobody uses are dropped, and any install may take over a seeded type. Verified: upgrade
+    from the pre-package image installs Ollama 1.0.3 by itself; a fresh install offers no orphan and takes the zip import. Note: a
+    preinstalled package is never downgraded, so an instance already on a higher number (a dev build with Ollama 2.0.1) keeps it
+    until the package is removed and installed again.
 
 Phases 1 to 4 are core work that can be built and tested without touching a host. Phases 5 to 8 each remove one
 widget's code from core and are independently releasable.

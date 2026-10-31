@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import { notifyServersChanged } from '@/lib/dashboards/events';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { ProvisionSteps } from '@/components/settings/ProvisionSteps';
 import { LeftoverKeysPanel } from '@/components/settings/LeftoverKeysPanel';
@@ -101,7 +102,7 @@ export default function NewServerPage() {
     if (!provisionData) return;
     // The host was already added to this Bosun: provisioning updated its key in place.
     if (provisionData.existing_server) {
-      router.push('/settings/servers');
+      notifyServersChanged(); router.push('/settings/servers');
       return;
     }
     setLoading(true);
@@ -130,7 +131,7 @@ export default function NewServerPage() {
         return;
       }
 
-      router.push('/settings/servers');
+      notifyServersChanged(); router.push('/settings/servers');
     } catch (err) {
       setError('An error occurred');
     } finally {
@@ -169,7 +170,7 @@ export default function NewServerPage() {
         return;
       }
 
-      router.push('/settings/servers');
+      notifyServersChanged(); router.push('/settings/servers');
     } catch (err) {
       setError('An error occurred');
     } finally {

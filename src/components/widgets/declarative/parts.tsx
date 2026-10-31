@@ -43,6 +43,17 @@ export function formatValue(v: unknown, format: string): string {
     const hours = Math.floor(minutes / 60);
     return hours < 24 ? `${hours}h ago` : `${Math.floor(hours / 24)}d ago`;
   }
+  if (format === 'until') {   // a moment in the future: "4 minutes from now" ("Forever" when it is years away)
+    const t = typeof v === 'number' ? v : new Date(String(v)).getTime();
+    if (!Number.isFinite(t)) return String(v);
+    const seconds = Math.round((t - Date.now()) / 1000);
+    if (seconds > 10 * 365 * 86400) return 'Forever';
+    if (seconds < 30) return 'now';
+    const minutes = Math.round(seconds / 60);
+    if (minutes < 60) return `${Math.max(1, minutes)} minute${minutes === 1 ? '' : 's'} from now`;
+    const hours = Math.round(minutes / 60);
+    return hours < 48 ? `${hours} hour${hours === 1 ? '' : 's'} from now` : `${Math.round(hours / 24)} days from now`;
+  }
   return typeof v === 'object' ? JSON.stringify(v) : String(v);
 }
 
