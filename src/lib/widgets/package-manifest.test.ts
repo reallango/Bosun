@@ -164,9 +164,11 @@ describe('packages shipped in the repository', () => {
     if (!r.ok) throw new Error(r.error);
     const spec = r.value.widgets[0].spec!;
     expect(spec.actions.map(a => a.id).sort()).toEqual(['logs', 'restart', 'shell', 'start', 'stop']);
-    // The shell button opens the web terminal in the container; it runs no command.
+    // The shell button opens a terminal that runs the package's own command; API keys must pass its check first.
     const shell = spec.actions.find(a => a.id === 'shell')!;
-    expect(shell).toMatchObject({ kind: 'terminal', terminal: { container: 'name' }, permission: 'docker.shell', command: '' });
+    expect(shell).toMatchObject({ kind: 'terminal', terminal: { ref: 'name', check: 'shell_check' }, permission: 'docker.shell', command: '' });
+    expect(shell.terminal?.command).toContain('docker exec -it {{ref}}');
+    expect(spec.metrics?.[0]).toMatchObject({ name: 'docker.running', from: { agg: 'count' } });
     expect(spec.view.row?.actions).toEqual(['logs', 'shell', 'restart', 'stop', 'start']);
     expect(spec.view.filter?.fields).toEqual(['name', 'image']);
     expect(spec.view.toggles?.[0].key).toBe('stopped');

@@ -89,7 +89,7 @@ export function reviewPackage(m: PackageManifest, files?: PackageFiles): Package
     }
     for (const a of spec?.actions ?? []) {
       if (a.kind === 'terminal') {
-        commands.push({ what: a.label, actionId: a.id, permission: a.permission, as: 'terminal', command: `Interactive shell in a container: in the web UI the terminal asks for your own login (Full access only); for API keys holding this permission it hands out an API terminal token for ANY container of the host (a fixed docker exec as the service account, refused for containers that could reach the host)`, confirm: false });
+        commands.push({ what: a.label, actionId: a.id, permission: a.permission, as: 'terminal', command: `Interactive terminal running: ${a.terminal?.command ?? ''}. In the web UI it asks for your own login (Full access only); for API keys holding this permission it hands out an API terminal token for any target of that kind on the host, running as the service account${a.terminal?.check ? ` after the package's check script "${a.terminal.check}" allows it` : ''}`, confirm: false });
         continue;
       }
       if (a.kind === 'script') {

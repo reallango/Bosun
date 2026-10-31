@@ -2,8 +2,8 @@
   "schema": 1,
   "id": "docker",
   "name": "Docker Containers",
-  "version": "0.1.1",
-  "description": "Containers on the host with logs, a shell in each container, and start, stop and restart. Installed by default; the poller collects the container list.",
+  "version": "1.0.0",
+  "description": "Containers on the host with logs, a shell in each container, and start, stop and restart. Installed by default. Everything it does is in this package: the scripts that list and control containers, the check that decides who may get a shell, and its screen.",
   "author": "Bosun",
   "permissions": [
     {
@@ -36,7 +36,7 @@
     {
       "id": "docker.shell",
       "label": "Open a shell in a container",
-      "description": "Show the shell button on each running container (the web terminal asks for your own login and is only available to Full access users), and let an API key with this permission get an API terminal in any container of the host (containers that could reach the host are refused).",
+      "description": "Show the shell button on running containers (the web terminal needs Full access and your own login), and let an API key with this permission get a terminal in a container that cannot reach the host (the package checks this).",
       "group": "Docker",
       "defaultLevel": "admin",
       "risk": "high",
@@ -50,45 +50,164 @@
       "description": "Containers on the host with logs and start, stop and restart.",
       "icon": "box",
       "category": "system",
-      "default_size": { "w": 8, "h": 8 },
-      "min_size": { "w": 5, "h": 5 },
+      "default_size": {
+        "w": 8,
+        "h": 8
+      },
+      "min_size": {
+        "w": 5,
+        "h": 5
+      },
       "refresh_interval": 15,
       "supports_linux": true,
       "supports_windows": false,
       "spec": {
-        "version": 1,
+        "version": 2,
+        "scripts": {
+          "ps": {
+            "as": "service",
+            "timeoutSec": 30,
+            "linux": "scripts/ps.sh",
+            "params": {}
+          },
+          "logs": {
+            "as": "service",
+            "timeoutSec": 30,
+            "linux": "scripts/logs.sh",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$",
+                "maxLength": 128
+              },
+              "lines": {
+                "type": "number",
+                "min": 1,
+                "max": 2000,
+                "integer": true,
+                "default": 300
+              }
+            }
+          },
+          "control": {
+            "as": "service",
+            "timeoutSec": 120,
+            "linux": "scripts/control.sh",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$",
+                "maxLength": 128
+              },
+              "op": {
+                "type": "string",
+                "values": [
+                  "start",
+                  "stop",
+                  "restart"
+                ],
+                "maxLength": 10
+              }
+            }
+          },
+          "shell_check": {
+            "as": "service",
+            "timeoutSec": 30,
+            "linux": "scripts/shell_check.sh",
+            "params": {
+              "ref": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$",
+                "maxLength": 128
+              }
+            }
+          }
+        },
         "data": {
           "source": "command",
           "as": "service",
-          "command": "docker ps -a --format '{{json .}}'",
+          "command": "",
+          "script": "ps",
           "parse": "jsonlines",
           "cacheSec": 10,
-          "timeoutSec": 20,
+          "timeoutSec": 30,
           "permission": "docker.view",
-          "map": { "name": "Names", "image": "Image", "state": "State", "status": "Status", "ports": "Ports", "compose": "Labels" }
+          "map": {
+            "name": "Names",
+            "image": "Image",
+            "state": "State",
+            "status": "Status",
+            "ports": "Ports",
+            "compose": "Labels"
+          }
         },
         "metrics": [
-          { "name": "docker.running", "label": "Running containers" }
+          {
+            "name": "docker.running",
+            "label": "Running containers",
+            "from": {
+              "agg": "count",
+              "where": {
+                "field": "state",
+                "equals": "running"
+              }
+            }
+          }
         ],
         "view": {
           "type": "list",
           "empty": "No containers",
           "summary": [
-            { "label": "running", "where": { "field": "state", "equals": "running" } },
-            { "label": "total" }
+            {
+              "label": "running",
+              "where": {
+                "field": "state",
+                "equals": "running"
+              }
+            },
+            {
+              "label": "total"
+            }
           ],
-          "filter": { "fields": ["name", "image"], "placeholder": "Filter" },
+          "filter": {
+            "fields": [
+              "name",
+              "image"
+            ],
+            "placeholder": "Filter"
+          },
           "toggles": [
-            { "key": "stopped", "label": "stopped", "default": true, "hideWhen": { "field": "state", "notEquals": "running" } }
+            {
+              "key": "stopped",
+              "label": "stopped",
+              "default": true,
+              "hideWhen": {
+                "field": "state",
+                "notEquals": "running"
+              }
+            }
           ],
           "row": {
             "dot": {
               "field": "state",
-              "colors": { "running": "green", "restarting": "amber", "paused": "amber", "created": "gray", "exited": "gray", "dead": "red" }
+              "colors": {
+                "running": "green",
+                "restarting": "amber",
+                "paused": "amber",
+                "created": "gray",
+                "exited": "gray",
+                "dead": "red"
+              }
             },
             "title": "{name}",
             "subtitle": "{image} · {status}",
-            "actions": ["logs", "shell", "restart", "stop", "start"]
+            "actions": [
+              "logs",
+              "shell",
+              "restart",
+              "stop",
+              "start"
+            ]
           }
         },
         "actions": [
@@ -97,56 +216,139 @@
             "label": "Logs",
             "icon": "scroll-text",
             "permission": "docker.logs",
-            "as": "service",
-            "command": "docker logs --tail {{lines}} {{name}} 2>&1",
+            "kind": "script",
+            "result": "text",
             "params": {
-              "name": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$", "from": "name" },
-              "lines": { "type": "number", "min": 1, "max": 2000, "default": 300 }
+              "name": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$",
+                "maxLength": 128,
+                "from": "name"
+              },
+              "lines": {
+                "type": "number",
+                "min": 1,
+                "max": 2000,
+                "integer": true,
+                "default": 300
+              }
             },
-            "result": "text"
+            "variants": [
+              {
+                "script": "logs",
+                "args": {}
+              }
+            ]
           },
           {
             "id": "shell",
             "label": "Shell",
             "icon": "terminal-square",
             "permission": "docker.shell",
-            "terminal": { "container": "name" },
-            "when": { "field": "state", "equals": "running" }
+            "when": {
+              "field": "state",
+              "equals": "running"
+            },
+            "terminal": {
+              "ref": "name",
+              "refPattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$",
+              "command": "docker exec -it {{ref}} sh -c 'if command -v bash >/dev/null 2>&1; then exec bash; else exec sh; fi'",
+              "check": "shell_check"
+            }
           },
           {
             "id": "restart",
             "label": "Restart",
             "icon": "rotate-cw",
             "permission": "docker.containers.control",
-            "as": "service",
-            "command": "docker restart {{name}}",
-            "params": { "name": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$", "from": "name" } },
-            "when": { "field": "state", "equals": "running" },
-            "confirm": { "title": "Restart {name}?", "text": "Anything the container is serving will be interrupted.", "destructive": true },
-            "after": "refresh"
+            "kind": "script",
+            "after": "refresh",
+            "when": {
+              "field": "state",
+              "equals": "running"
+            },
+            "confirm": {
+              "title": "Restart {name}?",
+              "text": "Anything the container is serving will be interrupted.",
+              "destructive": true
+            },
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$",
+                "maxLength": 128,
+                "from": "name"
+              }
+            },
+            "variants": [
+              {
+                "script": "control",
+                "args": {
+                  "op": "literal:restart"
+                }
+              }
+            ]
           },
           {
             "id": "stop",
             "label": "Stop",
             "icon": "square",
             "permission": "docker.containers.control",
-            "as": "service",
-            "command": "docker stop {{name}}",
-            "params": { "name": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$", "from": "name" } },
-            "when": { "field": "state", "equals": "running" },
-            "confirm": { "title": "Stop {name}?", "text": "Anything the container is serving will be interrupted.", "destructive": true },
-            "after": "refresh"
+            "kind": "script",
+            "after": "refresh",
+            "when": {
+              "field": "state",
+              "equals": "running"
+            },
+            "confirm": {
+              "title": "Stop {name}?",
+              "text": "Anything the container is serving will be interrupted.",
+              "destructive": true
+            },
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$",
+                "maxLength": 128,
+                "from": "name"
+              }
+            },
+            "variants": [
+              {
+                "script": "control",
+                "args": {
+                  "op": "literal:stop"
+                }
+              }
+            ]
           },
           {
             "id": "start",
             "label": "Start",
             "icon": "play",
             "permission": "docker.containers.control",
-            "as": "service",
-            "command": "docker start {{name}}",
-            "params": { "name": { "type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$", "from": "name" } },
-            "when": { "field": "state", "notEquals": "running" },
-            "after": "refresh"
+            "kind": "script",
+            "after": "refresh",
+            "when": {
+              "field": "state",
+              "notEquals": "running"
+            },
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$",
+                "maxLength": 128,
+                "from": "name"
+              }
+            },
+            "variants": [
+              {
+                "script": "control",
+                "args": {
+                  "op": "literal:start"
+                }
+              }
+            ]
           }
         ]
       }

@@ -15,7 +15,7 @@ import { runOnServerId } from '@/lib/ssh/connection-pool';
  *
  * Resolution: an explicit mapping for this node (app_config
  * `wol.node_host.<NODE_NAME>`) wins. Otherwise, if this process runs in a Docker container, the host is found by
- * looking for this container among the Docker containers the poller has stored and, failing that, by asking each
+ * asking each
  * managed Linux server whether its Docker daemon has it (`docker inspect <our id>`). Not in a container: no host.
  */
 
@@ -41,18 +41,6 @@ export function ownContainerIds(): string[] {
   const host = os.hostname();
   if (/^[0-9a-f]{12}$/.test(host)) ids.add(host);
   return Array.from(ids);
-}
-
-/** Pure matcher (tested): which server's docker snapshot contains one of our IDs? */
-export function matchContainerHost(
-  ids: string[],
-  snapshots: { serverId: string; containers: { id?: string }[] }[],
-): string | null {
-  const shorts = ids.map(id => id.slice(0, 12));
-  for (const s of snapshots) {
-    if (s.containers.some(c => c.id && shorts.includes(String(c.id).slice(0, 12)))) return s.serverId;
-  }
-  return null;
 }
 
 /** Does `docker inspect <short id>` output (the full container id) belong to one of our container ids? Pure (tested). */
@@ -106,18 +94,12 @@ export function forgetDetectedNodeHost(): void {
 
 /**
  * The managed server this Bosun node's container runs on, or null (not in a container, or not found).
- * First the Docker containers the poller already stored (free), then the managed servers are asked directly.
+ * The managed servers are asked directly (nothing depends on a widget or on what the poller has stored).
  */
 export async function detectNodeHost(): Promise<string | null> {
   const ids = ownContainerIds();
   if (!ids.length) return null;   // not running in a container: there is no host to find
-  const r = await rqlite.query("SELECT server_id, data FROM host_snapshots WHERE section = 'docker'");
-  const snapshots = r.values.map(([serverId, data]) => {
-    let containers: { id?: string }[] = [];
-    try { containers = JSON.parse(String(data)).containers || []; } catch { containers = []; }
-    return { serverId: String(serverId), containers };
-  });
-  return matchContainerHost(ids, snapshots) ?? await pollForHost(ids);
+  return await pollForHost(ids);
 }
 
 export async function getNodeHostMapping(): Promise<string | null> {

@@ -18,7 +18,7 @@ const RQLITE_HOST = process.env.RQLITE_HOST || '127.0.0.1:4001';
 
 // WebSocket path for terminal (Cloudflare-compatible)
 const WS_PATH = '/ws/terminal';
-// API terminals (API keys only; non-admin shell account or one container). A separate
+// API terminals (API keys only; non-admin shell account or one package command). A separate
 // route, token type and handler: see src/lib/terminal/api-terminal-session.js.
 const API_WS_PATH = '/ws/api-terminal';
 const { handleApiTerminal } = require('./src/lib/terminal/api-terminal-session');
@@ -37,8 +37,11 @@ const rateLimitMap = new Map();
 const RATE_LIMIT_MAX = 10;
 const RATE_LIMIT_WINDOW_MS = 60000;
 
-// Container names/IDs accepted for `docker exec` terminals.
-const CONTAINER_REF_RE = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
+// A package's terminal action opens a terminal that runs one command of the package. The command travels in a signed,
+// single-use token (minted by the widget-actions route after its permission, role and check passed); this server only
+// runs what the token says.
+const apiTerm = require('./src/lib/terminal/api-terminal');
+const usedCmdTokens = new apiTerm.UsedTokens();
 
 // Query rqlite database (parameterized)
 async function queryRqlite(sql, params = []) {
@@ -213,8 +216,9 @@ wss.on('connection', async (ws, req) => {
   // URL; the password arrives as the first WebSocket frame so it is never
   // written to URLs or access logs.
   const sshUser = (parsedUrl.query.sshUser || '').toString().trim();
-  // Optional: open `docker exec` into this container instead of a login shell.
-  const containerId = (parsedUrl.query.containerId || '').toString().trim();
+  // Optional: run a package's command (cmdToken, signed) instead of a login shell; cmdLabel only names it for the person.
+  const cmdToken = (parsedUrl.query.cmdToken || '').toString();
+  const cmdLabel = (parsedUrl.query.cmdLabel || '').toString().trim();
 
   // Get client IP (respect x-forwarded-for for Cloudflare)
   const clientIP = req.headers['x-forwarded-for']?.split(',')[0] || req.socket.remoteAddress;
@@ -238,7 +242,7 @@ wss.on('connection', async (ws, req) => {
     return;
   }
 
-  // Host shells and container shells both need Full access (admin), and only
+  // Host shells and package terminals both need Full access (admin), and only
   // for a signed-in user (tokens are never minted for API keys; refuse any
   // that claim to be one).
   const isApiKey = payload.authType === 'api_key' || String(payload.userId).startsWith('apikey:');
@@ -252,8 +256,8 @@ wss.on('connection', async (ws, req) => {
     return;
   }
 
-  if (containerId && !CONTAINER_REF_RE.test(containerId)) {
-    ws.close(4000, 'Invalid container');
+  if (cmdLabel.length > 200) {
+    ws.close(4000, 'Invalid terminal');
     return;
   }
 
@@ -278,11 +282,11 @@ wss.on('connection', async (ws, req) => {
   // ========== CHECK FOR EXISTING SESSION (REATTACH) ==========
   const existingSession = sshSessions.get(sessionId);
   // A session can only be reattached by the same Bosun user, for the same
-  // server/container and SSH account; anything else starts a fresh session.
+  // server/terminal and SSH account; anything else starts a fresh session.
   const sameTarget = existingSession &&
     existingSession.ownerUserId === payload.userId &&
     existingSession.serverId === serverId &&
-    (existingSession.containerId || '') === containerId &&
+    (existingSession.cmdLabel || '') === cmdLabel &&
     existingSession.username === sshUser;
   if (existingSession && existingSession.stream && existingSession.authenticated && sameTarget) {
     console.log('[WS] Reattaching to existing session: ' + sessionId);
@@ -359,6 +363,16 @@ wss.on('connection', async (ws, req) => {
     if (existingSession.client) existingSession.client.end();
     if (existingSession.stream) existingSession.stream.close();
     sshSessions.delete(sessionId);
+  }
+
+  // A package terminal needs its signed command token (a reattach above needs none: the session already exists).
+  let command = null;
+  if (cmdLabel) {
+    const cmdPayload = cmdToken ? verifyToken(cmdToken, apiTerm.WEB_CMD_TOKEN_TYPE) : null;
+    const okClaims = cmdPayload && apiTerm.checkWebCommandClaims(cmdPayload, payload).ok && cmdPayload.serverId === serverId && cmdPayload.label === cmdLabel;
+    if (!okClaims) { ws.close(4003, 'Invalid or expired terminal token'); return; }
+    if (!usedCmdTokens.consume(cmdPayload.jti, cmdPayload.exp)) { ws.close(4001, 'Token already used'); return; }
+    command = cmdPayload.cmd;
   }
 
   // ========== NEW SESSION ==========
@@ -500,12 +514,10 @@ wss.on('connection', async (ws, req) => {
       });
     };
 
-    if (containerId) {
-      // Container shell: docker exec through the host's SSH session. Prefer
-      // bash, fall back to sh (alpine/distroless-ish images).
-      const execCmd = `docker exec -it ${containerId} sh -c 'if command -v bash >/dev/null 2>&1; then exec bash; else exec sh; fi'`;
-      ws.send('\r\n\x1b[36mOpening shell in container ' + containerId + '...\x1b[0m\r\n');
-      sshClient.exec(execCmd, { pty: { term: 'xterm-256color', cols: 80, rows: 24 } }, openPty);
+    if (command) {
+      // A package's terminal: its one command through the host's SSH session (the person's own login).
+      ws.send('\r\n\x1b[36mOpening ' + cmdLabel + '...\x1b[0m\r\n');
+      sshClient.exec(command, { pty: { term: 'xterm-256color', cols: 80, rows: 24 } }, openPty);
     } else if (connected.platform === 'windows') {
       // exec() gives a stream we can drive directly; with a pty, powershell.exe
       // renders an interactive prompt (client.shell() would run cmd.exe).
@@ -526,7 +538,7 @@ wss.on('connection', async (ws, req) => {
       username: sshUser,
       authenticated: true, // Shell created successfully - server-side auth complete
       serverId: serverId,
-      containerId: containerId,
+      cmdLabel: cmdLabel,
       ownerUserId: payload.userId,
     };
     sshSessions.set(sessionId, sessionData);

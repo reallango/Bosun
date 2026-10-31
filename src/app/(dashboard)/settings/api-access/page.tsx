@@ -48,7 +48,6 @@ const ENDPOINTS: { method: string; path: string; what: string; role: Role }[] = 
   { method: 'GET', path: '/api/widgets/:widgetId/data', what: 'Live data of a widget (CPU, disks, containers, …)', role: 'viewer' },
   { method: 'GET', path: '/api/metrics?serverId=…&metrics=cpu.usage,mem.used_pct&range=24h', what: 'Metric history', role: 'viewer' },
   { method: 'GET', path: '/api/cluster/status', what: 'Database cluster status', role: 'viewer' },
-  { method: 'POST', path: '/api/servers/:id/containers/:container/action', what: 'Container start/stop/restart: {"action":"restart","confirm":true}', role: 'operator' },
   { method: 'POST', path: '/api/servers/:id/wake', what: 'Wake-on-LAN', role: 'operator' },
   { method: 'GET', path: '/api/widgets/:widgetId/data?force=true', what: 'Force a fresh poll of the host', role: 'operator' },
   { method: 'POST', path: '/api/servers/:id/exec', what: 'Run a command on the host: {"command":"uptime"}', role: 'admin' },

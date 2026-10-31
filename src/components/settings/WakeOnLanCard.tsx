@@ -94,7 +94,7 @@ export default function WakeOnLanCard() {
                   {servers.map(o => <option key={o.id} value={o.id}>{o.name} ({o.host})</option>)}
                 </select>
                 <p className="text-xs text-muted-foreground">
-                  Detection matches this container against the Docker containers Bosun sees on each server. Set it here if the
+                  Detection asks each managed server whether its Docker daemon runs this container. Set it here if the
                   host is not monitored by Docker or detection picks the wrong one. Each node of a cluster keeps its own setting.
                 </p>
               </div>

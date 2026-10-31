@@ -9,8 +9,9 @@ import { getTerminalSessionManager } from '@/lib/terminal-session-manager';
 interface SSHTerminalWidgetProps {
   widgetId: string;
   serverId: string;
-  /** When set, open `docker exec` into this container instead of a login shell (admin only). */
-  containerId?: string;
+  /** When set, run the command of a widget package's terminal action instead of a login shell (admin only): the signed token and a name for it. */
+  cmdToken?: string;
+  cmdLabel?: string;
 }
 
 type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'error' | 'disconnected';
@@ -99,7 +100,7 @@ function ensureXtermCss() {
   }
 }
 
-export function SSHTerminalWidget({ widgetId, serverId, containerId }: SSHTerminalWidgetProps) {
+export function SSHTerminalWidget({ widgetId, serverId, cmdToken, cmdLabel }: SSHTerminalWidgetProps) {
   const terminalRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
@@ -266,7 +267,7 @@ export function SSHTerminalWidget({ widgetId, serverId, containerId }: SSHTermin
       const url = new URL(getWsUrl());
       url.searchParams.set('sessionId', sessionId);
       url.searchParams.set('serverId', serverId);
-      if (containerId) url.searchParams.set('containerId', containerId);
+      if (cmdLabel) { url.searchParams.set('cmdLabel', cmdLabel); if (cmdToken) url.searchParams.set('cmdToken', cmdToken); }
       url.searchParams.set('token', tokenJson.data.token);
       // Username is needed to match reattached sessions; the password is sent
       // as the first WebSocket frame so it never lands in URLs or access logs.
@@ -367,7 +368,7 @@ export function SSHTerminalWidget({ widgetId, serverId, containerId }: SSHTermin
       setStatus('error');
       statusRef.current = 'error';
     }
-  }, [username, sessionId, serverId, containerId, cleanup, resetToLogin, widgetId]);
+  }, [username, sessionId, serverId, cmdToken, cmdLabel, cleanup, resetToLogin, widgetId]);
 
   // Disconnect from WebSocket server - FULL destroy (user clicked disconnect)
   const disconnect = useCallback(() => {

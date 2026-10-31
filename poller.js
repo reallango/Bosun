@@ -9,7 +9,7 @@
  *  - one persistent SSH connection per host (keepalives, reused across polls);
  *  - one exec per poll running a batched, read-only script at nice 19 /
  *    ionice idle (PowerShell at BelowNormal on Windows);
- *  - probes are tiered: cheap counters every poll, docker/disks every
+ *  - probes are tiered: cheap counters every poll, disks every
  *    minute, services/OS facts every few minutes;
  *  - CPU% and network rates come from counter deltas between polls, so
  *    nothing sleeps on the host;
@@ -56,12 +56,12 @@ const MAX_BACKOFF_MS = 5 * 60 * 1000;
 const TIERS = {
   linux: [
     { name: 'fast', probes: ['stat', 'mem', 'load', 'temp', 'netdev', 'gpu'], periodMs: 0 },
-    { name: 'medium', probes: ['df', 'ip', 'docker'], periodMs: 60 * 1000 },
+    { name: 'medium', probes: ['df', 'ip'], periodMs: 60 * 1000 },
     { name: 'slow', probes: ['services', 'system'], periodMs: 5 * 60 * 1000 },
   ],
   windows: [
     { name: 'fast', probes: ['stat', 'mem', 'netdev', 'gpu'], periodMs: 0 },
-    { name: 'medium', probes: ['df', 'docker'], periodMs: 2 * 60 * 1000 },
+    { name: 'medium', probes: ['df'], periodMs: 2 * 60 * 1000 },
     { name: 'slow', probes: ['ip', 'services', 'system'], periodMs: 15 * 60 * 1000 },
   ],
 };

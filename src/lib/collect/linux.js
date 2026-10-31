@@ -17,7 +17,7 @@ const { metricsSection } = require('./metrics-section');
 const MARK = '@@BOSUN ';
 
 /** Probes the script understands; the poller picks a subset per tick. */
-const PROBES = ['stat', 'mem', 'load', 'temp', 'netdev', 'gpu', 'df', 'ip', 'docker', 'services', 'system'];
+const PROBES = ['stat', 'mem', 'load', 'temp', 'netdev', 'gpu', 'df', 'ip', 'services', 'system'];
 
 const SCRIPT = String.raw`
 export LC_ALL=C
@@ -48,12 +48,6 @@ ip) m ip
   printf "PHYS"; for d in /sys/class/net/*; do [ -e "$d/device" ] && printf " %s" "$(basename "$d")"; done; echo
   printf "WIFI"; for d in /sys/class/net/*; do [ -e "$d/wireless" ] && printf " %s" "$(basename "$d")"; done; echo
   if have ip; then ip -j addr show 2>/dev/null || echo NOJSON; else echo NONE; fi ;;
-docker) m docker
-  if have docker; then
-    out=$(docker ps -a --no-trunc --format '{{json .}}' 2>&1); rc=$?
-    if [ $rc -ne 0 ] && have sudo; then out2=$(sudo -n docker ps -a --no-trunc --format '{{json .}}' 2>&1) && { out=$out2; rc=0; }; fi
-    echo "RC $rc"; printf '%s\n' "$out" | head -n 500
-  else echo NONE; fi ;;
 services) m services
   if have systemctl; then systemctl list-units --type=service --all --no-pager --plain --no-legend 2>/dev/null | head -n 400
   else echo NONE; fi ;;
@@ -223,31 +217,6 @@ function parseIp(text) {
   return parseIpProbe(text).interfaces;
 }
 
-function parseDocker(text) {
-  if (!text || text === 'NONE') return { available: false, error: 'docker not installed', containers: [] };
-  const [first, ...rest] = text.split('\n');
-  const rc = parseInt((first || '').replace('RC ', ''), 10);
-  if (rc !== 0) {
-    const err = rest.join(' ').trim().slice(0, 300);
-    return { available: false, error: /permission denied/i.test(err) ? 'permission denied (add the SSH user to the docker group)' : err || 'docker ps failed', containers: [] };
-  }
-  const containers = [];
-  for (const l of rest) {
-    if (!l.startsWith('{')) continue;
-    try {
-      const c = JSON.parse(l);
-      containers.push({
-        id: String(c.ID || '').slice(0, 12), name: c.Names, image: c.Image, status: c.Status,
-        state: c.State || (/^Up/.test(c.Status) ? 'running' : 'exited'), ports: c.Ports || '',
-        createdAt: c.CreatedAt || '', runningFor: c.RunningFor || '',
-        compose: (String(c.Labels || '').match(/com\.docker\.compose\.project=([^,]+)/) || [])[1] || null,
-      });
-    } catch { /* ignore malformed line */ }
-  }
-  containers.sort((a, b) => (a.state === b.state ? String(a.name).localeCompare(String(b.name)) : a.state === 'running' ? -1 : 1));
-  return { available: true, containers };
-}
-
 function parseServices(text) {
   if (!text || text === 'NONE') return [];
   return text.split('\n').filter(Boolean).map(l => {
@@ -380,12 +349,6 @@ function buildSnapshot(raw, prev, now = Date.now()) {
     if (disks.length) metrics['disk.max_used_pct'] = Math.max(...disks.map(d => d.usagePercent));
   }
 
-  if (raw.docker !== undefined) {
-    const d = parseDocker(raw.docker);
-    sections.docker = d;
-    if (d.available) metrics['docker.running'] = d.containers.filter(c => c.state === 'running').length;
-  }
-
   if (raw.services !== undefined) sections.services = parseServices(raw.services);
 
   if (raw.system !== undefined) {
@@ -404,5 +367,5 @@ module.exports = {
   buildCommand,
   splitSections,
   buildSnapshot,
-  _parsers: { parseStat, parseMeminfo, parseLoad, parseTemp, parseNetdev, parseGpu, parseDf, parseIp, parseIpProbe, parseDocker, parseServices, parseSystem },
+  _parsers: { parseStat, parseMeminfo, parseLoad, parseTemp, parseNetdev, parseGpu, parseDf, parseIp, parseIpProbe, parseServices, parseSystem },
 };

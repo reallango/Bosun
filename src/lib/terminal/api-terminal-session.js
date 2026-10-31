@@ -8,9 +8,9 @@
  * a deliberately weak purpose:
  *   - host target:      the host's NON-ADMIN shell account (its own key; no sudo, no Docker group),
  *                       re-verified on every open;
- *   - container target: one fixed `docker exec` into one container, over the privileged account,
- *                       and only for containers that cannot reach the host. The privileged account
- *                       runs exactly two fixed commands (`docker inspect`, `docker exec`); it never
+ *   - command target:   the one command a package's terminal action declared, over the privileged account,
+ *                       and only after the package's own check passed when the token was minted. The
+ *                       privileged account runs exactly that command; it never
  *                       gets a shell, and the session ends the moment that exec ends.
  * There is no reattach, no fallback to another account, and no way to type commands into
  * anything but the shell/exec the session was opened for.
@@ -61,7 +61,7 @@ async function handleApiTerminal(ws, parsedUrl, deps) {
   let stream = null;
   let maxTimer = null;
   let idleTimer = null;
-  let detail = payload.target === 'host' ? 'host shell' : 'container ' + payload.container;
+  let detail = payload.target === 'host' ? 'host shell' : String(payload.label);
   let opened = false;
   const startedAt = Date.now();
 
@@ -94,7 +94,7 @@ async function handleApiTerminal(ws, parsedUrl, deps) {
     if (!s.length) return fail('Server not found', 4000);
     const [hostname, port, platform, fingerprint, sshUser, sshKeyId, shellUser, shellKeyId] = s[0];
     const isWindows = platform === 'windows';
-    if (isWindows && payload.target !== 'host') return fail('Container shells are not available on Windows hosts', 4000);
+    if (isWindows && payload.target !== 'host') return fail('This terminal is not available on Windows hosts', 4000);
 
     // Which key and account does this session use? Exactly one, fixed by the token's target.
     const isHost = payload.target === 'host';
@@ -124,15 +124,9 @@ async function handleApiTerminal(ws, parsedUrl, deps) {
       // non-admin account, and nothing else is run.
       if (isWindows) command = 'powershell -NoLogo -NoProfile';
     } else {
-      // The privileged account is used for these two fixed commands only.
-      const ref = String(payload.container);
-      const ins = await sshExec(client, api.inspectCommand(ref), { timeoutMs: 15000 });
-      const info = api.parseInspect(ins.stdout);
-      const risks = ins.exitCode === 0 ? api.containerRisks(info) : ['the container was not found'];
-      if (risks.length) return fail('Container shell refused: ' + risks.join('; '), 4003);
-      if (!api.CONTAINER_ID_RE.test(String(info.Id))) return fail('Container shell refused: unreadable container id', 4003);
-      command = api.dockerExecCommand(String(info.Id));
-      detail = 'container ' + ref + ' (' + String(info.Id).slice(0, 12) + ')';
+      // The privileged account runs exactly the command the package's terminal action declared and its check pinned (it
+      // is in the signed token); nothing else, and no host shell behind it.
+      command = String(payload.cmd);
     }
 
     const pty = { term: 'xterm-256color', cols: 80, rows: 24 };
@@ -154,7 +148,7 @@ async function handleApiTerminal(ws, parsedUrl, deps) {
     maxTimer = setTimeout(() => finish('maximum session time'), limits.maxSessionMs);
 
     stream.on('data', (d) => { touch(); if (ws.readyState === WebSocket.OPEN) ws.send(d.toString('utf-8')); });
-    // For a container the ssh channel IS the exec: when it ends the whole session is torn down,
+    // For a command the ssh channel IS the exec: when it ends the whole session is torn down,
     // so there is never a host shell left behind it.
     stream.on('close', () => finish('shell ended'));
     ws.on('message', (data) => {

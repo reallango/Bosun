@@ -1,19 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import {
-  checkApiTerminalClaims, UsedTokens, SessionLimiter, containerRisks, isSensitiveMount, parseInspect,
-  inspectCommand, dockerExecCommand, TOKEN_TYPE, terminalLimits, LIMIT_KEYS,
+  checkApiTerminalClaims, checkWebCommandClaims, isValidTerminalCommand, UsedTokens, SessionLimiter,
+  TOKEN_TYPE, WEB_CMD_TOKEN_TYPE, terminalLimits, LIMIT_KEYS,
 } from './api-terminal';
 
 const goodHost = { type: TOKEN_TYPE, authType: 'api_key', userId: 'apikey:k1', serverId: 's1', jti: 'j1', target: 'host' };
-const ID = 'a'.repeat(64);
-
-const safe = () => ({ Id: ID, State: { Running: true }, HostConfig: { Privileged: false, PidMode: '', CapAdd: null, Devices: null, SecurityOpt: null, Binds: ['/srv/app:/data'] },
-  Mounts: [{ Type: 'bind', Source: '/srv/app', Destination: '/data' }, { Type: 'volume', Source: '/var/lib/docker/volumes/x/_data' }] });
+const goodCommand = { ...goodHost, target: 'command', cmd: "docker exec -it abc sh -c 'exec sh'", label: 'Shell: web' };
 
 describe('checkApiTerminalClaims', () => {
   it('accepts well-formed API key tokens', () => {
     expect(checkApiTerminalClaims(goodHost).ok).toBe(true);
-    expect(checkApiTerminalClaims({ ...goodHost, target: 'container', container: 'web-1' }).ok).toBe(true);
+    expect(checkApiTerminalClaims(goodCommand).ok).toBe(true);
   });
   it('rejects the web terminal token type, sessions, and malformed claims', () => {
     expect(checkApiTerminalClaims({ ...goodHost, type: 'ws' }).ok).toBe(false);
@@ -21,10 +18,44 @@ describe('checkApiTerminalClaims', () => {
     expect(checkApiTerminalClaims({ ...goodHost, userId: 'u1' }).ok).toBe(false);
     expect(checkApiTerminalClaims({ ...goodHost, jti: undefined }).ok).toBe(false);
     expect(checkApiTerminalClaims({ ...goodHost, target: 'root' }).ok).toBe(false);
-    expect(checkApiTerminalClaims({ ...goodHost, target: 'container', container: '--privileged' }).ok).toBe(false);
-    expect(checkApiTerminalClaims({ ...goodHost, target: 'container', container: 'a b' }).ok).toBe(false);
-    expect(checkApiTerminalClaims({ ...goodHost, container: 'web' }).ok).toBe(false);
+    expect(checkApiTerminalClaims({ ...goodHost, target: 'container', container: 'web' }).ok).toBe(false);
     expect(checkApiTerminalClaims(null).ok).toBe(false);
+  });
+  it('a command token needs a command and a label, a host token must not carry them', () => {
+    expect(checkApiTerminalClaims({ ...goodCommand, cmd: undefined }).ok).toBe(false);
+    expect(checkApiTerminalClaims({ ...goodCommand, label: undefined }).ok).toBe(false);
+    expect(checkApiTerminalClaims({ ...goodCommand, cmd: 'echo hi\nid' }).ok).toBe(false);
+    expect(checkApiTerminalClaims({ ...goodCommand, cmd: 'x'.repeat(2001) }).ok).toBe(false);
+    expect(checkApiTerminalClaims({ ...goodHost, cmd: 'id' }).ok).toBe(false);
+    expect(checkApiTerminalClaims({ ...goodHost, label: 'x' }).ok).toBe(false);
+  });
+});
+
+describe('checkWebCommandClaims', () => {
+  const access = { userId: 'u1', role: 'admin' };
+  const good = { type: WEB_CMD_TOKEN_TYPE, userId: 'u1', serverId: 's1', jti: 'j1', cmd: 'docker exec -it abc sh', label: 'Shell: web' };
+  it('accepts a command token minted for this user', () => {
+    expect(checkWebCommandClaims(good, access).ok).toBe(true);
+  });
+  it('refuses another user, another token type, API keys and malformed claims', () => {
+    expect(checkWebCommandClaims({ ...good, userId: 'u2' }, access).ok).toBe(false);
+    expect(checkWebCommandClaims({ ...good, type: 'ws' }, access).ok).toBe(false);
+    expect(checkWebCommandClaims({ ...good, type: TOKEN_TYPE }, access).ok).toBe(false);
+    expect(checkWebCommandClaims({ ...good, authType: 'api_key' }, access).ok).toBe(false);
+    expect(checkWebCommandClaims({ ...good, userId: 'apikey:k' }, { userId: 'apikey:k' }).ok).toBe(false);
+    expect(checkWebCommandClaims({ ...good, jti: undefined }, access).ok).toBe(false);
+    expect(checkWebCommandClaims({ ...good, serverId: '' }, access).ok).toBe(false);
+    expect(checkWebCommandClaims({ ...good, cmd: '' }, access).ok).toBe(false);
+    expect(checkWebCommandClaims({ ...good, label: 'a\nb' }, access).ok).toBe(false);
+    expect(checkWebCommandClaims(null, access).ok).toBe(false);
+    expect(checkWebCommandClaims(good, null).ok).toBe(false);
+  });
+});
+
+describe('isValidTerminalCommand', () => {
+  it('is one non-empty line of limited length without control characters', () => {
+    expect(isValidTerminalCommand('docker exec -it abc sh')).toBe(true);
+    for (const bad of ['', 'a\nb', 'a\u0000b', 'a\u007fb', 'x'.repeat(2001), 5, null, undefined]) expect(isValidTerminalCommand(bad as never), String(bad)).toBe(false);
   });
 });
 
@@ -46,75 +77,22 @@ describe('UsedTokens and SessionLimiter', () => {
   });
 });
 
-describe('containerRisks', () => {
-  it('accepts an ordinary container', () => {
-    expect(containerRisks(safe())).toEqual([]);
-  });
-  it('refuses anything that reaches the host', () => {
-    const cases: [string, (c: any) => void, RegExp][] = [
-      ['privileged', c => { c.HostConfig.Privileged = true; }, /privileged/],
-      ['host pid', c => { c.HostConfig.PidMode = 'host'; }, /PID/],
-      ['host ipc', c => { c.HostConfig.IpcMode = 'host'; }, /IPC/],
-      ['sys_admin', c => { c.HostConfig.CapAdd = ['CAP_SYS_ADMIN']; }, /capabilities/],
-      ['devices', c => { c.HostConfig.Devices = [{ PathOnHost: '/dev/sda' }]; }, /devices/],
-      ['unconfined', c => { c.HostConfig.SecurityOpt = ['seccomp=unconfined']; }, /security profile/],
-      ['docker socket', c => { c.Mounts.push({ Type: 'bind', Source: '/var/run/docker.sock' }); }, /mounts/],
-      ['root fs', c => { c.Mounts.push({ Type: 'bind', Source: '/' }); }, /mounts/],
-      ['etc', c => { c.Mounts.push({ Type: 'bind', Source: '/etc/ssh' }); }, /mounts/],
-      ['home', c => { c.HostConfig.Binds = ['/home/admin/.ssh:/k:ro']; }, /mounts/],
-      ['traversal', c => { c.Mounts.push({ Type: 'bind', Source: '/srv/../etc' }); }, /mounts/],
-      ['stopped', c => { c.State.Running = false; }, /not running/],
-    ];
-    for (const [name, mutate, re] of cases) {
-      const c = safe();
-      mutate(c);
-      const r = containerRisks(c);
-      expect(r.length, name).toBeGreaterThan(0);
-      expect(r.join(' '), name).toMatch(re);
-    }
-  });
-  it('treats unreadable inspections as unsafe', () => {
-    expect(containerRisks(null).length).toBe(1);
-    expect(containerRisks({}).length).toBe(1);
-    expect(parseInspect('not json')).toBeNull();
-    expect(parseInspect('[]')).toBeNull();
-    expect(parseInspect(JSON.stringify([safe(), safe()]))).toBeNull();
-    expect(parseInspect(JSON.stringify([safe()]))?.Id).toBe(ID);
-  });
-  it('knows which mount sources are sensitive', () => {
-    for (const s of ['/', '/etc', '/etc/shadow', '/root', '/home/me', '/run/docker.sock', '/var/run', '/proc/1', '/srv/../etc', '/opt/x/docker.sock']) expect(isSensitiveMount(s), s).toBe(true);
-    for (const s of ['/srv/app', '/mnt/data', '/opt/app', '/var/lib/myapp', '/homework']) expect(isSensitiveMount(s), s).toBe(false);
-  });
-});
-
-describe('commands', () => {
-  it('only builds fixed docker commands from validated input', () => {
-    expect(inspectCommand('web-1')).toBe('docker inspect --type container web-1');
-    expect(() => inspectCommand('x; reboot')).toThrow();
-    expect(() => inspectCommand('--privileged')).toThrow();
-    expect(dockerExecCommand(ID)).toBe(`docker exec -it ${ID} sh -c 'if command -v bash >/dev/null 2>&1; then exec bash; else exec sh; fi'`);
-    expect(() => dockerExecCommand('web-1')).toThrow();
-    expect(() => dockerExecCommand(ID + '; id')).toThrow();
-  });
-});
-
 describe('terminalLimits', () => {
   it('uses the defaults when nothing is set', () => {
-    expect(terminalLimits({})).toEqual({ tokenTtlSec: 60, maxSessionMs: 60 * 60000, idleMs: 10 * 60000, maxPerKey: 3 });
-    expect(terminalLimits()).toEqual(terminalLimits({}));
+    const l = terminalLimits({});
+    expect(l.tokenTtlSec).toBe(60);
+    expect(l.maxPerKey).toBe(3);
   });
   it('applies configured values, clamped to sane ranges, and ignores junk', () => {
-    const l = terminalLimits({
-      [LIMIT_KEYS.tokenTtlSec]: '120', [LIMIT_KEYS.sessionMaxMin]: '5000', [LIMIT_KEYS.idleMin]: '0', [LIMIT_KEYS.maxPerKey]: 'abc',
-    });
-    expect(l).toEqual({ tokenTtlSec: 120, maxSessionMs: 1440 * 60000, idleMs: 1 * 60000, maxPerKey: 3 });
-    expect(terminalLimits({ [LIMIT_KEYS.maxPerKey]: '' }).maxPerKey).toBe(3);
-    expect(terminalLimits({ [LIMIT_KEYS.maxPerKey]: null }).maxPerKey).toBe(3);
+    expect(terminalLimits({ [LIMIT_KEYS.tokenTtlSec]: '30' }).tokenTtlSec).toBe(30);
+    expect(terminalLimits({ [LIMIT_KEYS.tokenTtlSec]: '1' }).tokenTtlSec).toBe(10);
+    expect(terminalLimits({ [LIMIT_KEYS.tokenTtlSec]: '99999' }).tokenTtlSec).toBe(300);
+    expect(terminalLimits({ [LIMIT_KEYS.maxPerKey]: 'lots' }).maxPerKey).toBe(3);
   });
   it('lets the session limiter take a per-call cap', () => {
-    const l = new SessionLimiter(3);
-    expect(l.acquire('k', 1)).toBe(true);
-    expect(l.acquire('k', 1)).toBe(false);
+    const l = new SessionLimiter(1);
     expect(l.acquire('k', 2)).toBe(true);
+    expect(l.acquire('k', 2)).toBe(true);
+    expect(l.acquire('k', 2)).toBe(false);
   });
 });

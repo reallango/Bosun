@@ -1,6 +1,6 @@
 # Plan: self-contained widget packages
 
-Status: **in progress on `dev`. Phases 0 (spec v2), 1 (file store and materialiser), 2 (scripts runner, probes, lookups), 3 (jobs) and 4 (conditions, variants, UI blocks) are done and verified; phase 5 (port Ollama, OS Update Check and Custom Command) is done for Linux and Docker, its Windows live test is open; phase 8 (Docker package) is next.** Written on the `dev` branch so the work can be picked up later by anyone (or any
+Status: **in progress on `dev`. Phases 0 (spec v2), 1 (file store and materialiser), 2 (scripts runner, probes, lookups), 3 (jobs) and 4 (conditions, variants, UI blocks) are done and verified; phase 5 (port Ollama, OS Update Check and Custom Command) is done for Linux and Docker, its Windows live test is open; phase 8 (Docker package) is done; phase 9 (guard rails and docs) is next.** Written on the `dev` branch so the work can be picked up later by anyone (or any
 session). Phases marked "done" are built, tested and pushed to `dev`.
 
 ## 1. The rule
@@ -282,6 +282,24 @@ hosts, the live tests in section 8. Do not push to `main` until the owner has te
 8. **Docker package completion**: container actions, logs and the terminal action as package actions; remove the
    `/containers/**` routes and the `docker.*` special cases in the terminal route and OpenAPI; move the `docker` probe
    and `docker.running` metric into the package; Wake-on-LAN uses its own direct check.
+   **DONE** (461 tests, 31 more run in the Docker build on Linux; live on the nuc against real containers): the Docker package is
+   version 2 (1.0.0): data, logs and start/stop/restart are scripts, `docker.running` is a computed metric, and the shell is a
+   generic **terminal action** (`terminal: { ref, refPattern, command, check }`): Bosun validates the target, runs the package's
+   check script for API keys (which may refuse with `ERROR:` and pins the exact target with `REF <name>`), and mints a signed
+   single-use token that carries the final command (`ws-svc` target `command` for API keys, a new `ws-cmd` token for a signed-in
+   Full access user); ws-server.js and the API terminal session only run the command in the token. The container-safety rules
+   (privileged, host namespaces, dangerous capabilities, devices, disabled security profiles, sensitive mounts, an unreadable
+   inspection is unsafe) moved from core JavaScript into `widgets/docker/scripts/shell_check.sh` (Docker's own inspect templates plus
+   awk). Removed from core: the `/containers/**` routes, `src/lib/docker`, the `docker.shell` special case and the `container`
+   target of `POST /terminal`, the collectors' docker probe and parser, the poller's docker probe, the `docker` snapshot section
+   and capability, the static docker metric label and alert entry, the container entries of the OpenAPI document and the
+   Wake-on-LAN shortcut through the stored container list (its own direct `docker inspect` check stays).
+   Verified live: container list and metric, logs and the three controls (confirmation enforced), the shell check on two ordinary and
+   five genuinely risky containers (privileged, host PID, Docker socket, /etc, SYS_ADMIN) and a stopped one, a real API terminal and a
+   real web terminal session in a container, token replay and a wrong label refused, the old routes answering 404.
+   Carried forward: (a) the provisioning route still adds the service account to the docker group when Docker exists (a host
+   capability, not a widget; revisit with the guard rails); (b) the terminal command runs on Linux hosts only; (c) the stored `docker`
+   snapshot rows of older installs stay in the database until retention removes them.
 9. **Guard rails and docs**: a test (and CI step) that fails if core sources mention a package's widget types, permission
    ids or snapshot sections (an allow-list file for the SSH Terminal); remove `customWidgetComponents`,
    `WIDGET_SECTIONS` and the widget names from `SNAPSHOT_SECTIONS`; write "Create your own widget" documentation with a
