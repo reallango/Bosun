@@ -1,0 +1,4 @@
+# Files copied into the Docker image must keep LF line endings, whatever the checkout setting.
+s6-overlay/** text eol=lf
+*.sh text eol=lf
+Dockerfile text eol=lf

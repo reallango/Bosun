@@ -1,7 +1,7 @@
 # Plan: self-contained widget packages
 
-Status: **plan, decisions made (declarative + host scripts; all three widgets at once), build not started.** Written on the `dev` branch so the work can be picked up later by anyone (or any
-session). Nothing in this document has been built yet except where it says "done".
+Status: **in progress on `dev`. Phase 0 (spec v2) and phase 1 (file store and materialiser) are done and verified; phase 2 (scripts runner, probes, lookups) is next.** Written on the `dev` branch so the work can be picked up later by anyone (or any
+session). Phases marked "done" are built, tested and pushed to `dev`.
 
 ## 1. The rule
 
@@ -184,6 +184,10 @@ hosts, the live tests in section 8. Do not push to `main` until the owner has te
    contracts. Unit tests first.
 1. **File store and materialiser** (5.1) including the cluster test and the raised limits; install review shows file
    hashes.
+   **DONE** (commit 2ce1a37): migration 11 adds `widget_packages.content_hash`; `materialize.ts` (disk, atomic, hash-verified) and
+   `materialize-db.ts` (15 s sync keyed on the hash, DB fallback for a node that is behind); verified in Docker by upgrading
+   a v10 database (hashes backfilled, all 12 packages written under `/tmp/bosun-widgets`). Install review still to show file
+   hashes (phase 2). A `.gitattributes` keeps the s6 files LF on Windows checkouts.
 2. **Scripts runner, state probes, lookups** (5.2, 5.3, 5.4): generic runtime, poller integration, install review of
    scripts and network hosts.
 3. **Jobs** (5.5): table (migration), runtime, routes, audit, UI progress.
