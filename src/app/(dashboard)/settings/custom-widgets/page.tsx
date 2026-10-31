@@ -3,10 +3,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Puzzle, Trash2 } from 'lucide-react';
 import Header from '@/components/layout/Header';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import { useToast } from '@/components/ui/toast';
 import { useAuth } from '@/hooks/useAuth';
@@ -46,23 +44,19 @@ function sizeOf(raw: string): { w: number; h: number } {
 /**
  * Widget types defined in the database (Settings → Custom Widgets). Admins can
  * rename them, change their default size and refresh interval, restrict them
- * to Linux or Windows, or disable them, without a rebuild. Data comes from
- * the poller; only types the code can feed can be registered.
+ * to Linux or Windows, or disable them, without a rebuild. New widgets are added as packages (Settings, Widgets).
  */
 export default function CustomWidgetsPage() {
   const { toast } = useToast();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const [rows, setRows] = useState<CustomWidgetRow[]>([]);
-  const [collectorTypes, setCollectorTypes] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
-  const [form, setForm] = useState({ type: '', display_name: '', description: '' });
 
   const load = useCallback(async () => {
     try {
-      const d = await api<{ widgets: CustomWidgetRow[]; collectorTypes: string[] }>('/api/custom-widgets');
+      const d = await api<{ widgets: CustomWidgetRow[] }>('/api/custom-widgets');
       setRows(d.widgets || []);
-      setCollectorTypes(d.collectorTypes || []);
     } catch (err) {
       toast('Failed to load custom widgets', { variant: 'error', description: err instanceof Error ? err.message : undefined });
     } finally {
@@ -89,20 +83,6 @@ export default function CustomWidgetsPage() {
       toast('Delete failed', { variant: 'error', description: err instanceof Error ? err.message : undefined });
     }
   };
-
-  const register = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      await api('/api/widget-definitions', 'POST', form);
-      setForm({ type: '', display_name: '', description: '' });
-      await load();
-      toast('Custom widget registered', { variant: 'success' });
-    } catch (err) {
-      toast('Registration failed', { variant: 'error', description: err instanceof Error ? err.message : undefined });
-    }
-  };
-
-  const registrable = collectorTypes.filter(t => !rows.some(r => r.type === t));
 
   return (
     <>
@@ -167,40 +147,6 @@ export default function CustomWidgetsPage() {
               );
             })}
           </ul>
-        )}
-
-        {isAdmin && (
-          <Card>
-            <CardHeader><CardTitle>Register a custom widget</CardTitle></CardHeader>
-            <CardContent>
-              {registrable.length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  New widgets are added as packages (Settings, Widgets): a package carries its own scripts, settings and screen.
-                </p>
-              ) : (
-                <form onSubmit={register} className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                  <div className="space-y-1.5">
-                    <Label htmlFor="cw-type">Type</Label>
-                    <select id="cw-type" className="form-select" value={form.type} onChange={e => setForm(f => ({ ...f, type: e.target.value }))} required>
-                      <option value="">Select…</option>
-                      {registrable.map(t => <option key={t} value={t}>{t}</option>)}
-                    </select>
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="cw-name">Display name</Label>
-                    <Input id="cw-name" value={form.display_name} onChange={e => setForm(f => ({ ...f, display_name: e.target.value }))} required />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="cw-desc">Description</Label>
-                    <Input id="cw-desc" value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} />
-                  </div>
-                  <div className="sm:col-span-3">
-                    <Button type="submit" size="lg">Register</Button>
-                  </div>
-                </form>
-              )}
-            </CardContent>
-          </Card>
         )}
       </div>
     </>

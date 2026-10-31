@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "commands",
   "name": "Custom Command",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Run a command on the host as its non-admin account (PowerShell on Windows) and show its output, repeated at the interval you choose. Installed by default. Everything it does is in this package: the scripts that run the command, its settings and its screen.",
   "author": "Bosun",
   "permissions": [
@@ -18,7 +18,7 @@
     {
       "id": "commands.run",
       "label": "Run commands",
-      "description": "Choose the command of a Custom Command widget (it runs as the non-admin account of the host), and run arbitrary commands on the host through the API.",
+      "description": "Choose the command of a Custom Command widget (it runs as the non-admin account of the host).",
       "group": "Commands",
       "defaultLevel": "admin",
       "risk": "high",

@@ -94,7 +94,7 @@ describe('the three ported packages (Ollama, OS Update Check, Custom Command)', 
 const base = (): Record<string, unknown> => ({
   version: 2,
   scripts: { a: { as: 'service', linux: 'scripts/a.sh', params: { name: { type: 'string', pattern: '^[a-z]{1,10}$' } } } },
-  data: { source: 'snapshot', section: 'docker', permission: 'dk.view' },
+  data: { source: 'snapshot', section: 'services', permission: 'dk.view' },
   actions: [],
   view: { type: 'text', text: '{x}' },
 });

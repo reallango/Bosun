@@ -47,11 +47,11 @@ export function buildOpenApi(widgets: OpenApiWidget[], serverUrl = '/'): Json {
     '/api/servers/{serverId}/exec': {
       post: {
         operationId: 'execAsServiceAccount', summary: 'Run a command as the privileged service account', tags: ['Commands'],
-        description: 'Needs the `commands.run` permission (Full access by default).',
+        description: 'Needs the `exec.service` permission (Full access by default).',
         parameters: [serverIdParam],
         requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['command'], properties: { command: { type: 'string', maxLength: 4000 } } } } } },
         responses: { '200': { description: 'Output and exit code' }, ...errorResponses },
-        'x-bosun-permission': 'commands.run',
+        'x-bosun-permission': 'exec.service',
       },
     },
     '/api/servers/{serverId}/shell/exec': {
