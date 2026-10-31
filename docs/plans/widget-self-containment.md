@@ -316,6 +316,17 @@ hosts, the live tests in section 8. Do not push to `main` until the owner has te
    `bundled.json`) validated and run by `example-package.test.ts`; `widgets/README.md` no longer describes compiled views.
 10. **Hardening and release**: upgrade test from the previous image (all widget types on a dashboard, then switch the
     image), multi-node test, a Read-only user's view, then ask the owner before any push to `main`.
+    **DONE on `dev`; the release to `main` waits for the owner.** Verified on the nuc: (a) the image from before the package work
+    (all 13 widget types on a dashboard, a Custom Command setting) replaced by this one on the same data: every package installed
+    and upgraded, every widget kept working and its setting; (b) a Read-only user sees and reads the widgets but is refused the exec
+    API, package management and widget settings; (c) a two-node cluster: a zip-imported package served the same data from both
+    nodes. Also in this phase, at the owner's request: the Custom Widgets page is gone and every installed widget has a settings
+    cog (offered, platforms, default and smallest size, refresh; a default below the smallest is refused); widgets are badged
+    **Optional** (from the Bosun repository, preinstalled or installed) or **Custom** (imported from a zip); titles come from the
+    widget's real name; `widget-sizes.test.ts` checks default >= smallest for every bundled widget. A visual pass over all
+    widgets at default and smallest size raised the smallest size of CPU/Memory (4x5), Metrics History (6x5) and Server Summary
+    (4x5, default 6x5), removed stale wording from the package descriptions, stopped command output breaking mid-word, and shows
+    fewer chart time labels on narrow charts. Widgets already on dashboards keep the minimum they were created with.
 
 Phases 1 to 4 are core work that can be built and tested without touching a host. Phases 5 to 8 each remove one
 widget's code from core and are independently releasable.

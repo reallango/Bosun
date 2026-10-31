@@ -87,7 +87,7 @@ function V1View({ view, data, widgetId, serverId, actions, allowed, busy, start 
     }
     if (view.type === 'text') {
       const root = (data && typeof data === 'object' ? data : { text: String(data) }) as Row;
-      return <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-all font-mono text-xs">{fillTemplate(view.text ?? '', root)}</pre>;
+      return <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words font-mono text-xs">{fillTemplate(view.text ?? '', root)}</pre>;
     }
     if (rows.length === 0) return <div className="py-4 text-center text-xs text-gray-500">{view.empty || 'Nothing to show'}</div>;
     if (view.type === 'list' && view.row) {
@@ -322,7 +322,7 @@ export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
               <Dialog.Description className="sr-only">Output of the action</Dialog.Description>
               <Dialog.Close asChild><IconBtn label="Close"><X /></IconBtn></Dialog.Close>
             </div>
-            <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-all rounded bg-gray-950 p-2 font-mono text-[11px] leading-snug text-gray-100">{output?.text}</pre>
+            <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded bg-gray-950 p-2 font-mono text-[11px] leading-snug text-gray-100">{output?.text}</pre>
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>

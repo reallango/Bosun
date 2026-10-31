@@ -2,8 +2,8 @@
   "schema": 1,
   "id": "docker",
   "name": "Docker Containers",
-  "version": "1.0.0",
-  "description": "Containers on the host with logs, a shell in each container, and start, stop and restart. Installed by default. Everything it does is in this package: the scripts that list and control containers, the check that decides who may get a shell, and its screen.",
+  "version": "1.0.1",
+  "description": "Containers on the host with logs, a shell in each container, and start, stop and restart.",
   "author": "Bosun",
   "permissions": [
     {

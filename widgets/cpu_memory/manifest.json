@@ -2,8 +2,8 @@
   "schema": 1,
   "id": "cpu_memory",
   "name": "CPU/Memory",
-  "version": "1.0.0",
-  "description": "CPU and memory usage with load averages, swap and temperature. Installed by default; tracks CPU, load, temperature, memory and swap as history.",
+  "version": "1.0.2",
+  "description": "CPU and memory usage with load averages, swap and temperature. Tracks CPU, load, temperature, memory and swap as history.",
   "author": "Bosun",
   "permissions": [
     {
@@ -24,7 +24,7 @@
       "icon": "cpu",
       "category": "system",
       "default_size": { "w": 8, "h": 6 },
-      "min_size": { "w": 4, "h": 4 },
+      "min_size": { "w": 4, "h": 5 },
       "refresh_interval": 5,
       "supports_linux": true,
       "supports_windows": true,

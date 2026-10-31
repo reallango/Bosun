@@ -2,8 +2,8 @@
   "schema": 1,
   "id": "server_summary",
   "name": "Server Summary",
-  "version": "1.0.0",
-  "description": "Compact overview: online status, address, operating system and the main vitals. Installed by default.",
+  "version": "1.0.2",
+  "description": "Compact overview: online status, address, operating system and the main vitals.",
   "author": "Bosun",
   "permissions": [
     {
@@ -23,8 +23,8 @@
       "description": "Compact overview showing server name, online status, and basic vitals",
       "icon": "server",
       "category": "utility",
-      "default_size": { "w": 6, "h": 4 },
-      "min_size": { "w": 4, "h": 3 },
+      "default_size": { "w": 6, "h": 5 },
+      "min_size": { "w": 4, "h": 5 },
       "refresh_interval": 15,
       "supports_linux": true,
       "supports_windows": true,

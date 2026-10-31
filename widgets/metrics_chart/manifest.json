@@ -2,8 +2,8 @@
   "schema": 1,
   "id": "metrics_chart",
   "name": "Metrics History",
-  "version": "1.0.0",
-  "description": "Charts the recorded history of a server's statistics: CPU, memory, network, disks, GPUs and anything a widget tracks. Installed by default.",
+  "version": "1.0.2",
+  "description": "Charts the recorded history of a server's statistics: CPU, memory, network, disks, GPUs and anything a widget tracks.",
   "author": "Bosun",
   "permissions": [
     {
@@ -24,7 +24,7 @@
       "icon": "line-chart",
       "category": "system",
       "default_size": { "w": 12, "h": 6 },
-      "min_size": { "w": 6, "h": 4 },
+      "min_size": { "w": 6, "h": 5 },
       "refresh_interval": 60,
       "supports_linux": true,
       "supports_windows": true,

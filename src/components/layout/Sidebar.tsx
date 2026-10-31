@@ -7,7 +7,6 @@ import { Dialog as DialogPrimitive } from 'radix-ui';
 import {
   Bell,
   Package,
-  Puzzle,
   Database,
   FileClock,
   House,
@@ -80,7 +79,6 @@ const SETTINGS_NAV: NavItem[] = [
   { href: '/settings/database', label: 'Database', icon: Database },
   { href: '/settings/alerts', label: 'Alerts', icon: Bell },
   { href: '/settings/widgets', label: 'Widgets', icon: Package },
-  { href: '/settings/custom-widgets', label: 'Custom Widgets', icon: Puzzle },
   { href: '/settings/audit-log', label: 'Audit Log', icon: FileClock },
   { href: '/settings/account', label: 'My Account', icon: UserCog },
 ];

@@ -30,6 +30,8 @@ export interface CustomWidgetRow {
   enabled: number;
   builtin: number;
   package_id?: string | null;
+  /** widget_packages.source of the package that provides the type (joined in). */
+  package_source?: string | null;
 }
 
 /**
@@ -61,6 +63,7 @@ export function customRowToDefinition(row: CustomWidgetRow): WidgetDefinition {
     refreshInterval: row.refresh_interval ?? 30,
     backgroundPollable: true,
     isCustom: true,
+    origin: row.package_source === 'github' || row.package_source === 'bundled' ? 'optional' : 'custom',
     packageId: row.package_id ?? undefined,
     supportsLinux: !!row.supports_linux,
     supportsWindows: !!row.supports_windows,
@@ -75,7 +78,7 @@ export function supportsPlatform(def: WidgetDefinition, platform: string | null 
 
 export async function getCustomWidgetDefinitions(): Promise<WidgetDefinition[]> {
   try {
-    const res = await rqlite.query('SELECT * FROM custom_widgets WHERE enabled = 1 ORDER BY display_name');
+    const res = await rqlite.query(`SELECT w.*, p.source AS package_source FROM custom_widgets w LEFT JOIN widget_packages p ON p.id = w.package_id WHERE w.enabled = 1 ORDER BY w.display_name`);
     return rowsToObjects(res).map(r => customRowToDefinition(r as unknown as CustomWidgetRow));
   } catch {
     return [];
@@ -97,7 +100,7 @@ export async function resolveWidgetDefinition(type: string): Promise<WidgetDefin
   const builtin = getBuiltinDefinition(type);
   if (builtin) return builtin;
   try {
-    const res = await rqlite.query('SELECT * FROM custom_widgets WHERE type = ?', [type]);
+    const res = await rqlite.query('SELECT w.*, p.source AS package_source FROM custom_widgets w LEFT JOIN widget_packages p ON p.id = w.package_id WHERE w.type = ?', [type]);
     const rows = rowsToObjects(res);
     return rows.length ? customRowToDefinition(rows[0] as unknown as CustomWidgetRow) : undefined;
   } catch {

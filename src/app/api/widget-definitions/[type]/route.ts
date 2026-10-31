@@ -30,7 +30,7 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   if (roleError) return roleError;
   const { type } = await params;
   try {
-    const existing = await rqlite.query('SELECT supports_linux, supports_windows FROM custom_widgets WHERE type = ?', [type]);
+    const existing = await rqlite.query('SELECT supports_linux, supports_windows, default_size, min_size FROM custom_widgets WHERE type = ?', [type]);
     if (!existing.values?.length) return fail('Custom widget not found (built-in types are read-only)', 404);
     const body = await request.json();
     const v = sanitizeCustomWidget(body, false);
@@ -38,6 +38,10 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const linux = v.values.supports_linux ?? Number(existing.values[0][0]);
     const windows = v.values.supports_windows ?? Number(existing.values[0][1]);
     if (!linux && !windows) return fail('A widget must support at least one platform');
+    const parse = (raw: unknown) => { try { return JSON.parse(String(raw)); } catch { return null; } };
+    const def = parse(v.values.default_size ?? existing.values[0][2]);
+    const min = parse(v.values.min_size ?? existing.values[0][3]);
+    if (def && min && (Number(def.w) < Number(min.w) || Number(def.h) < Number(min.h))) return fail('The default size cannot be smaller than the smallest size');
     const cols = Object.keys(v.values) as (keyof typeof v.values)[];
     if (!cols.length) return fail('No updatable fields provided');
     await rqlite.execute(

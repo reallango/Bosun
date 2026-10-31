@@ -18,6 +18,7 @@ import {
 import { WidgetFrame } from './WidgetFrame';
 import { getWidgetDefinition } from '@/components/widgets/registry';
 import { EmptyState } from '@/components/shared/EmptyState';
+import { useWidgetNames } from '@/hooks/useWidgetNames';
 import { ensureArray } from '@/lib/api/ensureArray';
 
 // The container is measured with a ResizeObserver (not WidthProvider, which only
@@ -87,6 +88,7 @@ export function DashboardGrid({
   emptyAction,
 }: DashboardGridProps) {
   const safeWidgets = useMemo(() => ensureArray<Widget>(widgets), [widgets]);
+  const names = useWidgetNames();
 
   // Layouts for every breakpoint: saved per-breakpoint rects, otherwise derived from lg.
   const derived = useMemo(() => buildResponsiveLayouts(safeWidgets), [safeWidgets]);
@@ -169,7 +171,7 @@ export function DashboardGrid({
             <WidgetFrame
               widgetId={widget.id}
               widgetType={widget.widget_type}
-              title={widget.title_override || getWidgetDefinition(widget.widget_type)?.displayName || widget.widget_type}
+              title={widget.title_override || getWidgetDefinition(widget.widget_type)?.displayName || names[widget.widget_type] || widget.widget_type}
               serverId={widget.server_id}
               serverName={widget.server_name}
               editable={interactive}
