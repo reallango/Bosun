@@ -86,7 +86,6 @@ describe('system widget actions in the OpenAPI document', () => {
   it('lists the built-in widgets actions with their permissions', () => {
     expect(doc.paths['/api/servers/{serverId}/containers/{containerId}/action'].post['x-bosun-permission']).toBe('docker.containers.control');
     expect(doc.paths['/api/servers/{serverId}/containers/{containerId}/logs'].get['x-bosun-permission']).toBe('docker.logs');
-    expect(doc.paths['/api/servers/{serverId}/ollama/models'].delete['x-bosun-permission']).toBe('ollama.models.delete');
     expect(doc.paths['/api/servers/{serverId}/power'].post.requestBody.content['application/json'].schema.required).toEqual(['action', 'confirm']);
     expect(doc.paths['/api/servers/{serverId}/containers/{containerId}/action'].post.description).toMatch(/docker.containers.control/);
   });

@@ -58,7 +58,7 @@ export const CATALOG: readonly PermissionDef[] = [
   { id: 'power.shutdown', label: 'Shut down a server', group: 'Power', source: 'core', defaultLevel: 'operator', risk: 'high', scope: 'server',
     description: 'Power the host off. It stays off until it is woken or started at the machine.' },
 
-  // The permissions of the widgets (docker.*, ollama.*, updates.*, commands.run, ...) are provided by the bundled
+  // The permissions of the widgets are provided by the bundled
   // widget packages in widgets/ and registered when they install.
 
   // ---- Shell (API) -------------------------------------------------------

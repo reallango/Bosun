@@ -34,9 +34,6 @@ function output(stat: string, rx: number, tx: number) {
     '@@BOSUN docker', 'RC 0',
     '{"ID":"abcdef1234567890","Names":"web","Image":"nginx:1","Status":"Up 2 hours","State":"running","Ports":"80/tcp","Labels":"com.docker.compose.project=site"}',
     '{"ID":"0123456789abcdef","Names":"job","Image":"alpine","Status":"Exited (0) 1 hour ago","State":"exited","Ports":"","Labels":""}',
-    '@@BOSUN ollama', '{"version":"0.5.1"}',
-    '{"models":[{"name":"tiny:latest","size":100,"modified_at":"x","digest":"sha256:abc","details":{"family":"llama","parameter_size":"1B","quantization_level":"Q4"}}]}',
-    '{"models":[{"name":"tiny:latest","size":100,"size_vram":100}]}',
     '@@BOSUN end', '',
   ].join('\n');
 }
@@ -77,8 +74,7 @@ describe('linux collector', () => {
     expect(b.sections.docker.containers[0]).toMatchObject({ id: 'abcdef123456', name: 'web', state: 'running', compose: 'site' });
     expect(b.metrics['docker.running']).toBe(1);
 
-    expect(b.sections.ollama).toMatchObject({ status: 'running', version: '0.5.1' });
-    expect(b.sections.ollama.models[0]).toMatchObject({ name: 'tiny:latest', loaded: true, parameter_size: '1B' });
+    expect(b.sections.ollama).toBeUndefined();   // widget-specific data is collected by the widget's own package, not by the poller's probes
   });
 
   it('reports docker permission problems clearly', () => {
@@ -143,57 +139,6 @@ describe('windows collector', () => {
     expect(() => windows.powershellCommand(`Write-Output '${incompressible}'`)).toThrow(/too large/);
   });
 
-  describe('Windows Update check', () => {
-    const updatesSection = (json: unknown) => windows.buildSnapshot({ updates: typeof json === 'string' ? json : JSON.stringify(json) }, null, 0).sections.updates;
-
-    it('is a probe that fits in one command and never rides along with the regular probes', () => {
-      expect(windows.PROBES).toContain('updates');
-      const cmd = windows.buildCommand(['updates']);
-      expect(cmd.length).toBeLessThan(CMD_EXE_LIMIT);
-      expect(scriptOf(cmd).startsWith("$Probes = @('updates')")).toBe(true);
-    });
-
-    it('maps the search result to the shape the OS Update widget reads', () => {
-      const s = updatesSection({
-        ok: true,
-        rebootRequired: true,
-        updates: [
-          { title: '2024-05 Cumulative Update for Windows 11 (KB5037771)', kb: 'KB5037771', severity: 'Critical', categories: 'Security Updates;Windows 11', mb: 640 },
-          { title: 'Windows Malicious Software Removal Tool x64 (KB890830)', kb: 'KB890830', severity: '', categories: 'Update Rollups', mb: 52 },
-          { title: 'Security Intelligence Update for Microsoft Defender', kb: 'KB2267602', severity: '', categories: 'Security Updates;Definition Updates', mb: 1 },
-          { title: 'Some update without a KB', kb: '', severity: 'Moderate', categories: '', mb: 3 },
-        ],
-      });
-      expect(s).toMatchObject({ manager: 'windows', updatesAvailable: 4, securityUpdates: 3, rebootRequired: true });
-      // the title already carries the KB number, so it is not repeated
-      expect(s.packages[0]).toEqual({ name: '2024-05 Cumulative Update for Windows 11 (KB5037771)', current_version: '', new_version: '', is_security: true });
-      expect(s.packages[2]).toMatchObject({ name: 'Security Intelligence Update for Microsoft Defender', new_version: 'KB2267602' });   // title has no KB: shown
-      expect(s.packages[1].is_security).toBe(false);   // no severity, not a security category
-      expect(s.packages[3]).toMatchObject({ name: 'Some update without a KB', new_version: '', is_security: true });   // MSRC-rated
-      expect(s.error).toBeUndefined();
-    });
-
-    it('reports an up-to-date host', () => {
-      expect(updatesSection({ ok: true, rebootRequired: false, updates: [] })).toEqual({
-        manager: 'windows', updatesAvailable: 0, securityUpdates: 0, rebootRequired: false, packages: [],
-      });
-    });
-
-    it('reports a failed search instead of "up to date"', () => {
-      const s = updatesSection({ ok: false, error: 'Exception from HRESULT: 0x80240024' });
-      expect(s).toMatchObject({ manager: 'windows', updatesAvailable: 0, error: 'Exception from HRESULT: 0x80240024' });
-      expect(updatesSection('not json at all').error).toMatch(/no data/i);
-      expect(updatesSection({ ok: true }).error).toMatch(/no data/i);   // missing list is not "zero updates"
-    });
-
-    it('caps a very long list', () => {
-      const many = Array.from({ length: 500 }, (_, i) => ({ title: `Update ${i}`, kb: `KB${i}`, severity: '', categories: '', mb: 1 }));
-      const s = updatesSection({ ok: true, rebootRequired: false, updates: many });
-      expect(s.updatesAvailable).toBe(500);
-      expect(s.packages).toHaveLength(200);
-    });
-  });
-
   it('normalises Windows probes to the Linux shapes', () => {
     const raw = (busy: number, ts: number) => ({
       stat: JSON.stringify({ busy100ns: busy, ts100ns: ts, threads: 16, uptimeSeconds: 100 }),
@@ -230,24 +175,5 @@ describe('store', () => {
   it('builds retention deletes from config', () => {
     const st = store.retentionStatements({ rawHours: 1, rollup5mDays: 1, rollup1hDays: 2 }, 1_000_000_000);
     expect(st.map(s => s.params[0])).toEqual([1_000_000 - 3600, 1_000_000 - 86400, 1_000_000 - 172800]);
-  });
-});
-
-describe('linux update parsing', () => {
-  it('reads apt versions, security origin and pending reboot', () => {
-    const r = linux._parsers.parseUpdates([
-      'MGR apt',
-      'Inst openssl [3.0.13-0ubuntu3.4] (3.0.13-0ubuntu3.5 Ubuntu:24.04/noble-security [amd64])',
-      'Inst curl [8.5.0-2ubuntu10.4] (8.5.0-2ubuntu10.5 Ubuntu:24.04/noble-updates [amd64])',
-      'REBOOT 1',
-    ].join('\n'));
-    expect(r).toMatchObject({ manager: 'apt', updatesAvailable: 2, securityUpdates: 1, rebootRequired: true });
-    expect(r.packages[0]).toEqual({ name: 'openssl', current_version: '3.0.13-0ubuntu3.4', new_version: '3.0.13-0ubuntu3.5', is_security: true });
-    expect(r).not.toHaveProperty('lastCheck');
-  });
-  it('reads dnf check-update output', () => {
-    const r = linux._parsers.parseUpdates('MGR dnf\nkernel.x86_64  6.8.1-1.fc40  updates\n');
-    expect(r.packages).toEqual([{ name: 'kernel.x86_64', current_version: '', new_version: '6.8.1-1.fc40', is_security: false }]);
-    expect(r.rebootRequired).toBe(false);
   });
 });

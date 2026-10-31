@@ -6,6 +6,8 @@ import { logAudit, AuditActions } from '@/lib/audit/logger';
 import { ok, fail, failFrom } from '@/lib/api/response';
 import { loadWidgetSpec, runAction, runScript, prepareScriptAction, loadInstance, RuntimeError } from '@/lib/widgets/runtime/execute';
 import { startJob } from '@/lib/widgets/jobs/runtime';
+import { rqlite } from '@/lib/db/rqlite-client';
+import { storeActionData } from '@/lib/widgets/runtime/store-data';
 import { ParamError } from '@/lib/widgets/runtime/command';
 import { CONTAINER_REF_RE } from '@/lib/terminal/api-terminal';
 import { issueApiTerminalToken } from '@/lib/terminal/api-token';
@@ -54,7 +56,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         const instance = await loadInstance(serverId, widgetType, body.widgetId);
         const prepared = await prepareScriptAction(serverId, loaded, action, body.params, instance);
         if (action.job) {
-          const { job } = await startJob({ serverId, loaded, action, prepared, userId: auth.userId, params: (body.params && typeof body.params === 'object' ? body.params : {}) as Record<string, unknown>, ip });
+          const { job } = await startJob({ serverId, loaded, action, prepared, userId: auth.userId, params: (body.params && typeof body.params === 'object' ? body.params : {}) as Record<string, unknown>, instanceId: instance?.id, ip });
           await logAudit({
             userId: auth.userId, serverId, action: AuditActions.WIDGET_ACTION, status: 'success',
             details: JSON.stringify({ widget: widgetType, action: actionId, job: job.id, started: true, params: body.params ?? {} }).slice(0, 900), ipAddress: ip,
@@ -62,6 +64,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           return ok({ jobId: job.id, status: job.status }, { status: 202 });
         }
         const r = await runScript(serverId, loaded, prepared.scriptId, prepared.args);
+        if (r.success && !r.protocol.error && action.stores === 'data') await storeActionData(serverId, loaded.type, loaded.spec.data, instance?.id, r.stdout);
+        // The action changed something on the host: have the poller look again now (state and data), not at its next period.
+        if (r.success && !r.protocol.error && action.after === 'refresh') await rqlite.execute('UPDATE servers SET poll_requested_at = ? WHERE id = ?', [Date.now(), serverId]).catch(() => undefined);
         await logAudit({
           userId: auth.userId, serverId, action: AuditActions.WIDGET_ACTION, status: r.success ? 'success' : 'failure',
           details: JSON.stringify({ widget: widgetType, action: actionId, as: action.as, params: body.params ?? {}, exitCode: r.exitCode, output: r.stdout.slice(0, 200) }).slice(0, 900),

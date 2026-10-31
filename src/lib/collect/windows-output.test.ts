@@ -1,17 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { cleanPowerShellOutput, SCRIPT, buildCommand } from './windows';
-
-describe('Windows Update check script', () => {
-  it('reads the reboot-pending state from the registry, never from the COM class a remote session is refused', () => {
-    expect(SCRIPT).not.toMatch(/New-Object -ComObject Microsoft.Update.SystemInfo/);
-    expect(SCRIPT).toContain('WindowsUpdate\\Auto Update\\RebootRequired');
-    expect(SCRIPT).toContain('Component Based Servicing\\RebootPending');
-  });
-
-  it('still fits in a single exec command', () => {
-    expect(buildCommand(['updates']).length).toBeLessThan(8000);
-  });
-});
+import { cleanPowerShellOutput } from './windows';
 
 describe('cleanPowerShellOutput', () => {
   const clixml = '#< CLIXML\n<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">'

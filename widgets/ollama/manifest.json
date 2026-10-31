@@ -2,9 +2,12 @@
   "schema": 1,
   "id": "ollama",
   "name": "Ollama Status",
-  "version": "1.1.0",
-  "description": "Models, loaded models and their CPU/GPU memory split; pull and delete models; shows how Ollama is installed (service, nssm, Docker), updates it, starts and stops it, sets its startup method or restart policy, and installs it. Installed by default. The view and these flows are built into Bosun; this package carries its permissions, size and tracked statistics.",
+  "version": "2.0.0",
+  "description": "Models, loaded models and their memory split; pull and delete models; shows how Ollama is installed (Windows service with nssm, systemd service, Docker container), updates it, starts and stops it, sets its startup method, restart policy and settings, and installs it. Installed by default. Everything it does is in this package: the scripts for each platform and install kind, and its screen.",
   "author": "Bosun",
+  "network": [
+    "api.github.com"
+  ],
   "permissions": [
     {
       "id": "ollama.view",
@@ -27,7 +30,7 @@
     {
       "id": "ollama.service",
       "label": "Install, update and control Ollama",
-      "description": "Install Ollama on the host (a Windows service with nssm, a Docker container or a systemd service), update it, start and stop it, change its startup method or restart policy.",
+      "description": "Install Ollama on the host (a Windows service with nssm, a Docker container or a systemd service), update it, start and stop it, change its startup method, restart policy or settings.",
       "group": "Ollama",
       "defaultLevel": "admin",
       "risk": "high",
@@ -47,21 +50,1480 @@
     {
       "type": "ollama_status",
       "display_name": "Ollama Status",
-      "description": "Models, loaded models and their CPU/GPU memory split; pull and delete (admin)",
+      "description": "Models, loaded models and their memory split; pull and delete models; install, update and control Ollama",
       "icon": "bot",
       "category": "ai",
-      "default_size": { "w": 8, "h": 8 },
-      "min_size": { "w": 6, "h": 5 },
+      "default_size": {
+        "w": 8,
+        "h": 8
+      },
+      "min_size": {
+        "w": 6,
+        "h": 5
+      },
       "refresh_interval": 30,
       "supports_linux": true,
       "supports_windows": true,
       "spec": {
-        "version": 1,
-        "data": { "source": "snapshot", "section": "ollama", "permission": "ollama.view" },
+        "version": 2,
+        "scripts": {
+          "status": {
+            "as": "service",
+            "timeoutSec": 30,
+            "linux": "scripts/status.sh",
+            "windows": "scripts/status.ps1",
+            "params": {}
+          },
+          "detect": {
+            "as": "service",
+            "timeoutSec": 60,
+            "linux": "scripts/detect.sh",
+            "windows": "scripts/detect.ps1",
+            "params": {}
+          },
+          "pull": {
+            "as": "service",
+            "timeoutSec": 3600,
+            "linux": "scripts/pull.sh",
+            "windows": "scripts/pull.ps1",
+            "params": {
+              "model": {
+                "type": "string",
+                "pattern": "^(?!.*\\.\\.)[a-zA-Z0-9][a-zA-Z0-9._\\-/:]{0,199}$",
+                "maxLength": 200
+              }
+            }
+          },
+          "delete": {
+            "as": "service",
+            "timeoutSec": 60,
+            "linux": "scripts/delete.sh",
+            "windows": "scripts/delete.ps1",
+            "params": {
+              "model": {
+                "type": "string",
+                "pattern": "^(?!.*\\.\\.)[a-zA-Z0-9][a-zA-Z0-9._\\-/:]{0,199}$",
+                "maxLength": 200
+              }
+            }
+          },
+          "dk_control": {
+            "as": "service",
+            "timeoutSec": 120,
+            "linux": "scripts/dk_control.sh",
+            "params": {
+              "container": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$",
+                "maxLength": 200
+              },
+              "op": {
+                "type": "string",
+                "values": [
+                  "start",
+                  "stop",
+                  "restart"
+                ],
+                "maxLength": 40
+              }
+            }
+          },
+          "dk_policy": {
+            "as": "service",
+            "timeoutSec": 60,
+            "linux": "scripts/dk_policy.sh",
+            "params": {
+              "container": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$",
+                "maxLength": 200
+              },
+              "policy": {
+                "type": "string",
+                "values": [
+                  "no",
+                  "always",
+                  "unless-stopped",
+                  "on-failure"
+                ],
+                "maxLength": 40
+              }
+            }
+          },
+          "dk_install": {
+            "as": "service",
+            "timeoutSec": 3600,
+            "linux": "scripts/dk_install.sh",
+            "params": {
+              "version": {
+                "type": "string",
+                "pattern": "^(latest|[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3})$",
+                "maxLength": 200,
+                "default": "latest"
+              }
+            }
+          },
+          "dk_recreate": {
+            "as": "service",
+            "timeoutSec": 3600,
+            "linux": "scripts/dk_recreate.sh",
+            "params": {
+              "container": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$",
+                "maxLength": 200
+              },
+              "version": {
+                "type": "string",
+                "pattern": "^(keep|latest|[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3})$",
+                "maxLength": 200,
+                "default": "keep"
+              },
+              "setting": {
+                "type": "string",
+                "values": [
+                  "none",
+                  "OLLAMA_CONTEXT_LENGTH",
+                  "OLLAMA_MAX_LOADED_MODELS"
+                ],
+                "maxLength": 40,
+                "default": "none"
+              },
+              "value": {
+                "type": "string",
+                "pattern": "^([0-9]{1,9}|default)$",
+                "maxLength": 200,
+                "default": "default"
+              }
+            }
+          },
+          "sd_control": {
+            "as": "service",
+            "timeoutSec": 120,
+            "linux": "scripts/sd_control.sh",
+            "params": {
+              "unit": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.-]{1,64}$",
+                "maxLength": 200
+              },
+              "op": {
+                "type": "string",
+                "values": [
+                  "start",
+                  "stop",
+                  "restart"
+                ],
+                "maxLength": 40
+              }
+            }
+          },
+          "sd_startup": {
+            "as": "service",
+            "timeoutSec": 60,
+            "linux": "scripts/sd_startup.sh",
+            "params": {
+              "unit": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.-]{1,64}$",
+                "maxLength": 200
+              },
+              "mode": {
+                "type": "string",
+                "values": [
+                  "enabled",
+                  "disabled"
+                ],
+                "maxLength": 40
+              }
+            }
+          },
+          "sd_setting": {
+            "as": "service",
+            "timeoutSec": 120,
+            "linux": "scripts/sd_setting.sh",
+            "params": {
+              "unit": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.-]{1,64}$",
+                "maxLength": 200
+              },
+              "setting": {
+                "type": "string",
+                "values": [
+                  "OLLAMA_CONTEXT_LENGTH",
+                  "OLLAMA_MAX_LOADED_MODELS"
+                ],
+                "maxLength": 40
+              },
+              "value": {
+                "type": "string",
+                "pattern": "^([0-9]{1,9}|default)$",
+                "maxLength": 200
+              }
+            }
+          },
+          "host_install": {
+            "as": "service",
+            "timeoutSec": 3600,
+            "linux": "scripts/host_install.sh",
+            "params": {
+              "version": {
+                "type": "string",
+                "pattern": "^(latest|[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3})$",
+                "maxLength": 200,
+                "default": "latest"
+              }
+            }
+          },
+          "host_update": {
+            "as": "service",
+            "timeoutSec": 3600,
+            "linux": "scripts/host_update.sh",
+            "params": {
+              "version": {
+                "type": "string",
+                "pattern": "^(latest|[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3})$",
+                "maxLength": 200,
+                "default": "latest"
+              }
+            }
+          },
+          "win_control": {
+            "as": "service",
+            "timeoutSec": 120,
+            "windows": "scripts/win_control.ps1",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.-]{1,64}$",
+                "maxLength": 200
+              },
+              "op": {
+                "type": "string",
+                "values": [
+                  "start",
+                  "stop",
+                  "restart"
+                ],
+                "maxLength": 40
+              }
+            }
+          },
+          "win_startup": {
+            "as": "service",
+            "timeoutSec": 60,
+            "windows": "scripts/win_startup.ps1",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.-]{1,64}$",
+                "maxLength": 200
+              },
+              "mode": {
+                "type": "string",
+                "values": [
+                  "auto",
+                  "delayed",
+                  "manual",
+                  "disabled"
+                ],
+                "maxLength": 40
+              }
+            }
+          },
+          "win_setting": {
+            "as": "service",
+            "timeoutSec": 180,
+            "windows": "scripts/win_setting.ps1",
+            "params": {
+              "manager": {
+                "type": "string",
+                "values": [
+                  "nssm",
+                  "windows"
+                ],
+                "maxLength": 40
+              },
+              "name": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.-]{1,64}$",
+                "maxLength": 200
+              },
+              "setting": {
+                "type": "string",
+                "values": [
+                  "OLLAMA_CONTEXT_LENGTH",
+                  "OLLAMA_MAX_LOADED_MODELS"
+                ],
+                "maxLength": 40
+              },
+              "value": {
+                "type": "string",
+                "pattern": "^([0-9]{1,9}|default)$",
+                "maxLength": 200
+              }
+            }
+          },
+          "win_install": {
+            "as": "service",
+            "timeoutSec": 3600,
+            "windows": "scripts/win_install.ps1",
+            "params": {
+              "mode": {
+                "type": "string",
+                "values": [
+                  "install",
+                  "update"
+                ],
+                "maxLength": 40
+              },
+              "name": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9_.-]{1,64}$",
+                "maxLength": 200,
+                "default": "Ollama"
+              },
+              "exe": {
+                "type": "string",
+                "pattern": "^[A-Za-z]:\\\\[A-Za-z0-9_. \\\\-]{1,160}ollama\\.exe$",
+                "maxLength": 200,
+                "default": "C:\\Ollama\\bin\\ollama.exe"
+              },
+              "version": {
+                "type": "string",
+                "pattern": "^(latest|[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3})$",
+                "maxLength": 200,
+                "default": "latest"
+              }
+            }
+          }
+        },
+        "state": {
+          "script": "detect",
+          "periodSec": 60,
+          "initialDelaySec": 0,
+          "fields": {
+            "install.kind": "string",
+            "install.manager": "string",
+            "install.name": "string",
+            "install.state": "string",
+            "install.start_mode": "string",
+            "install.container": "string",
+            "install.image": "string",
+            "install.restart_policy": "string",
+            "install.exe": "string",
+            "install.docker_available": "boolean",
+            "env.ollama_context_length": "string",
+            "env.ollama_max_loaded_models": "string"
+          }
+        },
+        "lookups": {
+          "latest": {
+            "url": "https://api.github.com/repos/ollama/ollama/releases/latest",
+            "path": "tag_name",
+            "match": "(\\d+\\.\\d+\\.\\d+)",
+            "ttlSec": 21600
+          }
+        },
+        "data": {
+          "source": "command",
+          "as": "service",
+          "command": "",
+          "script": "status",
+          "parse": "json",
+          "cacheSec": 15,
+          "timeoutSec": 30,
+          "permission": "ollama.view"
+        },
         "metrics": [
-          { "name": "ollama.loaded", "label": "Loaded models" }
+          {
+            "name": "ollama.loaded",
+            "label": "Loaded models",
+            "from": {
+              "agg": "count",
+              "path": "ps.models"
+            }
+          }
         ],
-        "view": { "type": "text", "text": "Ollama Status is drawn by Bosun itself." }
+        "actions": [
+          {
+            "id": "start",
+            "label": "Start",
+            "description": "Start Ollama",
+            "icon": "play",
+            "permission": "ollama.service",
+            "kind": "script",
+            "params": {},
+            "variants": [
+              {
+                "when": {
+                  "all": [
+                    {
+                      "field": "state.install.kind",
+                      "equals": "service"
+                    },
+                    {
+                      "field": "state.install.manager",
+                      "in": [
+                        "nssm",
+                        "windows"
+                      ]
+                    }
+                  ]
+                },
+                "script": "win_control",
+                "args": {
+                  "name": "state.install.name",
+                  "op": "literal:start"
+                }
+              },
+              {
+                "when": {
+                  "all": [
+                    {
+                      "field": "state.install.kind",
+                      "equals": "service"
+                    },
+                    {
+                      "field": "state.install.manager",
+                      "in": [
+                        "systemd"
+                      ]
+                    }
+                  ]
+                },
+                "script": "sd_control",
+                "args": {
+                  "unit": "state.install.name",
+                  "op": "literal:start"
+                }
+              },
+              {
+                "when": {
+                  "field": "state.install.kind",
+                  "equals": "docker"
+                },
+                "script": "dk_control",
+                "args": {
+                  "container": "state.install.container",
+                  "op": "literal:start"
+                }
+              }
+            ],
+            "after": "refresh"
+          },
+          {
+            "id": "stop",
+            "label": "Stop",
+            "description": "Stop Ollama",
+            "icon": "square",
+            "permission": "ollama.service",
+            "kind": "script",
+            "params": {},
+            "variants": [
+              {
+                "when": {
+                  "all": [
+                    {
+                      "field": "state.install.kind",
+                      "equals": "service"
+                    },
+                    {
+                      "field": "state.install.manager",
+                      "in": [
+                        "nssm",
+                        "windows"
+                      ]
+                    }
+                  ]
+                },
+                "script": "win_control",
+                "args": {
+                  "name": "state.install.name",
+                  "op": "literal:stop"
+                }
+              },
+              {
+                "when": {
+                  "all": [
+                    {
+                      "field": "state.install.kind",
+                      "equals": "service"
+                    },
+                    {
+                      "field": "state.install.manager",
+                      "in": [
+                        "systemd"
+                      ]
+                    }
+                  ]
+                },
+                "script": "sd_control",
+                "args": {
+                  "unit": "state.install.name",
+                  "op": "literal:stop"
+                }
+              },
+              {
+                "when": {
+                  "field": "state.install.kind",
+                  "equals": "docker"
+                },
+                "script": "dk_control",
+                "args": {
+                  "container": "state.install.container",
+                  "op": "literal:stop"
+                }
+              }
+            ],
+            "after": "refresh",
+            "confirm": {
+              "title": "Stop Ollama?",
+              "text": "Models stop answering requests until it is started again.",
+              "destructive": true
+            }
+          },
+          {
+            "id": "set_startup_windows",
+            "label": "Startup method",
+            "permission": "ollama.service",
+            "kind": "script",
+            "after": "refresh",
+            "params": {
+              "mode": {
+                "type": "string",
+                "values": [
+                  "auto",
+                  "delayed",
+                  "manual",
+                  "disabled"
+                ],
+                "maxLength": 40
+              }
+            },
+            "variants": [
+              {
+                "when": {
+                  "all": [
+                    {
+                      "field": "state.install.kind",
+                      "equals": "service"
+                    },
+                    {
+                      "field": "state.install.manager",
+                      "in": [
+                        "nssm",
+                        "windows"
+                      ]
+                    }
+                  ]
+                },
+                "script": "win_startup",
+                "args": {
+                  "name": "state.install.name",
+                  "mode": "param.mode"
+                }
+              }
+            ]
+          },
+          {
+            "id": "set_startup_systemd",
+            "label": "Startup method",
+            "permission": "ollama.service",
+            "kind": "script",
+            "after": "refresh",
+            "params": {
+              "mode": {
+                "type": "string",
+                "values": [
+                  "enabled",
+                  "disabled"
+                ],
+                "maxLength": 40
+              }
+            },
+            "variants": [
+              {
+                "when": {
+                  "all": [
+                    {
+                      "field": "state.install.kind",
+                      "equals": "service"
+                    },
+                    {
+                      "field": "state.install.manager",
+                      "in": [
+                        "systemd"
+                      ]
+                    }
+                  ]
+                },
+                "script": "sd_startup",
+                "args": {
+                  "unit": "state.install.name",
+                  "mode": "param.mode"
+                }
+              }
+            ]
+          },
+          {
+            "id": "set_restart_policy",
+            "label": "Restart policy",
+            "permission": "ollama.service",
+            "kind": "script",
+            "after": "refresh",
+            "params": {
+              "policy": {
+                "type": "string",
+                "values": [
+                  "no",
+                  "always",
+                  "unless-stopped",
+                  "on-failure"
+                ],
+                "maxLength": 40
+              }
+            },
+            "variants": [
+              {
+                "when": {
+                  "field": "state.install.kind",
+                  "equals": "docker"
+                },
+                "script": "dk_policy",
+                "args": {
+                  "container": "state.install.container",
+                  "policy": "param.policy"
+                }
+              }
+            ]
+          },
+          {
+            "id": "set_context_length",
+            "label": "Apply context length",
+            "permission": "ollama.service",
+            "kind": "script",
+            "job": true,
+            "after": "refresh",
+            "params": {
+              "value": {
+                "type": "string",
+                "pattern": "^(default|[1-9][0-9]{2,6})$",
+                "maxLength": 12,
+                "default": "default"
+              }
+            },
+            "variants": [
+              {
+                "when": {
+                  "all": [
+                    {
+                      "field": "state.install.kind",
+                      "equals": "service"
+                    },
+                    {
+                      "field": "state.install.manager",
+                      "in": [
+                        "nssm",
+                        "windows"
+                      ]
+                    }
+                  ]
+                },
+                "script": "win_setting",
+                "args": {
+                  "manager": "state.install.manager",
+                  "name": "state.install.name",
+                  "setting": "literal:OLLAMA_CONTEXT_LENGTH",
+                  "value": "param.value"
+                }
+              },
+              {
+                "when": {
+                  "all": [
+                    {
+                      "field": "state.install.kind",
+                      "equals": "service"
+                    },
+                    {
+                      "field": "state.install.manager",
+                      "in": [
+                        "systemd"
+                      ]
+                    }
+                  ]
+                },
+                "script": "sd_setting",
+                "args": {
+                  "unit": "state.install.name",
+                  "setting": "literal:OLLAMA_CONTEXT_LENGTH",
+                  "value": "param.value"
+                }
+              },
+              {
+                "when": {
+                  "field": "state.install.kind",
+                  "equals": "docker"
+                },
+                "script": "dk_recreate",
+                "args": {
+                  "container": "state.install.container",
+                  "version": "literal:keep",
+                  "setting": "literal:OLLAMA_CONTEXT_LENGTH",
+                  "value": "param.value"
+                }
+              }
+            ],
+            "confirm": {
+              "title": "Change the context length?",
+              "text": "Ollama restarts to pick the setting up (a container is recreated); loaded models are unloaded for a moment."
+            }
+          },
+          {
+            "id": "set_max_loaded",
+            "label": "Apply max loaded models",
+            "permission": "ollama.service",
+            "kind": "script",
+            "job": true,
+            "after": "refresh",
+            "params": {
+              "value": {
+                "type": "string",
+                "pattern": "^(default|[0-9]{1,2})$",
+                "maxLength": 12,
+                "default": "default"
+              }
+            },
+            "variants": [
+              {
+                "when": {
+                  "all": [
+                    {
+                      "field": "state.install.kind",
+                      "equals": "service"
+                    },
+                    {
+                      "field": "state.install.manager",
+                      "in": [
+                        "nssm",
+                        "windows"
+                      ]
+                    }
+                  ]
+                },
+                "script": "win_setting",
+                "args": {
+                  "manager": "state.install.manager",
+                  "name": "state.install.name",
+                  "setting": "literal:OLLAMA_MAX_LOADED_MODELS",
+                  "value": "param.value"
+                }
+              },
+              {
+                "when": {
+                  "all": [
+                    {
+                      "field": "state.install.kind",
+                      "equals": "service"
+                    },
+                    {
+                      "field": "state.install.manager",
+                      "in": [
+                        "systemd"
+                      ]
+                    }
+                  ]
+                },
+                "script": "sd_setting",
+                "args": {
+                  "unit": "state.install.name",
+                  "setting": "literal:OLLAMA_MAX_LOADED_MODELS",
+                  "value": "param.value"
+                }
+              },
+              {
+                "when": {
+                  "field": "state.install.kind",
+                  "equals": "docker"
+                },
+                "script": "dk_recreate",
+                "args": {
+                  "container": "state.install.container",
+                  "version": "literal:keep",
+                  "setting": "literal:OLLAMA_MAX_LOADED_MODELS",
+                  "value": "param.value"
+                }
+              }
+            ],
+            "confirm": {
+              "title": "Change the number of loaded models?",
+              "text": "Ollama restarts to pick the setting up (a container is recreated); loaded models are unloaded for a moment."
+            }
+          },
+          {
+            "id": "update",
+            "label": "Update",
+            "description": "Update Ollama to the latest release",
+            "icon": "download",
+            "permission": "ollama.service",
+            "kind": "script",
+            "job": true,
+            "after": "refresh",
+            "params": {
+              "version": {
+                "type": "string",
+                "pattern": "^(latest|[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3})$",
+                "maxLength": 20,
+                "default": "latest"
+              }
+            },
+            "confirm": {
+              "title": "Update Ollama?",
+              "text": "Ollama is unavailable while it is updated.",
+              "destructive": true
+            },
+            "variants": [
+              {
+                "when": {
+                  "field": "state.install.kind",
+                  "equals": "docker"
+                },
+                "script": "dk_recreate",
+                "args": {
+                  "container": "state.install.container",
+                  "version": "param.version",
+                  "setting": "literal:none",
+                  "value": "literal:default"
+                }
+              },
+              {
+                "when": {
+                  "all": [
+                    {
+                      "field": "state.install.kind",
+                      "equals": "service"
+                    },
+                    {
+                      "field": "state.install.manager",
+                      "in": [
+                        "nssm",
+                        "windows"
+                      ]
+                    }
+                  ]
+                },
+                "script": "win_install",
+                "args": {
+                  "mode": "literal:update",
+                  "name": "state.install.name",
+                  "exe": "state.install.exe",
+                  "version": "param.version"
+                }
+              },
+              {
+                "when": {
+                  "all": [
+                    {
+                      "field": "state.install.kind",
+                      "equals": "service"
+                    },
+                    {
+                      "field": "state.install.manager",
+                      "in": [
+                        "systemd"
+                      ]
+                    }
+                  ]
+                },
+                "script": "host_update",
+                "args": {
+                  "version": "param.version"
+                }
+              }
+            ]
+          },
+          {
+            "id": "install",
+            "label": "Install",
+            "description": "Install Ollama on the host",
+            "icon": "download",
+            "permission": "ollama.service",
+            "kind": "script",
+            "job": true,
+            "after": "refresh",
+            "params": {
+              "version": {
+                "type": "string",
+                "pattern": "^(latest|[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3})$",
+                "maxLength": 20,
+                "default": "latest"
+              }
+            },
+            "confirm": {
+              "title": "Install Ollama?",
+              "text": "Downloads Ollama and starts it as a Windows service or a Docker container. It becomes reachable from your network on port 11434."
+            },
+            "variants": [
+              {
+                "when": {
+                  "field": "server.platform",
+                  "equals": "windows"
+                },
+                "script": "win_install",
+                "args": {
+                  "mode": "literal:install",
+                  "name": "literal:Ollama",
+                  "version": "param.version"
+                }
+              },
+              {
+                "when": {
+                  "field": "state.install.docker_available",
+                  "equals": true
+                },
+                "script": "dk_install",
+                "args": {
+                  "version": "param.version"
+                }
+              }
+            ]
+          },
+          {
+            "id": "install_host",
+            "label": "Install on the host",
+            "description": "Install Ollama on the host with the official script (a systemd service)",
+            "icon": "download",
+            "permission": "ollama.service",
+            "kind": "script",
+            "job": true,
+            "after": "refresh",
+            "params": {
+              "version": {
+                "type": "string",
+                "pattern": "^(latest|[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3})$",
+                "maxLength": 20,
+                "default": "latest"
+              }
+            },
+            "confirm": {
+              "title": "Install Ollama on the host?",
+              "text": "Runs the official install script with sudo and starts Ollama as a systemd service. It becomes reachable from your network on port 11434."
+            },
+            "variants": [
+              {
+                "when": {
+                  "field": "server.platform",
+                  "equals": "linux"
+                },
+                "script": "host_install",
+                "args": {
+                  "version": "param.version"
+                }
+              }
+            ]
+          },
+          {
+            "id": "pull",
+            "label": "Pull",
+            "description": "Download a model",
+            "icon": "download",
+            "permission": "ollama.models.pull",
+            "kind": "script",
+            "job": true,
+            "after": "refresh",
+            "params": {
+              "model": {
+                "type": "string",
+                "pattern": "^(?!.*\\.\\.)[a-zA-Z0-9][a-zA-Z0-9._\\-/:]{0,199}$",
+                "maxLength": 200
+              }
+            },
+            "variants": [
+              {
+                "script": "pull",
+                "args": {}
+              }
+            ]
+          },
+          {
+            "id": "delete",
+            "label": "Delete",
+            "description": "Remove a model from the host",
+            "icon": "trash-2",
+            "permission": "ollama.models.delete",
+            "kind": "script",
+            "after": "refresh",
+            "params": {
+              "model": {
+                "type": "string",
+                "pattern": "^(?!.*\\.\\.)[a-zA-Z0-9][a-zA-Z0-9._\\-/:]{0,199}$",
+                "maxLength": 200,
+                "from": "name"
+              }
+            },
+            "confirm": {
+              "title": "Delete {name}?",
+              "text": "This removes the model from the host. It has to be downloaded again to be used.",
+              "destructive": true,
+              "requireText": "{name}"
+            },
+            "variants": [
+              {
+                "script": "delete",
+                "args": {}
+              }
+            ]
+          }
+        ],
+        "view": {
+          "type": "layout",
+          "blocks": [
+            {
+              "type": "kv",
+              "items": [
+                {
+                  "label": "Status",
+                  "value": "running",
+                  "format": "text",
+                  "when": {
+                    "field": "data.version",
+                    "exists": true
+                  }
+                },
+                {
+                  "label": "Status",
+                  "value": "not reachable",
+                  "format": "text",
+                  "when": {
+                    "field": "data.version",
+                    "exists": false
+                  }
+                },
+                {
+                  "label": "Version",
+                  "value": "{data.version}",
+                  "format": "text",
+                  "when": {
+                    "field": "data.version",
+                    "exists": true
+                  }
+                }
+              ]
+            },
+            {
+              "type": "jobProgress"
+            },
+            {
+              "type": "section",
+              "title": "Installation",
+              "defaultOpen": false,
+              "summary": "{state.install.kind} {state.install.name}{state.install.container} {state.install.state}",
+              "badges": [
+                {
+                  "text": "Update available",
+                  "color": "blue",
+                  "when": {
+                    "field": "lookups.latest",
+                    "newerThan": "data.version"
+                  }
+                },
+                {
+                  "text": "Not installed",
+                  "color": "gray",
+                  "when": {
+                    "field": "state.install.kind",
+                    "equals": "none"
+                  }
+                },
+                {
+                  "text": "Stopped",
+                  "color": "red",
+                  "when": {
+                    "all": [
+                      {
+                        "field": "state.install.kind",
+                        "in": [
+                          "service",
+                          "docker"
+                        ]
+                      },
+                      {
+                        "field": "state.install.state",
+                        "notEquals": "running"
+                      }
+                    ]
+                  }
+                }
+              ],
+              "blocks": [
+                {
+                  "type": "notice",
+                  "level": "info",
+                  "text": "Ollama is installed, but not as a service or container, so Bosun cannot manage it. Install it as a service (or container) to manage it from here.",
+                  "when": {
+                    "field": "state.install.kind",
+                    "equals": "standard"
+                  }
+                },
+                {
+                  "type": "notice",
+                  "level": "warning",
+                  "text": "Docker is not installed (or not usable by the Bosun account), so Ollama cannot be installed as a container here. You can install it on the host instead.",
+                  "when": {
+                    "all": [
+                      {
+                        "field": "state.install.kind",
+                        "equals": "none"
+                      },
+                      {
+                        "field": "server.platform",
+                        "equals": "linux"
+                      },
+                      {
+                        "field": "state.install.docker_available",
+                        "equals": false
+                      }
+                    ]
+                  }
+                },
+                {
+                  "type": "kv",
+                  "items": [
+                    {
+                      "label": "Installed as",
+                      "value": "{state.install.kind} {state.install.manager}",
+                      "format": "text",
+                      "when": {
+                        "field": "state.install.kind",
+                        "in": [
+                          "service",
+                          "docker"
+                        ]
+                      }
+                    },
+                    {
+                      "label": "Name",
+                      "value": "{state.install.name}{state.install.container}",
+                      "format": "text",
+                      "when": {
+                        "field": "state.install.kind",
+                        "in": [
+                          "service",
+                          "docker"
+                        ]
+                      }
+                    },
+                    {
+                      "label": "State",
+                      "value": "{state.install.state}",
+                      "format": "text",
+                      "when": {
+                        "field": "state.install.kind",
+                        "in": [
+                          "service",
+                          "docker"
+                        ]
+                      }
+                    },
+                    {
+                      "label": "Image",
+                      "value": "{state.install.image}",
+                      "format": "text",
+                      "when": {
+                        "field": "state.install.kind",
+                        "equals": "docker"
+                      }
+                    },
+                    {
+                      "label": "Latest release",
+                      "value": "{lookups.latest}",
+                      "format": "text",
+                      "when": {
+                        "field": "lookups.latest",
+                        "exists": true
+                      }
+                    }
+                  ]
+                },
+                {
+                  "type": "buttons",
+                  "actions": [
+                    "start",
+                    "stop"
+                  ]
+                },
+                {
+                  "type": "buttons",
+                  "actions": [
+                    "update"
+                  ],
+                  "when": {
+                    "field": "lookups.latest",
+                    "newerThan": "data.version"
+                  }
+                },
+                {
+                  "type": "buttons",
+                  "actions": [
+                    "install",
+                    "install_host"
+                  ],
+                  "when": {
+                    "field": "state.install.kind",
+                    "equals": "none"
+                  }
+                },
+                {
+                  "type": "select",
+                  "label": "Startup",
+                  "value": "state.install.start_mode",
+                  "action": "set_startup_windows",
+                  "param": "mode",
+                  "options": [
+                    {
+                      "value": "auto",
+                      "label": "Automatic"
+                    },
+                    {
+                      "value": "delayed",
+                      "label": "Automatic (delayed)"
+                    },
+                    {
+                      "value": "manual",
+                      "label": "Manual"
+                    },
+                    {
+                      "value": "disabled",
+                      "label": "Disabled"
+                    }
+                  ],
+                  "when": {
+                    "all": [
+                      {
+                        "field": "state.install.kind",
+                        "equals": "service"
+                      },
+                      {
+                        "field": "state.install.manager",
+                        "in": [
+                          "nssm",
+                          "windows"
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "type": "select",
+                  "label": "Startup",
+                  "value": "state.install.start_mode",
+                  "action": "set_startup_systemd",
+                  "param": "mode",
+                  "options": [
+                    {
+                      "value": "enabled",
+                      "label": "Enabled at boot"
+                    },
+                    {
+                      "value": "disabled",
+                      "label": "Disabled"
+                    }
+                  ],
+                  "when": {
+                    "all": [
+                      {
+                        "field": "state.install.kind",
+                        "equals": "service"
+                      },
+                      {
+                        "field": "state.install.manager",
+                        "in": [
+                          "systemd"
+                        ]
+                      }
+                    ]
+                  }
+                },
+                {
+                  "type": "select",
+                  "label": "Restart policy",
+                  "value": "state.install.restart_policy",
+                  "action": "set_restart_policy",
+                  "param": "policy",
+                  "options": [
+                    {
+                      "value": "no",
+                      "label": "Never"
+                    },
+                    {
+                      "value": "always",
+                      "label": "Always"
+                    },
+                    {
+                      "value": "unless-stopped",
+                      "label": "Unless stopped"
+                    },
+                    {
+                      "value": "on-failure",
+                      "label": "On failure"
+                    }
+                  ],
+                  "when": {
+                    "field": "state.install.kind",
+                    "equals": "docker"
+                  }
+                },
+                {
+                  "type": "form",
+                  "title": "Context length",
+                  "fields": [
+                    {
+                      "name": "value",
+                      "label": "OLLAMA_CONTEXT_LENGTH",
+                      "input": "number",
+                      "value": "state.env.ollama_context_length",
+                      "placeholder": "Ollama default",
+                      "help": "Tokens of context a model gets unless a request asks for another size. Bigger uses more memory. Leave empty for the default."
+                    }
+                  ],
+                  "submit": {
+                    "action": "set_context_length",
+                    "label": "Apply",
+                    "params": {
+                      "value": "value"
+                    }
+                  },
+                  "when": {
+                    "field": "state.install.kind",
+                    "in": [
+                      "service",
+                      "docker"
+                    ]
+                  }
+                },
+                {
+                  "type": "form",
+                  "title": "Max loaded models",
+                  "fields": [
+                    {
+                      "name": "value",
+                      "label": "OLLAMA_MAX_LOADED_MODELS",
+                      "input": "number",
+                      "value": "state.env.ollama_max_loaded_models",
+                      "placeholder": "Ollama default",
+                      "help": "How many models may stay loaded at the same time. 0 lets Ollama decide from the available memory. Leave empty for the default."
+                    }
+                  ],
+                  "submit": {
+                    "action": "set_max_loaded",
+                    "label": "Apply",
+                    "params": {
+                      "value": "value"
+                    }
+                  },
+                  "when": {
+                    "field": "state.install.kind",
+                    "in": [
+                      "service",
+                      "docker"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "type": "form",
+              "title": "Pull a model",
+              "fields": [
+                {
+                  "name": "model",
+                  "label": "Model",
+                  "input": "text",
+                  "placeholder": "llama3.2:1b"
+                }
+              ],
+              "submit": {
+                "action": "pull",
+                "label": "Pull",
+                "params": {
+                  "model": "model"
+                }
+              },
+              "when": {
+                "field": "data.version",
+                "exists": true
+              }
+            },
+            {
+              "type": "section",
+              "title": "Loaded models",
+              "defaultOpen": true,
+              "when": {
+                "field": "data.version",
+                "exists": true
+              },
+              "blocks": [
+                {
+                  "type": "view",
+                  "path": "ps.models",
+                  "view": {
+                    "type": "list",
+                    "empty": "No model is loaded",
+                    "row": {
+                      "title": "{name}",
+                      "fields": [
+                        {
+                          "label": "Memory",
+                          "value": "{size}",
+                          "format": "bytes"
+                        },
+                        {
+                          "label": "In GPU memory",
+                          "value": "{size_vram}",
+                          "format": "bytes"
+                        }
+                      ]
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "section",
+              "title": "Models",
+              "defaultOpen": true,
+              "when": {
+                "field": "data.version",
+                "exists": true
+              },
+              "blocks": [
+                {
+                  "type": "view",
+                  "path": "tags.models",
+                  "view": {
+                    "type": "list",
+                    "empty": "No models installed",
+                    "row": {
+                      "title": "{name}",
+                      "subtitle": "{details.parameter_size} {details.quantization_level}",
+                      "fields": [
+                        {
+                          "label": "Size",
+                          "value": "{size}",
+                          "format": "bytes"
+                        }
+                      ],
+                      "actions": [
+                        "delete"
+                      ]
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
       }
     }
   ]

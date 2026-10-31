@@ -35,6 +35,13 @@ describe('selectVariant', () => {
   });
 });
 
+describe('resolveScriptArgs with script defaults', () => {
+  it('uses the default of a parameter that nothing supplies', () => {
+    const s: ScriptSpec = { ...script, params: { exe: { type: 'string', pattern: '^.*$', maxLength: 20, default: 'C:\\x\\ollama.exe' } } };
+    expect(resolveScriptArgs(v({ args: {} }), s, {}).exe).toBe('C:\\x\\ollama.exe');
+  });
+});
+
 describe('resolveScriptArgs', () => {
   it('reads context paths, literals and action parameters of the same name', () => {
     const variant = v({ args: { name: 'state.install.name', port: 'param.port' } });

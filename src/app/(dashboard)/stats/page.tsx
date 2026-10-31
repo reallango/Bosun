@@ -15,7 +15,7 @@ interface ServerItem {
   last_seen: string | null;
   last_error: string | null;
   poll_interval_sec: number;
-  capabilities: { gpus?: number; docker?: boolean; ollama?: boolean };
+  capabilities: { gpus?: number; docker?: boolean };
 }
 
 // Metrics every host reports, plus the first GPU when any host has one.

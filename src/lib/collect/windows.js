@@ -17,7 +17,7 @@ const macs = require('./macs');
 const { metricsSection } = require('./metrics-section');
 const { splitSections } = linux;
 
-const PROBES = ['stat', 'mem', 'netdev', 'gpu', 'df', 'ip', 'docker', 'ollama', 'services', 'system', 'updates'];
+const PROBES = ['stat', 'mem', 'netdev', 'gpu', 'df', 'ip', 'docker', 'services', 'system'];
 
 const SCRIPT = String.raw`
 $ErrorActionPreference = 'SilentlyContinue'
@@ -54,62 +54,12 @@ foreach ($p in $Probes) {
       $d = Get-Command docker.exe -ErrorAction SilentlyContinue
       if ($d) { $out = & $d.Source ps -a --no-trunc --format '{{json .}}' 2>&1; Write-Output ("RC " + $LASTEXITCODE); $out | Select-Object -First 500 }
       else { Write-Output 'NONE' } }
-    'ollama' { M 'ollama'
-      try {
-        $v = Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 http://127.0.0.1:11434/api/version
-        Write-Output $v.Content
-        Write-Output (Invoke-WebRequest -UseBasicParsing -TimeoutSec 5 http://127.0.0.1:11434/api/tags).Content
-        Write-Output (Invoke-WebRequest -UseBasicParsing -TimeoutSec 3 http://127.0.0.1:11434/api/ps).Content
-      } catch { Write-Output 'DOWN' }
-      Write-Output '@@INSTALL'
-      $s = Get-CimInstance Win32_Service | Where-Object { $_.Name -eq 'Ollama' -or $_.Name -like '*ollama*' } | Sort-Object { if ($_.Name -eq 'Ollama') { 0 } else { 1 } } | Select-Object -First 1
-      if ($s) {
-        Write-Output ('SVC_NAME=' + $s.Name)
-        Write-Output ('SVC_STATE=' + $s.State)
-        Write-Output ('SVC_START=' + $s.StartMode)
-        Write-Output ('SVC_DELAYED=' + $s.DelayedAutoStart)
-        $exe = ($s.PathName -replace '^"?([^"]+?)"?(\s.*)?$', '$1')
-        if ($s.PathName -match 'nssm') {
-          Write-Output 'SVC_WRAPPER=nssm'
-          $app = (Get-ItemProperty ('HKLM:\SYSTEM\CurrentControlSet\Services\' + $s.Name + '\Parameters') -ErrorAction SilentlyContinue).Application
-          if ($app) { $exe = $app }
-        }
-        Write-Output ('SVC_EXE=' + $exe)
-        # The settings Bosun manages: nssm keeps them in AppEnvironmentExtra, a plain service in its Environment value.
-        $envKey = 'HKLM:\SYSTEM\CurrentControlSet\Services\' + $s.Name
-        if ($s.PathName -match 'nssm') { $envList = @((Get-ItemProperty ($envKey + '\Parameters') -ErrorAction SilentlyContinue).AppEnvironmentExtra) }
-        else { $envList = @((Get-ItemProperty $envKey -ErrorAction SilentlyContinue).Environment) }
-        foreach ($e in $envList) { if ($e -match '^(OLLAMA_CONTEXT_LENGTH|OLLAMA_MAX_LOADED_MODELS)=') { Write-Output ('ENV_' + $e) } }
-      } else {
-        $p = Get-Process -Name ollama -ErrorAction SilentlyContinue | Select-Object -First 1
-        $std = Get-ChildItem 'C:\Users\*\AppData\Local\Programs\Ollama\ollama.exe' -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($p -and $p.Path) { Write-Output ('STANDARD_PATH=' + $p.Path) } elseif ($std) { Write-Output ('STANDARD_PATH=' + $std.FullName) }
-      } }
     'services' { M 'services'
       J @(Get-Service | Select-Object -First 400 | ForEach-Object { @{ name = $_.Name; status = [string]$_.Status; display = $_.DisplayName; start = [string]$_.StartType } }) }
     'system' { M 'system'
       $os = Get-CimInstance Win32_OperatingSystem; $cpu = @(Get-CimInstance Win32_Processor)
       J @{ caption = $os.Caption; version = $os.Version; build = $os.BuildNumber; arch = $os.OSArchitecture; host = $env:COMPUTERNAME;
            model = $cpu[0].Name; cores = ($cpu | Measure-Object NumberOfCores -Sum).Sum; threads = ($cpu | Measure-Object NumberOfLogicalProcessors -Sum).Sum } }
-    'updates' { M 'updates'
-      # Windows Update search (read-only). Slow (15 s to minutes): the poller runs it on its own, never with the regular probes.
-      # "Reboot pending" comes from the registry markers Windows Update and servicing set. The COM class for it
-      # (Microsoft.Update.SystemInfo) is refused for a remote (SSH) session, and must never cost the update list.
-      $reboot = $false
-      try {
-        $reboot = (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired') -or (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending')
-      } catch { $reboot = $false }
-      try {
-        $ErrorActionPreference = 'Stop'
-        $wu =(New-Object -ComObject Microsoft.Update.Session).CreateUpdateSearcher().Search("IsInstalled=0 and IsHidden=0 and Type='Software'")
-        $list = @(foreach ($u in $wu.Updates) {
-          $cats = @(foreach ($c in $u.Categories) { $c.Name })
-          $kbs = @(foreach ($k in $u.KBArticleIDs) { "KB$k" })
-          @{ title = [string]$u.Title; kb = ($kbs -join ','); severity = [string]$u.MsrcSeverity; categories = ($cats -join ';'); mb = [math]::Round($u.MaxDownloadSize / 1MB, 1) }
-        })
-        J @{ ok = $true; rebootRequired = [bool]$reboot; updates = $list }
-      } catch { J @{ ok = $false; error = [string]$_.Exception.Message } }
-      $ErrorActionPreference = 'SilentlyContinue' }
   }
 }
 M 'end'
@@ -159,32 +109,6 @@ const jsonOf = t => {
   try { return JSON.parse(t); } catch { return null; }
 };
 
-/**
- * Windows Update search result -> the `updates` section the OS Update widget reads
- * (same shape the Linux package managers produce). A failed or unreadable search
- * is reported in `error` so the widget can say why instead of showing "up to date".
- */
-function parseUpdates(u) {
-  const base = { manager: 'windows', updatesAvailable: 0, securityUpdates: 0, rebootRequired: false, packages: [] };
-  if (!u || u.ok === false || !Array.isArray(u.updates)) {
-    return { ...base, error: String((u && u.error) || 'Windows Update returned no data').slice(0, 300) };
-  }
-  // Anything Microsoft rates (MSRC severity) or files under "Security Updates" counts as security.
-  const packages = u.updates.map(p => ({
-    name: p.title || p.kb || 'Update',
-    current_version: '',
-    // Most titles already end in "(KB1234567)"; only show the KB separately when the title lacks it.
-    new_version: p.kb && !String(p.title || '').includes(p.kb) ? p.kb : '',
-    is_security: /security/i.test(p.categories || '') || !!p.severity,
-  }));
-  return {
-    ...base,
-    updatesAvailable: packages.length,
-    securityUpdates: packages.filter(p => p.is_security).length,
-    rebootRequired: !!u.rebootRequired,
-    packages: packages.slice(0, 200),
-  };
-}
 const arr = v => (Array.isArray(v) ? v : v ? [v] : []);
 const round1 = v => Math.round(v * 10) / 10;
 
@@ -288,10 +212,6 @@ function buildSnapshot(raw, prev, now = Date.now()) {
     }));
   }
 
-  if (raw.updates !== undefined) {
-    sections.updates = parseUpdates(jsonOf(raw.updates));
-  }
-
   if (raw.system !== undefined) {
     const s = jsonOf(raw.system) || {};
     const sys = {
@@ -303,9 +223,9 @@ function buildSnapshot(raw, prev, now = Date.now()) {
     state.system = sys;
   }
 
-  // GPU, docker and ollama output is identical to Linux; reuse those parsers.
+  // GPU and docker output is identical to Linux; reuse those parsers.
   const shared = {};
-  for (const k of ['gpu', 'docker', 'ollama']) if (raw[k] !== undefined) shared[k] = raw[k];
+  for (const k of ['gpu', 'docker']) if (raw[k] !== undefined) shared[k] = raw[k];
   if (Object.keys(shared).length) {
     const r = linux.buildSnapshot(shared, null, now);
     Object.assign(sections, r.sections);

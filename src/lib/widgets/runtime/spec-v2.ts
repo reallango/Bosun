@@ -218,8 +218,9 @@ export function validateVariants(
         args[name] = path;
       }
     }
-    for (const name of Object.keys(script.params)) {
-      if (!(name in args) && !(name in actionParams)) return fail(`${where}: script "${v.script}" needs the parameter "${name}": map it in "args" or declare an action parameter with that name`);
+    for (const [name, p] of Object.entries(script.params)) {
+      // A parameter with a default of its own need not be mapped: the default is used.
+      if (!(name in args) && !(name in actionParams) && p.default === undefined) return fail(`${where}: script "${v.script}" needs the parameter "${name}": map it in "args" or declare an action parameter with that name`);
     }
     out.push({ ...(when ? { when } : {}), script: v.script, args });
   }

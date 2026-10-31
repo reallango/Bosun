@@ -10,6 +10,7 @@ export interface WidgetDataExtra {
   lookups?: Record<string, string | null>;
   config?: Record<string, unknown>;
   server?: Record<string, unknown>;
+  collectedAt?: string | null;
 }
 
 /**
@@ -43,7 +44,7 @@ export function useWidgetData(widgetId: string, refreshInterval: number = 15) {
       } else {
         setData(json.data);
         setUnavailable(json.unavailable ?? null);
-        setExtra({ state: json.state, stateError: json.stateError, lookups: json.lookups, config: json.config, server: json.server });
+        setExtra({ state: json.state, stateError: json.stateError, lookups: json.lookups, config: json.config, server: json.server, collectedAt: json.collectedAt });
         setError(null);
       }
     } catch (err) {

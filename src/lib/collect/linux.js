@@ -13,12 +13,11 @@
 
 const macs = require('./macs');
 const { metricsSection } = require('./metrics-section');
-const { parseInstall } = require('./ollama-install');
 
 const MARK = '@@BOSUN ';
 
 /** Probes the script understands; the poller picks a subset per tick. */
-const PROBES = ['stat', 'mem', 'load', 'temp', 'netdev', 'gpu', 'df', 'ip', 'docker', 'ollama', 'services', 'system', 'updates'];
+const PROBES = ['stat', 'mem', 'load', 'temp', 'netdev', 'gpu', 'df', 'ip', 'docker', 'services', 'system'];
 
 const SCRIPT = String.raw`
 export LC_ALL=C
@@ -55,35 +54,6 @@ docker) m docker
     if [ $rc -ne 0 ] && have sudo; then out2=$(sudo -n docker ps -a --no-trunc --format '{{json .}}' 2>&1) && { out=$out2; rc=0; }; fi
     echo "RC $rc"; printf '%s\n' "$out" | head -n 500
   else echo NONE; fi ;;
-ollama) m ollama
-  if have curl; then
-    v=$(curl -s -m 3 http://127.0.0.1:11434/api/version 2>/dev/null)
-    if [ -n "$v" ]; then
-      echo "$v"
-      curl -s -m 5 http://127.0.0.1:11434/api/tags 2>/dev/null; echo
-      curl -s -m 3 http://127.0.0.1:11434/api/ps 2>/dev/null; echo
-    else echo DOWN; fi
-  else echo NOCURL; fi
-  echo '@@INSTALL'
-  if have docker; then
-    echo DOCKER_AVAILABLE=1
-    D=docker; docker ps >/dev/null 2>&1 || { have sudo && sudo -n docker ps >/dev/null 2>&1 && D='sudo -n docker'; }
-    c=$($D ps -a --format '{{.Names}} {{.Image}}' 2>/dev/null | awk '$2 ~ /(^|\/)ollama\/ollama/ {print $1; exit}')
-    if [ -n "$c" ]; then
-      echo "DOCKER_NAME=$c"
-      echo "DOCKER_STATE=$($D inspect -f '{{.State.Status}}' "$c" 2>/dev/null)"
-      echo "DOCKER_RESTART=$($D inspect -f '{{.HostConfig.RestartPolicy.Name}}' "$c" 2>/dev/null)"
-      echo "DOCKER_IMAGE=$($D inspect -f '{{.Config.Image}}' "$c" 2>/dev/null)"
-      $D inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$c" 2>/dev/null | grep -E '^(OLLAMA_CONTEXT_LENGTH|OLLAMA_MAX_LOADED_MODELS)=' | sed 's/^/ENV_/'
-    fi
-  else echo DOCKER_AVAILABLE=0; fi
-  have ollama && echo "HOST_BIN=$(command -v ollama)"
-  if have systemctl && [ "$(systemctl show -p LoadState --value ollama.service 2>/dev/null)" = loaded ]; then
-    echo UNIT=ollama
-    echo "UNIT_ACTIVE=$(systemctl is-active ollama 2>/dev/null)"
-    echo "UNIT_ENABLED=$(systemctl is-enabled ollama 2>/dev/null)"
-    systemctl show ollama -p Environment 2>/dev/null | tr ' ' '\n' | tr -d '"' | sed 's/^Environment=//' | grep -E '^(OLLAMA_CONTEXT_LENGTH|OLLAMA_MAX_LOADED_MODELS)=' | sed 's/^/ENV_/'
-  fi ;;
 services) m services
   if have systemctl; then systemctl list-units --type=service --all --no-pager --plain --no-legend 2>/dev/null | head -n 400
   else echo NONE; fi ;;
@@ -91,12 +61,6 @@ system) m system
   cat /etc/os-release 2>/dev/null; echo "@@KERNEL $(uname -r)"; echo "@@ARCH $(uname -m)"; echo "@@HOST $(hostname 2>/dev/null || cat /etc/hostname)"
   echo "@@CPUS $(grep -c ^processor /proc/cpuinfo)"; echo "@@MODEL $(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2-)"
   echo "@@CORES $(grep -m1 'cpu cores' /proc/cpuinfo | cut -d: -f2-)" ;;
-updates) m updates
-  if have apt-get; then echo "MGR apt"; apt-get -s -o Debug::NoLocking=1 upgrade 2>/dev/null | grep '^Inst ' | head -n 300
-  elif have dnf; then echo "MGR dnf"; dnf -q check-update 2>/dev/null | head -n 300
-  elif have yum; then echo "MGR yum"; yum -q check-update 2>/dev/null | head -n 300
-  else echo "MGR none"; fi
-  if [ -f /var/run/reboot-required ]; then echo "REBOOT 1"; fi ;;
 esac
 done
 m end
@@ -284,32 +248,6 @@ function parseDocker(text) {
   return { available: true, containers };
 }
 
-/** The Ollama API answers, then (optionally) the `@@INSTALL` block that says how it is installed. */
-function parseOllama(raw) {
-  // Windows output has CRLF line ends, and the block is empty (nothing follows the marker) when nothing is installed.
-  const [text, installText] = String(raw || '').split(/\r?\n@@INSTALL(?:\r?\n|$)/);
-  const o = parseOllamaApi(String(text || '').replace(/\r/g, ''));
-  return installText === undefined ? o : { ...o, install: parseInstall(installText, o.status === 'running') };
-}
-
-function parseOllamaApi(text) {
-  if (!text || text === 'DOWN' || text === 'NOCURL') return { status: text === 'NOCURL' ? 'unknown' : 'stopped', models: [], running: [] };
-  const [v, tags, ps] = text.split('\n');
-  const safe = s => { try { return JSON.parse(s); } catch { return null; } };
-  const version = (safe(v) || {}).version || null;
-  const t = safe(tags);
-  const p = safe(ps);
-  if (!t) return { status: 'error', version, models: [], running: [] };
-  const running = ((p && p.models) || []).map(m => ({ name: m.name, size: m.size, size_vram: m.size_vram, expires_at: m.expires_at }));
-  const models = (t.models || []).map(m => ({
-    name: m.name, size: m.size, modified_at: m.modified_at, digest: String(m.digest || '').slice(0, 12),
-    family: m.details && m.details.family, parameter_size: m.details && m.details.parameter_size,
-    quantization_level: m.details && m.details.quantization_level,
-    loaded: running.some(r => r.name === m.name),
-  })).sort((a, b) => String(a.name).localeCompare(String(b.name)));
-  return { status: 'running', version, models, running };
-}
-
 function parseServices(text) {
   if (!text || text === 'NONE') return [];
   return text.split('\n').filter(Boolean).map(l => {
@@ -339,36 +277,6 @@ function parseSystem(text) {
     prettyName: kv.PRETTY_NAME || kv.NAME || 'Linux',
     kernel: meta.KERNEL || '', architecture: meta.ARCH || '', hostname: meta.HOST || '',
     cpuModel: (meta.MODEL || 'Unknown').trim(), cpuThreads: threads, cpuCores: num(meta.CORES, threads) || threads,
-  };
-}
-
-function parseUpdates(text) {
-  const [first, ...rest] = (text || '').split('\n');
-  const mgr = (first || '').replace('MGR ', '').trim();
-  let packages = [];
-  if (mgr === 'apt') {
-    // Inst <name> [<current>] (<new> <origin> [<arch>])
-    packages = rest.filter(l => l.startsWith('Inst ')).map(l => {
-      const mm = l.match(/^Inst (\S+)(?: \[([^\]]+)\])? \((\S+) ([^)]*)\)/);
-      return mm
-        ? { name: mm[1], current_version: mm[2] || '', new_version: mm[3], is_security: /security/i.test(mm[4]) }
-        : { name: l.split(/\s+/)[1], current_version: '', new_version: '', is_security: false };
-    });
-  } else if (mgr === 'dnf' || mgr === 'yum') {
-    // <name>.<arch>  <new version>  <repo>
-    packages = rest.filter(l => /^\S+\.\S+\s+\S+\s+\S+/.test(l)).map(l => {
-      const [name, version, repo] = l.trim().split(/\s+/);
-      return { name, current_version: '', new_version: version, is_security: /security/i.test(repo || '') };
-    });
-  }
-  // No timestamp here: collected_at already records when this ran, and a
-  // volatile field would rewrite the snapshot on every check.
-  return {
-    manager: mgr || 'none',
-    updatesAvailable: packages.length,
-    securityUpdates: packages.filter(p => p.is_security).length,
-    rebootRequired: rest.some(l => l.trim() === 'REBOOT 1'),
-    packages: packages.slice(0, 200),
   };
 }
 
@@ -478,12 +386,6 @@ function buildSnapshot(raw, prev, now = Date.now()) {
     if (d.available) metrics['docker.running'] = d.containers.filter(c => c.state === 'running').length;
   }
 
-  if (raw.ollama !== undefined) {
-    const o = parseOllama(raw.ollama);
-    sections.ollama = o;
-    if (o.status === 'running') metrics['ollama.loaded'] = o.running.length;
-  }
-
   if (raw.services !== undefined) sections.services = parseServices(raw.services);
 
   if (raw.system !== undefined) {
@@ -491,8 +393,6 @@ function buildSnapshot(raw, prev, now = Date.now()) {
     sections.system = s;
     state.system = s;
   }
-
-  if (raw.updates !== undefined) sections.updates = parseUpdates(raw.updates);
 
   sections.metrics = metricsSection(metrics, state.uptimeSeconds);
   return { sections, metrics, state };
@@ -504,5 +404,5 @@ module.exports = {
   buildCommand,
   splitSections,
   buildSnapshot,
-  _parsers: { parseStat, parseMeminfo, parseLoad, parseTemp, parseNetdev, parseGpu, parseDf, parseIp, parseIpProbe, parseDocker, parseOllama, parseServices, parseSystem, parseUpdates },
+  _parsers: { parseStat, parseMeminfo, parseLoad, parseTemp, parseNetdev, parseGpu, parseDf, parseIp, parseIpProbe, parseDocker, parseServices, parseSystem },
 };

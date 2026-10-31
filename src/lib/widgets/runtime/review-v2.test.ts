@@ -5,9 +5,9 @@ import crypto from 'crypto';
 import { validateManifest, scriptFilesOf } from '@/lib/widgets/package-manifest';
 import { reviewPackage } from './review';
 
-const dir = path.join(process.cwd(), 'docs', 'plans', 'spec-v2');
+const dir = path.join(process.cwd(), 'widgets');
 const load = (name: string) => {
-  const m = validateManifest(JSON.parse(fs.readFileSync(path.join(dir, `${name}.manifest.json`), 'utf8')));
+  const m = validateManifest(JSON.parse(fs.readFileSync(path.join(dir, name, 'manifest.json'), 'utf8')));
   if (!m.ok) throw new Error(m.error);
   return m.value;
 };

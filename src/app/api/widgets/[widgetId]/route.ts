@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/middleware';
 import { requirePermission } from '@/lib/permissions/authorize';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
-import { COMMAND_CHANGE_FORBIDDEN, mayChangeCommand, replacesCommand } from '@/lib/auth/widget-policy';
+import { denyGuardedConfigChange } from '@/lib/widgets/config-guard-http';
+import { resolveWidgetDefinition } from '@/components/widgets/registry-loader';
 import { visibleWidgets } from '@/lib/widgets/visibility';
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ widgetId: string }> }) {
@@ -34,14 +35,13 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
     const { config, title_override, grid_x, grid_y, grid_w, grid_h } = await request.json();
     const u: string[]=[]; const v: any[]=[];
     if (config!==undefined) {
-      if (!mayChangeCommand(auth.role)) {
-        const cur = await rqlite.query('SELECT config FROM widgets WHERE id=?', [widgetId]);
-        let existing: unknown = {};
-        try { existing = JSON.parse(String(cur.values?.[0]?.[0] || '{}')); } catch { existing = {}; }
-        if (replacesCommand(existing, config)) {
-          return NextResponse.json({ error: { message: COMMAND_CHANGE_FORBIDDEN, code: 'FORBIDDEN' } }, { status: 403 });
-        }
-      }
+      const cur = rowsToObjects(await rqlite.query('SELECT server_id, widget_type, config FROM widgets WHERE id=?', [widgetId]))[0];
+      if (!cur) return NextResponse.json({ error: { message: 'Widget not found' } }, { status: 404 });
+      let existing: unknown = {};
+      try { existing = JSON.parse(String(cur.config || '{}')); } catch { existing = {}; }
+      const def = await resolveWidgetDefinition(String(cur.widget_type));
+      const guardDenied = await denyGuardedConfigChange(auth, String(cur.server_id), def?.configSchema, existing, config, true);
+      if (guardDenied) return guardDenied;
       u.push('config=?'); v.push(JSON.stringify(config));
     }
     if (title_override!==undefined) { u.push('title_override=?'); v.push(title_override); }

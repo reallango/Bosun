@@ -1,6 +1,6 @@
 # Plan: self-contained widget packages
 
-Status: **in progress on `dev`. Phases 0 (spec v2), 1 (file store and materialiser), 2 (scripts runner, probes, lookups), 3 (jobs) and 4 (conditions, variants, UI blocks) are done and verified; phase 5 (port Ollama, OS Update Check and Custom Command) is next.** Written on the `dev` branch so the work can be picked up later by anyone (or any
+Status: **in progress on `dev`. Phases 0 (spec v2), 1 (file store and materialiser), 2 (scripts runner, probes, lookups), 3 (jobs) and 4 (conditions, variants, UI blocks) are done and verified; phase 5 (port Ollama, OS Update Check and Custom Command) is done for Linux and Docker, its Windows live test is open; phase 8 (Docker package) is next.** Written on the `dev` branch so the work can be picked up later by anyone (or any
 session). Phases marked "done" are built, tested and pushed to `dev`.
 
 ## 1. The rule
@@ -250,6 +250,26 @@ hosts, the live tests in section 8. Do not push to `main` until the owner has te
    **5c. Port Custom Command**: generic command data source that reads the command and interval from instance settings,
    runs as the non-admin account, `requires_permission` on the command field; delete the component and the data-route
    branch.
+   **DONE for Linux and Docker hosts** (457 tests, 23 more run in the Docker build on Linux; live on the nuc): all three are
+   version 2 packages (`widgets/commands`, `widgets/updates`, `widgets/ollama` with 2.0.0, scripts per platform and
+   install kind, layout views) and their code is gone from core: the components, `src/lib/ollama`, the Ollama routes,
+   `src/lib/updates`, `custom-command.ts`, the poller's updates tier and `updates_requested_at` handling, the collectors'
+   `ollama` and `updates` probes and parsers, the data route's custom-command, POST and snapshot branches, `snapshot-data.ts`,
+   the audit entries, the label map entry and the `widget-policy` role rule. New generic pieces they needed: settings guarded
+   by `requires_permission` (`config-guard`, used by the three widget routes and the settings dialog), `stores: "data"` and
+   `after: "refresh"` (also for quick actions: the poller looks again at once), the `ago` format, `collectedAt` in the view
+   context, script parameters with defaults need no mapping, alert metrics of the chosen server come from what it records.
+   Verified live: upgrade from the previous image keeps every widget and its settings (packages 1.0.0 to 2.0.0); Custom Command
+   output and the permission rule (an operator may not add or change a command); OS Update Check collected by the poller, check
+   now and install as jobs, the list refreshing after an install; Ollama against a real container (detect, pull with progress,
+   delete with confirmation, recreate for a setting with ports, volume and restart policy kept, update to a newer release,
+   restart policy, stop and start, the loaded-models metric); the three widgets in the browser.
+   Carried forward: (a) the Windows scripts (Custom Command, OS Update Check install via the SYSTEM task and job cancel, the
+   whole Ollama Windows set) are written, ASCII-checked and reviewed but not yet run on a Windows host: needs a Windows live
+   test with temporary authorised keys; (b) one running job per widget and server, so a model pull and an install no longer run
+   side by side (the old code allowed several pulls); (c) with Ollama down the loaded-models metric records 0 instead of no sample;
+   (d) a setting value of "default" removes the setting (the form sends it for an empty field); (e) the Ollama context length
+   value is not range-checked beyond its digits any more.
 8. **Docker package completion**: container actions, logs and the terminal action as package actions; remove the
    `/containers/**` routes and the `docker.*` special cases in the terminal route and OpenAPI; move the `docker` probe
    and `docker.running` metric into the package; Wake-on-LAN uses its own direct check.

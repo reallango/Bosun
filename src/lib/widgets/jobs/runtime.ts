@@ -9,6 +9,8 @@
 import { logAudit, AuditActions } from '@/lib/audit/logger';
 import { runScript, cancelScript, RuntimeError, type LoadedSpec, type PreparedScript } from '@/lib/widgets/runtime/execute';
 import { parseScriptOutput } from '@/lib/widgets/runtime/script-run';
+import { storeActionData } from '@/lib/widgets/runtime/store-data';
+import { rqlite } from '@/lib/db/rqlite-client';
 import type { ActionSpec } from '@/lib/widgets/runtime/spec';
 import { createJob, finishJob, getJob, JobConflictError, reportProgress, requestCancel, type JobRecord, type JobStatus } from '@/lib/widgets/jobs/store';
 
@@ -29,6 +31,8 @@ export interface StartJobInput {
   prepared: PreparedScript;
   userId: string | null;
   params: Record<string, unknown>;
+  /** The widget (instance) whose settings the action reads, when it names one. */
+  instanceId?: string;
   ip?: string;
 }
 
@@ -40,6 +44,15 @@ export function outcomeOf(r: { exitCode: number; timedOut: boolean; aborted?: bo
   if (r.exitCode === 0 && !p.error) return { status: 'success', message: p.done || 'Done' };
   const tail = (r.stderr.trim() || p.lines.slice(-3).join(' ')).slice(0, 300);
   return { status: 'error', message: p.error || tail || `Failed (exit ${r.exitCode})` };
+}
+
+/** What a successful job does besides finishing: store its output as the widget's data, and/or ask for a fresh collection. */
+async function afterSuccess(input: StartJobInput, stdout: string): Promise<void> {
+  const { serverId, loaded, action } = input;
+  try {
+    if (action.stores === 'data') await storeActionData(serverId, loaded.type, loaded.spec.data, input.instanceId, stdout);
+    if (action.after === 'refresh') await rqlite.execute('UPDATE servers SET poll_requested_at = ? WHERE id = ?', [Date.now(), serverId]);
+  } catch { /* the job itself succeeded; the next collection brings the data up to date */ }
 }
 
 /** Start the job and return at once; the script runs in the background of this process. */
@@ -91,6 +104,7 @@ async function run(job: JobRecord, input: StartJobInput, controller: AbortContro
     });
     ({ status, message } = outcomeOf(r));
     if (!out) out = r.stdout;
+    if (status === 'success') await afterSuccess(input, r.stdout);
   } catch (err) {
     status = 'error';
     message = err instanceof Error ? err.message.slice(0, 300) : String(err).slice(0, 300);

@@ -21,6 +21,8 @@ export interface JobState {
 
 export interface ViewContext {
   data?: unknown;
+  /** When the widget's data was collected (ISO text). */
+  collectedAt?: string | null;
   state?: unknown;
   config?: Record<string, unknown>;
   lookups?: Record<string, string | null>;

@@ -110,7 +110,6 @@ function capabilitiesOf(sections, prev) {
   const caps = { ...(prev || {}) };
   if (sections.gpus) caps.gpus = sections.gpus.length;
   if (sections.docker) caps.docker = !!sections.docker.available;
-  if (sections.ollama) caps.ollama = sections.ollama.status === 'running';
   return caps;
 }
 

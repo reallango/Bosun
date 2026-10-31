@@ -186,10 +186,6 @@ function systemOperations(): Record<string, Json> {
     '/api/servers/{serverId}/containers/{containerId}/action': { post: op('containerAction', 'Start, stop or restart a container', 'Docker (system)', 'docker.containers.control', {
       parameters: [serverIdParam, cid],
       requestBody: body({ action: { type: 'string', enum: ['start', 'stop', 'restart'] }, confirm: { type: 'boolean', enum: [true] } }, ['action', 'confirm']) }) },
-    '/api/servers/{serverId}/ollama/pull': { post: op('ollamaPull', 'Pull an Ollama model', 'Ollama (system)', 'ollama.models.pull', {
-      requestBody: body({ model: { type: 'string' } }, ['model']) }) },
-    '/api/servers/{serverId}/ollama/models': { delete: op('ollamaDeleteModel', 'Delete an Ollama model', 'Ollama (system)', 'ollama.models.delete', {
-      requestBody: body({ name: { type: 'string' }, confirm: { type: 'boolean', enum: [true] } }, ['name', 'confirm']) }) },
     '/api/servers/{serverId}/power': { post: op('power', 'Restart or shut down a host', 'Power (system)', 'power.restart', {
       description: 'Restart needs "Restart a server"; shutdown needs "Shut down a server".',
       requestBody: body({ action: { type: 'string', enum: ['restart', 'shutdown'] }, confirm: { type: 'boolean', enum: [true] } }, ['action', 'confirm']) }) },

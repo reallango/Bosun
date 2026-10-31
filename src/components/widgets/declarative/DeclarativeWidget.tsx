@@ -222,7 +222,7 @@ export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
   const actionsById = new Map(spec.actions.map(a => [a.id, a]));
   // A web terminal asks for the person's own login and is only available to Full access; the action's permission still applies.
   const allowed = (a: PublicAction) => can(a.permission, serverId) && (a.kind !== 'terminal' || hasRole(user?.role, 'admin'));
-  const ctx: ViewContext = { data, state: extra.state, config: extra.config, lookups: extra.lookups, server: extra.server, job };
+  const ctx: ViewContext = { data, collectedAt: extra.collectedAt, state: extra.state, config: extra.config, lookups: extra.lookups, server: extra.server, job };
 
   const run = async (action: PublicAction, row: Row | null, override?: Record<string, unknown>) => {
     setBusy(action.id);

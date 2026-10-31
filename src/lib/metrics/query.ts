@@ -111,7 +111,7 @@ export function describeMetric(metric: string): { label: string; unit: string } 
     'mem.used_pct': ['Memory used', '%'], 'mem.used_mb': ['Memory used', 'MB'], 'swap.used_mb': ['Swap used', 'MB'],
     'net.rx_bps': ['Network in', 'B/s'], 'net.tx_bps': ['Network out', 'B/s'],
     'disk.root_used_pct': ['Root disk used', '%'], 'disk.max_used_pct': ['Fullest disk', '%'],
-    'docker.running': ['Running containers', ''], 'ollama.loaded': ['Loaded models', ''],
+    'docker.running': ['Running containers', ''],
   };
   const [label, unit] = known[metric] || [metric, ''];
   return { label, unit };

@@ -9,8 +9,8 @@
  *  - one persistent SSH connection per host (keepalives, reused across polls);
  *  - one exec per poll running a batched, read-only script at nice 19 /
  *    ionice idle (PowerShell at BelowNormal on Windows);
- *  - probes are tiered: cheap counters every poll, docker/ollama/disks every
- *    minute, services/OS facts every few minutes, package updates every 6h;
+ *  - probes are tiered: cheap counters every poll, docker/disks every
+ *    minute, services/OS facts every few minutes;
  *  - CPU% and network rates come from counter deltas between polls, so
  *    nothing sleeps on the host;
  *  - failures back off exponentially (up to 5 minutes) and drop the
@@ -56,15 +56,13 @@ const MAX_BACKOFF_MS = 5 * 60 * 1000;
 const TIERS = {
   linux: [
     { name: 'fast', probes: ['stat', 'mem', 'load', 'temp', 'netdev', 'gpu'], periodMs: 0 },
-    { name: 'medium', probes: ['df', 'ip', 'docker', 'ollama'], periodMs: 60 * 1000 },
+    { name: 'medium', probes: ['df', 'ip', 'docker'], periodMs: 60 * 1000 },
     { name: 'slow', probes: ['services', 'system'], periodMs: 5 * 60 * 1000 },
-    { name: 'updates', probes: ['updates'], periodMs: 6 * 3600 * 1000, initialDelayMs: 5 * 60 * 1000 },
   ],
   windows: [
     { name: 'fast', probes: ['stat', 'mem', 'netdev', 'gpu'], periodMs: 0 },
-    { name: 'medium', probes: ['df', 'docker', 'ollama'], periodMs: 2 * 60 * 1000 },
+    { name: 'medium', probes: ['df', 'docker'], periodMs: 2 * 60 * 1000 },
     { name: 'slow', probes: ['ip', 'services', 'system'], periodMs: 15 * 60 * 1000 },
-    { name: 'updates', probes: ['updates'], periodMs: 6 * 3600 * 1000, initialDelayMs: 5 * 60 * 1000 },
   ],
 };
 
@@ -349,14 +347,13 @@ class HostAgent {
   }
 
   /** Probes due this poll; marks their tiers as run. */
-  dueProbes(now, forceAll, forceUpdates = false) {
+  dueProbes(now, forceAll) {
     const probes = [];
     for (const tier of TIERS[this.platform]) {
       const last = this.tierLast[tier.name];
       let due;
-      // Forced/initial polls refresh everything except tiers with an initial
-      // delay (package updates), which keep their own schedule.
-      if (tier.periodMs === 0 || (forceAll && !tier.initialDelayMs) || (forceUpdates && tier.name === 'updates')) due = true;
+      // Forced/initial polls refresh everything except tiers with an initial delay, which keep their own schedule.
+      if (tier.periodMs === 0 || (forceAll && !tier.initialDelayMs)) due = true;
       else if (last === undefined) due = now - this.started >= (tier.initialDelayMs || 0);
       else due = now - last >= tier.periodMs;
       if (due) {
@@ -367,44 +364,18 @@ class HostAgent {
     return probes;
   }
 
-  /**
-   * Windows Update search, in the background on the open connection. A failure is
-   * logged and leaves the last stored result alone; it never touches polling or
-   * the host's online status.
-   */
-  checkWindowsUpdates(client) {
-    if (this.updatesRunning) return;
-    this.updatesRunning = true;
-    (async () => {
-      const r = await ssh.exec(client, windows.buildCommand(['updates']), { timeoutMs: 10 * 60 * 1000 });
-      if (r.timedOut) throw new Error(`timed out after ${Math.round(r.durationMs / 1000)} s`);
-      const raw = windows.splitSections(r.stdout);
-      if (raw.updates === undefined) throw new Error(`no output (exit ${r.exitCode}): ${(r.stderr || '').trim().slice(0, 200)}`);
-      const snap = windows.buildSnapshot({ updates: raw.updates }, null, Date.now());
-      await executeBatch(store.buildPollStatements(this.id, snap, Date.now(), this.hashes));
-      const u = snap.sections.updates;
-      log(`${this.row.name}: Windows Update check done (${u.updatesAvailable} pending${u.error ? `, error: ${u.error}` : ''})`);
-    })()
-      .catch(err => warn(`${this.row.name}: Windows Update check failed: ${err.message}`))
-      .finally(() => { this.updatesRunning = false; });
-  }
-
-  async poll({ forceAll = false, forceUpdates = false } = {}) {
+  async poll({ forceAll = false } = {}) {
     this.busy = true;
     const started = Date.now();
     const lib = this.platform === 'windows' ? windows : linux;
     try {
       const client = await this.ensureConnected();
       // First poll after (re)connecting collects everything so widgets fill in.
-      const dueProbes = this.dueProbes(started, forceAll || this.polls === 0, forceUpdates);
-      // A Windows Update search takes 15 s to several minutes. It gets its own exec after
-      // this poll (checkWindowsUpdates) so it can never delay or fail the regular probes.
-      const windowsUpdates = this.platform === 'windows' && dueProbes.includes('updates');
-      const probes = windowsUpdates ? dueProbes.filter(p => p !== 'updates') : dueProbes;
+      const probes = this.dueProbes(started, forceAll || this.polls === 0);
       const cmd = lib.buildCommand(probes);
       const r = await ssh.exec(client, cmd, {
         stdin: this.platform === 'windows' ? undefined : linux.SCRIPT,
-        timeoutMs: probes.includes('updates') ? 120000 : 45000,
+        timeoutMs: 45000,
       });
       if (r.timedOut) throw new Error(`collection timed out after ${r.durationMs} ms`);
       const raw = lib.splitSections(r.stdout);
@@ -438,7 +409,6 @@ class HostAgent {
       this.polls++;
       this.lastDurationMs = Date.now() - started;
       this.nextDue = started + this.intervalMs;
-      if (windowsUpdates) this.checkWindowsUpdates(client);
       this.collectPackages(client, forceAll || this.polls === 1);
     } catch (err) {
       this.failures++;
@@ -449,7 +419,7 @@ class HostAgent {
       // A failed exec usually means a dead connection; start clean next time.
       this.close();
       this.state = null;
-      this.tierLast = { updates: this.tierLast.updates };
+      this.tierLast = {};
       this.polls = 0;
       const offline = this.failures >= 2 || err.code === 'HOST_KEY_MISMATCH' ? 0 : 1;
       executeBatch([{
@@ -511,7 +481,7 @@ let ticking = false;
 async function syncServers() {
   const rows = await query(
     'SELECT id, name, hostname, ssh_port, ssh_user, ssh_key_id, shell_user, shell_key_id, platform, poll_enabled, poll_interval_sec, ' +
-    'host_key_fingerprint, poll_requested_at, updates_requested_at, capabilities FROM servers');
+    'host_key_fingerprint, poll_requested_at, capabilities FROM servers');
   const seen = new Set();
   for (const row of rows) {
     if (Number(row.poll_enabled) !== 1) continue;
@@ -525,16 +495,9 @@ async function syncServers() {
         a.forceNext = true;
         a.nextDue = Math.min(a.nextDue, Date.now());
       }
-      // "Check for updates" sets updates_requested_at: run the update probe once.
-      if (row.updates_requested_at && row.updates_requested_at > (a.lastUpdatesRequest || 0)) {
-        a.lastUpdatesRequest = row.updates_requested_at;
-        a.forceUpdatesNext = true;
-        a.nextDue = Math.min(a.nextDue, Date.now());
-      }
     } else {
       const agent = new HostAgent(row);
       agent.lastRequest = row.poll_requested_at || 0;
-      agent.lastUpdatesRequest = row.updates_requested_at || 0;
       try { agent.caps = JSON.parse(row.capabilities || '{}'); } catch { agent.caps = {}; }
       agents.set(row.id, agent);
       log(`${row.name}: added (${row.platform || 'linux'} ${row.hostname})`);
@@ -593,9 +556,7 @@ async function tick() {
       running++;
       const forceAll = !!a.forceNext;
       a.forceNext = false;
-      const forceUpdates = !!a.forceUpdatesNext;
-      a.forceUpdatesNext = false;
-      a.poll({ forceAll, forceUpdates }); // runs concurrently; errors handled inside
+      a.poll({ forceAll }); // runs concurrently; errors handled inside
     }
 
     if (now - lastAlertSync > 30000) {

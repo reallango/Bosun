@@ -175,8 +175,7 @@ export default function CustomWidgetsPage() {
             <CardContent>
               {registrable.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  Every widget type with a data source is already registered. New types need a snapshot-section mapping
-                  (lib/widgets/snapshot-data) and a component (components/widgets/custom-registry).
+                  New widgets are added as packages (Settings, Widgets): a package carries its own scripts, settings and screen.
                 </p>
               ) : (
                 <form onSubmit={register} className="grid grid-cols-1 gap-4 sm:grid-cols-3">
