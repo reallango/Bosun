@@ -170,3 +170,25 @@ code for any particular widget. The Docker package (`widgets/docker`) uses every
   needs (`"secrets": ["git_token"]` on the script, Linux only). An admin sets them under Settings, Widgets (key icon); they are
   stored encrypted, never shown again, and reach only that script, as `BOSUN_SECRET_git_token`, at the top of the script text on stdin
   (so not on the command line). Output is scrubbed of their values.
+
+### More of the editor, and tasks
+
+- **Rows** (`"input": "rows"`): a list whose rows have labelled boxes (`columns`: text, number or a drop-down). `format` says how a row is written as one
+  line of the settings (`{ "col": "host_port", "suffix": ":" }`, fixed text with `{ "lit": "svc." }`, `optional`, `omit`), `parse` is the anchored regular
+  expression with a named group per column that reads a stored line back, and `derive` fills a column from another one after parsing. The Docker package
+  uses it for ports (host address, host port, container port, protocol) and volumes (volume or folder, source, path, read only).
+- **Options from the host**: a `select` (or a rows field, for its select columns marked `"remote": true`) with `"remote": { "dataset", "args", "path", "value" }`
+  asks one of the package's datasets while the form is open, with arguments from other fields (`"values.repo"`), and shows the answer as its options. `"custom":
+  "Custom…"` adds an entry that lets the person type a value, which is also what the field becomes when the host finds nothing.
+- **Buttons that fill the form**: `{ "input": "button", "tool": { "dataset", "args" } }` calls a dataset and applies its answer
+  `{ "fill": { "<field key>": value }, "errors": [], "notes": [] }` to the fields. A list or rows field takes lines, a checkbox "true" or "false". Errors are shown in
+  red under the button and say what could not be converted. Use `"transient": true` on a box that only feeds a button (the pasted text), and a heading with
+  `"collapsed": true` to hide the fields below it until the person opens it.
+- **Text areas** take `"height"` (lines) and `"upload": true` (a file is read into the box). A `code` block shows text from the context with Copy and Download.
+- **Secrets in a list**: `"mask": "secret-names"` on a `pairs` or text area of `KEY=value` lines hides the values of names such as PASSWORD or TOKEN, and keeps them
+  out of logs.
+- **Errors** of an action started from an editor are shown in the pop-up itself, under the buttons.
+- **Tasks**: an action with `"job": true` runs in the background and appears in the notification area at the top of Bosun with its steps, its log and, when
+  it was started from an editor, "Open the screen": the screen comes back with what was filled in, to correct it and try again. Values the editor marks with
+  `mask` are kept encrypted on the server and never sent back to the browser (it only gets a placeholder that the server turns into the real value when the
+  form is submitted again); logs never contain them. Different actions can run at the same time; the same action only once per widget and server.

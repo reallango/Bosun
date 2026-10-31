@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "docker",
   "name": "Docker Containers",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Containers on the host with logs, a shell, start, stop and restart; edit a container, create containers and stacks (a compose file, or one from a GitHub repository), and a Manage page for images, volumes and networks.",
   "author": "Bosun",
   "permissions": [
@@ -472,6 +472,13 @@
                 ],
                 "maxLength": 20,
                 "default": "false"
+              },
+              "override": {
+                "type": "text",
+                "maxLength": 8000,
+                "maxLines": 100,
+                "linePattern": "^(#.*|svc\\.[A-Za-z0-9_.-]+\\.(container_name|port|volume|network)=.+)$",
+                "default": ""
               }
             },
             "secrets": [
@@ -525,6 +532,114 @@
                 "default": "false"
               }
             }
+          },
+          "export_run": {
+            "as": "service",
+            "timeoutSec": 60,
+            "linux": "scripts/export_run.sh",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$",
+                "maxLength": 128
+              }
+            }
+          },
+          "export_compose": {
+            "as": "service",
+            "timeoutSec": 60,
+            "linux": "scripts/export_compose.sh",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$",
+                "maxLength": 128
+              }
+            }
+          },
+          "convert": {
+            "as": "service",
+            "timeoutSec": 60,
+            "linux": "scripts/convert.sh",
+            "params": {
+              "input": {
+                "type": "text",
+                "maxLength": 65536,
+                "maxLines": 2000
+              }
+            }
+          },
+          "exposed_ports": {
+            "as": "service",
+            "timeoutSec": 300,
+            "linux": "scripts/exposed_ports.sh",
+            "params": {
+              "ref": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_./:@-]{0,254}$",
+                "maxLength": 255
+              }
+            }
+          },
+          "git_branches": {
+            "as": "service",
+            "timeoutSec": 60,
+            "linux": "scripts/git_branches.sh",
+            "params": {
+              "repo": {
+                "type": "string",
+                "pattern": "^https://[A-Za-z0-9.-]+/[A-Za-z0-9._/-]+$",
+                "maxLength": 300
+              }
+            },
+            "secrets": [
+              "git_token"
+            ]
+          },
+          "git_files": {
+            "as": "service",
+            "timeoutSec": 120,
+            "linux": "scripts/git_files.sh",
+            "params": {
+              "repo": {
+                "type": "string",
+                "pattern": "^https://[A-Za-z0-9.-]+/[A-Za-z0-9._/-]+$",
+                "maxLength": 300
+              },
+              "branch": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._/-]{1,100}$",
+                "maxLength": 100
+              }
+            },
+            "secrets": [
+              "git_token"
+            ]
+          },
+          "git_services": {
+            "as": "service",
+            "timeoutSec": 120,
+            "linux": "scripts/git_services.sh",
+            "params": {
+              "repo": {
+                "type": "string",
+                "pattern": "^https://[A-Za-z0-9.-]+/[A-Za-z0-9._/-]+$",
+                "maxLength": 300
+              },
+              "branch": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._/-]{1,100}$",
+                "maxLength": 100
+              },
+              "file": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9._/-]{1,200}$",
+                "maxLength": 200
+              }
+            },
+            "secrets": [
+              "git_token"
+            ]
           }
         },
         "data": {
@@ -816,7 +931,8 @@
                 }
               }
             ],
-            "after": "refresh"
+            "after": "refresh",
+            "job": true
           },
           {
             "id": "create_privileged",
@@ -839,7 +955,8 @@
                 }
               }
             ],
-            "after": "refresh"
+            "after": "refresh",
+            "job": true
           },
           {
             "id": "recreate",
@@ -873,7 +990,8 @@
               "title": "Replace the container?",
               "text": "The container is stopped and replaced by a new one with these settings. Its volumes are kept. If the new container cannot start, the old one is put back.",
               "destructive": false
-            }
+            },
+            "job": true
           },
           {
             "id": "recreate_privileged",
@@ -907,7 +1025,8 @@
               "title": "Replace the container with elevated options?",
               "text": "These options can give the container control over the host. The container is stopped and replaced by a new one; volumes are kept.",
               "destructive": true
-            }
+            },
+            "job": true
           },
           {
             "id": "remove",
@@ -941,7 +1060,8 @@
               "text": "The container is stopped and deleted. Named volumes are kept.",
               "destructive": true,
               "requireText": "{name}"
-            }
+            },
+            "job": true
           },
           {
             "id": "image_pull",
@@ -991,11 +1111,12 @@
             "confirm": {
               "title": "Remove image {ref}?",
               "destructive": true
-            }
+            },
+            "job": true
           },
           {
             "id": "image_prune",
-            "label": "Remove unused images",
+            "label": "Remove dangling images",
             "permission": "docker.delete",
             "kind": "script",
             "params": {},
@@ -1009,8 +1130,30 @@
             ],
             "after": "refresh",
             "confirm": {
-              "title": "Remove unused images?",
-              "text": "Dangling images that no container uses are deleted.",
+              "title": "Remove dangling images?",
+              "text": "Only untagged leftovers of builds and pulls (<none>) are deleted. Images that have a name but no container stay: use \"Remove all unused images\" for those.",
+              "destructive": true
+            }
+          },
+          {
+            "id": "image_prune_all",
+            "label": "Remove all unused images",
+            "permission": "docker.delete",
+            "kind": "script",
+            "params": {},
+            "variants": [
+              {
+                "script": "image_prune",
+                "args": {
+                  "all": "literal:true"
+                }
+              }
+            ],
+            "after": "refresh",
+            "job": true,
+            "confirm": {
+              "title": "Remove all unused images?",
+              "text": "Every image that no container uses is deleted, tagged or not, and has to be pulled again when it is needed. Images used by a stopped container are kept.",
               "destructive": true
             }
           },
@@ -1064,7 +1207,8 @@
               "text": "The data in the volume is deleted for good.",
               "destructive": true,
               "requireText": "{name}"
-            }
+            },
+            "job": true
           },
           {
             "id": "volume_prune",
@@ -1144,7 +1288,8 @@
             "confirm": {
               "title": "Remove network {name}?",
               "destructive": true
-            }
+            },
+            "job": true
           },
           {
             "id": "network_prune",
@@ -1216,6 +1361,13 @@
               "pull": {
                 "type": "boolean",
                 "default": false
+              },
+              "override": {
+                "type": "text",
+                "maxLength": 8000,
+                "maxLines": 100,
+                "linePattern": "^(#.*|svc\\.[A-Za-z0-9_.-]+\\.(container_name|port|volume|network)=.+)$",
+                "default": ""
               }
             },
             "variants": [
@@ -1284,6 +1436,13 @@
               "pull": {
                 "type": "boolean",
                 "default": false
+              },
+              "override": {
+                "type": "text",
+                "maxLength": 8000,
+                "maxLines": 100,
+                "linePattern": "^(#.*|svc\\.[A-Za-z0-9_.-]+\\.(container_name|port|volume|network)=.+)$",
+                "default": ""
               }
             },
             "variants": [
@@ -1351,7 +1510,7 @@
               }
             ],
             "icon": "square",
-            "job": false,
+            "job": true,
             "after": "refresh",
             "confirm": {
               "title": "Stop stack {name}?",
@@ -1380,7 +1539,7 @@
               }
             ],
             "icon": "rotate-cw",
-            "job": false,
+            "job": true,
             "after": "refresh",
             "confirm": {
               "title": "Restart stack {name}?",
@@ -1440,7 +1599,8 @@
               "text": "Its containers and networks are removed (volumes are kept).",
               "destructive": true,
               "requireText": "{name}"
-            }
+            },
+            "job": true
           }
         ],
         "datasets": {
@@ -1478,6 +1638,41 @@
             "script": "stack_get",
             "cacheSec": 0,
             "permission": "docker.manage"
+          },
+          "export_run": {
+            "script": "export_run",
+            "cacheSec": 0,
+            "permission": "docker.manage"
+          },
+          "export_compose": {
+            "script": "export_compose",
+            "cacheSec": 0,
+            "permission": "docker.manage"
+          },
+          "convert": {
+            "script": "convert",
+            "cacheSec": 0,
+            "permission": "docker.manage"
+          },
+          "exposed_ports": {
+            "script": "exposed_ports",
+            "cacheSec": 0,
+            "permission": "docker.manage"
+          },
+          "git_branches": {
+            "script": "git_branches",
+            "cacheSec": 30,
+            "permission": "docker.manage"
+          },
+          "git_files": {
+            "script": "git_files",
+            "cacheSec": 30,
+            "permission": "docker.manage"
+          },
+          "git_services": {
+            "script": "git_services",
+            "cacheSec": 30,
+            "permission": "docker.manage"
           }
         },
         "screens": {
@@ -1496,6 +1691,22 @@
               "networks": {
                 "dataset": "networks",
                 "args": {}
+              },
+              "volumes": {
+                "dataset": "volumes",
+                "args": {}
+              },
+              "run": {
+                "dataset": "export_run",
+                "args": {
+                  "name": "context.name"
+                }
+              },
+              "compose": {
+                "dataset": "export_compose",
+                "args": {
+                  "name": "context.name"
+                }
               }
             },
             "blocks": [
@@ -1616,12 +1827,82 @@
                     "input": "heading"
                   },
                   {
+                    "name": "ports_go",
+                    "label": "Publish all exposed ports",
+                    "input": "button",
+                    "tool": {
+                      "dataset": "exposed_ports",
+                      "args": {
+                        "ref": "values.image"
+                      },
+                      "busy": "Looking at the image…"
+                    }
+                  },
+                  {
                     "name": "port",
                     "label": "Published ports",
-                    "input": "lines",
+                    "input": "rows",
                     "value": "datasets.cur.settings.port",
-                    "placeholder": "8080:80/tcp",
-                    "help": "host port:container port, optionally with an address (127.0.0.1:8080:80) or /udp."
+                    "help": "Which port of the host reaches which port of the container. \"Publish all exposed ports\" picks a free port on the host for every port the image declares; the ports are kept when you edit the container again.",
+                    "columns": [
+                      {
+                        "name": "host_ip",
+                        "label": "Host address (optional)",
+                        "input": "text",
+                        "placeholder": "127.0.0.1"
+                      },
+                      {
+                        "name": "host_port",
+                        "label": "Host port",
+                        "input": "number",
+                        "placeholder": "8080"
+                      },
+                      {
+                        "name": "container_port",
+                        "label": "Container port",
+                        "input": "number",
+                        "placeholder": "80"
+                      },
+                      {
+                        "name": "protocol",
+                        "label": "Protocol",
+                        "input": "select",
+                        "options": [
+                          {
+                            "value": "tcp",
+                            "label": "TCP"
+                          },
+                          {
+                            "value": "udp",
+                            "label": "UDP"
+                          },
+                          {
+                            "value": "sctp",
+                            "label": "SCTP"
+                          }
+                        ],
+                        "default": "tcp"
+                      }
+                    ],
+                    "format": [
+                      {
+                        "col": "host_ip",
+                        "suffix": ":",
+                        "optional": true
+                      },
+                      {
+                        "col": "host_port",
+                        "suffix": ":"
+                      },
+                      {
+                        "col": "container_port"
+                      },
+                      {
+                        "col": "protocol",
+                        "prefix": "/"
+                      }
+                    ],
+                    "parse": "^(?:(?<host_ip>[0-9a-fA-F:.]+?):)?(?<host_port>[0-9]+):(?<container_port>[0-9]+)(?:/(?<protocol>tcp|udp|sctp))?$"
                   },
                   {
                     "name": "network",
@@ -1662,10 +1943,84 @@
                   {
                     "name": "volume",
                     "label": "Volumes and folders",
-                    "input": "lines",
+                    "input": "rows",
                     "value": "datasets.cur.settings.volume",
-                    "placeholder": "/srv/data:/data  or  my-volume:/data:ro",
-                    "help": "A volume name or an absolute host folder, then the path in the container, optionally :ro."
+                    "help": "A volume is storage Docker manages; a folder is a folder of the host shown inside the container. Read only keeps the container from changing it.",
+                    "columns": [
+                      {
+                        "name": "type",
+                        "label": "Type",
+                        "input": "select",
+                        "options": [
+                          {
+                            "value": "volume",
+                            "label": "Volume"
+                          },
+                          {
+                            "value": "folder",
+                            "label": "Folder of the host"
+                          }
+                        ],
+                        "default": "volume"
+                      },
+                      {
+                        "name": "source",
+                        "label": "Volume name or host folder",
+                        "input": "text",
+                        "placeholder": "my-volume or /srv/data",
+                        "suggest": {
+                          "path": "datasets.volumes",
+                          "value": "name"
+                        }
+                      },
+                      {
+                        "name": "target",
+                        "label": "Path in the container",
+                        "input": "text",
+                        "placeholder": "/data"
+                      },
+                      {
+                        "name": "mode",
+                        "label": "Access",
+                        "input": "select",
+                        "options": [
+                          {
+                            "value": "rw",
+                            "label": "Read and write"
+                          },
+                          {
+                            "value": "ro",
+                            "label": "Read only"
+                          }
+                        ],
+                        "default": "rw"
+                      }
+                    ],
+                    "format": [
+                      {
+                        "col": "source",
+                        "suffix": ":"
+                      },
+                      {
+                        "col": "target"
+                      },
+                      {
+                        "col": "mode",
+                        "prefix": ":",
+                        "omit": [
+                          "rw"
+                        ]
+                      }
+                    ],
+                    "parse": "^(?<source>[^:]+):(?<target>[^:]+)(?::(?<mode>ro|rw))?$",
+                    "derive": {
+                      "type": {
+                        "from": "source",
+                        "startsWith": "/",
+                        "then": "folder",
+                        "else": "volume"
+                      }
+                    }
                   },
                   {
                     "name": "tmpfs",
@@ -1683,7 +2038,9 @@
                     "name": "env",
                     "label": "Environment variables",
                     "input": "pairs",
-                    "value": "datasets.cur.settings.env"
+                    "value": "datasets.cur.settings.env",
+                    "mask": "secret-names",
+                    "help": "Values of names such as PASSWORD or TOKEN are hidden and kept out of logs."
                   },
                   {
                     "name": "label",
@@ -1917,6 +2274,46 @@
                     }
                   }
                 ]
+              },
+              {
+                "type": "section",
+                "title": "Share these settings",
+                "defaultOpen": false,
+                "blocks": [
+                  {
+                    "type": "text",
+                    "text": "The settings of the container as they are now (saved ones, not what you are typing). They include its environment variables, so look before you share them."
+                  },
+                  {
+                    "type": "tabs",
+                    "tabs": [
+                      {
+                        "id": "run",
+                        "label": "docker run",
+                        "blocks": [
+                          {
+                            "type": "code",
+                            "title": "docker run command",
+                            "value": "datasets.run.text",
+                            "filename": "docker-run.sh"
+                          }
+                        ]
+                      },
+                      {
+                        "id": "compose",
+                        "label": "Docker Compose",
+                        "blocks": [
+                          {
+                            "type": "code",
+                            "title": "compose file",
+                            "value": "datasets.compose.text",
+                            "filename": "docker-compose.yml"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
               }
             ]
           },
@@ -1929,6 +2326,10 @@
               "networks": {
                 "dataset": "networks",
                 "args": {}
+              },
+              "volumes": {
+                "dataset": "volumes",
+                "args": {}
               }
             },
             "blocks": [
@@ -1936,6 +2337,34 @@
                 "type": "editor",
                 "param": "settings",
                 "fields": [
+                  {
+                    "name": "h_import",
+                    "label": "Import from a docker run command or a compose file",
+                    "input": "heading",
+                    "collapsed": true
+                  },
+                  {
+                    "name": "import_text",
+                    "label": "Paste a docker run command or a compose file",
+                    "input": "textarea",
+                    "transient": true,
+                    "height": 8,
+                    "upload": true,
+                    "placeholder": "docker run -d --name web -p 8080:80 nginx:alpine",
+                    "help": "Nothing you paste is kept: it only fills in the form below."
+                  },
+                  {
+                    "name": "import_go",
+                    "label": "Import",
+                    "input": "button",
+                    "tool": {
+                      "dataset": "convert",
+                      "args": {
+                        "input": "values.import_text"
+                      },
+                      "busy": "Converting…"
+                    }
+                  },
                   {
                     "name": "h_general",
                     "label": "General",
@@ -2016,11 +2445,81 @@
                     "input": "heading"
                   },
                   {
+                    "name": "ports_go",
+                    "label": "Publish all exposed ports",
+                    "input": "button",
+                    "tool": {
+                      "dataset": "exposed_ports",
+                      "args": {
+                        "ref": "values.image"
+                      },
+                      "busy": "Looking at the image…"
+                    }
+                  },
+                  {
                     "name": "port",
                     "label": "Published ports",
-                    "input": "lines",
-                    "placeholder": "8080:80/tcp",
-                    "help": "host port:container port, optionally with an address (127.0.0.1:8080:80) or /udp."
+                    "input": "rows",
+                    "help": "Which port of the host reaches which port of the container. \"Publish all exposed ports\" picks a free port on the host for every port the image declares; the ports are kept when you edit the container again.",
+                    "columns": [
+                      {
+                        "name": "host_ip",
+                        "label": "Host address (optional)",
+                        "input": "text",
+                        "placeholder": "127.0.0.1"
+                      },
+                      {
+                        "name": "host_port",
+                        "label": "Host port",
+                        "input": "number",
+                        "placeholder": "8080"
+                      },
+                      {
+                        "name": "container_port",
+                        "label": "Container port",
+                        "input": "number",
+                        "placeholder": "80"
+                      },
+                      {
+                        "name": "protocol",
+                        "label": "Protocol",
+                        "input": "select",
+                        "options": [
+                          {
+                            "value": "tcp",
+                            "label": "TCP"
+                          },
+                          {
+                            "value": "udp",
+                            "label": "UDP"
+                          },
+                          {
+                            "value": "sctp",
+                            "label": "SCTP"
+                          }
+                        ],
+                        "default": "tcp"
+                      }
+                    ],
+                    "format": [
+                      {
+                        "col": "host_ip",
+                        "suffix": ":",
+                        "optional": true
+                      },
+                      {
+                        "col": "host_port",
+                        "suffix": ":"
+                      },
+                      {
+                        "col": "container_port"
+                      },
+                      {
+                        "col": "protocol",
+                        "prefix": "/"
+                      }
+                    ],
+                    "parse": "^(?:(?<host_ip>[0-9a-fA-F:.]+?):)?(?<host_port>[0-9]+):(?<container_port>[0-9]+)(?:/(?<protocol>tcp|udp|sctp))?$"
                   },
                   {
                     "name": "network",
@@ -2057,9 +2556,83 @@
                   {
                     "name": "volume",
                     "label": "Volumes and folders",
-                    "input": "lines",
-                    "placeholder": "/srv/data:/data  or  my-volume:/data:ro",
-                    "help": "A volume name or an absolute host folder, then the path in the container, optionally :ro."
+                    "input": "rows",
+                    "help": "A volume is storage Docker manages; a folder is a folder of the host shown inside the container. Read only keeps the container from changing it.",
+                    "columns": [
+                      {
+                        "name": "type",
+                        "label": "Type",
+                        "input": "select",
+                        "options": [
+                          {
+                            "value": "volume",
+                            "label": "Volume"
+                          },
+                          {
+                            "value": "folder",
+                            "label": "Folder of the host"
+                          }
+                        ],
+                        "default": "volume"
+                      },
+                      {
+                        "name": "source",
+                        "label": "Volume name or host folder",
+                        "input": "text",
+                        "placeholder": "my-volume or /srv/data",
+                        "suggest": {
+                          "path": "datasets.volumes",
+                          "value": "name"
+                        }
+                      },
+                      {
+                        "name": "target",
+                        "label": "Path in the container",
+                        "input": "text",
+                        "placeholder": "/data"
+                      },
+                      {
+                        "name": "mode",
+                        "label": "Access",
+                        "input": "select",
+                        "options": [
+                          {
+                            "value": "rw",
+                            "label": "Read and write"
+                          },
+                          {
+                            "value": "ro",
+                            "label": "Read only"
+                          }
+                        ],
+                        "default": "rw"
+                      }
+                    ],
+                    "format": [
+                      {
+                        "col": "source",
+                        "suffix": ":"
+                      },
+                      {
+                        "col": "target"
+                      },
+                      {
+                        "col": "mode",
+                        "prefix": ":",
+                        "omit": [
+                          "rw"
+                        ]
+                      }
+                    ],
+                    "parse": "^(?<source>[^:]+):(?<target>[^:]+)(?::(?<mode>ro|rw))?$",
+                    "derive": {
+                      "type": {
+                        "from": "source",
+                        "startsWith": "/",
+                        "then": "folder",
+                        "else": "volume"
+                      }
+                    }
                   },
                   {
                     "name": "tmpfs",
@@ -2075,7 +2648,9 @@
                   {
                     "name": "env",
                     "label": "Environment variables",
-                    "input": "pairs"
+                    "input": "pairs",
+                    "mask": "secret-names",
+                    "help": "Values of names such as PASSWORD or TOKEN are hidden and kept out of logs."
                   },
                   {
                     "name": "label",
@@ -2318,6 +2893,8 @@
                     "name": "yaml",
                     "label": "docker-compose.yml",
                     "input": "textarea",
+                    "height": 24,
+                    "upload": true,
                     "placeholder": "services:\n  web:\n    image: nginx:latest\n    ports:\n      - \"8080:80\"",
                     "when": {
                       "field": "values.source",
@@ -2332,34 +2909,145 @@
                     "when": {
                       "field": "values.source",
                       "equals": "git"
-                    }
+                    },
+                    "help": "Private repository? An admin sets a GitHub access token under Settings, Widgets, Docker Containers (key icon)."
                   },
                   {
                     "name": "branch",
                     "label": "Branch",
-                    "input": "text",
-                    "placeholder": "main",
+                    "input": "select",
                     "when": {
                       "field": "values.source",
                       "equals": "git"
+                    },
+                    "placeholder": "main",
+                    "custom": "Custom…",
+                    "remote": {
+                      "dataset": "git_branches",
+                      "args": {
+                        "repo": "values.repo"
+                      },
+                      "path": "items",
+                      "value": "name"
                     }
                   },
                   {
                     "name": "file",
                     "label": "Compose file in the repository",
-                    "input": "text",
-                    "placeholder": "docker-compose.yml",
+                    "input": "select",
                     "when": {
                       "field": "values.source",
                       "equals": "git"
                     },
-                    "help": "Private repository? An admin sets a GitHub access token under Settings, Widgets, Docker Containers (key icon)."
+                    "placeholder": "docker-compose.yml",
+                    "custom": "Custom…",
+                    "remote": {
+                      "dataset": "git_files",
+                      "args": {
+                        "repo": "values.repo",
+                        "branch": "values.branch"
+                      },
+                      "path": "items"
+                    }
+                  },
+                  {
+                    "name": "h_override",
+                    "label": "Override settings of the compose file",
+                    "input": "heading",
+                    "collapsed": true,
+                    "when": {
+                      "field": "values.source",
+                      "equals": "git"
+                    }
+                  },
+                  {
+                    "name": "override",
+                    "label": "Overrides",
+                    "input": "rows",
+                    "when": {
+                      "field": "values.source",
+                      "equals": "git"
+                    },
+                    "help": "Change a setting of one service without editing the repository: its container name, a port, a volume or its network. Ports, volumes and networks you list replace the ones of the compose file for that service. Needs Docker Compose 2.24 or newer.",
+                    "remote": {
+                      "dataset": "git_services",
+                      "args": {
+                        "repo": "values.repo",
+                        "branch": "values.branch",
+                        "file": "values.file"
+                      },
+                      "path": "services",
+                      "value": "name"
+                    },
+                    "columns": [
+                      {
+                        "name": "service",
+                        "label": "Service",
+                        "input": "select",
+                        "remote": true
+                      },
+                      {
+                        "name": "setting",
+                        "label": "Override",
+                        "input": "select",
+                        "options": [
+                          {
+                            "value": "container_name",
+                            "label": "Container name"
+                          },
+                          {
+                            "value": "port",
+                            "label": "Port"
+                          },
+                          {
+                            "value": "volume",
+                            "label": "Volume"
+                          },
+                          {
+                            "value": "network",
+                            "label": "Network"
+                          }
+                        ],
+                        "default": "port"
+                      },
+                      {
+                        "name": "value",
+                        "label": "Value",
+                        "input": "text",
+                        "placeholder": "name, 8080:80/tcp, vol:/data or network"
+                      }
+                    ],
+                    "format": [
+                      {
+                        "lit": "svc."
+                      },
+                      {
+                        "col": "service"
+                      },
+                      {
+                        "lit": "."
+                      },
+                      {
+                        "col": "setting"
+                      },
+                      {
+                        "lit": "="
+                      },
+                      {
+                        "col": "value"
+                      }
+                    ],
+                    "parse": "^svc\\.(?<service>[^.=]+)\\.(?<setting>container_name|port|volume|network)=(?<value>.+)$"
                   },
                   {
                     "name": "env",
                     "label": "Environment file (.env)",
                     "input": "textarea",
-                    "placeholder": "KEY=value"
+                    "height": 6,
+                    "mask": "secret-names",
+                    "upload": true,
+                    "placeholder": "KEY=value",
+                    "help": "Values of names such as PASSWORD or TOKEN are kept out of logs and saved encrypted."
                   },
                   {
                     "name": "pull",
@@ -2379,7 +3067,8 @@
                       "repo": "values.repo",
                       "branch": "values.branch",
                       "file": "values.file",
-                      "pull": "values.pull"
+                      "pull": "values.pull",
+                      "override": "values.override"
                     }
                   },
                   {
@@ -2394,7 +3083,8 @@
                       "repo": "values.repo",
                       "branch": "values.branch",
                       "file": "values.file",
-                      "pull": "values.pull"
+                      "pull": "values.pull",
+                      "override": "values.override"
                     }
                   }
                 ]
@@ -2439,6 +3129,8 @@
                     "label": "docker-compose.yml",
                     "input": "textarea",
                     "value": "datasets.cur.yaml",
+                    "height": 24,
+                    "upload": true,
                     "placeholder": "services:\n  web:\n    image: nginx:latest\n    ports:\n      - \"8080:80\"",
                     "when": {
                       "field": "values.source",
@@ -2454,37 +3146,149 @@
                     "when": {
                       "field": "values.source",
                       "equals": "git"
-                    }
+                    },
+                    "help": "Private repository? An admin sets a GitHub access token under Settings, Widgets, Docker Containers (key icon)."
                   },
                   {
                     "name": "branch",
                     "label": "Branch",
-                    "input": "text",
+                    "input": "select",
                     "value": "datasets.cur.branch",
-                    "placeholder": "main",
                     "when": {
                       "field": "values.source",
                       "equals": "git"
+                    },
+                    "placeholder": "main",
+                    "custom": "Custom…",
+                    "remote": {
+                      "dataset": "git_branches",
+                      "args": {
+                        "repo": "values.repo"
+                      },
+                      "path": "items",
+                      "value": "name"
                     }
                   },
                   {
                     "name": "file",
                     "label": "Compose file in the repository",
-                    "input": "text",
+                    "input": "select",
                     "value": "datasets.cur.file",
-                    "placeholder": "docker-compose.yml",
                     "when": {
                       "field": "values.source",
                       "equals": "git"
                     },
-                    "help": "Private repository? An admin sets a GitHub access token under Settings, Widgets, Docker Containers (key icon)."
+                    "placeholder": "docker-compose.yml",
+                    "custom": "Custom…",
+                    "remote": {
+                      "dataset": "git_files",
+                      "args": {
+                        "repo": "values.repo",
+                        "branch": "values.branch"
+                      },
+                      "path": "items"
+                    }
+                  },
+                  {
+                    "name": "h_override",
+                    "label": "Override settings of the compose file",
+                    "input": "heading",
+                    "collapsed": true,
+                    "when": {
+                      "field": "values.source",
+                      "equals": "git"
+                    }
+                  },
+                  {
+                    "name": "override",
+                    "label": "Overrides",
+                    "input": "rows",
+                    "when": {
+                      "field": "values.source",
+                      "equals": "git"
+                    },
+                    "value": "datasets.cur.override",
+                    "help": "Change a setting of one service without editing the repository: its container name, a port, a volume or its network. Ports, volumes and networks you list replace the ones of the compose file for that service. Needs Docker Compose 2.24 or newer.",
+                    "remote": {
+                      "dataset": "git_services",
+                      "args": {
+                        "repo": "values.repo",
+                        "branch": "values.branch",
+                        "file": "values.file"
+                      },
+                      "path": "services",
+                      "value": "name"
+                    },
+                    "columns": [
+                      {
+                        "name": "service",
+                        "label": "Service",
+                        "input": "select",
+                        "remote": true
+                      },
+                      {
+                        "name": "setting",
+                        "label": "Override",
+                        "input": "select",
+                        "options": [
+                          {
+                            "value": "container_name",
+                            "label": "Container name"
+                          },
+                          {
+                            "value": "port",
+                            "label": "Port"
+                          },
+                          {
+                            "value": "volume",
+                            "label": "Volume"
+                          },
+                          {
+                            "value": "network",
+                            "label": "Network"
+                          }
+                        ],
+                        "default": "port"
+                      },
+                      {
+                        "name": "value",
+                        "label": "Value",
+                        "input": "text",
+                        "placeholder": "name, 8080:80/tcp, vol:/data or network"
+                      }
+                    ],
+                    "format": [
+                      {
+                        "lit": "svc."
+                      },
+                      {
+                        "col": "service"
+                      },
+                      {
+                        "lit": "."
+                      },
+                      {
+                        "col": "setting"
+                      },
+                      {
+                        "lit": "="
+                      },
+                      {
+                        "col": "value"
+                      }
+                    ],
+                    "parse": "^svc\\.(?<service>[^.=]+)\\.(?<setting>container_name|port|volume|network)=(?<value>.+)$"
                   },
                   {
                     "name": "env",
                     "label": "Environment file (.env)",
                     "input": "textarea",
                     "value": "datasets.cur.env",
-                    "placeholder": "KEY=value"
+                    "height": 6,
+                    "mask": "secret-names",
+                    "upload": true,
+                    "placeholder": "KEY=value",
+                    "help": "Values of names such as PASSWORD or TOKEN are kept out of logs and saved encrypted."
                   },
                   {
                     "name": "pull",
@@ -2504,7 +3308,8 @@
                       "repo": "values.repo",
                       "branch": "values.branch",
                       "file": "values.file",
-                      "pull": "values.pull"
+                      "pull": "values.pull",
+                      "override": "values.override"
                     }
                   },
                   {
@@ -2519,7 +3324,8 @@
                       "repo": "values.repo",
                       "branch": "values.branch",
                       "file": "values.file",
-                      "pull": "values.pull"
+                      "pull": "values.pull",
+                      "override": "values.override"
                     }
                   }
                 ]
@@ -2703,7 +3509,8 @@
                       {
                         "type": "buttons",
                         "actions": [
-                          "image_prune"
+                          "image_prune",
+                          "image_prune_all"
                         ]
                       },
                       {
@@ -2765,30 +3572,34 @@
                     "label": "Volumes",
                     "blocks": [
                       {
-                        "type": "form",
-                        "title": "Create a volume",
+                        "type": "editor",
                         "fields": [
                           {
                             "name": "name",
-                            "label": "Name",
+                            "label": "Create a volume: name",
                             "input": "text",
+                            "required": true,
                             "placeholder": "my-volume"
                           },
                           {
                             "name": "driver",
                             "label": "Driver",
-                            "input": "text",
-                            "placeholder": "local"
+                            "input": "select",
+                            "optionsFrom": {
+                              "path": "datasets.system.drivers.volume"
+                            }
                           }
                         ],
-                        "submit": {
-                          "action": "volume_create",
-                          "label": "Create",
-                          "params": {
-                            "name": "name",
-                            "driver": "driver"
+                        "submits": [
+                          {
+                            "action": "volume_create",
+                            "label": "Create volume",
+                            "params": {
+                              "name": "values.name",
+                              "driver": "values.driver"
+                            }
                           }
-                        }
+                        ]
                       },
                       {
                         "type": "buttons",
@@ -2847,37 +3658,22 @@
                     "label": "Networks",
                     "blocks": [
                       {
-                        "type": "form",
-                        "title": "Create a network",
+                        "type": "editor",
                         "fields": [
                           {
                             "name": "name",
-                            "label": "Name",
+                            "label": "Create a network: name",
                             "input": "text",
+                            "required": true,
                             "placeholder": "my-network"
                           },
                           {
                             "name": "driver",
                             "label": "Driver",
                             "input": "select",
-                            "options": [
-                              {
-                                "value": "bridge",
-                                "label": "bridge"
-                              },
-                              {
-                                "value": "macvlan",
-                                "label": "macvlan"
-                              },
-                              {
-                                "value": "ipvlan",
-                                "label": "ipvlan"
-                              },
-                              {
-                                "value": "overlay",
-                                "label": "overlay"
-                              }
-                            ]
+                            "optionsFrom": {
+                              "path": "datasets.system.drivers.network"
+                            }
                           },
                           {
                             "name": "subnet",
@@ -2892,16 +3688,18 @@
                             "placeholder": "172.30.0.1"
                           }
                         ],
-                        "submit": {
-                          "action": "network_create",
-                          "label": "Create",
-                          "params": {
-                            "name": "name",
-                            "driver": "driver",
-                            "subnet": "subnet",
-                            "gateway": "gateway"
+                        "submits": [
+                          {
+                            "action": "network_create",
+                            "label": "Create network",
+                            "params": {
+                              "name": "values.name",
+                              "driver": "values.driver",
+                              "subnet": "values.subnet",
+                              "gateway": "values.gateway"
+                            }
                           }
-                        }
+                        ]
                       },
                       {
                         "type": "buttons",

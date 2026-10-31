@@ -30,7 +30,7 @@ describe('the Docker manager package', () => {
   it('has screens, datasets and menu entries that exist, and a review that lists what runs', () => {
     expect(Object.keys(spec.screens ?? {}).sort()).toEqual(['create', 'edit', 'manage', 'stack_edit', 'stack_new']);
     expect(spec.menu?.map(m => m.id)).toEqual(['new_container', 'new_stack', 'manage']);
-    expect(Object.keys(spec.datasets ?? {}).sort()).toEqual(['images', 'inspect', 'networks', 'stack_get', 'stacks', 'system', 'volumes']);
+    expect(Object.keys(spec.datasets ?? {}).sort()).toEqual(['convert', 'export_compose', 'export_run', 'exposed_ports', 'git_branches', 'git_files', 'git_services', 'images', 'inspect', 'networks', 'stack_get', 'stacks', 'system', 'volumes']);
     const review = reviewPackage(manifest);
     expect(review.runsAsService).toBe(true);
     expect(review.widgets[0].commands.some(c => /dataset "inspect"/.test(c.what))).toBe(true);
@@ -63,7 +63,7 @@ describe('the Docker manager package', () => {
   it('the editors use only keys of the settings blob, and mark the risky ones', () => {
     for (const screenId of ['edit', 'create']) {
       const [ed] = editors(spec.screens![screenId].blocks);
-      const fields = ed.fields.filter(f => f.input !== 'heading');
+      const fields = ed.fields.filter(f => f.input !== 'heading' && f.input !== 'button' && !f.transient);
       for (const f of fields) expect(BLOB_KEYS, `${screenId}.${f.name}`).toContain(f.key ?? f.name);
       for (const k of RISKY_KEYS) expect(fields.find(f => (f.key ?? f.name) === k)?.warn, `${screenId}.${k} warns`).toBeTruthy();
       expect(fields.find(f => f.name === 'cap_drop')?.warn).toBeUndefined();
@@ -72,7 +72,7 @@ describe('the Docker manager package', () => {
 
   it('every key of the blob the editors can send is understood by the create and recreate scripts', () => {
     const [ed] = editors(spec.screens!.create.blocks);
-    for (const f of ed.fields.filter((x: EditorField) => x.input !== 'heading')) {
+    for (const f of ed.fields.filter((x: EditorField) => x.input !== 'heading' && x.input !== 'button' && !x.transient)) {
       const key = f.key ?? f.name;
       for (const s of ['container_create', 'container_recreate']) expect(script(s), `${s} knows "${key}"`).toMatch(new RegExp(`\\b${key}\\)|['"]${key}['"]|\\b${key}\\b`));
     }
@@ -97,11 +97,13 @@ describe('the Docker manager package', () => {
     const values = editorInitial(ed.fields, { context: undefined });
     values.name = 'demo'; values.yaml = 'services:\n  web:\n    image: nginx\n';
     const params = spec.scripts!.stack_deploy.params;
-    expect(() => validateParamValues(params, { name: 'demo', source: 'editor', yaml: String(values.yaml), env: '', repo: '-', branch: '-', file: '-', pull: 'false', allow_risky: 'false' })).not.toThrow();
-    expect(() => validateParamValues(params, { name: 'demo', source: 'git', yaml: '', env: 'A=1', repo: 'https://github.com/owner/repo', branch: 'main', file: 'deploy/compose.yaml', pull: 'true', allow_risky: 'false' })).not.toThrow();
-    expect(() => validateParamValues(params, { name: 'demo', source: 'git', yaml: '', env: '', repo: 'http://github.com/owner/repo', branch: 'main', file: 'a', pull: 'false', allow_risky: 'false' })).toThrow();   // https only
-    expect(() => validateParamValues(params, { name: 'Bad Name', source: 'editor', yaml: '', env: '', repo: '-', branch: '-', file: '-', pull: 'false', allow_risky: 'false' })).toThrow();
-    // only the stack scripts receive the GitHub token
-    for (const [id, s] of Object.entries(spec.scripts!)) expect(Boolean(s.secrets?.length), id).toBe(id === 'stack_deploy' || id === 'stack_action');
+    expect(() => validateParamValues(params, { name: 'demo', source: 'editor', yaml: String(values.yaml), env: '', repo: '-', branch: '-', file: '-', pull: 'false', allow_risky: 'false', override: '' })).not.toThrow();
+    expect(() => validateParamValues(params, { name: 'demo', source: 'git', yaml: '', env: 'A=1', repo: 'https://github.com/owner/repo', branch: 'main', file: 'deploy/compose.yaml', pull: 'true', allow_risky: 'false', override: 'svc.web.port=8080:80/tcp\nsvc.web.container_name=site' })).not.toThrow();
+    expect(() => validateParamValues(params, { name: 'demo', source: 'git', yaml: '', env: '', repo: 'http://github.com/owner/repo', branch: 'main', file: 'a', pull: 'false', allow_risky: 'false', override: '' })).toThrow();   // https only
+    expect(() => validateParamValues(params, { name: 'Bad Name', source: 'editor', yaml: '', env: '', repo: '-', branch: '-', file: '-', pull: 'false', allow_risky: 'false', override: '' })).toThrow();
+    expect(() => validateParamValues(params, { name: 'demo', source: 'git', yaml: '', env: '', repo: 'https://github.com/owner/repo', branch: 'main', file: 'a.yml', pull: 'false', allow_risky: 'false', override: 'svc.web.volume=/etc:/etc\nrm -rf /' })).toThrow();   // an override line must be a svc.<service>.<setting>=value line
+    // only the stack and git scripts receive the GitHub token
+    const withToken = ['stack_deploy', 'stack_action', 'git_branches', 'git_files', 'git_services'];
+    for (const [id, s] of Object.entries(spec.scripts!)) expect(Boolean(s.secrets?.length), id).toBe(withToken.includes(id));
   });
 });

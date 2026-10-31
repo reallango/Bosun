@@ -191,7 +191,8 @@ export { newRow as newEditorRow };
 
 /** The rows of a `rows` field from the lines the context holds. Lines that do not fit keep their text in the first column. */
 function rowsFromLines(f: EditorField, v: unknown): RowValue[] {
-  return asLines(v).filter(l => l.trim() !== '').map(l => parseRowLine(f, l) ?? { ...newRow(f), [f.columns![0].name]: l.trim() });
+  // comment lines (# ...) are not rows; a line that does not fit keeps its text in the first column so nothing is lost silently
+  return asLines(v).filter(l => l.trim() !== '' && !l.trim().startsWith('#')).map(l => parseRowLine(f, l) ?? { ...newRow(f), [f.columns![0].name]: l.trim() });
 }
 
 /** The starting values of an editor: what each field's path holds in the context. */
