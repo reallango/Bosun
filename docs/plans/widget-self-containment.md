@@ -264,9 +264,13 @@ hosts, the live tests in section 8. Do not push to `main` until the owner has te
    now and install as jobs, the list refreshing after an install; Ollama against a real container (detect, pull with progress,
    delete with confirmation, recreate for a setting with ports, volume and restart policy kept, update to a newer release,
    restart policy, stop and start, the loaded-models metric); the three widgets in the browser.
-   Carried forward: (a) the Windows scripts (Custom Command, OS Update Check install via the SYSTEM task and job cancel, the
-   whole Ollama Windows set) are written, ASCII-checked and reviewed but not yet run on a Windows host: needs a Windows live
-   test with temporary authorised keys; (b) one running job per widget and server, so a model pull and an install no longer run
+   Windows (gamebed, Windows 11, an nssm Ollama 0.40.13, admin account, temporary key): verified live: Ollama state probe (nssm
+   service, exe, the two settings from the registry), data script, the Windows Update search (read-only), and the Ollama update
+   flow as a job (service stopped, release downloaded, unpacked, service started, settings and version unchanged); the install
+   script refuses cleanly when a service named Ollama exists.
+   Carried forward: (a) not yet run on Windows: Custom Command (needs a standard-user account), the OS update install through the
+   SYSTEM task and job cancel, a fresh Ollama install (needs the existing service removed), the Windows control, startup and
+   setting scripts; (b) one running job per widget and server, so a model pull and an install no longer run
    side by side (the old code allowed several pulls); (c) with Ollama down the loaded-models metric records 0 instead of no sample;
    (d) a setting value of "default" removes the setting (the form sends it for an empty field); (e) the Ollama context length
    value is not range-checked beyond its digits any more.
