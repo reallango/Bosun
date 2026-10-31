@@ -93,7 +93,7 @@ describe('terminal actions in the OpenAPI document', () => {
   it('are listed as a token-returning operation with the action permission', () => {
     const r = validateWidgetSpec({
       version: 1,
-      data: { source: 'snapshot', section: 'docker', permission: 'dk.view' },
+      data: { source: 'snapshot', section: 'services', permission: 'dk.view' },
       view: { type: 'list', row: { title: '{name}', actions: ['shell'] } },
       actions: [{ id: 'shell', label: 'Shell', permission: 'dk.shell', terminal: { ref: 'name', refPattern: '^[a-z]+$', command: 'docker exec -it {{ref}} sh' } }],
     }, ['dk.view', 'dk.shell']);

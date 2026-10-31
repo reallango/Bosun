@@ -17,7 +17,6 @@ import { useToast } from '@/components/ui/toast';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { cn } from '@/lib/utils';
 import { RefreshHandler, WidgetFrameContext } from './widget-context';
-import { customWidgetComponents } from '@/components/widgets/custom-registry';
 import { DeclarativeWidget } from '@/components/widgets/declarative/DeclarativeWidget';
 import { WidgetLoading } from '@/components/widgets/WidgetLoading';
 import { useAuth } from '@/hooks/useAuth';
@@ -62,10 +61,7 @@ function WidgetContent({ widgetId, widgetType, serverId, serverName }: { widgetI
       return <SSHTerminalWidget widgetId={widgetId} serverId={serverId} />;
     default:
     {
-      // Database-defined widget types render through the custom registry.
-      const Custom = customWidgetComponents[widgetType];
-      if (Custom) return <Custom widgetId={widgetId} serverId={serverId} serverName={serverName} />;
-      // Package widgets render from their declarative spec; the component says so if the type has none.
+      // Every other widget is a package and renders from its declarative spec; the component says so if the type has none.
       return <DeclarativeWidget widgetId={widgetId} widgetType={widgetType} serverId={serverId} />;
     }
   }
@@ -74,7 +70,7 @@ function WidgetContent({ widgetId, widgetType, serverId, serverName }: { widgetI
 /** Widgets that manage their own scrolling/padding (edge-to-edge content). */
 const FULL_BLEED = new Set(['ssh_terminal']);
 
-/** Human title for a raw widget type ("cpu_memory" -> "Cpu memory") when no name is set. */
+/** Human title for a raw widget type ("my_widget" -> "My widget") when no name is set. */
 function prettyType(type: string) {
   const s = type.replace(/[_-]+/g, ' ').trim();
   return s.charAt(0).toUpperCase() + s.slice(1);

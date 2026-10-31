@@ -1,0 +1,34 @@
+{
+  "allowed": [
+    {
+      "file": "src/lib/ssh/shell-account.js",
+      "names": ["docker"],
+      "reason": "A host group name: members of the docker group are root-equivalent, so the service-account check treats it as admin-like. It is about the host, not the Docker widget."
+    },
+    {
+      "file": "src/lib/widgets/custom-widget-input.ts",
+      "names": ["docker", "network"],
+      "reason": "Widget categories are a fixed list of picker labels any package may use (a manifest's category field); they are not widget types."
+    },
+    {
+      "file": "src/types/widget.ts",
+      "names": ["docker", "network"],
+      "reason": "The WidgetCategory type is the same fixed list of picker labels; any package may pick one."
+    },
+    {
+      "file": "src/lib/widgets/package-manifest.ts",
+      "names": ["network"],
+      "reason": "\"network\" is the manifest field that lists the hosts a package's lookups may contact, not a widget type."
+    },
+    {
+      "file": "src/lib/widgets/runtime/lookups.ts",
+      "names": ["network"],
+      "reason": "A comment naming the manifest field \"network\" (the allowed lookup hosts)."
+    },
+    {
+      "file": "src/lib/widgets/runtime/spec.ts",
+      "names": ["cpu_memory", "network"],
+      "reason": "SNAPSHOT_SECTIONS lists the sections the collectors write into every snapshot (generic host data any widget may read); sections are core data, not widget types."
+    }
+  ]
+}

@@ -37,7 +37,6 @@ export interface CustomWidgetRow {
  * snapshot section mapping) and a component, i.e. they are known to the code
  * but not compiled into the registry.
  */
-export const CUSTOM_WIDGET_DATA_TYPES: string[] = [];
 
 function parseJson<T>(raw: unknown, fallback: T): T {
   if (raw == null) return fallback;

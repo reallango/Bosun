@@ -72,7 +72,7 @@ Rules that keep a package from becoming a way to run arbitrary commands:
   `pattern` or a fixed list of `values`; a number needs `min` and `max`. Values are validated, then inserted as one quoted word.
 - `as` is explicit on every command. `shell` is the non-admin account (no sudo, no Docker).
 - Installing shows the admin every command, the account and the permissions, and asks for confirmation.
-- **Terminal actions** (`"terminal": { "container": "<row field>" }`, no command or parameters) add a shell button that opens the web  terminal in a container, like the built-in Docker widget. The terminal asks for the person's own login and is only available to  Full access users, in addition to the permission the action names. Over the API the same action, `POST /api/servers/:serverId/widget-actions/:widgetType/:actionId` with `{ "container": "name" }`, returns a single-use token for an API terminal in that container, for API keys holding the action's permission (instead of the built-in `docker.shell`). Containers able to reach the host are refused, as for any API container shell.
+- **Terminal actions** (`"terminal": { "ref": "<row field>", "refPattern": "...", "command": "docker exec -it {{ref}} sh", "check": "<script>" }`) add a shell button that opens a terminal running that command on the host. The terminal asks for the person's own login and is only available to Full access users, in addition to the permission the action names. Over the API the same action, `POST /api/servers/:serverId/widget-actions/:widgetType/:actionId` with `{ "ref": "name" }`, returns a single-use token for an API terminal, for API keys holding the action's permission. The optional `check` script decides whether an API key may have the shell (it prints `ERROR: reason` to refuse, and `REF <exact target>` to pin what the shell opens); the Docker package uses it to refuse containers that can reach the host.
 
 Each action is also an API endpoint, `POST /api/servers/:serverId/widget-actions/:widgetType/:actionId`, with
 `{ "params": {...}, "confirm": true }`, and the data is at `GET /api/servers/:serverId/widget-data/:widgetType`.
@@ -88,9 +88,9 @@ version replaces an older one that came from the image; a package the admin inst
 left alone. Every bundled widget has a `<id>.view` data permission at the `viewer` level, so Read only users keep
 their dashboards unless a group denies it.
 
-Ollama Status, OS Update Check and Custom Command have views that are compiled into Bosun (long running pulls,
-installs and live commands); their packages carry the permissions, size, settings and tracked statistics, and the
-`spec` only names the data permission.
+Every one of them, including Ollama Status, OS Update Check, Docker Containers and Custom Command, is built only from
+its manifest, scripts and declarative screen; Bosun has no code of its own for any of them. To write your own, see
+[docs/create-your-own-widget.md](../docs/create-your-own-widget.md) and the example in `docs/examples/hello_host`.
 
 ## More of the spec
 

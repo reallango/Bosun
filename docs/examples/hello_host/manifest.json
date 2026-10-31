@@ -1,0 +1,69 @@
+{
+  "schema": 1,
+  "id": "hello_host",
+  "name": "Hello Host",
+  "version": "1.0.0",
+  "description": "A tiny example package: shows the host name and uptime with a greeting you choose. It is the worked example in docs/create-your-own-widget.md and is not installed by default.",
+  "author": "Bosun",
+  "permissions": [
+    {
+      "id": "hello_host.view",
+      "label": "See Hello Host widgets",
+      "description": "See the Hello Host widget and the output of its script.",
+      "group": "Hello Host",
+      "defaultLevel": "viewer",
+      "risk": "low",
+      "scope": "server"
+    }
+  ],
+  "widgets": [
+    {
+      "type": "hello_host",
+      "display_name": "Hello Host",
+      "description": "The host name and uptime with a greeting",
+      "icon": "hand",
+      "category": "utility",
+      "default_size": { "w": 6, "h": 3 },
+      "min_size": { "w": 4, "h": 2 },
+      "refresh_interval": 60,
+      "supports_linux": true,
+      "supports_windows": true,
+      "config_schema": [
+        { "key": "greeting", "label": "Greeting", "type": "string", "default": "Hello", "description": "The word shown before the host name." }
+      ],
+      "spec": {
+        "version": 2,
+        "scripts": {
+          "hello": {
+            "as": "shell",
+            "timeoutSec": 15,
+            "linux": "scripts/hello.sh",
+            "windows": "scripts/hello.ps1",
+            "params": {
+              "greeting": { "type": "string", "pattern": "^[A-Za-z ,!.-]{1,40}$", "maxLength": 40, "default": "Hello", "description": "Word shown before the host name" }
+            }
+          }
+        },
+        "data": {
+          "source": "command",
+          "as": "shell",
+          "command": "",
+          "script": "hello",
+          "args": { "greeting": "config.greeting" },
+          "parse": "json",
+          "cacheSec": 30,
+          "timeoutSec": 15,
+          "permission": "hello_host.view"
+        },
+        "view": {
+          "type": "fields",
+          "fields": [
+            { "label": "Message", "value": "{message}" },
+            { "label": "Up", "value": "{uptime}" }
+          ]
+        },
+        "actions": []
+      }
+    }
+  ]
+}

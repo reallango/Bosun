@@ -1,6 +1,6 @@
 # Plan: self-contained widget packages
 
-Status: **in progress on `dev`. Phases 0 (spec v2), 1 (file store and materialiser), 2 (scripts runner, probes, lookups), 3 (jobs) and 4 (conditions, variants, UI blocks) are done and verified; phase 5 (port Ollama, OS Update Check and Custom Command) is done for Linux and Docker, its Windows live test is open; phase 8 (Docker package) is done; phase 9 (guard rails and docs) is next.** Written on the `dev` branch so the work can be picked up later by anyone (or any
+Status: **in progress on `dev`. Phases 0 (spec v2), 1 (file store and materialiser), 2 (scripts runner, probes, lookups), 3 (jobs) and 4 (conditions, variants, UI blocks) are done and verified; phase 5 (port Ollama, OS Update Check and Custom Command) is done and live-tested on Linux, Docker and Windows; phase 8 (Docker package) and phase 9 (guard rails and docs) are done; phase 10 (hardening and release) is next.** Written on the `dev` branch so the work can be picked up later by anyone (or any
 session). Phases marked "done" are built, tested and pushed to `dev`.
 
 ## 1. The rule
@@ -304,6 +304,16 @@ hosts, the live tests in section 8. Do not push to `main` until the owner has te
    ids or snapshot sections (an allow-list file for the SSH Terminal); remove `customWidgetComponents`,
    `WIDGET_SECTIONS` and the widget names from `SNAPSHOT_SECTIONS`; write "Create your own widget" documentation with a
    small worked example package that is not shipped (and use it as a test fixture).
+   **DONE**: `src/lib/widgets/guard-rails.test.ts` fails when a non-test source of Bosun (`src/`, `poller.js`, `ws-server.js`;
+   not the migrations, which record history) names a widget type, package id or permission of a bundled package; the few
+   exceptions are in `guard-rails.allow.json` with a reason each (host group `docker`, the picker categories, the manifest
+   field `network`, the collector snapshot sections). The Docker build runs vitest, so it is the gate (the repository has no CI
+   workflow). Removed: `customWidgetComponents`/`custom-registry.tsx`, `CUSTOM_WIDGET_DATA_TYPES`, the "Register a custom
+   widget" card and the `POST /api/widget-definitions` it used, and `docker` from `SNAPSHOT_SECTIONS`. The one real dependency the
+   test found was the ad-hoc command API using the Custom Command package's `commands.run`: it now has the core permission
+   `exec.service`, and migration 13 copies every grant and deny of `commands.run` to it (nobody gains or loses access);
+   Custom Command is 2.0.1. Docs: `docs/create-your-own-widget.md`, with `docs/examples/hello_host` (a package that is not in
+   `bundled.json`) validated and run by `example-package.test.ts`; `widgets/README.md` no longer describes compiled views.
 10. **Hardening and release**: upgrade test from the previous image (all widget types on a dashboard, then switch the
     image), multi-node test, a Read-only user's view, then ask the owner before any push to `main`.
 

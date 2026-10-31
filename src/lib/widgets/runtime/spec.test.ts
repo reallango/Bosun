@@ -82,8 +82,8 @@ describe('validateWidgetSpec', () => {
   });
 
   it('checks data sources, fields and limits', () => {
-    expect(bad(s => { s.data = { source: 'snapshot', section: 'docker', path: 'containers', permission: 'dk.view' }; }).ok).toBe(true);
-    expect(bad(s => { s.data = { source: 'snapshot', section: 'docker', path: 'containers' }; }).ok).toBe(false);   // data.permission is required
+    expect(bad(s => { s.data = { source: 'snapshot', section: 'services', path: 'containers', permission: 'dk.view' }; }).ok).toBe(true);
+    expect(bad(s => { s.data = { source: 'snapshot', section: 'services', path: 'containers' }; }).ok).toBe(false);   // data.permission is required
     expect(bad(s => { s.data = { source: 'snapshot', section: 'secrets', permission: 'dk.view' }; }).ok).toBe(false);
     expect(bad(s => { s.data = { source: 'file', path: '/etc/shadow', permission: 'dk.view' }; }).ok).toBe(false);
     expect(bad(s => { s.data.parse = 'xml'; }).ok).toBe(false);

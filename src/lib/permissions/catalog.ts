@@ -65,6 +65,9 @@ export const CATALOG: readonly PermissionDef[] = [
   { id: 'shell.user', label: 'Terminal and commands as the non-admin account (API)', group: 'Shell', source: 'core', defaultLevel: 'admin', risk: 'high', scope: 'server',
     description: 'Run commands and open a terminal on the host as its unprivileged account (no sudo, no Docker group, no way back to the admin account). API keys only; the web terminal still asks for your own login.' },
 
+  { id: 'exec.service', label: 'Run commands as the service account (API)', group: 'Shell', source: 'core', defaultLevel: 'admin', risk: 'high', scope: 'server',
+    description: 'Run an arbitrary command on the host as its privileged service account through the API (PowerShell on Windows). Rate limited and audited.' },
+
   // ---- Dashboards --------------------------------------------------------
   { id: 'dashboards.edit', label: 'Edit dashboards', group: 'Dashboards', source: 'core', defaultLevel: 'operator', risk: 'low', scope: 'global',
     description: 'Create, rename and delete dashboards; add, move, resize, configure and remove widgets.' },

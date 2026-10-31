@@ -576,6 +576,15 @@ const V12_PACKAGE_JOBS: string[] = [
     `CREATE INDEX IF NOT EXISTS idx_package_jobs_lookup ON package_jobs(server_id, widget_type, started_at)`,
 ];
 
+// ---- Version 13: the ad-hoc command API gets a permission of its own ----
+// `commands.run` belongs to the Custom Command package (it guards the command of that widget); the API that runs an ad-hoc
+// command as the service account must not depend on a widget package, so it has the core permission `exec.service`. Everyone
+// who was granted (or denied) `commands.run` gets the same for `exec.service`, so nobody gains or loses access.
+const V13_EXEC_PERMISSION: string[] = [
+    `INSERT OR IGNORE INTO permission_grants (id, group_id, permission, scope_type, scope_id, effect)
+       SELECT lower(hex(randomblob(16))), group_id, 'exec.service', scope_type, scope_id, effect FROM permission_grants WHERE permission = 'commands.run'`,
+];
+
 export const MIGRATIONS: Migration[] = [
     {
         version: 1,
@@ -597,6 +606,7 @@ export const MIGRATIONS: Migration[] = [
     { version: 10, name: 'metric_definitions', statements: V10_METRIC_DEFINITIONS },
     { version: 11, name: 'package_content_hash', statements: V11_PACKAGE_HASH },
     { version: 12, name: 'package_jobs', statements: V12_PACKAGE_JOBS },
+    { version: 13, name: 'exec_permission', statements: V13_EXEC_PERMISSION },
 ];
 
 /** The schema version this build expects. */

@@ -15,7 +15,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
   const { serverId } = await params;
-  const roleError = await requirePermission(auth, 'commands.run', serverId);
+  const roleError = await requirePermission(auth, 'exec.service', serverId);
   if (roleError) return roleError;
 
   let body: { command?: unknown };
