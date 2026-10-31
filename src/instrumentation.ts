@@ -11,6 +11,12 @@ export async function register() {
   // branch. Skip the production build phase.
   if (process.env.NEXT_RUNTIME === 'nodejs' && process.env.NEXT_PHASE !== 'phase-production-build') {
     const { ensureDatabase } = await import('@/lib/db/initialize');
-    void ensureDatabase().catch(err => console.error('[db] initialisation failed:', err));
+    void ensureDatabase()
+      .then(async () => {
+        // Every node keeps the packages' files on its own disk, written from the database (see lib/widgets/materialize.ts).
+        const { startPackageFileSync } = await import('@/lib/widgets/materialize-db');
+        startPackageFileSync();
+      })
+      .catch(err => console.error('[db] initialisation failed:', err));
   }
 }

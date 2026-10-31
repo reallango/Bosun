@@ -13,7 +13,7 @@ export type SourceRef = (typeof ALLOWED_REFS)[number];
 export const DEFAULT_REF: SourceRef = 'main';
 
 const MAX_PACKAGES = 100;
-const MAX_RESPONSE_BYTES = 512 * 1024;
+const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const TIMEOUT_MS = 10_000;
 
 type FetchLike = (url: string, init?: { headers?: Record<string, string>; signal?: AbortSignal }) => Promise<{

@@ -15,9 +15,9 @@ export const PACKAGE_ID_RE = /^[a-z][a-z0-9_]{1,39}$/;
 export const WIDGET_TYPE_RE = /^[a-z][a-z0-9_]{0,63}$/;
 export const VERSION_RE = /^\d{1,6}\.\d{1,6}\.\d{1,6}$/;
 
-export const MAX_FILE_BYTES = 256 * 1024;
-export const MAX_FILES_BYTES = 1024 * 1024;
-export const MAX_FILES = 40;
+export const MAX_FILE_BYTES = 2 * 1024 * 1024;
+export const MAX_FILES_BYTES = 8 * 1024 * 1024;
+export const MAX_FILES = 100;
 export const MAX_SPEC_BYTES = 128 * 1024;
 const FILE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*(\/[A-Za-z0-9][A-Za-z0-9._-]*)*$/;
 

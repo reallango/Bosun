@@ -11,6 +11,8 @@ import { invalidatePermissionCache } from '@/lib/permissions/store';
 import { invalidateRuntimeCache } from '@/lib/widgets/runtime/execute';
 import { compareVersions, validateManifest, validateScriptFiles, manifestToJson, type PackageManifest, type PackageFiles } from '@/lib/widgets/package-manifest';
 import { reservedPackageNames } from '@/lib/widgets/system-packages';
+import { contentHashOf } from '@/lib/widgets/materialize';
+import { materializeNow } from '@/lib/widgets/materialize-db';
 import { markBundledRemoved, unmarkBundledRemoved, isBundledId } from '@/lib/widgets/bundled';
 
 export class PackageError extends Error {
@@ -136,14 +138,17 @@ export async function installPackage(opts: InstallOptions): Promise<InstallResul
 
   const source = `package:${manifest.id}`;
   const stmts: { sql: string; params?: unknown[] }[] = [];
+  // What every node compares with the copy on its disk (see materialize.ts).
+  const manifestJson = JSON.stringify(manifestToJson(manifest));
+  const contentHash = contentHashOf(manifestJson, files);
   stmts.push({
-    sql: `INSERT INTO widget_packages (id, name, version, description, author, source, source_ref, manifest, files, installed_by)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    sql: `INSERT INTO widget_packages (id, name, version, description, author, source, source_ref, manifest, files, installed_by, content_hash)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET name = excluded.name, version = excluded.version, description = excluded.description,
             author = excluded.author, source = excluded.source, source_ref = excluded.source_ref, manifest = excluded.manifest,
-            files = excluded.files, updated_at = CURRENT_TIMESTAMP`,
+            files = excluded.files, content_hash = excluded.content_hash, updated_at = CURRENT_TIMESTAMP`,
     params: [manifest.id, manifest.name, manifest.version, manifest.description, manifest.author, opts.source, opts.sourceRef ?? null,
-      JSON.stringify(manifestToJson(manifest)), JSON.stringify(files), opts.userId ?? null],
+      manifestJson, JSON.stringify(files), opts.userId ?? null, contentHash],
   });
   for (const w of manifest.widgets) {
     const c = w.columns;
@@ -197,6 +202,8 @@ export async function installPackage(opts: InstallOptions): Promise<InstallResul
 
   await rqlite.executeBatch(stmts as { sql: string; params?: never[] }[], { transaction: true });
   await unmarkBundledRemoved(manifest.id).catch(() => {});
+  // Write the package's files on this node now; the other nodes pick the change up from the database.
+  await materializeNow(manifest.id).catch(err => console.warn(`[widgets] could not write the files of ${manifest.id}: ${err instanceof Error ? err.message : err}`));
   invalidatePermissionCache();
   invalidateRuntimeCache();
   return { id: manifest.id, version: manifest.version, previousVersion, widgetTypes: newTypes, permissions: permIds };
@@ -220,6 +227,7 @@ export async function removePackage(id: string, removeWidgets: boolean): Promise
   stmts.push({ sql: 'DELETE FROM metric_definitions WHERE package_id = ?', params: [id] });
   stmts.push({ sql: 'DELETE FROM widget_packages WHERE id = ?', params: [id] });
   await rqlite.executeBatch(stmts as { sql: string; params?: never[] }[], { transaction: true });
+  await materializeNow(id).catch(() => undefined);   // the row is gone, so this removes the files of this node
   // A bundled package that is removed stays removed (it is not installed again at the next start).
   if (found.pkg.source === 'bundled' || isBundledId(id)) await markBundledRemoved(id).catch(() => {});
   invalidatePermissionCache();

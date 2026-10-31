@@ -87,7 +87,8 @@ describe('validateFiles', () => {
       expect(validateFiles({ [name]: 'x' }).ok, name).toBe(false);
     }
     expect(validateFiles({ 'bin.dat': Buffer.from([1, 0, 2]) }).ok).toBe(false);
-    expect(validateFiles({ 'big.txt': 'a'.repeat(300 * 1024) }).ok).toBe(false);
+    expect(validateFiles({ 'big.txt': 'a'.repeat(2 * 1024 * 1024 + 1) }).ok).toBe(false);
+    expect(validateFiles({ 'script.sh': 'a'.repeat(300 * 1024) }).ok).toBe(true);   // real scripts may be larger than a manifest
     expect(validateFiles({ 'bad.txt': Buffer.from([0xff, 0xfe, 0xfd]) }).ok).toBe(false);
   });
 });

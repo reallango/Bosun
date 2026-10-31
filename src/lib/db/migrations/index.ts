@@ -541,6 +541,14 @@ const V10_METRIC_DEFINITIONS: string[] = [
     )`,
 ];
 
+// ---- Version 11: content hash of a widget package ----
+// A hash over the manifest and all files of a package. Every node compares it with the copy it has on disk and
+// rewrites the files when it differs (see lib/widgets/materialize*.ts); rows from before this version get theirs
+// at the next start.
+const V11_PACKAGE_HASH: string[] = [
+    `ALTER TABLE widget_packages ADD COLUMN content_hash TEXT`,
+];
+
 export const MIGRATIONS: Migration[] = [
     {
         version: 1,
@@ -560,6 +568,7 @@ export const MIGRATIONS: Migration[] = [
     { version: 8, name: 'deny_grants', statements: V8_DENY_GRANTS },
     { version: 9, name: 'bundled_packages', statements: V9_BUNDLED },
     { version: 10, name: 'metric_definitions', statements: V10_METRIC_DEFINITIONS },
+    { version: 11, name: 'package_content_hash', statements: V11_PACKAGE_HASH },
 ];
 
 /** The schema version this build expects. */
