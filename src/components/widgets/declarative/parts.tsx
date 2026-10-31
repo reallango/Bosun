@@ -34,6 +34,15 @@ export function formatValue(v: unknown, format: string): string {
     const d = Math.floor(n / 86400), h = Math.floor((n % 86400) / 3600), m = Math.floor((n % 3600) / 60);
     return d > 0 ? `${d}d ${h}h` : h > 0 ? `${h}h ${m}m` : `${m}m`;
   }
+  if (format === 'ago') {
+    const t = typeof v === 'number' ? v : new Date(String(v)).getTime();
+    if (!Number.isFinite(t)) return String(v);
+    const minutes = Math.floor(Math.max(0, Date.now() - t) / 60000);
+    if (minutes < 1) return 'just now';
+    if (minutes < 60) return `${minutes} min ago`;
+    const hours = Math.floor(minutes / 60);
+    return hours < 24 ? `${hours}h ago` : `${Math.floor(hours / 24)}d ago`;
+  }
   return typeof v === 'object' ? JSON.stringify(v) : String(v);
 }
 

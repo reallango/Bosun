@@ -6,14 +6,14 @@ import { cond } from './spec-util';
 import { validateManifest, scriptFilesOf, validateScriptFiles, manifestToJson } from '@/lib/widgets/package-manifest';
 import { extractMetrics } from './data';
 
-const dir = path.join(process.cwd(), 'docs', 'plans', 'spec-v2');
-const draft = (name: string) => JSON.parse(fs.readFileSync(path.join(dir, `${name}.manifest.json`), 'utf8'));
+const dir = path.join(process.cwd(), 'widgets');
+const draft = (name: string) => JSON.parse(fs.readFileSync(path.join(dir, name, 'manifest.json'), 'utf8'));
 
-/** A script file for every script a draft names (the real scripts are written when the widget is ported). */
+/** A script file for every script a package names (only the checks of the manifest are under test here, not the scripts). */
 const dummyFiles = (m: ReturnType<typeof validateManifest> & { ok: true }) =>
   Object.fromEntries(scriptFilesOf(m.value).map(f => [f, '# placeholder\n']));
 
-describe('the three draft packages (the requirements of the port)', () => {
+describe('the three ported packages (Ollama, OS Update Check, Custom Command)', () => {
   for (const name of ['ollama', 'updates', 'commands']) {
     it(`${name} is a valid version 2 package whose script files can be checked`, () => {
       const m = validateManifest(draft(name));
@@ -30,8 +30,8 @@ describe('the three draft packages (the requirements of the port)', () => {
     const m = validateManifest(draft('ollama'));
     if (!m.ok) throw new Error(m.error);
     const files = dummyFiles(m);
-    delete files['scripts/dk_update.sh'];
-    expect(validateScriptFiles(m.value, files)).toEqual({ ok: false, error: 'the package does not contain the script file "scripts/dk_update.sh"' });
+    delete files['scripts/dk_recreate.sh'];
+    expect(validateScriptFiles(m.value, files)).toEqual({ ok: false, error: 'the package does not contain the script file "scripts/dk_recreate.sh"' });
     expect(validateScriptFiles(m.value, { ...dummyFiles(m), 'scripts/status.sh': '   ' }).ok).toBe(false);
   });
 
@@ -42,7 +42,7 @@ describe('the three draft packages (the requirements of the port)', () => {
     const spec = m.value.widgets[0].spec!;
     expect(spec.state?.script).toBe('detect');
     expect(spec.lookups?.latest.ttlSec).toBe(21600);
-    expect(spec.actions.filter(a => a.job).map(a => a.id).sort()).toEqual(['install', 'pull', 'update']);
+    expect(spec.actions.filter(a => a.job).map(a => a.id).sort()).toEqual(['install', 'install_host', 'pull', 'set_context_length', 'set_max_loaded', 'update']);
     expect(spec.view.type).toBe('layout');
   });
 
@@ -59,8 +59,9 @@ describe('the three draft packages (the requirements of the port)', () => {
     const m = validateManifest(draft('updates'));
     if (!m.ok) throw new Error(m.error);
     const spec = m.value.widgets[0].spec!;
-    expect(spec.data).toMatchObject({ cacheSec: 21600, initialDelaySec: 300, timeoutSec: 600 });
-    expect(spec.actions.find(a => a.id === 'check')).toMatchObject({ job: true, stores: 'data' });
+    expect(spec.data).toMatchObject({ cacheSec: 21600, initialDelaySec: 60, timeoutSec: 600 });
+    expect(spec.actions.find(a => a.id === 'check_now')).toMatchObject({ job: true, stores: 'data' });
+    expect(spec.actions.find(a => a.id === 'install')).toMatchObject({ job: true, after: 'refresh' });
   });
 
   it('a manifest cannot reach a host it did not declare, nor require a permission it does not have', () => {

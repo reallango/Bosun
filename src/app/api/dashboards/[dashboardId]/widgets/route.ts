@@ -4,7 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/middleware';
 import { requirePermission } from '@/lib/permissions/authorize';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
-import { COMMAND_CHANGE_FORBIDDEN, changesCommand, mayChangeCommand } from '@/lib/auth/widget-policy';
+import { denyGuardedConfigChange } from '@/lib/widgets/config-guard-http';
 import { resolveWidgetDefinition, supportsPlatform } from '@/components/widgets/registry-loader';
 import { visibleWidgets } from '@/lib/widgets/visibility';
 import { loadWidgetSpec } from '@/lib/widgets/runtime/execute';
@@ -59,10 +59,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     }
     // Seed config from the definition's field defaults; explicit values win.
     const defaults = Object.fromEntries((def.configSchema || []).filter(f => f.default !== undefined).map(f => [f.key, f.default]));
-    // Operators may add a Custom Command widget, but only with its default command.
-    if (changesCommand(defaults, config) && !mayChangeCommand(auth.role)) {
-      return NextResponse.json({ error: { message: COMMAND_CHANGE_FORBIDDEN, code: 'FORBIDDEN' } }, { status: 403 });
-    }
+    // A setting the package guards with a permission (requires_permission) may only be given another value than its default by someone holding it.
+    const guardDenied = await denyGuardedConfigChange(auth, server_id, def.configSchema, defaults, config);
+    if (guardDenied) return guardDenied;
     const initialConfig = {
       ...defaults,
       ...(config && typeof config === 'object' ? config : {}),

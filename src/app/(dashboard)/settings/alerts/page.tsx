@@ -45,7 +45,7 @@ const METRICS: [string, string][] = [
   ['disk.root_used_pct', 'Root disk (%)'], ['cpu.temp', 'CPU temperature (°C)'], ['cpu.load1', 'Load (1m)'],
   ['swap.used_mb', 'Swap used (MB)'], ['net.rx_bps', 'Network in (B/s)'], ['net.tx_bps', 'Network out (B/s)'],
   ['gpu0.util', 'GPU 0 utilization (%)'], ['gpu0.temp', 'GPU 0 temperature (°C)'], ['gpu0.vram_mb', 'GPU 0 VRAM used (MB)'],
-  ['docker.running', 'Running containers'], ['ollama.loaded', 'Loaded Ollama models'],
+  ['docker.running', 'Running containers'],
 ];
 const METRIC_LABEL = Object.fromEntries(METRICS);
 
@@ -59,6 +59,8 @@ export default function AlertsPage() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [servers, setServers] = useState<ServerOption[]>([]);
   const [editing, setEditing] = useState<{ id: string; emails: string } | null>(null);
+  // Metrics recorded for the chosen server beyond the built-in list (for example by a widget package).
+  const [serverMetrics, setServerMetrics] = useState<[string, string][]>([]);
   const { toast } = useToast();
   const formEmailError = form.emails.trim() ? recipientsError(form.emails) : null;
 
@@ -84,6 +86,16 @@ export default function AlertsPage() {
       .then(j => setServers((j?.data?.servers || []).map((s: ServerOption) => ({ id: s.id, name: s.name }))))
       .catch(() => undefined);
   }, []);
+
+  useEffect(() => {
+    if (!form.server_id) { setServerMetrics([]); return; }
+    let live = true;
+    fetchWithAuth(`/api/metrics?serverId=${encodeURIComponent(form.server_id)}`)
+      .then(r => r.json())
+      .then(j => { if (live) setServerMetrics(((j?.data?.metrics || []) as { metric: string; label?: string }[]).filter(m => !METRIC_LABEL[m.metric] && !/^gpu\d+\./.test(m.metric)).map(m => [m.metric, m.label || m.metric] as [string, string])); })
+      .catch(() => { if (live) setServerMetrics([]); });
+    return () => { live = false; };
+  }, [form.server_id]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -185,7 +197,7 @@ export default function AlertsPage() {
                 <div className="space-y-1.5">
                   <Label htmlFor="alert-metric">Metric</Label>
                   <select id="alert-metric" value={form.metric} onChange={e => setForm({ ...form, metric: e.target.value })} className="form-select">
-                    {METRICS.map(([key, label]) => <option key={key} value={key}>{label}</option>)}
+                    {[...METRICS, ...serverMetrics].map(([key, label]) => <option key={key} value={key}>{label}</option>)}
                   </select>
                 </div>
                 <div className="space-y-1.5">

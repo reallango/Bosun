@@ -31,8 +31,8 @@ export const ACCESS_LEVELS: Record<Role, AccessLevel> = {
     level: 2,
     label: 'Read + actions',
     description:
-      'Read only, plus widget actions: start/stop/restart containers and view their logs, pull/delete Ollama models, ' +
-      'install OS updates, Wake-on-LAN, restart or shut down servers, force refreshes, and editing dashboards and widgets. No shells or arbitrary commands.',
+      'Read only, plus the actions of widgets (each widget package decides which permissions its actions need), ' +
+      'Wake-on-LAN, restart or shut down servers, force refreshes, and editing dashboards and widgets. No shells or arbitrary commands.',
   },
   admin: {
     role: 'admin',

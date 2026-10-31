@@ -15,6 +15,8 @@ export interface WidgetConfigField {
   placeholder?: string;
   default?: string | number | boolean;
   options?: string[];
+  /** Changing this setting needs this permission (declared by the package). */
+  requires_permission?: string;
 }
 
 export interface WidgetDefinition {

@@ -1,1 +1,0 @@
-export { CustomCommandWidget } from './CustomCommandWidget';

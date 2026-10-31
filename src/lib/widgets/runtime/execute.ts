@@ -14,6 +14,7 @@ import { buildScriptInvocation, buildCancelInvocation, parseScriptOutput, script
 import { typedParams, selectVariant, resolveScriptArgs, type ActionContext } from '@/lib/widgets/runtime/script-action';
 import { getPackageFile } from '@/lib/widgets/materialize-db';
 import { loadLookups } from '@/lib/widgets/runtime/lookups';
+import { dataSectionFor } from '@/lib/widgets/runtime/store-data';
 
 export class RuntimeError extends Error {
   status: number;
@@ -272,7 +273,7 @@ async function loadMainData(serverId: string, loaded: LoadedSpec, force: boolean
 
   // Command-sourced data is collected by the poller (see lib/collect/packages.js) and stored as the host
   // snapshot section `pkg:<type>`, so opening a dashboard never runs an SSH command from the web process.
-  const r = await rqlite.query('SELECT data, collected_at FROM host_snapshots WHERE server_id = ? AND section = ?', [serverId, ds.source === 'command' && ds.script && (ds.cacheSecFrom || (ds.args && Object.keys(ds.args).length)) && instanceId ? `pkg:${loaded.type}#${instanceId}` : `pkg:${loaded.type}`]);
+  const r = await rqlite.query('SELECT data, collected_at FROM host_snapshots WHERE server_id = ? AND section = ?', [serverId, dataSectionFor(loaded.type, ds, instanceId)]);
   const row = r.values?.[0];
   if (force || !row) await requestPoll(serverId, force);
   if (!row) return { data: null, collectedAt: null, pending: true };

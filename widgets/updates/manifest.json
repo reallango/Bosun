@@ -2,8 +2,8 @@
   "schema": 1,
   "id": "updates",
   "name": "OS Update Check",
-  "version": "1.0.0",
-  "description": "Check for and install operating system updates (apt, dnf, Windows Update). Installed by default. The view and the install flow are built into Bosun; this package carries its permissions and size.",
+  "version": "2.0.0",
+  "description": "Check for and install operating system updates (apt, dnf and yum on Linux, Windows Update on Windows). Installed by default. Everything it does is in this package: the scripts that check and install, and its screen. On Windows an install runs in the background on the host as a scheduled task and the host is never restarted automatically.",
   "author": "Bosun",
   "permissions": [
     {
@@ -48,9 +48,88 @@
       "supports_linux": true,
       "supports_windows": true,
       "spec": {
-        "version": 1,
-        "data": { "source": "snapshot", "section": "updates", "permission": "updates.view" },
-        "view": { "type": "text", "text": "OS Update Check is drawn by Bosun itself." }
+        "version": 2,
+        "scripts": {
+          "check": {
+            "as": "service",
+            "timeoutSec": 600,
+            "linux": "scripts/check.sh",
+            "windows": "scripts/check.ps1",
+            "params": {}
+          },
+          "install": {
+            "as": "service",
+            "timeoutSec": 3600,
+            "linux": "scripts/install.sh",
+            "windows": "scripts/install.ps1",
+            "params": {}
+          }
+        },
+        "data": {
+          "source": "command",
+          "as": "service",
+          "command": "",
+          "script": "check",
+          "parse": "json",
+          "cacheSec": 21600,
+          "initialDelaySec": 60,
+          "timeoutSec": 600,
+          "permission": "updates.view"
+        },
+        "view": {
+          "type": "layout",
+          "blocks": [
+            { "type": "notice", "level": "error", "text": "Could not check for updates: {data.error}", "when": { "field": "data.error", "exists": true } },
+            { "type": "notice", "level": "info", "text": "System up to date", "when": { "all": [{ "field": "data.updatesAvailable", "equals": 0 }, { "not": { "field": "data.error", "exists": true } }] } },
+            { "type": "notice", "level": "warning", "text": "{data.updatesAvailable} updates available, {data.securityUpdates} of them security updates", "when": { "field": "data.updatesAvailable", "gt": 0 } },
+            { "type": "notice", "level": "warning", "text": "A restart is required to finish installing updates.", "when": { "field": "data.rebootRequired", "equals": true } },
+            { "type": "kv", "items": [
+              { "label": "Package manager", "value": "{data.manager}", "format": "text" },
+              { "label": "Last checked", "value": "{collectedAt}", "format": "ago" }
+            ] },
+            { "type": "jobProgress" },
+            { "type": "buttons", "actions": ["check_now"] },
+            { "type": "buttons", "actions": ["install"], "when": { "field": "data.updatesAvailable", "gt": 0 } },
+            { "type": "section", "title": "Packages", "defaultOpen": false, "summary": "{data.updatesAvailable} pending", "when": { "field": "data.updatesAvailable", "gt": 0 }, "blocks": [
+              { "type": "view", "path": "packages", "view": { "type": "list", "empty": "Nothing pending", "row": {
+                "title": "{name}",
+                "subtitle": "{current_version} {new_version}",
+                "dot": { "field": "is_security", "colors": { "true": "red", "false": "gray" } }
+              } } }
+            ] }
+          ]
+        },
+        "actions": [
+          {
+            "id": "check_now",
+            "label": "Check for updates",
+            "description": "Look for pending updates now",
+            "permission": "updates.check",
+            "icon": "refresh-cw",
+            "kind": "script",
+            "job": true,
+            "stores": "data",
+            "params": {},
+            "variants": [{ "script": "check", "args": {} }]
+          },
+          {
+            "id": "install",
+            "label": "Install updates",
+            "description": "Install the pending updates on the host",
+            "permission": "updates.install",
+            "icon": "download",
+            "kind": "script",
+            "job": true,
+            "after": "refresh",
+            "params": {},
+            "confirm": {
+              "title": "Install OS updates?",
+              "text": "This installs {data.updatesAvailable} updates on {server.name}. On Linux it uses sudo and the host may need a restart afterwards. On Windows it runs in the background on the host and is never restarted automatically. This action is logged.",
+              "destructive": true
+            },
+            "variants": [{ "script": "install", "args": {} }]
+          }
+        ]
       }
     }
   ]

@@ -1,6 +1,5 @@
 /**
- * System widgets: the widgets that ship inside Bosun (compiled into the registry, plus Ollama
- * Status). Each is presented as a package so the management page can list it, but it is
+ * System widgets: the widgets that ship inside Bosun (compiled into the registry). Each is presented as a package so the management page can list it, but it is
  * built in: it has no database row, cannot be removed or upgraded from a package, and its
  * version moves with Bosun itself. Versions start at 0.0.1.
  */

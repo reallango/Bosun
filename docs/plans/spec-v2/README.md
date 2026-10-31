@@ -2,11 +2,11 @@
 
 Version 2 lets a package carry a whole widget, logic and screens, so that nothing about it is built into Bosun. See
 `../widget-self-containment.md` for the why and the phases. The validators are `src/lib/widgets/runtime/spec.ts`
-(version 1 and the shared parts) and `spec-v2.ts` (the additions); `spec-v2.test.ts` loads the three drafts here and
-is the executable specification.
+(version 1 and the shared parts) and `spec-v2.ts` (the additions); `spec-v2.test.ts` loads the packages in
+`widgets/` and is the executable specification.
 
-The drafts (`ollama`, `updates`, `commands`) are the requirements of the port: a representative subset of each
-widget's scripts, enough to prove the format. The real scripts are written when each widget is ported (phase 5).
+The three packages `widgets/ollama`, `widgets/updates` and `widgets/commands` are the worked examples: complete
+version 2 packages with their scripts for each platform, checked by the tests next to them.
 
 ## What version 2 adds
 

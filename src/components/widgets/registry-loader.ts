@@ -1,7 +1,6 @@
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { WidgetDefinition, WidgetConfigField } from '@/types/widget';
 import { widgetRegistry, getWidgetDefinition as getBuiltinDefinition } from './registry';
-import { WIDGET_SECTIONS } from '@/lib/widgets/snapshot-data';
 
 /**
  * Resolve the widget definitions available to a server (server-side only).
@@ -11,8 +10,7 @@ import { WIDGET_SECTIONS } from '@/lib/widgets/snapshot-data';
  * Widget picker, the create route's sizing and platform check, the settings
  * dialog's config fields) sees one list and one lookup.
  *
- * A custom type's data comes from the poller's snapshot sections
- * (WIDGET_SECTIONS) and its view from custom-registry.tsx; the database row
+ * A package widget's data and screen are declared in its package (see lib/widgets/runtime); the database row
  * only describes it, so admins can retune it without a rebuild.
  */
 
@@ -39,7 +37,7 @@ export interface CustomWidgetRow {
  * snapshot section mapping) and a component, i.e. they are known to the code
  * but not compiled into the registry.
  */
-export const CUSTOM_WIDGET_DATA_TYPES: string[] = Object.keys(WIDGET_SECTIONS).filter(t => !widgetRegistry[t]);
+export const CUSTOM_WIDGET_DATA_TYPES: string[] = [];
 
 function parseJson<T>(raw: unknown, fallback: T): T {
   if (raw == null) return fallback;

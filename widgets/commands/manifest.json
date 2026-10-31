@@ -2,8 +2,8 @@
   "schema": 1,
   "id": "commands",
   "name": "Custom Command",
-  "version": "1.0.0",
-  "description": "Run a command on the host as its non-admin account (PowerShell on Windows) and show its output, repeated at the interval you choose. Installed by default. The runner is built into Bosun; this package carries its permissions, settings and size.",
+  "version": "2.0.0",
+  "description": "Run a command on the host as its non-admin account (PowerShell on Windows) and show its output, repeated at the interval you choose. Installed by default. Everything it does is in this package: the scripts that run the command, its settings and its screen.",
   "author": "Bosun",
   "permissions": [
     {
@@ -18,7 +18,7 @@
     {
       "id": "commands.run",
       "label": "Run commands",
-      "description": "Run an arbitrary command on the host as the service account through the API, and set the command of a Custom Command widget (which runs as the non-admin account).",
+      "description": "Choose the command of a Custom Command widget (it runs as the non-admin account of the host), and run arbitrary commands on the host through the API.",
       "group": "Commands",
       "defaultLevel": "admin",
       "risk": "high",
@@ -38,13 +38,48 @@
       "supports_linux": true,
       "supports_windows": true,
       "config_schema": [
-        { "key": "command", "label": "Command", "type": "string", "placeholder": "uptime", "default": "uptime", "description": "Runs as the non-admin shell account of the host (no sudo or Docker access) each time the widget repeats. On Windows the untouched default shows how long the machine has been up." },
-        { "key": "interval", "label": "Repeat every (seconds)", "type": "number", "default": 30, "description": "How often the command runs, from 10 to 3600 seconds. The result is shared by everyone viewing the widget." }
+        {
+          "key": "command", "label": "Command", "type": "string", "placeholder": "uptime", "default": "uptime", "requires_permission": "commands.run",
+          "description": "Runs as the non-admin shell account of the host (no sudo or Docker access) each time the widget repeats. On Windows the untouched default shows how long the machine has been up. Only people with the permission to run commands can change it."
+        },
+        {
+          "key": "interval", "label": "Repeat every (seconds)", "type": "number", "default": 30,
+          "description": "How often the command runs, from 10 to 3600 seconds. The result is shared by everyone viewing the widget."
+        }
       ],
       "spec": {
-        "version": 1,
-        "data": { "source": "snapshot", "section": "system", "permission": "commands.view" },
-        "view": { "type": "text", "text": "Custom Command is drawn by Bosun itself." }
+        "version": 2,
+        "scripts": {
+          "run": {
+            "as": "shell",
+            "timeoutSec": 30,
+            "linux": "scripts/run.sh",
+            "windows": "scripts/run.ps1",
+            "params": {
+              "command": { "type": "string", "pattern": "^[^\\u0000-\\u001f]{1,2000}$", "maxLength": 2000, "default": "uptime", "description": "The command line to run" }
+            }
+          }
+        },
+        "data": {
+          "source": "command",
+          "as": "shell",
+          "command": "",
+          "script": "run",
+          "args": { "command": "config.command" },
+          "parse": "text",
+          "cacheSec": 30,
+          "cacheSecFrom": "config.interval",
+          "timeoutSec": 30,
+          "permission": "commands.view"
+        },
+        "view": {
+          "type": "layout",
+          "blocks": [
+            { "type": "view", "view": { "type": "text", "text": "{text}", "empty": "(no output)" } },
+            { "type": "text", "text": "Runs as the non-admin account of the host, every {config.interval} s." }
+          ]
+        },
+        "actions": []
       }
     }
   ]
