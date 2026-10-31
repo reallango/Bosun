@@ -1,7 +1,6 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
-import { Dialog } from 'radix-ui';
 import { useRouter } from 'next/navigation';
 import { Info, Loader2, Search, X } from 'lucide-react';
 import { LayoutGrid, List, Package, Plus, RefreshCw, Settings, SquareTerminal } from 'lucide-react';
@@ -19,7 +18,7 @@ import type { ViewContext } from '@/lib/widgets/runtime/layout';
 import { MetricsChartWidget } from '@/components/widgets/metrics-chart/MetricsChartWidget';
 import { Bar, DOT, Fields, formatValue, ICONS, IconBtn, type Row } from './parts';
 import { LayoutBlocks, type LayoutUi } from './LayoutView';
-import { ScreenView } from './ScreenView';
+import { ScreenDialog } from './ScreenDialog';
 import { useActionRunner, type PublicAction } from './useActionRunner';
 
 /** What the browser gets from /api/widget-runtime/:type (no commands, no scripts). */
@@ -57,8 +56,6 @@ export function usePublicSpec(widgetType: string) {
 const MENU_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   plus: Plus, settings: Settings, 'layout-grid': LayoutGrid, list: List, package: Package, download: ICONS.download, terminal: SquareTerminal, 'refresh-cw': RefreshCw, info: Info,
 };
-
-const DIALOG_WIDTH: Record<string, string> = { md: 'sm:max-w-lg', lg: 'sm:max-w-3xl', xl: 'sm:max-w-5xl' };
 
 export interface V1Props {
   view: ViewSpec;
@@ -274,7 +271,6 @@ export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
     : v1(view, data);
 
   const open = screen ? spec.screens?.[screen.id] : undefined;
-  const screenCtx: ViewContext = { ...fullCtx, context: screen?.row ?? undefined };
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-2 text-sm">
@@ -287,26 +283,8 @@ export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
       {body}
       {runner.dialogs}
 
-      <Dialog.Root open={!!open} onOpenChange={o => { if (!o) setScreen(null); }}>
-        <Dialog.Portal>
-          <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
-          <Dialog.Content
-            className={`fixed inset-x-2 top-4 z-50 mx-auto flex max-h-[92vh] flex-col rounded-xl border border-gray-200 bg-white p-4 shadow-xl dark:border-gray-700 dark:bg-gray-900 ${DIALOG_WIDTH[open?.size ?? 'lg']}`}
-            aria-describedby={undefined}
-          >
-            <div className="mb-3 flex items-start justify-between gap-2">
-              <Dialog.Title className="min-w-0 truncate text-base font-semibold">{open ? fillTemplate(open.title, screenCtx) : ''}</Dialog.Title>
-              <Dialog.Close asChild><IconBtn label="Close"><X /></IconBtn></Dialog.Close>
-            </div>
-            <div className="min-h-0 flex-1 overflow-auto pr-1">
-              {open && screen && (
-                <ScreenView key={screen.id + JSON.stringify(screen.row ?? {})} screen={open} context={screenCtx} serverId={serverId} widgetType={widgetType}
-                  ui={ui} reloadToken={reloadToken} onDone={() => { if (!open.keepOpenAfterSubmit) setScreen(null); refresh(); }} />
-              )}
-            </div>
-          </Dialog.Content>
-        </Dialog.Portal>
-      </Dialog.Root>
+      <ScreenDialog id={screen?.id ?? null} row={screen?.row ?? null} screen={open} ctx={fullCtx} serverId={serverId} widgetType={widgetType} ui={ui}
+        reloadToken={reloadToken} onClose={() => setScreen(null)} onDone={refresh} />
     </div>
   );
 }

@@ -25,6 +25,8 @@ printf '%s\n' "$rows" | awk -F '\t' -v usedf="$used" '
     none = (repo == "<none>"); if (none) repo = ""; if (tag == "<none>") tag = ""
     ref = (repo == "" ) ? id : (tag == "" ? repo : repo ":" tag)
     if (!first) printf ","; first = 0
-    printf "{\"id\":%s,\"repo\":\"%s\",\"tag\":\"%s\",\"ref\":\"%s\",\"size\":%s,\"created\":\"%s\",\"containers\":%d,\"dangling\":%s}", $1, esc(repo), esc(tag), esc(ref), $4, iso($5), cnt[id] + 0, (none && tag == "") ? "true" : "false"
+    sid = id; sub(/^sha256:/, "", sid); sid = substr(sid, 1, 12)
+    cr = iso($5); ct = (cr ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T/) ? substr(cr, 1, 10) " " substr(cr, 12, 5) : cr
+    printf "{\"id\":%s,\"short_id\":\"%s\",\"repo\":\"%s\",\"tag\":\"%s\",\"ref\":\"%s\",\"size\":%s,\"created\":\"%s\",\"created_text\":\"%s\",\"containers\":%d,\"dangling\":%s}", $1, esc(sid), esc(repo), esc(tag), esc(ref), $4, cr, esc(ct), cnt[id] + 0, (none && tag == "") ? "true" : "false"
   }
   END { print "]" }'

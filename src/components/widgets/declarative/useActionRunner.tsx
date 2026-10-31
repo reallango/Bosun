@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Dialog } from 'radix-ui';
 import dynamic from 'next/dynamic';
 import { X } from 'lucide-react';
@@ -63,6 +63,16 @@ export function useActionRunner(o: Options) {
   const [shellFor, setShellFor] = useState<{ token: string; label: string } | null>(null);
   const { job, refresh: refreshJob, cancel } = useWidgetJob(o.serverId, o.widgetType, o.actions.some(a => a.job));
   const settled = useRef(false);
+
+  // A job (a pull, a stack deploy) changed things on the host when it ends: have the screens and the widget load again.
+  const changedRef = useRef(o.changed);
+  changedRef.current = o.changed;
+  const lastStatus = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const s = job?.status;
+    if (lastStatus.current === 'running' && s && s !== 'running') changedRef.current();
+    lastStatus.current = s;
+  }, [job?.status]);
 
   // A web terminal asks for the person's own login and is only available to Full access; the action's permission still applies.
   const allowed = useCallback((a: PublicAction) => can(a.permission, o.serverId) && (a.kind !== 'terminal' || hasRole(user?.role, 'admin')), [can, o.serverId, user?.role]);
