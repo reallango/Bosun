@@ -13,6 +13,8 @@ import { fillTemplate } from '@/lib/widgets/runtime/spec';
 import type { ViewContext } from '@/lib/widgets/runtime/layout';
 import type { LayoutUi } from './LayoutView';
 import { ScreenView } from './ScreenView';
+import { ScreenDialog } from './ScreenDialog';
+import type { Row } from './parts';
 import { useActionRunner } from './useActionRunner';
 import { usePublicSpec, V1View } from './DeclarativeWidget';
 
@@ -45,11 +47,16 @@ function Inner({ widget, screenId }: { widget: WidgetRow; screenId: string }) {
   const { spec, error } = usePublicSpec(widget.widget_type);
   const { data, refresh, extra } = useWidgetData(widget.id, 15);
   const [reloadToken, setReloadToken] = useState(0);
+  const [dialog, setDialog] = useState<{ id: string; row: Row | null } | null>(null);
   const ctx: ViewContext = useMemo(() => ({ data, collectedAt: extra.collectedAt, state: extra.state, config: extra.config, lookups: extra.lookups, server: extra.server }), [data, extra]);
   const runner = useActionRunner({
     actions: spec?.actions ?? [], version: spec?.version ?? 1, serverId: widget.server_id, widgetType: widget.widget_type, widgetId: widget.id, templateContext: ctx,
     changed: () => { refresh(); setReloadToken(n => n + 1); },
-    openScreen: id => { if (spec?.screens?.[id]?.kind === 'page') router.push(`/widgets/${encodeURIComponent(widget.id)}/${encodeURIComponent(id)}`); },
+    openScreen: (id, row) => {
+      const s = spec?.screens?.[id];
+      if (!s) return;
+      if (s.kind === 'page') router.push(`/widgets/${encodeURIComponent(widget.id)}/${encodeURIComponent(id)}`); else setDialog({ id, row });
+    },
   });
   const screen = spec?.screens?.[screenId];
   const full: ViewContext = useMemo(() => ({ ...ctx, job: runner.job }), [ctx, runner.job]);
@@ -83,6 +90,8 @@ function Inner({ widget, screenId }: { widget: WidgetRow; screenId: string }) {
           : screen.kind !== 'page' ? <p className="text-sm text-muted-foreground">This screen opens as a pop-up from its widget.</p>
           : <ScreenView screen={screen} context={full} serverId={widget.server_id} widgetType={widget.widget_type} ui={ui} reloadToken={reloadToken} />}
         {runner.dialogs}
+        <ScreenDialog id={dialog?.id ?? null} row={dialog?.row ?? null} screen={dialog ? spec?.screens?.[dialog.id] : undefined} ctx={full} serverId={widget.server_id} widgetType={widget.widget_type} ui={ui}
+          reloadToken={reloadToken} onClose={() => setDialog(null)} onDone={refresh} />
       </div>
     </>
   );

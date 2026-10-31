@@ -438,9 +438,9 @@ esac`);
     const r = run('images.sh');
     expect(r.status).toBe(0);
     expect(JSON.parse(r.stdout)).toEqual([
-      { id: 'sha256:aaa', repo: 'nginx', tag: '1.25', ref: 'nginx:1.25', size: '187MB', created: '2025-01-02T03:04:05+02:00', containers: 2, dangling: false },
-      { id: 'sha256:bbb', repo: '', tag: '', ref: 'sha256:bbb', size: '1GB', created: '2025-01-02T03:04:05+00:00', containers: 0, dangling: true },
-      { id: 'sha256:ccc', repo: 'x/y', tag: '', ref: 'x/y', size: '2MB', created: 'garbage', containers: 0, dangling: false },
+      { id: 'sha256:aaa', short_id: 'aaa', repo: 'nginx', tag: '1.25', ref: 'nginx:1.25', size: '187MB', created: '2025-01-02T03:04:05+02:00', created_text: '2025-01-02 03:04', containers: 2, dangling: false },
+      { id: 'sha256:bbb', short_id: 'bbb', repo: '', tag: '', ref: 'sha256:bbb', size: '1GB', created: '2025-01-02T03:04:05+00:00', created_text: '2025-01-02 03:04', containers: 0, dangling: true },
+      { id: 'sha256:ccc', short_id: 'ccc', repo: 'x/y', tag: '', ref: 'x/y', size: '2MB', created: 'garbage', created_text: 'garbage', containers: 0, dangling: false },
     ]);
     fake('case "$1" in image) exit 0 ;; esac');
     expect(JSON.parse(run('images.sh').stdout)).toEqual([]);
