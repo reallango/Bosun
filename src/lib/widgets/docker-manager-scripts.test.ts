@@ -47,7 +47,8 @@ const dockerCalls = () => calls().filter((c) => c[0] === 'docker').map((c) => c.
 const verbs = () => dockerCalls().map((c) => c.slice(0, 2).join(' '));
 
 const run = (file: string, params: Record<string, string> = {}, extraEnv: Record<string, string> = {}) => {
-  const inv = buildScriptInvocation('linux', script(file), params);
+  // like the runtime: the text parameters travel on stdin with the script, the rest on the command line
+  const inv = buildScriptInvocation('linux', script(file), params, { stdinParams: ['settings', 'input', 'yaml', 'env', 'override'] });
   return spawnSync('sh', ['-c', inv.command], {
     input: inv.stdin, encoding: 'utf8', cwd: bin,
     env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, LOG: log, HOME: home, BOSUN_RECREATE_WAIT: '0', ...extraEnv },

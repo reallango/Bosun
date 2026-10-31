@@ -24,6 +24,15 @@ describe('package secrets', () => {
     expect(bad(m => { m.widgets[0].spec.scripts.run.windows = 'scripts/run.ps1'; }).ok).toBe(false);  // no Windows file for a script with secrets
   });
 
+  it('text parameters travel on stdin too: not on the command line, not in BOSUN_PARAMS', () => {
+    const inv = buildScriptInvocation('linux', 'echo hi\n', { name: 'web', settings: 'env=DB_PASSWORD=hunter2' }, { stdinParams: ['settings'] });
+    expect(inv.command).not.toContain('hunter2');
+    expect(inv.command).toContain("BOSUN_PARAM_name='web'");
+    expect(inv.stdin).toBe("export BOSUN_PARAM_settings='env=DB_PASSWORD=hunter2'\necho hi\n");
+    // on Windows (no such channel) they stay where they were
+    expect(buildScriptInvocation('windows', 'echo hi', { settings: 'a=1' }, { stdinParams: ['settings'] }).command).toContain('BOSUN_PARAM_settings');
+  });
+
   it('reach the script on stdin, never on the command line, and not on Windows', () => {
     const inv = buildScriptInvocation('linux', '#!/bin/sh\necho hi\n', { name: 'x' }, { secrets: { git_token: "to'ken value" } });
     expect(inv.command).not.toContain('token');

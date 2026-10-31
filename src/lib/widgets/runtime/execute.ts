@@ -159,7 +159,8 @@ export async function runScript(serverId: string, loaded: LoadedSpec, scriptId: 
   if (text === null) throw new RuntimeError(`The package file "${file}" is missing`, 500, 'SCRIPT_MISSING');
   const values = validateParamValues(script.params, args);
   const secrets = script.secrets?.length ? await getPackageSecrets(loaded.packageId, script.secrets) : {};
-  const inv = buildScriptInvocation(server.platform, text, values, { jobId: ext.jobId, secrets });
+  const stdinParams = Object.entries(script.params).filter(([, p]) => p.type === 'text').map(([n]) => n);
+  const inv = buildScriptInvocation(server.platform, text, values, { jobId: ext.jobId, secrets, stdinParams });
   // Whatever a script prints, a secret it was given never leaves it (live output included).
   const secretValues = Object.values(secrets).filter(v => v.length >= 4);
   const scrub = (s: string) => secretValues.reduce((acc, v) => acc.split(v).join('***'), s);
