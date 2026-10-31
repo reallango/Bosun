@@ -272,7 +272,10 @@ hosts, the live tests in section 8. Do not push to `main` until the owner has te
    code, the Windows `uptime` default), the Ollama control, startup and setting scripts (stop/start, manual/auto, context length and
    max loaded models each applied and reverted), a model pull and delete, the OS update install through the SYSTEM task, its job
    cancel (the job ends, the task finishes on its own) and starting an install again while the task still runs.
-   Carried forward: (a) a fresh Ollama install on Windows has not been run because it needs the existing service removed; (b) one running job per widget and server, so a model pull and an install no longer run
+   A fresh Ollama install on Windows was run too (existing service removed with its configuration saved, Bosun saw "not installed",
+   the install job downloaded and verified the release, found no nssm, installed it with winget, created the service and checked the
+   firewall; after putting the two settings back all 16 nssm settings matched the saved ones; only the path of nssm.exe differs).
+   Carried forward: (a) none for Windows now; (b) one running job per widget and server, so a model pull and an install no longer run
    side by side (the old code allowed several pulls); (c) with Ollama down the loaded-models metric records 0 instead of no sample;
    (d) a setting value of "default" removes the setting (the form sends it for an empty field); (e) the Ollama context length
    value is not range-checked beyond its digits any more.
