@@ -4,7 +4,8 @@ import { requirePermission } from '@/lib/permissions/authorize';
 import { consumeActionRateLimit } from '@/lib/utils/rate-limiter';
 import { logAudit, AuditActions } from '@/lib/audit/logger';
 import { ok, fail, failFrom } from '@/lib/api/response';
-import { loadWidgetSpec, runAction, RuntimeError } from '@/lib/widgets/runtime/execute';
+import { loadWidgetSpec, runAction, runScript, prepareScriptAction, loadInstance, RuntimeError } from '@/lib/widgets/runtime/execute';
+import { startJob } from '@/lib/widgets/jobs/runtime';
 import { ParamError } from '@/lib/widgets/runtime/command';
 import { CONTAINER_REF_RE } from '@/lib/terminal/api-terminal';
 import { issueApiTerminalToken } from '@/lib/terminal/api-token';
@@ -29,7 +30,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const denied = await requirePermission(auth, action.permission, serverId);
     if (denied) return denied;
 
-    let body: { params?: unknown; confirm?: unknown; container?: unknown };
+    let body: { params?: unknown; confirm?: unknown; container?: unknown; widgetId?: unknown };
     try { body = await request.json(); } catch { body = {}; }
     // A terminal action: for API keys it hands out the token for an API terminal in that container (the same
     // single-use WebSocket, with the same checks that refuse containers able to reach the host), gated by the
@@ -45,6 +46,37 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
     const started = Date.now();
     const ip = request.headers.get('x-forwarded-for')?.split(',')[0];
+
+    // Version 2 script action: the variant that applies to this host runs its package script. With `job: true` it runs
+    // in the background (answers 202 with the job to follow), otherwise the answer comes when the script ends.
+    if (action.kind === 'script') {
+      try {
+        const instance = await loadInstance(serverId, widgetType, body.widgetId);
+        const prepared = await prepareScriptAction(serverId, loaded, action, body.params, instance);
+        if (action.job) {
+          const { job } = await startJob({ serverId, loaded, action, prepared, userId: auth.userId, params: (body.params && typeof body.params === 'object' ? body.params : {}) as Record<string, unknown>, ip });
+          await logAudit({
+            userId: auth.userId, serverId, action: AuditActions.WIDGET_ACTION, status: 'success',
+            details: JSON.stringify({ widget: widgetType, action: actionId, job: job.id, started: true, params: body.params ?? {} }).slice(0, 900), ipAddress: ip,
+          });
+          return ok({ jobId: job.id, status: job.status }, { status: 202 });
+        }
+        const r = await runScript(serverId, loaded, prepared.scriptId, prepared.args);
+        await logAudit({
+          userId: auth.userId, serverId, action: AuditActions.WIDGET_ACTION, status: r.success ? 'success' : 'failure',
+          details: JSON.stringify({ widget: widgetType, action: actionId, as: action.as, params: body.params ?? {}, exitCode: r.exitCode, output: r.stdout.slice(0, 200) }).slice(0, 900),
+          durationMs: Date.now() - started, ipAddress: ip,
+        });
+        return ok({ success: r.success && !r.protocol.error, output: r.stdout, error: r.stderr, exitCode: r.exitCode, timedOut: r.timedOut, message: r.protocol.done ?? r.protocol.error });
+      } catch (error) {
+        await logAudit({
+          userId: auth.userId, serverId, action: AuditActions.WIDGET_ACTION, status: 'failure',
+          details: JSON.stringify({ widget: widgetType, action: actionId, params: body.params ?? {}, error: String(error).slice(0, 300) }).slice(0, 900), ipAddress: ip,
+        });
+        if (error instanceof ParamError) return fail(error.message, 400, 'INVALID_PARAMS');
+        throw error;
+      }
+    }
     try {
       const r = await runAction(serverId, action, body.params);
       await logAudit({

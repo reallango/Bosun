@@ -20,11 +20,17 @@ export interface CommandResult {
   exitCode: number;
   durationMs: number;
   timedOut?: boolean;
+  /** The command was stopped because the caller's signal aborted. */
+  aborted?: boolean;
 }
 
 export interface ExecOptions {
   timeoutMs?: number;
   stdin?: string;
+  /** Called with output as it arrives (long-running jobs). */
+  onData?: (text: string, isErr: boolean) => void;
+  /** Abort to close the channel. */
+  signal?: AbortSignal;
 }
 
 interface Entry {
@@ -115,13 +121,13 @@ export class SSHConnectionPool {
   async executeCommand(serverId: string, cfg: SSHConnectionConfig, command: string, opts: ExecOptions = {}): Promise<CommandResult> {
     const client = await this.getConnection(serverId, cfg);
     try {
-      return await sshHelpers.exec(client, command, { timeoutMs: opts.timeoutMs ?? 30000, stdin: opts.stdin });
+      return await sshHelpers.exec(client, command, { timeoutMs: opts.timeoutMs ?? 30000, stdin: opts.stdin, onData: opts.onData, signal: opts.signal });
     } catch (err) {
       // Channel could not be opened: the connection is dead. Retry once fresh.
       const e = this.entries.get(this.keyOf(serverId, cfg));
       if (e) this.drop(e);
       const fresh = await this.getConnection(serverId, cfg);
-      return sshHelpers.exec(fresh, command, { timeoutMs: opts.timeoutMs ?? 30000, stdin: opts.stdin });
+      return sshHelpers.exec(fresh, command, { timeoutMs: opts.timeoutMs ?? 30000, stdin: opts.stdin, onData: opts.onData, signal: opts.signal });
     }
   }
 
