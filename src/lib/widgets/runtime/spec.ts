@@ -16,6 +16,7 @@
 
 import { cond, fail, FIELD_RE, ID_RE, PARAM_RE, intIn, isObj, scalar, text, validateParam, type Obj, type Validated } from './spec-util';
 export type { Validated } from './spec-util';
+import { validateDatasets, validateMenu, validateScreens, type DatasetSpec, type MenuEntry, type ScreenSpec } from './spec-screens';
 import { validateLayout, validateLookups, validateScripts, validateState, validateVariants, type ActionVariant, type Block, type LookupSpec, type ScriptSpec, type StateSpec } from './spec-v2';
 export type { ActionVariant, Block, LookupSpec, ScriptSpec, StateSpec } from './spec-v2';
 
@@ -23,7 +24,7 @@ export const SPEC_VERSION = 1;
 /** Versions the validators accept. Version 2 adds scripts, state, lookups, script actions and layout views (spec-v2.ts). */
 export const SPEC_VERSIONS = [1, 2] as const;
 export const SNAPSHOT_SECTIONS = ['cpu_memory', 'disks', 'gpus', 'system', 'net_rates', 'network', 'services', 'metrics'] as const;
-export const ICONS = ['play', 'square', 'rotate-cw', 'scroll-text', 'trash-2', 'download', 'upload', 'power', 'refresh-cw', 'terminal-square', 'pause', 'info'] as const;
+export const ICONS = ['play', 'square', 'rotate-cw', 'scroll-text', 'trash-2', 'download', 'upload', 'power', 'refresh-cw', 'terminal-square', 'pause', 'info', 'pencil', 'plus', 'copy', 'settings', 'external-link', 'layers'] as const;
 export const DOT_COLORS = ['green', 'amber', 'red', 'gray', 'blue'] as const;
 export const FORMATS = ['text', 'bytes', 'percent', 'badge', 'bar', 'duration', 'mb', 'temp', 'ago', 'until'] as const;
 export const PARSERS = ['json', 'jsonlines', 'lines', 'text'] as const;
@@ -69,7 +70,9 @@ export type DataSpec =
 export type ParamSpec =
   | { type: 'string'; pattern?: string; values?: string[]; maxLength: number; from?: string; default?: string; description?: string }
   | { type: 'number'; min: number; max: number; integer: boolean; from?: string; default?: number; description?: string }
-  | { type: 'boolean'; from?: string; default?: boolean; description?: string };
+  | { type: 'boolean'; from?: string; default?: boolean; description?: string }
+  /** Several lines of text (a settings blob, a compose file) for script actions; newlines are allowed, every other control character is not. */
+  | { type: 'text'; maxLength: number; maxLines: number; linePattern?: string; from?: string; default?: string; description?: string };
 
 export interface ActionSpec {
   id: string;
@@ -81,7 +84,9 @@ export interface ActionSpec {
    * `command` runs a command on the host; `terminal` opens an interactive terminal running a command of the package (see `terminal`);
    * `script` (version 2) runs the first of `variants` whose condition holds.
    */
-  kind: 'command' | 'terminal' | 'script';
+  kind: 'command' | 'terminal' | 'script' | 'screen';
+  /** A `screen` action opens this screen of the widget with the row it was clicked on as its context (it runs nothing). */
+  screen?: string;
   /** Script actions only. */
   variants?: ActionVariant[];
   /** Script actions only: the output of the script (parsed like `data.parse`) replaces the widget's stored data (a "check now" action). */
@@ -156,6 +161,10 @@ export interface WidgetSpec {
   scripts?: Record<string, ScriptSpec>;
   state?: StateSpec;
   lookups?: Record<string, LookupSpec>;
+  /** Version 2: read-only scripts a screen loads, the screens (dialogs and pages) and the entries of the widget's menu that open them (see spec-screens.ts). */
+  datasets?: Record<string, DatasetSpec>;
+  screens?: Record<string, ScreenSpec>;
+  menu?: MenuEntry[];
 }
 
 
@@ -410,6 +419,23 @@ function validateAction(raw: unknown, ownPerms: ReadonlySet<string>, v2?: { scri
     };
   }
 
+  if (raw.kind === 'screen') {
+    if (!v2) return fail(`${where}: screen actions need spec version 2`);
+    if (typeof raw.screen !== 'string' || !ID_RE.test(raw.screen)) return fail(`${where}: "screen" must name a screen of this widget`);
+    if ((typeof raw.command === 'string' && raw.command !== '') || raw.windowsCommand !== undefined || raw.variants !== undefined || (isObj(raw.params) && Object.keys(raw.params).length > 0)) {
+      return fail(`${where}: a screen action only opens a screen: it has no command, variants or parameters`);
+    }
+    let swhen: Cond | undefined;
+    if (raw.when !== undefined) { const c = cond(raw.when, `${where} "when"`); if (!c.ok) return c; swhen = c.value; }
+    return {
+      ok: true,
+      value: {
+        id, label, ...(description ? { description } : {}), ...(raw.icon ? { icon: raw.icon as ActionSpec['icon'] } : {}), permission: raw.permission,
+        kind: 'screen', screen: raw.screen, as: 'service', command: '', params: {}, timeoutSec: 30, ...(swhen ? { when: swhen } : {}), result: 'none', after: 'none',
+      },
+    };
+  }
+
   if (raw.kind === 'script') {
     // Version 2: runs the first variant whose condition holds (a script of the package, as the account it declares).
     if (!v2) return fail(`${where}: script actions need spec version 2`);
@@ -432,7 +458,7 @@ function validateAction(raw: unknown, ownPerms: ReadonlySet<string>, v2?: { scri
       },
     };
   }
-  if (raw.kind !== undefined && raw.kind !== 'command') return fail(`${where}: "kind" must be "command", "script" or left out`);
+  if (raw.kind !== undefined && raw.kind !== 'command') return fail(`${where}: "kind" must be "command", "script", "screen" or left out`);
 
   if (raw.as !== 'service' && raw.as !== 'shell') return fail(`${where}: "as" must be "service" (the privileged account) or "shell" (the non-admin account)`);
 
@@ -660,7 +686,7 @@ export function validateWidgetSpec(raw: unknown, ownPermissions: readonly string
   if (raw.version !== 1 && raw.version !== 2) return fail('spec.version must be 1 or 2');
   const v2on = raw.version === 2;
   if (!v2on) {
-    for (const k of ['scripts', 'state', 'lookups'] as const) if (raw[k] !== undefined) return fail(`"${k}" needs spec version 2`);
+    for (const k of ['scripts', 'state', 'lookups', 'datasets', 'screens', 'menu'] as const) if (raw[k] !== undefined) return fail(`"${k}" needs spec version 2`);
   }
   const own = new Set(ownPermissions);
   const scripts = v2on ? validateScripts(raw.scripts) : { ok: true as const, value: {} as Record<string, ScriptSpec> };
@@ -686,6 +712,15 @@ export function validateWidgetSpec(raw: unknown, ownPermissions: readonly string
   if (!state.ok) return state;
   const lookups = v2on ? validateLookups(raw.lookups) : { ok: true as const, value: {} as Record<string, LookupSpec> };
   if (!lookups.ok) return lookups;
+  const datasets = v2on ? validateDatasets(raw.datasets, scripts.value, own) : { ok: true as const, value: {} as Record<string, DatasetSpec> };
+  if (!datasets.ok) return datasets;
+  const screens = v2on
+    ? validateScreens(raw.screens, actions, datasets.value, scripts.value, inner => validateView(inner, ids, true), validateFields)
+    : { ok: true as const, value: {} as Record<string, ScreenSpec> };
+  if (!screens.ok) return screens;
+  for (const a of actions) if (a.kind === 'screen' && !(a.screen! in screens.value)) return fail(`action "${a.id}": the screen "${a.screen}" is not declared`);
+  const menu = v2on ? validateMenu(raw.menu, screens.value, own) : { ok: true as const, value: [] as MenuEntry[] };
+  if (!menu.ok) return menu;
   let metrics: MetricSpec[] | undefined;
   if (raw.metrics !== undefined) {
     const m = validateMetrics(raw.metrics, packageId);
@@ -699,6 +734,9 @@ export function validateWidgetSpec(raw: unknown, ownPermissions: readonly string
       ...(Object.keys(scripts.value).length ? { scripts: scripts.value } : {}),
       ...(state.value ? { state: state.value } : {}),
       ...(Object.keys(lookups.value).length ? { lookups: lookups.value } : {}),
+      ...(Object.keys(datasets.value).length ? { datasets: datasets.value } : {}),
+      ...(Object.keys(screens.value).length ? { screens: screens.value } : {}),
+      ...(menu.value.length ? { menu: menu.value } : {}),
     },
   };
 }
@@ -757,7 +795,7 @@ export function fillTemplate(template: string, row: unknown): string {
  * The part of a spec the browser needs: how to draw the widget and which actions exist, but
  * not the commands that implement them.
  */
-export function publicSpec(spec: WidgetSpec): Omit<WidgetSpec, 'data' | 'actions' | 'scripts' | 'state' | 'lookups'> & {
+export function publicSpec(spec: WidgetSpec): Omit<WidgetSpec, 'data' | 'actions' | 'scripts' | 'state' | 'lookups' | 'datasets'> & {
   data: { source: DataSpec['source'] };
   actions: (Omit<ActionSpec, 'command' | 'windowsCommand' | 'as' | 'timeoutSec' | 'variants' | 'terminal'> & { variants?: { when?: Cond }[]; terminal?: { ref: string } })[];
 } {
@@ -766,6 +804,8 @@ export function publicSpec(spec: WidgetSpec): Omit<WidgetSpec, 'data' | 'actions
   return {
     version: spec.version,
     view: spec.view,
+    ...(spec.screens ? { screens: spec.screens } : {}),
+    ...(spec.menu ? { menu: spec.menu } : {}),
     data: { source: spec.data.source },
     actions: spec.actions.map(a => {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars

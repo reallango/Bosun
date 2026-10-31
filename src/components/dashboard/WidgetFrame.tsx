@@ -16,7 +16,7 @@ import {
 import { useToast } from '@/components/ui/toast';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { cn } from '@/lib/utils';
-import { RefreshHandler, WidgetFrameContext } from './widget-context';
+import { FrameMenuItem, RefreshHandler, WidgetFrameContext } from './widget-context';
 import { DeclarativeWidget } from '@/components/widgets/declarative/DeclarativeWidget';
 import { WidgetLoading } from '@/components/widgets/WidgetLoading';
 import { useAuth } from '@/hooks/useAuth';
@@ -88,8 +88,14 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName,
 
   // Refresh handlers registered by the widget inside (via useWidgetData).
   const handlers = useRef(new Set<RefreshHandler>());
+  // Entries the widget inside adds to the ⋮ menu.
+  const [menuItems, setMenuItems] = useState<FrameMenuItem[]>([]);
   const frameContext = useMemo(
     () => ({
+      registerMenu: (items: FrameMenuItem[]) => {
+        setMenuItems(items);
+        return () => setMenuItems(cur => (cur === items ? [] : cur));
+      },
       registerRefresh: (handler: RefreshHandler) => {
         handlers.current.add(handler);
         return () => {
@@ -180,6 +186,13 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName,
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent>
+            {menuItems.map(m => (
+              <DropdownMenuItem key={m.id} onSelect={() => m.onSelect()}>
+                {m.icon && <m.icon />}
+                {m.label}
+              </DropdownMenuItem>
+            ))}
+            {menuItems.length > 0 && <DropdownMenuSeparator />}
             <DropdownMenuItem onSelect={() => handleRefresh()} disabled={refreshing}>
               <RefreshCw />
               Refresh

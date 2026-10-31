@@ -14,12 +14,12 @@
  * reviewed scripts. Pure (no I/O).
  */
 import type { ActionSpec, Cond, FieldSpec, ParamSpec, RunAs, ViewSpec } from './spec';
-import { cond, fail, FIELD_RE, ID_RE, intIn, isObj, text, validateParam, type Obj, type Validated } from './spec-util';
+import { cond, fail, FIELD_RE, ID_RE, intIn, isObj, PARAM_RE, text, validateParam, type Obj, type Validated } from './spec-util';
 
 export const SCRIPT_FILE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*(\/[A-Za-z0-9][A-Za-z0-9._-]*)*$/;
 export const MAX_SCRIPTS = 20;
 export const MAX_BLOCKS = 60;
-const MAX_BLOCK_DEPTH = 3;
+const MAX_BLOCK_DEPTH = 5;
 const BADGE_COLORS = ['green', 'amber', 'red', 'gray', 'blue'] as const;
 const LITERAL_RE = /^[A-Za-z0-9_.:/ -]{0,100}$/;
 const STATE_KEY_RE = /^[a-z][a-z0-9_]*(\.[a-z0-9_]+)*$/;
@@ -74,7 +74,42 @@ export interface FormField {
   options?: { value: string; label: string }[];
 }
 
+export const EDITOR_INPUTS = ['text', 'number', 'select', 'checkbox', 'textarea', 'lines', 'pairs', 'heading'] as const;
+
+/**
+ * One field of an `editor` block. Its value goes into the settings blob (see serializeEditor) under `key` (default: the name):
+ * text, number and select as `key=value`, a checkbox as `key=true|false`, a text area as one `key=line` per line, `lines` and
+ * `pairs` (rows of a value, or of name and value) as one `key=row` per row. `warn` is shown when the field is used (risky options).
+ */
+export interface EditorField {
+  name: string;
+  label: string;
+  input: (typeof EDITOR_INPUTS)[number];
+  key?: string;
+  /** Path into the screen's context holding the starting value (a string, number, boolean or list of strings). */
+  value?: string;
+  placeholder?: string;
+  help?: string;
+  warn?: string;
+  options?: { value: string; label: string }[];
+  /** Options built from a list in the context (for example the networks dataset): `path` to the list, `value` and `label` fields of each item. */
+  optionsFrom?: { path: string; value: string; label?: string };
+  required?: boolean;
+  /** Shown only while this holds; it reads the current form values as `values.<name>`. */
+  when?: Cond;
+}
+
+export interface EditorSubmit {
+  action: string;
+  label: string;
+  style: 'primary' | 'danger';
+  /** Action parameter -> where its value comes from: `values.<field>`, a path into the screen's context (`context.name`) or `literal:<text>`. */
+  params: Record<string, string>;
+}
+
 export type Block =
+  | { type: 'tabs'; tabs: { id: string; label: string; blocks: Block[] }[]; when?: Cond }
+  | { type: 'editor'; fields: EditorField[]; /** The text parameter of the submit actions that receives the settings blob. */ param: string; submits: EditorSubmit[]; when?: Cond }
   | { type: 'section'; title: string; defaultOpen: boolean; badges: Badge[]; summary?: string; blocks: Block[]; when?: Cond }
   | { type: 'kv'; items: FieldSpec[]; when?: Cond }
   | { type: 'text'; text: string; when?: Cond }
@@ -237,14 +272,55 @@ function whenOf(raw: Obj, where: string): Validated<Cond | undefined> {
   return c.ok ? { ok: true, value: c.value } : c;
 }
 
-function options(raw: unknown, where: string): Validated<{ value: string; label: string }[]> {
-  if (!Array.isArray(raw) || raw.length < 1 || raw.length > 20) return fail(`${where}: "options" must list 1-20 options`);
+function options(raw: unknown, where: string, max = 20): Validated<{ value: string; label: string }[]> {
+  if (!Array.isArray(raw) || raw.length < 1 || raw.length > max) return fail(`${where}: "options" must list 1-${max} options`);
   const out: { value: string; label: string }[] = [];
   for (const o of raw as unknown[]) {
     if (!isObj(o) || typeof o.value !== 'string' || o.value.length > 60) return fail(`${where}: each option needs a short "value"`);
     const label = text(o.label, 60);
     if (!label) return fail(`${where}: each option needs a label`);
     out.push({ value: o.value, label });
+  }
+  return { ok: true, value: out };
+}
+
+function validateEditorFields(raw: unknown, where: string): Validated<EditorField[]> {
+  if (!Array.isArray(raw) || raw.length < 1 || raw.length > 80) return fail(`${where}: "fields" must list 1-80 fields`);
+  const out: EditorField[] = [];
+  for (const f of raw as unknown[]) {
+    if (!isObj(f) || typeof f.name !== 'string' || !ID_RE.test(f.name)) return fail(`${where}: each field needs a "name" (lowercase letters, digits, underscores)`);
+    if (out.some(x => x.name === f.name)) return fail(`${where}: the field "${f.name}" is listed twice`);
+    const label = text(f.label, 80);
+    if (!label || !(EDITOR_INPUTS as readonly string[]).includes(String(f.input))) return fail(`${where}: field "${f.name}" needs a label and an input (${EDITOR_INPUTS.join(', ')})`);
+    const field: EditorField = { name: f.name, label, input: f.input as EditorField['input'] };
+    if (f.key !== undefined) {
+      if (typeof f.key !== 'string' || !/^[a-z][a-z0-9_]{0,39}$/.test(f.key)) return fail(`${where}: field "${f.name}": "key" must be lowercase letters, digits and underscores`);
+      field.key = f.key;
+    }
+    if (f.value !== undefined) {
+      if (typeof f.value !== 'string' || !FIELD_RE.test(f.value)) return fail(`${where}: field "${f.name}": "value" must be a path into the context`);
+      field.value = f.value;
+    }
+    for (const k of ['placeholder', 'help', 'warn'] as const) {
+      if (f[k] === undefined) continue;
+      const t = text(f[k], k === 'placeholder' ? 80 : 300);
+      if (!t) return fail(`${where}: field "${f.name}": "${k}" must be short text`);
+      field[k] = t;
+    }
+    if (f.input === 'select') {
+      if (f.options !== undefined) { const o = options(f.options, `${where} field "${f.name}"`, 100); if (!o.ok) return o; field.options = o.value; }
+      if (f.optionsFrom !== undefined) {
+        const of = f.optionsFrom;
+        if (!isObj(of) || typeof of.path !== 'string' || !FIELD_RE.test(of.path) || typeof of.value !== 'string' || !FIELD_RE.test(of.value) || (of.label !== undefined && (typeof of.label !== 'string' || !FIELD_RE.test(of.label)))) {
+          return fail(`${where}: field "${f.name}": "optionsFrom" needs "path" (the list), "value" and optionally "label" (fields of each item)`);
+        }
+        field.optionsFrom = { path: of.path, value: of.value, ...(of.label ? { label: of.label } : {}) };
+      }
+      if (!field.options && !field.optionsFrom) return fail(`${where}: select field "${f.name}" needs "options" or "optionsFrom"`);
+    }
+    if (f.required !== undefined) { if (typeof f.required !== 'boolean') return fail(`${where}: field "${f.name}": "required" must be true or false`); field.required = f.required; }
+    if (f.when !== undefined) { const c = cond(f.when, `${where} field "${f.name}" "when"`); if (!c.ok) return c; field.when = c.value; }
+    out.push(field);
   }
   return { ok: true, value: out };
 }
@@ -356,6 +432,47 @@ export function validateLayout(
         case 'jobProgress':
           out.push({ type: 'jobProgress', ...base });
           break;
+        case 'tabs': {
+          if (!Array.isArray(b.tabs) || b.tabs.length < 1 || b.tabs.length > 12) return fail(`${w}: "tabs" must list 1-12 tabs`);
+          const tabs: { id: string; label: string; blocks: Block[] }[] = [];
+          for (const t of b.tabs as unknown[]) {
+            if (!isObj(t) || typeof t.id !== 'string' || !ID_RE.test(t.id) || tabs.some(x => x.id === t.id)) return fail(`${w}: each tab needs a unique "id" (lowercase letters, digits, underscores)`);
+            const label = text(t.label, 40);
+            if (!label) return fail(`${w}: tab "${t.id}" needs a label`);
+            const inner = walk(t.blocks, depth + 1, `${w} tab "${t.id}"`);
+            if (!inner.ok) return inner;
+            tabs.push({ id: t.id, label, blocks: inner.value });
+          }
+          out.push({ type: 'tabs', tabs, ...base });
+          break;
+        }
+        case 'editor': {
+          const fields = validateEditorFields(b.fields, w);
+          if (!fields.ok) return fail(fields.error);
+          if (typeof b.param !== 'string' || !PARAM_RE.test(b.param)) return fail(`${w}: "param" must name the text parameter of the submit actions that receives the settings`);
+          if (!Array.isArray(b.submits) || b.submits.length < 1 || b.submits.length > 4) return fail(`${w}: "submits" must list 1-4 buttons`);
+          const submits: EditorSubmit[] = [];
+          for (const s of b.submits as unknown[]) {
+            if (!isObj(s) || actionRef(s.action) === null) return fail(`${w}: each submit needs "action", the id of an action this widget declares`);
+            const label = text(s.label, 40);
+            if (!label) return fail(`${w}: each submit needs a label`);
+            if (s.style !== undefined && s.style !== 'primary' && s.style !== 'danger') return fail(`${w}: submit "style" must be primary or danger`);
+            const params: Record<string, string> = {};
+            if (s.params !== undefined) {
+              if (!isObj(s.params)) return fail(`${w}: submit "params" must map action parameters to values`);
+              for (const [p, src] of Object.entries(s.params)) {
+                if (!PARAM_RE.test(p)) return fail(`${w}: "${p}" is not a parameter name`);
+                const lit = typeof src === 'string' && src.startsWith('literal:') && LITERAL_RE.test(src.slice(8));
+                if (typeof src !== 'string' || (!lit && !FIELD_RE.test(src))) return fail(`${w}: submit parameter "${p}" must come from "values.<field>", a context path such as "context.name", or "literal:<text>"`);
+                if (src.startsWith('values.') && !fields.value.some(f => f.name === src.slice(7))) return fail(`${w}: submit parameter "${p}" refers to the unknown field "${src.slice(7)}"`);
+                params[p] = src;
+              }
+            }
+            submits.push({ action: s.action as string, label, style: s.style === 'danger' ? 'danger' : 'primary', params });
+          }
+          out.push({ type: 'editor', fields: fields.value, param: b.param, submits, ...base });
+          break;
+        }
         case 'view': {
           const v = innerView(b.view);
           if (!v.ok) return v;
@@ -365,7 +482,7 @@ export function validateLayout(
           break;
         }
         default:
-          return fail(`${w}: unknown block type "${b.type}" (section, kv, text, notice, buttons, form, select, jobProgress or view)`);
+          return fail(`${w}: unknown block type "${b.type}" (section, tabs, kv, text, notice, buttons, form, editor, select, jobProgress or view)`);
       }
     }
     return { ok: true, value: out };

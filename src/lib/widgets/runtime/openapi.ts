@@ -20,6 +20,7 @@ type Json = Record<string, unknown>;
 const serverIdParam = { name: 'serverId', in: 'path', required: true, schema: { type: 'string' }, description: 'Server id (GET /api/servers)' };
 
 function paramSchema(p: ParamSpec): Json {
+  if (p.type === 'text') return { type: 'string', maxLength: p.maxLength, ...(p.description ? { description: p.description } : {}) };
   if (p.type === 'boolean') return { type: 'boolean', ...(p.description ? { description: p.description } : {}) };
   if (p.type === 'number') return { type: p.integer ? 'integer' : 'number', minimum: p.min, maximum: p.max, ...(p.description ? { description: p.description } : {}) };
   return {
@@ -90,6 +91,7 @@ export function buildOpenApi(widgets: OpenApiWidget[], serverUrl = '/'): Json {
       },
     };
     for (const a of w.spec.actions) {
+      if (a.kind === 'screen') continue;   // opens a screen in the web UI; nothing to call
       if (a.kind === 'terminal') {
         // For API keys a terminal action hands out the token for an API terminal that runs the package's command.
         paths[`/api/servers/{serverId}/widget-actions/${w.type}/${a.id}`] = {

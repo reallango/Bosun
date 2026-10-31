@@ -1,12 +1,12 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
-import type { Block, FormField } from '@/lib/widgets/runtime/spec-v2';
+import { AlertTriangle, ChevronDown, ChevronRight, Loader2, Plus, X } from 'lucide-react';
+import type { Block, EditorField, FormField } from '@/lib/widgets/runtime/spec-v2';
 import type { ViewSpec } from '@/lib/widgets/runtime/spec';
 import {
-  actionApplies, formInitial, formParams, jobHeadline, selectCurrent, selectParams, text, visible, visibleBadges,
-  type JobState, type PublicActionLike, type ViewContext,
+  actionApplies, editorFieldVisible, editorInitial, editorMissing, editorOptions, editorSubmitParams, editorWarnings, formInitial, formParams, jobHeadline, selectCurrent, selectParams, text, visible, visibleBadges,
+  type EditorValue, type EditorValues, type JobState, type PublicActionLike, type ViewContext,
 } from '@/lib/widgets/runtime/layout';
 import { Bar, Fields } from './parts';
 
@@ -35,6 +35,12 @@ export interface LayoutUi {
   /** A version 1 view over a part of the data (a `view` block). */
   renderView: (view: ViewSpec, data: unknown) => React.ReactNode;
   onCancelJob: () => void;
+  /** Submit an action from an editor and learn how it went (true = it ran and succeeded). */
+  submit?: (action: PublicActionLike, params: Record<string, unknown>) => Promise<boolean>;
+  /** An editor's submit finished (screens close their dialog on success). */
+  onSubmitted?: (ok: boolean) => void;
+  /** Bigger text and fields, for dialogs and pages. */
+  large?: boolean;
 }
 
 const inputClass = 'w-full rounded-md border border-gray-200 bg-transparent px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-700';
@@ -58,8 +64,11 @@ function BlockView({ block, ctx, ui }: { block: Block; ctx: ViewContext; ui: Lay
     case 'form': return <Form block={block} ctx={ctx} ui={ui} />;
     case 'select': return <SelectBlock block={block} ctx={ctx} ui={ui} />;
     case 'jobProgress': return <JobProgress job={ctx.job ?? null} ui={ui} />;
+    case 'tabs': return <Tabs block={block} ctx={ctx} ui={ui} />;
+    case 'editor': return <Editor block={block} ctx={ctx} ui={ui} />;
     case 'view': {
-      const data = block.path ? pathOf(ctx.data, block.path) : ctx.data;
+      // A path that starts with `datasets.` or `context.` reads the screen's context; any other reads the widget's data.
+      const data = block.path ? (/^(datasets|context)\./.test(block.path) ? pathOf(ctx, block.path) : pathOf(ctx.data, block.path)) : ctx.data;
       return <>{ui.renderView(block.view, data)}</>;
     }
   }
@@ -72,6 +81,138 @@ function pathOf(data: unknown, path: string): unknown {
     cur = (cur as Record<string, unknown>)[part];
   }
   return cur;
+}
+
+function Tabs({ block, ctx, ui }: { block: Extract<Block, { type: 'tabs' }>; ctx: ViewContext; ui: LayoutUi }) {
+  const [active, setActive] = useState(block.tabs[0]?.id);
+  const tab = block.tabs.find(t => t.id === active) ?? block.tabs[0];
+  return (
+    <div className="space-y-3">
+      <div role="tablist" className="flex flex-wrap gap-1 border-b border-gray-200 dark:border-gray-800">
+        {block.tabs.map(t => (
+          <button key={t.id} type="button" role="tab" aria-selected={t.id === tab.id} onClick={() => setActive(t.id)}
+            className={`-mb-px rounded-t-md border-b-2 px-3 py-1.5 ${ui.large ? 'text-sm' : 'text-xs'} font-medium ${t.id === tab.id ? 'border-blue-500 text-blue-600 dark:text-blue-400' : 'border-transparent text-gray-500 hover:text-gray-900 dark:hover:text-gray-100'}`}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <div role="tabpanel"><LayoutBlocks blocks={tab.blocks} ctx={ctx} ui={ui} /></div>
+    </div>
+  );
+}
+
+function Editor({ block, ctx, ui }: { block: Extract<Block, { type: 'editor' }>; ctx: ViewContext; ui: LayoutUi }) {
+  const [values, setValues] = useState<EditorValues>(() => editorInitial(block.fields, ctx));
+  const [problem, setProblem] = useState<string | null>(null);
+  const [sending, setSending] = useState<string | null>(null);
+  const big = ui.large === true;
+  const field = `w-full rounded-md border border-gray-200 bg-transparent px-2 ${big ? 'py-1.5 text-sm' : 'py-1 text-xs'} outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-700`;
+  const set = (name: string, v: EditorValue) => setValues(s => ({ ...s, [name]: v }));
+  const warnings = editorWarnings(block.fields, values);
+
+  const send = async (s: (typeof block.submits)[number]) => {
+    const action = ui.actions.get(s.action);
+    if (!action || !ui.submit) return;
+    const missing = editorMissing(block.fields, values);
+    if (missing.length) { setProblem(`Fill in: ${missing.join(', ')}`); return; }
+    const { params, missing: lacking } = editorSubmitParams(action, s, block.param, block.fields, values, ctx);
+    if (lacking.length) { setProblem(`This screen cannot fill: ${lacking.join(', ')}`); return; }
+    setProblem(null);
+    setSending(s.action + s.label);
+    try { ui.onSubmitted?.(await ui.submit(action, params)); } finally { setSending(null); }
+  };
+
+  const rows = (f: EditorField): string[] => (Array.isArray(values[f.name]) ? (values[f.name] as string[]) : []);
+  const setRow = (f: EditorField, i: number, v: string) => set(f.name, rows(f).map((r, j) => (j === i ? v : r)));
+  const removeRow = (f: EditorField, i: number) => set(f.name, rows(f).filter((_, j) => j !== i));
+  const addRow = (f: EditorField) => set(f.name, [...rows(f), '']);
+
+  return (
+    <div className="space-y-3">
+      {block.fields.filter(f => editorFieldVisible(f, values)).map(f => {
+        if (f.input === 'heading') return <h4 key={f.name} className={`pt-2 font-semibold ${big ? 'text-sm' : 'text-xs'}`}>{f.label}</h4>;
+        const used = f.warn && (f.input === 'checkbox' ? values[f.name] === true : Array.isArray(values[f.name]) ? rows(f).some(r => r.trim() !== '') : String(values[f.name] ?? '').trim() !== '');
+        const label = <span className={`${big ? 'text-sm' : 'text-xs'} text-gray-600 dark:text-gray-400`}>{f.label}{f.required && <span className="text-red-500"> *</span>}</span>;
+        let control: React.ReactNode;
+        if (f.input === 'checkbox') {
+          return (
+            <div key={f.name} className="space-y-0.5">
+              <label className={`flex items-center gap-2 ${big ? 'text-sm' : 'text-xs'}`}>
+                <input type="checkbox" checked={values[f.name] === true} onChange={e => set(f.name, e.target.checked)} /> {f.label}
+              </label>
+              {f.help && <span className="block text-[11px] text-gray-500">{f.help}</span>}
+              {used && <Warn text={f.warn!} />}
+            </div>
+          );
+        }
+        if (f.input === 'select') {
+          const opts = editorOptions(f, ctx);
+          const cur = String(values[f.name] ?? '');
+          control = (
+            <select className={field} value={cur} onChange={e => set(f.name, e.target.value)}>
+              {!opts.some(o => o.value === cur) && <option value={cur}>{cur || '—'}</option>}
+              {opts.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          );
+        } else if (f.input === 'textarea') {
+          control = <textarea className={`${field} min-h-24 font-mono`} value={String(values[f.name] ?? '')} placeholder={f.placeholder} spellCheck={false} onChange={e => set(f.name, e.target.value)} />;
+        } else if (f.input === 'lines' || f.input === 'pairs') {
+          control = (
+            <div className="space-y-1.5">
+              {rows(f).map((r, i) => {
+                const eq = r.indexOf('=');
+                const k = f.input === 'pairs' ? (eq < 0 ? r : r.slice(0, eq)) : '';
+                const v = f.input === 'pairs' ? (eq < 0 ? '' : r.slice(eq + 1)) : r;
+                return (
+                  <div key={i} className="flex items-center gap-1.5">
+                    {f.input === 'pairs'
+                      ? (
+                        <>
+                          <input className={`${field} basis-2/5 font-mono`} value={k} placeholder="name" spellCheck={false} aria-label={`${f.label} name ${i + 1}`} onChange={e => setRow(f, i, `${e.target.value}=${v}`)} />
+                          <input className={`${field} font-mono`} value={v} placeholder="value" spellCheck={false} aria-label={`${f.label} value ${i + 1}`} onChange={e => setRow(f, i, `${k}=${e.target.value}`)} />
+                        </>
+                      )
+                      : <input className={`${field} font-mono`} value={v} placeholder={f.placeholder} spellCheck={false} aria-label={`${f.label} ${i + 1}`} onChange={e => setRow(f, i, e.target.value)} />}
+                    <button type="button" className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:hover:bg-gray-800" aria-label={`Remove ${f.label} ${i + 1}`} onClick={() => removeRow(f, i)}><X className="size-3.5" /></button>
+                  </div>
+                );
+              })}
+              <button type="button" className={buttonClass} onClick={() => addRow(f)}><Plus className="size-3" aria-hidden /> Add</button>
+            </div>
+          );
+        } else {
+          control = <input className={field} type={f.input === 'number' ? 'number' : 'text'} value={String(values[f.name] ?? '')} placeholder={f.placeholder} spellCheck={false} onChange={e => set(f.name, e.target.value)} />;
+        }
+        return (
+          <div key={f.name} className="space-y-0.5">
+            {f.input === 'lines' || f.input === 'pairs' ? <div>{label}</div> : <label className="block space-y-0.5">{label}{control}</label>}
+            {(f.input === 'lines' || f.input === 'pairs') && control}
+            {f.help && <span className="block text-[11px] text-gray-500">{f.help}</span>}
+            {used && <Warn text={f.warn!} />}
+          </div>
+        );
+      })}
+      {problem && <div role="alert" className="text-xs text-red-600 dark:text-red-400">{problem}</div>}
+      {warnings.length > 0 && <div role="status" className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">Elevated options are set: they can give this container control over the host.</div>}
+      <div className="flex flex-wrap gap-2 pt-1">
+        {block.submits.map(s => {
+          const action = ui.actions.get(s.action);
+          if (!action || !ui.allowed(action) || !actionApplies(action, ctx)) return null;
+          return (
+            <button key={s.action + s.label} type="button" disabled={ui.busy !== null || sending !== null}
+              className={`inline-flex items-center gap-1 rounded-md px-3 py-1.5 ${big ? 'text-sm' : 'text-xs'} font-medium text-white disabled:opacity-40 ${s.style === 'danger' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}
+              onClick={() => send(s)}>
+              {sending === s.action + s.label && <Loader2 className="size-3 animate-spin motion-reduce:animate-none" aria-hidden />}{s.label}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function Warn({ text: t }: { text: string }) {
+  return <span className="flex items-start gap-1 text-[11px] text-amber-700 dark:text-amber-400"><AlertTriangle className="mt-0.5 size-3 shrink-0" aria-hidden />{t}</span>;
 }
 
 function Section({ block, ctx, ui }: { block: Extract<Block, { type: 'section' }>; ctx: ViewContext; ui: LayoutUi }) {
