@@ -116,3 +116,24 @@ service (`privileged`, `network_mode: host`, `pid: host`, `cap_add`, `devices`, 
 `docker.view` (see containers, viewer), `docker.logs`, `docker.control` (start/stop/restart; operator), `docker.shell`,
 `docker.manage` (edit and create containers, images, volumes, networks, stacks; admin), `docker.privileged` (risky options; admin,
 high risk), `docker.delete` (remove containers/images/volumes/networks/stacks and prune; admin, high risk).
+
+## Status (2026-10-31)
+
+**Built** (package `docker` 1.0.2, all in `widgets/docker`; the generic pieces in core are listed at the top):
+
+- container list with an edit icon; ⋮ menu: New container, New stack, Manage
+- edit dialog: every standard setting, loaded from `docker inspect`; saving replaces the container (rename, create, stop old, start new, roll back on failure)
+- New container dialog (pulls a missing image); Run on an image of the Images tab opens it with the image filled in
+- stacks: editor (compose file + .env) or a GitHub repository (branch, compose file, optional token as a package secret); edit, start, stop, restart, pull and redeploy, remove
+- Manage page: Overview, Containers, Images (pull, run, remove, prune), Volumes, Networks, Stacks
+- risky options need `docker.privileged`; removing and pruning need `docker.delete`; reading a container's settings needs `docker.manage`
+
+**Verified** on a throwaway Docker daemon (docker-in-docker, private network): edit (env changed, ports, network, volume and labels kept), New container from the dialog, risky refusal for the plain action and success for the privileged one, a value that looks like shell code stored literally, a stack from the editor with a .env file, the stack editor prefilled, a viewer refused every manage action and dataset. The scripts were also run against the nuc's real Docker (only throwaway `bsbt-*` objects).
+
+**Not verified yet / known gaps**
+
+- a successful deploy from a GitHub repository and a real token (the clone, risky check and rollback were exercised; no suitable public compose file without ports was found)
+- the prune actions (only against a fake Docker), the Windows host case (the package is Linux only)
+- "Create from a docker run command" is not built; the Run button on an image and the New container dialog cover creating from a GUI
+- not kept when a container is edited: MAC address, networks beyond the first, links, volumes-from, cpu-shares (the dialog says what applies)
+- tables and the overview on the Manage page use the small widget text size
