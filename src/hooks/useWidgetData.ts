@@ -3,6 +3,15 @@ import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { readJson } from '@/lib/api/readJson';
 import { useWidgetFrame } from '@/components/dashboard/widget-context';
 
+/** What a version 2 widget gets besides its data: what the state probe found, lookup values, its settings and the server. */
+export interface WidgetDataExtra {
+  state?: unknown;
+  stateError?: string;
+  lookups?: Record<string, string | null>;
+  config?: Record<string, unknown>;
+  server?: Record<string, unknown>;
+}
+
 /**
  * Polls /api/widgets/:id/data. The enclosing WidgetFrame's "Refresh" action
  * triggers a forced (cache-bypassing) fetch through the same code path.
@@ -12,6 +21,7 @@ export function useWidgetData(widgetId: string, refreshInterval: number = 15) {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [unavailable, setUnavailable] = useState<string | null>(null);
+  const [extra, setExtra] = useState<WidgetDataExtra>({});
   const mounted = useRef(true);
   const frame = useWidgetFrame();
 
@@ -26,13 +36,14 @@ export function useWidgetData(widgetId: string, refreshInterval: number = 15) {
     try {
       const url = force ? `/api/widgets/${widgetId}/data?force=true` : `/api/widgets/${widgetId}/data`;
       const res = await fetchWithAuth(url);
-      const json = await readJson<{ data?: unknown; unavailable?: string; error?: { message?: string } }>(res);
+      const json = await readJson<{ data?: unknown; unavailable?: string; error?: { message?: string } } & WidgetDataExtra>(res);
       if (!mounted.current) return;
       if (json.error) {
         setError(json.error.message || 'Request failed');
       } else {
         setData(json.data);
         setUnavailable(json.unavailable ?? null);
+        setExtra({ state: json.state, stateError: json.stateError, lookups: json.lookups, config: json.config, server: json.server });
         setError(null);
       }
     } catch (err) {
@@ -67,5 +78,5 @@ export function useWidgetData(widgetId: string, refreshInterval: number = 15) {
     return frame.registerRefresh(refresh);
   }, [frame, refresh]);
 
-  return { data, isLoading, error, refresh, unavailable };
+  return { data, isLoading, error, refresh, unavailable, extra };
 }
