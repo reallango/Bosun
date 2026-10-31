@@ -41,7 +41,9 @@ function LogDialog({ task, onClose }: { task: Task | null; onClose: () => void }
     return () => { live = false; };
   }, [id]);
   const close = () => { setLog(null); setError(null); onClose(); };
-  const text = log ? [log.message ? `Result: ${log.message}` : '', log.steps.length ? `Steps:\n${log.steps.map(s => `  ${s}`).join('\n')}` : '', log.text ? `\nOutput:\n${log.text}` : ''].filter(Boolean).join('\n') : '';
+  // the script's own protocol lines (PROGRESS n/m, [step] ..., DONE ..., ERROR: ...) read as a plain log
+  const pretty = (s: string) => s.split('\n').filter(l => !/^PROGRESS\s/.test(l)).map(l => l.replace(/^\[step\]\s*/i, '• ').replace(/^DONE\s?/, 'Done: ').replace(/^ERROR:\s?/, 'Error: ')).join('\n');
+  const text = log ? [log.message ? `Result: ${log.message}` : '', log.text ? `\nLog:\n${pretty(log.text)}` : (log.steps.length ? `Steps:\n${log.steps.map(s => `  ${s}`).join('\n')}` : '')].filter(Boolean).join('\n') : '';
   return (
     <Dialog.Root open={!!task} onOpenChange={o => { if (!o) close(); }}>
       <Dialog.Portal>

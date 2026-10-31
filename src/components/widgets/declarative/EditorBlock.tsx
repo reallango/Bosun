@@ -124,7 +124,9 @@ function useRemoteList(f: EditorField, values: EditorValues, ctx: ViewContext, u
 function RowsField({ f, rows, onChange, ctx, cls, values, ui }: { f: EditorField; rows: RowValue[]; onChange: (rows: RowValue[]) => void; ctx: ViewContext; cls: string; values: EditorValues; ui: LayoutUi }) {
   const cols = f.columns as RowColumn[];
   const remote = useRemoteList(f, values, ctx, ui);
-  const widths: Record<string, string> = { text: 'min-w-[7rem] flex-1', number: 'w-24', select: 'w-32' };
+  // One grid for the header and every row, so the labels stand over their boxes.
+  const template = `${cols.map(c => (c.input === 'number' ? '6.5rem' : c.input === 'select' ? 'minmax(9rem, 13rem)' : 'minmax(8rem, 1fr)')).join(' ')} 1.75rem`;
+  const gridStyle = { display: 'grid', gridTemplateColumns: template, columnGap: '0.375rem', alignItems: 'center' } as const;
   const setCell = (i: number, name: string, v: string) => {
     onChange(rows.map((r, j) => {
       if (j !== i) return r;
@@ -142,21 +144,21 @@ function RowsField({ f, rows, onChange, ctx, cls, values, ui }: { f: EditorField
   return (
     <div className="space-y-1.5">
       {rows.length > 0 && (
-        <div className="flex items-center gap-1.5 text-[11px] text-gray-500">
-          {cols.map(c => <span key={c.name} className={widths[c.input]}>{c.label}</span>)}
-          <span className="w-6" aria-hidden />
+        <div className="text-[11px] text-gray-500" style={gridStyle}>
+          {cols.map(c => <span key={c.name} className="truncate" title={c.label}>{c.label}</span>)}
+          <span aria-hidden />
         </div>
       )}
       {rows.map((r, i) => (
-        <div key={i} className="flex items-center gap-1.5">
+        <div key={i} style={gridStyle}>
           {cols.map(c => (c.input === 'select' && !(c.remote && remote.options.length === 0)) ? (
-            <select key={c.name} className={`${cls} ${widths.select}`} value={r[c.name] ?? ''} aria-label={`${f.label} ${c.label} ${i + 1}`} onChange={e => setCell(i, c.name, e.target.value)}>
+            <select key={c.name} className={cls} value={r[c.name] ?? ''} aria-label={`${f.label} ${c.label} ${i + 1}`} onChange={e => setCell(i, c.name, e.target.value)}>
               {!(c.remote ? remote.options : (c.options ?? [])).some(o => o.value === (r[c.name] ?? '')) && <option value={r[c.name] ?? ''}>{r[c.name] || '—'}</option>}
               {(c.remote ? remote.options : (c.options ?? [])).map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           ) : (
 
-            <span key={c.name} className={`${widths[c.input]} min-w-0`}>
+            <span key={c.name} className="min-w-0">
               <input className={`${cls} font-mono`} type={c.input === 'number' ? 'number' : 'text'} value={r[c.name] ?? ''} placeholder={c.placeholder} spellCheck={false}
                 list={c.suggest ? listId(c) : undefined} aria-label={`${f.label} ${c.label} ${i + 1}`} onChange={e => setCell(i, c.name, e.target.value)} />
               {c.suggest && i === 0 && <datalist id={listId(c)}>{suggestions(c).map(s => <option key={s} value={s} />)}</datalist>}
