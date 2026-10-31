@@ -100,7 +100,8 @@ function Tabs({ block, ctx, ui }: { block: Extract<Block, { type: 'tabs' }>; ctx
           </button>
         ))}
       </div>
-      <div role="tabpanel"><LayoutBlocks blocks={tab.blocks} ctx={ctx} ui={ui} /></div>
+      {/* keyed by tab: the editors of two tabs must not share their state */}
+      <div role="tabpanel" key={tab.id}><LayoutBlocks blocks={tab.blocks} ctx={ctx} ui={ui} /></div>
     </div>
   );
 }
