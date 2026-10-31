@@ -1,6 +1,6 @@
 # Plan: self-contained widget packages
 
-Status: **in progress on `dev`. Phases 0 (spec v2), 1 (file store and materialiser), 2 (scripts runner, probes, lookups) and 3 (jobs) are done and verified; phase 4 (conditions, variants, UI blocks) is next.** Written on the `dev` branch so the work can be picked up later by anyone (or any
+Status: **in progress on `dev`. Phases 0 (spec v2), 1 (file store and materialiser), 2 (scripts runner, probes, lookups), 3 (jobs) and 4 (conditions, variants, UI blocks) are done and verified; phase 5 (port Ollama, OS Update Check and Custom Command) is next.** Written on the `dev` branch so the work can be picked up later by anyone (or any
 session). Phases marked "done" are built, tested and pushed to `dev`.
 
 ## 1. The rule
@@ -224,6 +224,21 @@ hosts, the live tests in section 8. Do not push to `main` until the owner has te
    whose node stops is shown as lost, the script on the host may still finish; (e) only stdout carries the protocol; (f) the
    old in-memory Ollama and OS-update job code is still in core and goes in phase 5.
 4. **Conditions, variants, UI blocks** (5.6, 5.7) in the declarative renderer, with a browser check (see section 8).
+   **DONE** (517 tests; checked in the in-app browser against a showcase package on the nuc): `runtime/layout.ts` (pure,
+   tested: block and badge visibility over the context data/state/config/lookups/server/job, which actions apply through
+   their variant conditions, form and select values and the action parameters they build); `DeclarativeWidget` now holds
+   the version 1 views as `V1View` (unchanged behaviour) and renders layout views through `LayoutView.tsx`: collapsible
+   sections with condition-driven badges and a summary, key-value rows, text, notices, buttons, forms (start from the host's
+   current value, keep what the person typed), selects, `jobProgress` (live percent, steps, Cancel, Dismiss, finished jobs
+   hidden after 10 minutes) and nested `view` blocks; `useWidgetJob` polls the job (2 s while running); the data route
+   returns `state`, `lookups`, the widget's settings and the server for version 2 widgets; actions send `widgetId`;
+   `confirm.requireText` is now enforced by the dialog (also for version 1). Verified live: sections and badges from
+   state and a real GitHub lookup, the "update available" notice, an invalid form value refused by the server and shown,
+   confirm dialog with the server name, live progress 5% to 40% with steps, Cancel ending as cancelled, a delete dialog
+   that stays disabled until the name is typed, no console errors beyond the expected 401/400.
+   Carried forward: (a) no automated component tests (the project has no DOM test setup), the browser pass above is the
+   check and must be repeated per ported widget; (b) a Read-only user's view and a narrow phone width of a layout are
+   checked in phase 10; (c) `stores: "data"` still waits for the OS Update Check port.
 5. **Port the three widgets together (phases 5, 6 and 7 as one step; see 4.1a).**
    **5a. Port Ollama**: write the package v2 (manifest, scripts per platform and install kind, layout view); move the
    current scripts over, replacing string interpolation with the parameter blob; delete `src/lib/ollama`, the four

@@ -1,21 +1,24 @@
 'use client';
 
-import { forwardRef, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Dialog } from 'radix-ui';
 import dynamic from 'next/dynamic';
-import {
-  Download, Info, Loader2, Pause, Play, Power, RefreshCw, RotateCw, ScrollText, Search, Square, TerminalSquare, Trash2, Upload, X,
-} from 'lucide-react';
+import { Info, Loader2, Search, X } from 'lucide-react';
 import { useWidgetData } from '@/hooks/useWidgetData';
+import { useWidgetJob } from '@/hooks/useWidgetJob';
 import { useAuth } from '@/hooks/useAuth';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { readJson } from '@/lib/api/readJson';
 import { WidgetLoading } from '@/components/widgets/WidgetLoading';
 import { WidgetError } from '@/components/widgets/WidgetError';
 import { ConfirmActionDialog, apiAction } from '@/components/widgets/shared/ConfirmActionDialog';
-import { evalCond, fillTemplate, getPath, type ActionSpec, type FieldSpec, type ViewSpec, type ParamSpec } from '@/lib/widgets/runtime/spec';
+import { evalCond, fillTemplate, getPath, type ViewSpec, type ParamSpec } from '@/lib/widgets/runtime/spec';
+import type { Block } from '@/lib/widgets/runtime/spec-v2';
+import type { PublicActionLike, ViewContext } from '@/lib/widgets/runtime/layout';
 import { hasRole } from '@/lib/auth/levels';
 import { MetricsChartWidget } from '@/components/widgets/metrics-chart/MetricsChartWidget';
+import { Bar, DOT, Fields, formatValue, ICONS, IconBtn, type Row } from './parts';
+import { LayoutBlocks, type LayoutUi } from './LayoutView';
 
 // The terminal (xterm) loads only when a container shell is opened.
 const SSHTerminalWidget = dynamic(
@@ -26,76 +29,9 @@ const SSHTerminalWidget = dynamic(
 /** Container names the terminal accepts (the same rule the server applies). */
 const CONTAINER_REF_RE = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
 
-/** What the browser gets from /api/widget-runtime/:type (no commands). */
-type PublicAction = Omit<ActionSpec, 'command' | 'windowsCommand' | 'as' | 'timeoutSec'>;
-interface PublicSpec { version: number; view: ViewSpec; data: { source: string }; actions: PublicAction[] }
-
-const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
-  play: Play, square: Square, 'rotate-cw': RotateCw, 'scroll-text': ScrollText, 'trash-2': Trash2, download: Download, upload: Upload,
-  power: Power, 'refresh-cw': RefreshCw, 'terminal-square': TerminalSquare, pause: Pause, info: Info,
-};
-
-const DOT: Record<string, string> = {
-  green: 'bg-green-500', amber: 'bg-amber-500', red: 'bg-red-500', gray: 'bg-gray-400', blue: 'bg-blue-500',
-};
-
-type Row = Record<string, unknown>;
-
-function formatValue(v: unknown, format: string): string {
-  if (v === undefined || v === null || v === '') return '';
-  const n = Number(v);
-  if (format === 'bytes' && Number.isFinite(n)) {
-    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    let x = n;
-    let i = 0;
-    while (x >= 1024 && i < units.length - 1) { x /= 1024; i++; }
-    return `${x >= 10 || i === 0 ? Math.round(x) : x.toFixed(1)} ${units[i]}`;
-  }
-  if ((format === 'percent' || format === 'bar') && Number.isFinite(n)) return `${Math.round(n * 10) / 10}%`;
-  if (format === 'mb' && Number.isFinite(n)) return n >= 1024 ? `${(n / 1024).toFixed(1)} GB` : `${Math.round(n)} MB`;
-  if (format === 'temp' && Number.isFinite(n)) return `${Math.round(n)}°C`;
-  if (format === 'duration' && Number.isFinite(n)) {
-    const d = Math.floor(n / 86400), h = Math.floor((n % 86400) / 3600), m = Math.floor((n % 3600) / 60);
-    return d > 0 ? `${d}d ${h}h` : h > 0 ? `${h}h ${m}m` : `${m}m`;
-  }
-  return typeof v === 'object' ? JSON.stringify(v) : String(v);
-}
-
-/** Bar colour by how full it is. */
-function barColor(pct: number): string {
-  return pct >= 90 ? 'bg-red-500' : pct >= 75 ? 'bg-amber-500' : 'bg-green-500';
-}
-
-function Bar({ value }: { value: number }) {
-  const pct = Math.max(0, Math.min(100, value));
-  return (
-    <div className="h-1.5 w-full overflow-hidden rounded bg-gray-200 dark:bg-gray-700" role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
-      <div className={`h-full ${barColor(pct)}`} style={{ width: `${pct}%` }} />
-    </div>
-  );
-}
-
-/** Labelled values of one object: gauges for the ones with a `bar`, plain pairs for the rest. */
-function Fields({ fields, data }: { fields: FieldSpec[]; data: Row }) {
-  const shown = fields.filter(f => !f.when || evalCond(f.when, data));
-  return (
-    <div className="space-y-1.5">
-      {shown.map(f => {
-        const text = formatValue(fillTemplate(f.value, data), f.format);
-        const bar = f.bar ? Number(fillTemplate(f.bar, data)) : NaN;
-        return (
-          <div key={f.label}>
-            <div className="flex items-baseline justify-between gap-2 text-xs">
-              <span className="text-gray-500">{f.label}</span>
-              <span className="truncate font-medium text-gray-900 dark:text-gray-100">{text || '—'}</span>
-            </div>
-            {Number.isFinite(bar) && <Bar value={bar} />}
-          </div>
-        );
-      })}
-    </div>
-  );
-}
+/** What the browser gets from /api/widget-runtime/:type (no commands, no scripts). */
+type PublicAction = PublicActionLike;
+interface PublicSpec { version: number; view: ViewSpec & { blocks?: Block[] }; data: { source: string }; actions: PublicAction[] }
 
 /** The values an action is called with: a parameter's `from` field of the row, else its default. */
 function paramsFor(action: PublicAction, row: Row | null): Record<string, unknown> {
@@ -107,51 +43,24 @@ function paramsFor(action: PublicAction, row: Row | null): Record<string, unknow
   return out;
 }
 
-interface Props {
+interface V1Props {
+  view: ViewSpec;
+  data: unknown;
   widgetId: string;
-  widgetType: string;
   serverId: string;
+  actions: Map<string, PublicAction>;
+  allowed: (a: PublicAction) => boolean;
+  busy: string | null;
+  start: (a: PublicAction, row: Row | null) => void;
 }
 
-/**
- * Renders a package widget from its declarative spec: a list, table or text view over the widget's
- * data, with the filter, toggles, summary and row actions the spec declares. Actions call the same
- * endpoint API keys use (/api/servers/:id/widget-actions/...), so they are subject to the same
- * permission, confirmation and validation rules.
- */
-export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
-  const { data, isLoading, error, refresh, unavailable } = useWidgetData(widgetId, 15);
-  const { user, can } = useAuth();
-  const [shellFor, setShellFor] = useState<string | null>(null);
-  const [spec, setSpec] = useState<PublicSpec | null>(null);
-  const [specError, setSpecError] = useState<string | null>(null);
+/** A version 1 view (list, table, fields, text, chart) over some data, with its filter, toggles, summary and row actions. */
+function V1View({ view, data, widgetId, serverId, actions, allowed, busy, start }: V1Props) {
   const [query, setQuery] = useState('');
-  const [toggles, setToggles] = useState<Record<string, boolean>>({});
-  const [busy, setBusy] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
-  const [pending, setPending] = useState<{ action: PublicAction; row: Row | null } | null>(null);
-  const [output, setOutput] = useState<{ title: string; text: string } | null>(null);
+  const [toggles, setToggles] = useState<Record<string, boolean>>(() => Object.fromEntries((view.toggles ?? []).map(t => [t.key, t.default])));
 
-  useEffect(() => {
-    let live = true;
-    (async () => {
-      try {
-        const res = await fetchWithAuth(`/api/widget-runtime/${encodeURIComponent(widgetType)}`);
-        const json = await readJson<{ data?: { spec: PublicSpec }; error?: { message?: string } }>(res);
-        if (!live) return;
-        if (!res.ok || !json.data) { setSpecError(json.error?.message || 'This widget has no definition'); return; }
-        setSpec(json.data.spec);
-        setToggles(Object.fromEntries((json.data.spec.view.toggles ?? []).map(t => [t.key, t.default])));
-      } catch (err) {
-        if (live) setSpecError(err instanceof Error ? err.message : String(err));
-      }
-    })();
-    return () => { live = false; };
-  }, [widgetType]);
-
-  const view = spec?.view;
   const rows: Row[] = useMemo(() => {
-    if (!view || view.type === 'text' || view.type === 'fields' || view.type === 'chart') return [];
+    if (view.type === 'text' || view.type === 'fields' || view.type === 'chart' || view.type === 'layout') return [];
     const list = Array.isArray(data) ? (data as Row[]) : data && typeof data === 'object' ? [data as Row] : [];
     const q = query.trim().toLowerCase();
     return list.filter(r => {
@@ -161,46 +70,12 @@ export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
     });
   }, [data, view, query, toggles]);
 
-  if (specError) return <div className="p-2 text-sm text-gray-500">{specError}</div>;
-  if (!spec || !view) return <WidgetLoading />;
-  if (isLoading && data === null) return <WidgetLoading />;
-  if (error) return <WidgetError error={error} onRetry={refresh} serverId={serverId} />;
-  if (unavailable) return <div className="p-2 text-sm text-gray-500">{unavailable}</div>;
   if (view.type === 'chart') return <MetricsChartWidget widgetId={widgetId} serverId={serverId} defaultMetrics={view.chart?.metrics} />;
   if (data === null || data === undefined) return <div className="p-2 text-sm text-gray-500">Waiting for the first data from this host…</div>;
-
-  const actionsById = new Map(spec.actions.map(a => [a.id, a]));
   const all: Row[] = Array.isArray(data) ? (data as Row[]) : [];
 
-  const run = async (action: PublicAction, row: Row | null) => {
-    setBusy(action.id);
-    try {
-      const d = await apiAction(fetchWithAuth, `/api/servers/${serverId}/widget-actions/${encodeURIComponent(widgetType)}/${encodeURIComponent(action.id)}`, 'POST', {
-        params: paramsFor(action, row), ...(action.confirm ? { confirm: true } : {}),
-      }) as { success: boolean; output: string; error: string; exitCode: number; timedOut: boolean };
-      const text = [d.output, d.error].filter(s => s && s.trim()).join('\n').trim();
-      if (!d.success) throw new Error(text.slice(0, 300) || (d.timedOut ? 'The command timed out' : `The command failed (exit ${d.exitCode})`));
-      if (action.result === 'text') setOutput({ title: `${action.label}${row ? `: ${fillTemplate(view.type === 'list' ? view.row?.title ?? '' : '', row)}` : ''}`, text: text || '(no output)' });
-      else if (action.result === 'toast') setNotice(`${action.label}: ${text ? text.split('\n')[0].slice(0, 120) : 'done'}`);
-      if (action.after === 'refresh') setTimeout(refresh, 2500);
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  const start = (action: PublicAction, row: Row | null) => {
-    if (action.kind === 'terminal') {
-      const ref = action.terminal ? String(getPath(row, action.terminal.container) ?? '') : '';
-      if (CONTAINER_REF_RE.test(ref)) setShellFor(ref); else setNotice(`${action.label}: this row has no usable container name`);
-      return;
-    }
-    if (action.confirm) setPending({ action, row });
-    else run(action, row).catch(err => setNotice(`${action.label} failed: ${err instanceof Error ? err.message : String(err)}`));
-  };
-
-  const rowButtons = (row: Row, ids: string[]) => ids.map(id => actionsById.get(id)).filter((a): a is PublicAction => !!a)
-    // A web terminal asks for the person's own login and is only available to Full access; the action's permission still applies.
-    .filter(a => can(a.permission, serverId) && (a.kind !== 'terminal' || hasRole(user?.role, 'admin')) && (!a.when || evalCond(a.when, row)))
+  const rowButtons = (row: Row, ids: string[]) => ids.map(id => actions.get(id)).filter((a): a is PublicAction => !!a)
+    .filter(a => allowed(a) && (!a.when || evalCond(a.when, row)))
     .map(a => {
       const Icon = (a.icon && ICONS[a.icon]) || Info;
       const label = `${a.label}${view.type === 'list' && view.row ? ` ${fillTemplate(view.row.title, row)}` : ''}`;
@@ -267,7 +142,7 @@ export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-2 text-sm">
+    <div className="flex min-h-0 flex-1 flex-col gap-2">
       {(view.summary?.length || view.filter || view.toggles?.length) ? (
         <div className="flex flex-wrap items-center gap-2">
           {view.summary?.map(s => (
@@ -289,22 +164,136 @@ export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
           ))}
         </div>
       ) : null}
+      {content()}
+    </div>
+  );
+}
+
+interface Props {
+  widgetId: string;
+  widgetType: string;
+  serverId: string;
+}
+
+interface Pending { action: PublicAction; row: Row | null; params?: Record<string, unknown> }
+
+/**
+ * Renders a package widget from its declarative spec: a list, table or text view over the widget's data (version 1), or a
+ * layout of sections, forms, buttons and job progress (version 2). Actions call the same endpoint API keys use
+ * (/api/servers/:id/widget-actions/...), so they are subject to the same permission, confirmation and validation rules.
+ */
+export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
+  const { data, isLoading, error, refresh, unavailable, extra } = useWidgetData(widgetId, 15);
+  const { user, can } = useAuth();
+  const [shellFor, setShellFor] = useState<string | null>(null);
+  const [spec, setSpec] = useState<PublicSpec | null>(null);
+  const [specError, setSpecError] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [pending, setPending] = useState<Pending | null>(null);
+  const [output, setOutput] = useState<{ title: string; text: string } | null>(null);
+  const { job, refresh: refreshJob, cancel } = useWidgetJob(serverId, widgetType, !!spec?.actions.some(a => a.job));
+
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        const res = await fetchWithAuth(`/api/widget-runtime/${encodeURIComponent(widgetType)}`);
+        const json = await readJson<{ data?: { spec: PublicSpec }; error?: { message?: string } }>(res);
+        if (!live) return;
+        if (!res.ok || !json.data) { setSpecError(json.error?.message || 'This widget has no definition'); return; }
+        setSpec(json.data.spec);
+      } catch (err) {
+        if (live) setSpecError(err instanceof Error ? err.message : String(err));
+      }
+    })();
+    return () => { live = false; };
+  }, [widgetType]);
+
+  const view = spec?.view;
+  const isLayout = view?.type === 'layout';
+
+  if (specError) return <div className="p-2 text-sm text-gray-500">{specError}</div>;
+  if (!spec || !view) return <WidgetLoading />;
+  if (isLoading && data === null) return <WidgetLoading />;
+  if (error) return <WidgetError error={error} onRetry={refresh} serverId={serverId} />;
+  if (unavailable) return <div className="p-2 text-sm text-gray-500">{unavailable}</div>;
+
+  const actionsById = new Map(spec.actions.map(a => [a.id, a]));
+  // A web terminal asks for the person's own login and is only available to Full access; the action's permission still applies.
+  const allowed = (a: PublicAction) => can(a.permission, serverId) && (a.kind !== 'terminal' || hasRole(user?.role, 'admin'));
+  const ctx: ViewContext = { data, state: extra.state, config: extra.config, lookups: extra.lookups, server: extra.server, job };
+
+  const run = async (action: PublicAction, row: Row | null, override?: Record<string, unknown>) => {
+    setBusy(action.id);
+    try {
+      const d = await apiAction(fetchWithAuth, `/api/servers/${serverId}/widget-actions/${encodeURIComponent(widgetType)}/${encodeURIComponent(action.id)}`, 'POST', {
+        params: override ?? paramsFor(action, row), ...(action.confirm ? { confirm: true } : {}), ...(spec.version >= 2 ? { widgetId } : {}),
+      }) as { success?: boolean; output?: string; error?: string; exitCode?: number; timedOut?: boolean; message?: string; jobId?: string };
+      if (d.jobId) { await refreshJob(); return; }   // started in the background: the job block follows it
+      const text = [d.output, d.error].filter(s => s && s.trim()).join('\n').trim();
+      if (!d.success) throw new Error((d.message || text).slice(0, 300) || (d.timedOut ? 'The command timed out' : `The command failed (exit ${d.exitCode})`));
+      if (action.result === 'text') setOutput({ title: `${action.label}${row && view.type === 'list' ? `: ${fillTemplate(view.row?.title ?? '', row)}` : ''}`, text: text || '(no output)' });
+      else if (action.result === 'toast') setNotice(`${action.label}: ${d.message || (text ? text.split('\n')[0].slice(0, 120) : 'done')}`);
+      if (action.after === 'refresh') setTimeout(refresh, 2500);
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const start = (action: PublicAction, row: Row | null, params?: Record<string, unknown>) => {
+    if (action.kind === 'terminal') {
+      const ref = action.terminal ? String(getPath(row, action.terminal.container) ?? '') : '';
+      if (CONTAINER_REF_RE.test(ref)) setShellFor(ref); else setNotice(`${action.label}: this row has no usable container name`);
+      return;
+    }
+    if (action.confirm) setPending({ action, row, params });
+    else run(action, row, params).catch(err => setNotice(`${action.label} failed: ${err instanceof Error ? err.message : String(err)}`));
+  };
+
+  const v1 = (v: ViewSpec, d: unknown) => (
+    <V1View view={v} data={d} widgetId={widgetId} serverId={serverId} actions={actionsById} allowed={allowed} busy={busy} start={start} />
+  );
+
+  const ui: LayoutUi = {
+    actions: actionsById,
+    allowed,
+    busy,
+    onAction: (a, params) => start(a, null, params),
+    renderView: v1,
+    onCancelJob: () => { cancel().catch(err => setNotice(`Cancel failed: ${err instanceof Error ? err.message : String(err)}`)); },
+  };
+
+  const body = isLayout
+    ? (
+      <div className="min-h-0 flex-1 overflow-auto">
+        {extra.stateError && <div role="alert" className="mb-2 rounded-md border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">Checking this host failed: {extra.stateError}</div>}
+        <LayoutBlocks blocks={view.blocks ?? []} ctx={ctx} ui={ui} />
+      </div>
+    )
+    : v1(view, data);
+
+  const confirmCtx = (pending?.row ?? ctx) as unknown;
+
+  return (
+    <div className="flex h-full min-h-0 flex-col gap-2 text-sm">
       {notice && (
         <div className="flex items-center justify-between rounded bg-blue-50 px-2 py-1 text-xs text-blue-800 dark:bg-blue-950/50 dark:text-blue-200">
           <span className="truncate">{notice}</span>
           <button onClick={() => setNotice(null)} aria-label="Dismiss"><X className="size-3" /></button>
         </div>
       )}
-      {content()}
+      {body}
 
       <ConfirmActionDialog
         open={!!pending}
         onOpenChange={o => { if (!o) setPending(null); }}
-        title={pending?.action.confirm ? fillTemplate(pending.action.confirm.title, pending.row ?? {}) : ''}
-        description={pending?.action.confirm?.text ? fillTemplate(pending.action.confirm.text, pending.row ?? {}) : (pending?.action.label ?? '')}
+        title={pending?.action.confirm ? fillTemplate(pending.action.confirm.title, confirmCtx) : ''}
+        description={pending?.action.confirm?.text ? fillTemplate(pending.action.confirm.text, confirmCtx) : (pending?.action.label ?? '')}
         confirmLabel={pending?.action.label ?? ''}
         destructive={!!pending?.action.confirm?.destructive}
-        onConfirm={() => (pending ? run(pending.action, pending.row) : undefined)}
+        requireText={pending?.action.confirm?.requireText ? fillTemplate(pending.action.confirm.requireText, confirmCtx) : undefined}
+        onConfirm={() => (pending ? run(pending.action, pending.row, pending.params) : undefined)}
       />
 
       <Dialog.Root open={!!shellFor} onOpenChange={o => { if (!o) setShellFor(null); }}>
@@ -339,14 +328,3 @@ export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
     </div>
   );
 }
-
-type IconBtnProps = React.ButtonHTMLAttributes<HTMLButtonElement> & { label: string };
-
-const IconBtn = forwardRef<HTMLButtonElement, IconBtnProps>(function IconBtn({ label, children, className, ...rest }, ref) {
-  return (
-    <button ref={ref} type="button" aria-label={label} title={label} {...rest}
-      className={`rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-900 disabled:opacity-40 dark:hover:bg-gray-800 dark:hover:text-gray-100 [&_svg]:size-3.5 ${className || ''}`}>
-      {children}
-    </button>
-  );
-});
