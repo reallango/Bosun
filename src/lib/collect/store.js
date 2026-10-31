@@ -109,7 +109,6 @@ function macAutofillStatements(serverId, nics) {
 function capabilitiesOf(sections, prev) {
   const caps = { ...(prev || {}) };
   if (sections.gpus) caps.gpus = sections.gpus.length;
-  if (sections.docker) caps.docker = !!sections.docker.available;
   return caps;
 }
 

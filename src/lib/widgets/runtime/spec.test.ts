@@ -224,7 +224,7 @@ describe('parameter defaults', () => {
 describe('terminal actions', () => {
   const withShell = (extra: Record<string, unknown> = {}) => {
     const s = dockerLike();
-    s.actions.push({ id: 'shell', label: 'Shell', icon: 'terminal-square', permission: 'dk.logs', terminal: { container: 'name' }, ...extra });
+    s.actions.push({ id: 'shell', label: 'Shell', icon: 'terminal-square', permission: 'dk.logs', terminal: { ref: 'name', refPattern: '^[a-z][a-z0-9_.-]{0,60}$', command: "docker exec -it {{ref}} sh" }, ...extra });
     s.view.row.actions = ['logs', 'shell'];
     return validateWidgetSpec(s, PERMS);
   };
@@ -234,17 +234,26 @@ describe('terminal actions', () => {
     expect(r.ok).toBe(true);
     if (r.ok) {
       const a = r.value.actions.find(x => x.id === 'shell')!;
-      expect(a).toMatchObject({ kind: 'terminal', terminal: { container: 'name' }, command: '', params: {} });
+      expect(a).toMatchObject({ kind: 'terminal', terminal: { ref: 'name', command: 'docker exec -it {{ref}} sh' }, command: '', params: {} });
       expect(r.value.actions.find(x => x.id === 'logs')?.kind).toBe('command');
     }
     expect(withShell({ permission: 'power.restart' }).ok).toBe(false);
   });
 
-  it('cannot also carry a command or parameters, and needs a valid container field', () => {
+  it('cannot also carry a command or parameters, and needs a valid target field, pattern and command', () => {
     expect(withShell({ command: 'docker exec -it {{name}} sh', params: { name: { type: 'string', values: ['a'] } } }).ok).toBe(false);
     expect(withShell({ windowsCommand: 'x' }).ok).toBe(false);
     expect(withShell({ terminal: {} }).ok).toBe(false);
-    expect(withShell({ terminal: { container: 'a b; id' } }).ok).toBe(false);
+    const t = (over: Record<string, unknown>) => ({ ref: 'name', refPattern: '^[a-z]+$', command: 'docker exec -it {{ref}} sh', ...over });
+    expect(withShell({ terminal: t({ ref: 'a b; id' }) }).ok).toBe(false);
+    expect(withShell({ terminal: t({ refPattern: '[a-z]+' }) }).ok).toBe(false);          // not anchored
+    expect(withShell({ terminal: t({ refPattern: '^(a$' }) }).ok).toBe(false);            // not a regular expression
+    expect(withShell({ terminal: t({ command: 'docker exec -it name sh' }) }).ok).toBe(false);   // no {{ref}}
+    expect(withShell({ terminal: t({ command: 'echo {{ref}} {{ref}}' }) }).ok).toBe(false);      // twice
+    expect(withShell({ terminal: t({ command: 'echo {{ref}} {{other}}' }) }).ok).toBe(false);    // another placeholder
+    expect(withShell({ terminal: t({ command: 'echo {{ref}}\nid' }) }).ok).toBe(false);          // two lines
+    expect(withShell({ terminal: t({ command: 'x'.repeat(501) + '{{ref}}' }) }).ok).toBe(false);
+    expect(withShell({ terminal: t({ check: 'probe' }) }).ok).toBe(false);                // a check needs version 2
   });
 
   it('survives being stored and validated again (the normalised form)', () => {
@@ -258,8 +267,8 @@ describe('terminal actions', () => {
     const r = withShell();
     if (!r.ok) throw new Error(r.error);
     const pub = publicSpec(r.value);
-    expect(pub.actions.find(a => a.id === 'shell')).toMatchObject({ kind: 'terminal', terminal: { container: 'name' } });
-    expect(JSON.stringify(pub)).not.toMatch(/"command":|"as":/);
+    expect(pub.actions.find(a => a.id === 'shell')).toMatchObject({ kind: 'terminal', terminal: { ref: 'name' } });
+    expect(JSON.stringify(pub)).not.toMatch(/"command":|"as":|docker exec|refPattern/);
   });
 });
 

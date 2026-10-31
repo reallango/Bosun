@@ -31,17 +31,14 @@ function output(stat: string, rx: number, tx: number) {
     '/dev/sda2 ext4 102400000 51200000 51200000 50% /',
     'tmpfs tmpfs 1000 0 1000 0% /run',
     '/dev/sdb1 xfs 204800000 184320000 20480000 90% /mnt/data media',
-    '@@BOSUN docker', 'RC 0',
-    '{"ID":"abcdef1234567890","Names":"web","Image":"nginx:1","Status":"Up 2 hours","State":"running","Ports":"80/tcp","Labels":"com.docker.compose.project=site"}',
-    '{"ID":"0123456789abcdef","Names":"job","Image":"alpine","Status":"Exited (0) 1 hour ago","State":"exited","Ports":"","Labels":""}',
     '@@BOSUN end', '',
   ].join('\n');
 }
 
 describe('linux collector', () => {
   it('builds a command that only passes known probe names', () => {
-    const cmd = linux.buildCommand(['stat', 'mem; rm -rf /', 'docker']);
-    expect(cmd).toContain('sh -s stat docker');
+    const cmd = linux.buildCommand(['stat', 'mem; rm -rf /', 'df']);
+    expect(cmd).toContain('sh -s stat df');
     expect(cmd).not.toContain('rm -rf');
     expect(cmd).toContain('nice -n 19');
   });
@@ -70,17 +67,10 @@ describe('linux collector', () => {
     expect(b.sections.gpus[0]).toMatchObject({ index: 0, name: 'NVIDIA GeForce RTX 3060', vram_total_mb: 12288, utilization_percent: 37, power_limit_watts: 170 });
     expect(b.metrics['gpu0.util']).toBe(37);
 
-    expect(b.sections.docker.available).toBe(true);
-    expect(b.sections.docker.containers[0]).toMatchObject({ id: 'abcdef123456', name: 'web', state: 'running', compose: 'site' });
-    expect(b.metrics['docker.running']).toBe(1);
+    expect(b.sections.docker).toBeUndefined();   // what a widget needs about Docker is collected by the widget's own package
+    expect(b.metrics['docker.running']).toBeUndefined();
 
     expect(b.sections.ollama).toBeUndefined();   // widget-specific data is collected by the widget's own package, not by the poller's probes
-  });
-
-  it('reports docker permission problems clearly', () => {
-    const d = linux._parsers.parseDocker('RC 1\npermission denied while trying to connect to the Docker daemon socket');
-    expect(d.available).toBe(false);
-    expect(d.error).toMatch(/docker group/);
   });
 
   it('treats a counter reset as no sample instead of a negative rate', () => {

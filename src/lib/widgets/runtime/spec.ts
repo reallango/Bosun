@@ -78,7 +78,7 @@ export interface ActionSpec {
   icon?: (typeof ICONS)[number];
   permission: string;
   /**
-   * `command` runs a command on the host; `terminal` opens the web terminal in a container (see `terminal`);
+   * `command` runs a command on the host; `terminal` opens an interactive terminal running a command of the package (see `terminal`);
    * `script` (version 2) runs the first of `variants` whose condition holds.
    */
   kind: 'command' | 'terminal' | 'script';
@@ -88,8 +88,13 @@ export interface ActionSpec {
   stores?: 'data';
   /** Script actions only: run as a long-running job (answers 202; progress and result through the job endpoint). */
   job?: boolean;
-  /** Terminal actions only: the row field that holds the container name. */
-  terminal?: { container: string };
+  /**
+   * Terminal actions only. `ref` is the row field that names what to open a terminal in (for example a container),
+   * `refPattern` an anchored pattern the name must match, `command` the one command the terminal runs with `{{ref}}` in
+   * its place (reviewed at install), and `check` (version 2) a package script, with a `ref` parameter, that API keys
+   * must pass first: it may refuse (ERROR:) and may pin the target by printing `REF <exact name>`.
+   */
+  terminal?: { ref: string; refPattern: string; command: string; check?: string };
   as: RunAs;
   command: string;
   windowsCommand?: string;
@@ -369,12 +374,22 @@ function validateAction(raw: unknown, ownPerms: ReadonlySet<string>, v2?: { scri
   if (raw.icon !== undefined && !(ICONS as readonly string[]).includes(String(raw.icon))) return fail(`${where}: unknown icon (use one of: ${ICONS.join(', ')})`);
   if (typeof raw.permission !== 'string' || !ownPerms.has(raw.permission)) return fail(`${where}: "permission" must be a permission this package declares`);
 
-  // A terminal action opens the web terminal in a container. It runs nothing itself: the person types their
-  // own login there, and only Full access users get a web terminal at all. (API access to a container shell is
-  // the separate API terminal, granted with its own permission.)
+  // A terminal action opens an interactive terminal that runs one command the package declares. The person types
+  // their own login there and only Full access users get a web terminal at all; API keys get an API terminal when
+  // they hold the action's permission and pass the action's check.
   if (raw.terminal !== undefined) {
-    if (!isObj(raw.terminal) || typeof raw.terminal.container !== 'string' || !FIELD_RE.test(raw.terminal.container)) {
-      return fail(`${where}: "terminal" needs "container": the row field that holds the container name`);
+    const t = raw.terminal;
+    if (!isObj(t) || typeof t.ref !== 'string' || !FIELD_RE.test(t.ref)) return fail(`${where}: "terminal" needs "ref": the row field that names what to open a terminal in`);
+    if (typeof t.refPattern !== 'string' || t.refPattern.length > 200 || !t.refPattern.startsWith('^') || !t.refPattern.endsWith('$')) return fail(`${where}: "terminal.refPattern" must be a regular expression anchored with ^ and $ (max 200 characters)`);
+    try { new RegExp(t.refPattern); } catch { return fail(`${where}: "terminal.refPattern" is not a valid regular expression`); }
+    if (typeof t.command !== 'string' || t.command.length < 1 || t.command.length > 500 || /[\u0000-\u001f]/.test(t.command)) return fail(`${where}: "terminal.command" must be one line of up to 500 characters`);
+    if ((t.command.match(/\{\{ref\}\}/g) ?? []).length !== 1 || t.command.replace('{{ref}}', '').includes('{{')) return fail(`${where}: "terminal.command" must contain {{ref}} exactly once and no other placeholder`);
+    let check: string | undefined;
+    if (t.check !== undefined) {
+      if (!v2) return fail(`${where}: "terminal.check" needs spec version 2`);
+      if (typeof t.check !== 'string' || !(t.check in v2.scripts)) return fail(`${where}: "terminal.check" must name one of the package scripts`);
+      if (!('ref' in v2.scripts[t.check].params)) return fail(`${where}: the check script "${t.check}" must declare a parameter named "ref"`);
+      check = t.check;
     }
     const hasCommand = (typeof raw.command === 'string' && raw.command !== '') || raw.windowsCommand !== undefined
       || (isObj(raw.params) && Object.keys(raw.params).length > 0);
@@ -389,7 +404,7 @@ function validateAction(raw: unknown, ownPerms: ReadonlySet<string>, v2?: { scri
       ok: true,
       value: {
         id, label, ...(description ? { description } : {}), ...(raw.icon ? { icon: raw.icon as ActionSpec['icon'] } : {}), permission: raw.permission,
-        kind: 'terminal', terminal: { container: raw.terminal.container }, as: 'service', command: '', params: {}, timeoutSec: 30,
+        kind: 'terminal', terminal: { ref: t.ref, refPattern: t.refPattern, command: t.command, ...(check ? { check } : {}) }, as: 'service', command: '', params: {}, timeoutSec: 30,
         ...(when ? { when } : {}), result: 'none', after: 'none',
       },
     };
@@ -744,7 +759,7 @@ export function fillTemplate(template: string, row: unknown): string {
  */
 export function publicSpec(spec: WidgetSpec): Omit<WidgetSpec, 'data' | 'actions' | 'scripts' | 'state' | 'lookups'> & {
   data: { source: DataSpec['source'] };
-  actions: (Omit<ActionSpec, 'command' | 'windowsCommand' | 'as' | 'timeoutSec' | 'variants'> & { variants?: { when?: Cond }[] })[];
+  actions: (Omit<ActionSpec, 'command' | 'windowsCommand' | 'as' | 'timeoutSec' | 'variants' | 'terminal'> & { variants?: { when?: Cond }[]; terminal?: { ref: string } })[];
 } {
   // Scripts, the state probe, lookups and the arguments of script variants are never sent to the browser; it only
   // gets what it needs to draw the widget and to decide which actions to offer (a variant's condition).
@@ -754,8 +769,8 @@ export function publicSpec(spec: WidgetSpec): Omit<WidgetSpec, 'data' | 'actions
     data: { source: spec.data.source },
     actions: spec.actions.map(a => {
       // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      const { command, windowsCommand, as, timeoutSec, variants, ...rest } = a;
-      return { ...rest, ...(variants ? { variants: variants.map(v => (v.when ? { when: v.when } : {})) } : {}) };
+      const { command, windowsCommand, as, timeoutSec, variants, terminal, ...rest } = a;
+      return { ...rest, ...(variants ? { variants: variants.map(v => (v.when ? { when: v.when } : {})) } : {}), ...(terminal ? { terminal: { ref: terminal.ref } } : {}) };
     }),
   };
 }

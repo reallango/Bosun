@@ -26,9 +26,6 @@ const SSHTerminalWidget = dynamic(
   { ssr: false, loading: () => <WidgetLoading /> },
 );
 
-/** Container names the terminal accepts (the same rule the server applies). */
-const CONTAINER_REF_RE = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$/;
-
 /** What the browser gets from /api/widget-runtime/:type (no commands, no scripts). */
 type PublicAction = PublicActionLike;
 interface PublicSpec { version: number; view: ViewSpec & { blocks?: Block[] }; data: { source: string }; actions: PublicAction[] }
@@ -185,7 +182,7 @@ interface Pending { action: PublicAction; row: Row | null; params?: Record<strin
 export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
   const { data, isLoading, error, refresh, unavailable, extra } = useWidgetData(widgetId, 15);
   const { user, can } = useAuth();
-  const [shellFor, setShellFor] = useState<string | null>(null);
+  const [shellFor, setShellFor] = useState<{ token: string; label: string } | null>(null);
   const [spec, setSpec] = useState<PublicSpec | null>(null);
   const [specError, setSpecError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -243,8 +240,12 @@ export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
 
   const start = (action: PublicAction, row: Row | null, params?: Record<string, unknown>) => {
     if (action.kind === 'terminal') {
-      const ref = action.terminal ? String(getPath(row, action.terminal.container) ?? '') : '';
-      if (CONTAINER_REF_RE.test(ref)) setShellFor(ref); else setNotice(`${action.label}: this row has no usable container name`);
+      const ref = action.terminal ? String(getPath(row, action.terminal.ref) ?? '') : '';
+      if (!ref) { setNotice(`${action.label}: this row has nothing to open it in`); return; }
+      // The server checks the target and signs the command the package declared; the terminal then asks for the person's own login.
+      apiAction(fetchWithAuth, `/api/servers/${serverId}/widget-actions/${encodeURIComponent(widgetType)}/${encodeURIComponent(action.id)}`, 'POST', { ref })
+        .then(d => { const x = d as { token?: string; label?: string }; if (x.token) setShellFor({ token: x.token, label: x.label || ref }); else setNotice(`${action.label}: no terminal token was returned`); })
+        .catch(err => setNotice(`${action.label}: ${err instanceof Error ? err.message : String(err)}`));
       return;
     }
     if (action.confirm) setPending({ action, row, params });
@@ -301,12 +302,12 @@ export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
           <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
           <Dialog.Content className="fixed inset-0 z-50 flex flex-col bg-white p-2 shadow-xl dark:bg-gray-900 sm:inset-6 sm:rounded-xl sm:border sm:border-gray-700 lg:inset-x-[8%]">
             <div className="mb-2 flex items-center justify-between gap-2 px-1">
-              <Dialog.Title className="truncate font-semibold">Shell: {shellFor}</Dialog.Title>
-              <Dialog.Description className="sr-only">Interactive docker exec session</Dialog.Description>
+              <Dialog.Title className="truncate font-semibold">{shellFor?.label}</Dialog.Title>
+              <Dialog.Description className="sr-only">Interactive terminal session</Dialog.Description>
               <Dialog.Close asChild><IconBtn label="Close shell"><X /></IconBtn></Dialog.Close>
             </div>
             <div className="min-h-0 flex-1">
-              {shellFor && <SSHTerminalWidget widgetId={`${widgetId}:exec:${shellFor}`} serverId={serverId} containerId={shellFor} />}
+              {shellFor && <SSHTerminalWidget widgetId={`${widgetId}:exec:${shellFor.label}`} serverId={serverId} cmdToken={shellFor.token} cmdLabel={shellFor.label} />}
             </div>
           </Dialog.Content>
         </Dialog.Portal>

@@ -9,8 +9,7 @@ import { startJob } from '@/lib/widgets/jobs/runtime';
 import { rqlite } from '@/lib/db/rqlite-client';
 import { storeActionData } from '@/lib/widgets/runtime/store-data';
 import { ParamError } from '@/lib/widgets/runtime/command';
-import { CONTAINER_REF_RE } from '@/lib/terminal/api-terminal';
-import { issueApiTerminalToken } from '@/lib/terminal/api-token';
+import { openTerminalAction } from '@/lib/widgets/runtime/terminal-action';
 
 /**
  * Run one action of a package widget: POST /api/servers/:serverId/widget-actions/:widgetType/:actionId
@@ -32,15 +31,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const denied = await requirePermission(auth, action.permission, serverId);
     if (denied) return denied;
 
-    let body: { params?: unknown; confirm?: unknown; container?: unknown; widgetId?: unknown };
+    let body: { params?: unknown; confirm?: unknown; ref?: unknown; widgetId?: unknown };
     try { body = await request.json(); } catch { body = {}; }
-    // A terminal action: for API keys it hands out the token for an API terminal in that container (the same
-    // single-use WebSocket, with the same checks that refuse containers able to reach the host), gated by the
-    // permission this action names instead of the built-in docker.shell. The web UI uses the web terminal instead.
+    // A terminal action runs one command the package declared in an interactive terminal: API keys get a token for an
+    // API terminal (after the action's check), a signed-in Full access user a token for the web terminal. The target is
+    // `ref`; see lib/widgets/runtime/terminal-action.ts.
     if (action.kind === 'terminal') {
-      const container = typeof body.container === 'string' ? body.container.trim() : '';
-      if (!CONTAINER_REF_RE.test(container)) return fail('container must be a container name or id');
-      return issueApiTerminalToken(auth, serverId, 'container', container, `${widgetType}/${actionId}`);
+      return openTerminalAction(auth, serverId, loaded, action, typeof body.ref === 'string' ? body.ref.trim() : '');
     }
     if (action.confirm && body.confirm !== true) return fail('Confirmation required', 400, 'CONFIRM_REQUIRED');
     const limit = consumeActionRateLimit(auth.userId);

@@ -17,7 +17,7 @@ const macs = require('./macs');
 const { metricsSection } = require('./metrics-section');
 const { splitSections } = linux;
 
-const PROBES = ['stat', 'mem', 'netdev', 'gpu', 'df', 'ip', 'docker', 'services', 'system'];
+const PROBES = ['stat', 'mem', 'netdev', 'gpu', 'df', 'ip', 'services', 'system'];
 
 const SCRIPT = String.raw`
 $ErrorActionPreference = 'SilentlyContinue'
@@ -50,10 +50,6 @@ foreach ($p in $Probes) {
       J @(Get-CimInstance Win32_NetworkAdapter -Filter 'PhysicalAdapter=True' | Where-Object { $_.MACAddress } | ForEach-Object {
         $c = $cfgs[[int]$_.Index]
         @{ name = $_.NetConnectionID; desc = $_.Name; mac = $_.MACAddress; up = ($_.NetConnectionStatus -eq 2); ips = @(if ($c -and $c.IPAddress) { $c.IPAddress }) } }) }
-    'docker' { M 'docker'
-      $d = Get-Command docker.exe -ErrorAction SilentlyContinue
-      if ($d) { $out = & $d.Source ps -a --no-trunc --format '{{json .}}' 2>&1; Write-Output ("RC " + $LASTEXITCODE); $out | Select-Object -First 500 }
-      else { Write-Output 'NONE' } }
     'services' { M 'services'
       J @(Get-Service | Select-Object -First 400 | ForEach-Object { @{ name = $_.Name; status = [string]$_.Status; display = $_.DisplayName; start = [string]$_.StartType } }) }
     'system' { M 'system'
@@ -223,9 +219,9 @@ function buildSnapshot(raw, prev, now = Date.now()) {
     state.system = sys;
   }
 
-  // GPU and docker output is identical to Linux; reuse those parsers.
+  // GPU output is identical to Linux; reuse that parser.
   const shared = {};
-  for (const k of ['gpu', 'docker']) if (raw[k] !== undefined) shared[k] = raw[k];
+  for (const k of ['gpu']) if (raw[k] !== undefined) shared[k] = raw[k];
   if (Object.keys(shared).length) {
     const r = linux.buildSnapshot(shared, null, now);
     Object.assign(sections, r.sections);

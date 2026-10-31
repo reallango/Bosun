@@ -45,7 +45,6 @@ const METRICS: [string, string][] = [
   ['disk.root_used_pct', 'Root disk (%)'], ['cpu.temp', 'CPU temperature (°C)'], ['cpu.load1', 'Load (1m)'],
   ['swap.used_mb', 'Swap used (MB)'], ['net.rx_bps', 'Network in (B/s)'], ['net.tx_bps', 'Network out (B/s)'],
   ['gpu0.util', 'GPU 0 utilization (%)'], ['gpu0.temp', 'GPU 0 temperature (°C)'], ['gpu0.vram_mb', 'GPU 0 VRAM used (MB)'],
-  ['docker.running', 'Running containers'],
 ];
 const METRIC_LABEL = Object.fromEntries(METRICS);
 

@@ -84,10 +84,8 @@ describe('reviewPackage', () => {
 describe('system widget actions in the OpenAPI document', () => {
   const doc = buildOpenApi([]) as any;
   it('lists the built-in widgets actions with their permissions', () => {
-    expect(doc.paths['/api/servers/{serverId}/containers/{containerId}/action'].post['x-bosun-permission']).toBe('docker.containers.control');
-    expect(doc.paths['/api/servers/{serverId}/containers/{containerId}/logs'].get['x-bosun-permission']).toBe('docker.logs');
+    expect(Object.keys(doc.paths).some(p => p.includes('/containers'))).toBe(false);   // a widget's own operations come from its package
     expect(doc.paths['/api/servers/{serverId}/power'].post.requestBody.content['application/json'].schema.required).toEqual(['action', 'confirm']);
-    expect(doc.paths['/api/servers/{serverId}/containers/{containerId}/action'].post.description).toMatch(/docker.containers.control/);
   });
 });
 
@@ -97,14 +95,15 @@ describe('terminal actions in the OpenAPI document', () => {
       version: 1,
       data: { source: 'snapshot', section: 'docker', permission: 'dk.view' },
       view: { type: 'list', row: { title: '{name}', actions: ['shell'] } },
-      actions: [{ id: 'shell', label: 'Shell', permission: 'dk.shell', terminal: { container: 'name' } }],
+      actions: [{ id: 'shell', label: 'Shell', permission: 'dk.shell', terminal: { ref: 'name', refPattern: '^[a-z]+$', command: 'docker exec -it {{ref}} sh' } }],
     }, ['dk.view', 'dk.shell']);
     if (!r.ok) throw new Error(r.error);
     const doc = buildOpenApi([{ type: 'dk_w', packageId: 'dk', displayName: 'Docker', spec: r.value, permissionLabels: { 'dk.shell': 'Open a shell' } }]) as any;
     const op = doc.paths['/api/servers/{serverId}/widget-actions/dk_w/shell'].post;
     expect(op['x-bosun-permission']).toBe('dk.shell');
     expect(op['x-bosun-runs-as']).toBe('terminal');
-    expect(op.requestBody.content['application/json'].schema.required).toEqual(['container']);
+    expect(op.requestBody.content['application/json'].schema.required).toEqual(['ref']);
+    expect(op.requestBody.content['application/json'].schema.properties.ref.pattern).toBe('^[a-z]+$');
     expect(op.description).toMatch(/Open a shell/);
     expect(op.description).toMatch(/ws\/api-terminal/);
   });

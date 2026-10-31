@@ -67,9 +67,9 @@ export function buildOpenApi(widgets: OpenApiWidget[], serverUrl = '/'): Json {
     '/api/servers/{serverId}/terminal': {
       post: {
         operationId: 'createTerminalToken', summary: 'Get a single-use token for an API terminal WebSocket', tags: ['Terminal'],
-        description: 'Connect to `/ws/api-terminal?token=...` within the token lifetime. `target: host` needs `shell.user`; `target: container` needs `docker.shell`.',
+        description: 'Connect to `/ws/api-terminal?token=...` within the token lifetime. `target: host` needs `shell.user` and opens the non-admin account of the host. Terminals that a widget package offers are opened through the terminal action of that widget (see its own operations).',
         parameters: [serverIdParam],
-        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['target'], properties: { target: { type: 'string', enum: ['host', 'container'] }, container: { type: 'string' } } } } } },
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['target'], properties: { target: { type: 'string', enum: ['host'] } } } } } },
         responses: { '200': { description: 'Token and WebSocket path' }, ...errorResponses },
       },
     },
@@ -91,16 +91,16 @@ export function buildOpenApi(widgets: OpenApiWidget[], serverUrl = '/'): Json {
     };
     for (const a of w.spec.actions) {
       if (a.kind === 'terminal') {
-        // For API keys a terminal action hands out the token for an API terminal in a container.
+        // For API keys a terminal action hands out the token for an API terminal that runs the package's command.
         paths[`/api/servers/{serverId}/widget-actions/${w.type}/${a.id}`] = {
           post: {
             operationId: `widgetTerminal_${w.type}_${a.id}`, summary: `${a.label} (API terminal token)`, tags: [tag],
             description: [
               a.description,
-              `Needs the "${w.permissionLabels[a.permission] ?? a.permission}" permission. API keys only. Returns a single-use token: connect to the WebSocket at /ws/api-terminal?token=... for an interactive shell in the container (a fixed docker exec; containers that could reach the host are refused).`,
+              `Needs the "${w.permissionLabels[a.permission] ?? a.permission}" permission. API keys get a single-use token: connect to the WebSocket at /ws/api-terminal?token=... for an interactive terminal that runs the one command the package declared${a.terminal?.check ? ' (the package first checks that the target may be opened and refuses otherwise)' : ''}.`,
             ].filter(Boolean).join(" "),
             parameters: [serverIdParam],
-            requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["container"], properties: { container: { type: "string", pattern: "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$", description: "Container name or id" } } } } } },
+            requestBody: { required: true, content: { "application/json": { schema: { type: "object", required: ["ref"], properties: { ref: { type: "string", pattern: a.terminal?.refPattern, description: "What to open the terminal in (its name or id)" } } } } } },
             responses: { "200": { description: "token, expiresInSec, path" }, ...errorResponses },
             "x-bosun-permission": a.permission,
             "x-bosun-runs-as": "terminal",
@@ -178,14 +178,7 @@ function systemOperations(): Record<string, Json> {
     operationId, summary, tags: [tag], description: `Needs the "${label(permission)}" permission.`,
     parameters: [serverIdParam], responses: { '200': { description: 'Done' }, ...errorResponses }, 'x-bosun-permission': permission, ...extra,
   });
-  const cid = { name: 'containerId', in: 'path', required: true, schema: { type: 'string' }, description: 'Container name' };
   return {
-    '/api/servers/{serverId}/containers': { get: { operationId: 'listContainers', summary: 'Containers as last collected', tags: ['Docker (system)'], parameters: [serverIdParam], responses: { '200': { description: 'Containers' }, ...errorResponses } } },
-    '/api/servers/{serverId}/containers/{containerId}/logs': { get: op('containerLogs', 'Container logs', 'Docker (system)', 'docker.logs', {
-      parameters: [serverIdParam, cid, { name: 'tail', in: 'query', required: false, schema: { type: 'integer', default: 200 } }] }) },
-    '/api/servers/{serverId}/containers/{containerId}/action': { post: op('containerAction', 'Start, stop or restart a container', 'Docker (system)', 'docker.containers.control', {
-      parameters: [serverIdParam, cid],
-      requestBody: body({ action: { type: 'string', enum: ['start', 'stop', 'restart'] }, confirm: { type: 'boolean', enum: [true] } }, ['action', 'confirm']) }) },
     '/api/servers/{serverId}/power': { post: op('power', 'Restart or shut down a host', 'Power (system)', 'power.restart', {
       description: 'Restart needs "Restart a server"; shutdown needs "Shut down a server".',
       requestBody: body({ action: { type: 'string', enum: ['restart', 'shutdown'] }, confirm: { type: 'boolean', enum: [true] } }, ['action', 'confirm']) }) },
