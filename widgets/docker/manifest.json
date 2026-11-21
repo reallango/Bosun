@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "docker",
   "name": "Docker Containers",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Containers on the host with logs, a shell, start, stop and restart; edit a container, create containers and stacks (a compose file, or one from a GitHub repository), and a Manage page for images, volumes and networks.",
   "author": "Bosun",
   "permissions": [
