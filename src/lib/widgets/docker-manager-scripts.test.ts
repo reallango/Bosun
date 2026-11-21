@@ -822,7 +822,7 @@ exit 0`);
     fake('exit 0');
     const web = shDir('web');
     const base = ['compose', '-p', 'web', '--project-directory', web, '-f', web + '/compose.yaml', '--env-file', web + '/.env'];
-    const expected: Record<string, string[]> = { up: ['up', '-d', '--remove-orphans'], down: ['down'], restart: ['restart'], pull: ['pull'], stop: ['stop'], start: ['start'] };
+    const expected: Record<string, string[]> = { up: ['up', '-d', '--remove-orphans'], down: ['down'], restart: ['restart'], pull: ['pull'], update: ['up', '-d', '--build', '--remove-orphans'], stop: ['stop'], start: ['start'] };
     for (const [op, tail] of Object.entries(expected)) {
       fs.writeFileSync(log, '');
       expect(out('stack_action.sh', { name: 'web', op }).done, op).toBe(`${op}: web`);
