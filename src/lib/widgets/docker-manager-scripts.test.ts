@@ -864,9 +864,11 @@ exit 0`);
 
   describe('overrides (svc.<service>.<key>=value lines)', () => {
     /** compose answers `version --short` with `ver`, and prints `cfg` for config. */
-    const ovFake = (cfg: string, ver = '2.29.1') => {
+    const ovFake = (cfg: string, ver = '2.29.1', declaredNetworks = 'backend\n') => {
       fs.writeFileSync(path.join(bin, 'cfg.json'), cfg);
+      fs.writeFileSync(path.join(bin, 'networks.txt'), declaredNetworks);
       fake(`case "$*" in "compose version --short") echo ${ver}; exit 0 ;; "compose version") echo v2; exit 0 ;; esac
+case "$*" in *' config --networks'*) cat "${path.join(bin, 'networks.txt')}" ;; esac
 case "$*" in *' config --format json'*) cat "${path.join(bin, 'cfg.json')}" ;; esac
 exit 0`);
     };
@@ -886,7 +888,7 @@ exit 0`);
       ].join('\n'));
       expect(fs.readFileSync(path.join(d, 'bosun.override'), 'utf8')).toBe(OVERRIDE);
       expect(fs.readdirSync(d).sort()).toEqual(['.env', 'bosun.meta', 'bosun.override', 'compose.override.yaml', 'compose.yaml']);
-      const c = dockerCalls().filter((x) => x[0] === 'compose' && x[1] === '-p');
+      const c = dockerCalls().filter((x) => x[0] === 'compose' && x[1] === '-p' && !x.includes('--networks'));
       expect(c[0]).toEqual(['compose', '-p', 'demo', '--project-directory', sd, '-f', sd + '/compose.yaml.new', '-f', sd + '/compose.override.yaml.new', '--env-file', sd + '/.env.new', 'config', '--format', 'json']);
       expect(c[1]).toEqual(['compose', '-p', 'demo', '--project-directory', sd, '-f', sd + '/compose.yaml', '-f', sd + '/compose.override.yaml', '--env-file', sd + '/.env', 'up', '-d', '--remove-orphans']);
       // stack_get hands the lines back, stack_action keeps using the override file
@@ -894,6 +896,16 @@ exit 0`);
       fs.writeFileSync(log, '');
       out('stack_action.sh', { name: 'demo', op: 'restart' });
       expect(dockerCalls().filter((x) => x[1] === '-p')).toEqual([['compose', '-p', 'demo', '--project-directory', sd, '-f', sd + '/compose.yaml', '-f', sd + '/compose.override.yaml', '--env-file', sd + '/.env', 'restart']]);
+    });
+
+    it.skipIf(!hasSh)('a network the compose file does not declare is attached as an external network; declared ones are left alone', () => {
+      ovFake(config('      "ports": []'), '2.29.1', 'default\nbackend\n');
+      const r = parseScriptOutput(deploy({ override: 'svc.web.network=backend\nsvc.web.network=ainet\n' }).stdout);
+      expect(r.error).toBeNull();
+      expect(fs.readFileSync(path.join(stackDir('demo'), 'compose.override.yaml'), 'utf8')).toBe([
+        'services:', '  "web":', '    networks: !override', '      - "backend"', '      - "ainet"',
+        '', 'networks:', '  "ainet":', '    external: true', '', '',
+      ].join('\n'));
     });
 
     it.skipIf(!hasSh)('no override lines: no override file, and an old one is removed (also when only comments or empty container names are given)', () => {
