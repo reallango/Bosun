@@ -2,6 +2,7 @@
 # Docker (Linux): runs one operation on a compose stack: up, down, restart, pull, stop or start (`docker compose -p <name> ...`
 # with the stack's stored files from $HOME/bosun-stacks/<name>/). A stack Bosun did not create (external) can only be
 # stopped, started, restarted or taken down (docker compose finds its containers by label); up and pull need the stored files.
+# `update` re-fetches a git stack's branch, rebuilds and starts it with the stored .env and override (nothing is re-entered).
 # Parameters: name, op.
 fail() { printf 'ERROR: %s\n' "$*"; exit 0; }
 name=$BOSUN_PARAM_name; op=$BOSUN_PARAM_op
@@ -12,9 +13,10 @@ case "$op" in
   down) set -- down ;;
   restart) set -- restart ;;
   pull) set -- pull ;;
+  update) set -- up -d --build --remove-orphans ;;
   stop) set -- stop ;;
   start) set -- start ;;
-  *) fail 'op must be up, down, restart, pull, stop or start' ;;
+  *) fail 'op must be up, down, restart, pull, update, stop or start' ;;
 esac
 case "$HOME" in /*) ;; *) fail 'HOME is not set' ;; esac
 D=docker; $D ps >/dev/null 2>&1 || { command -v sudo >/dev/null 2>&1 && sudo -n docker ps >/dev/null 2>&1 && D='sudo -n docker'; }
@@ -33,11 +35,23 @@ if [ -d "$DIR" ]; then
   PD=$(dirname "$CF")
   [ ! -f "$DIR/.env" ] || EF="$DIR/.env"
 else
-  case "$op" in up|pull) fail "the stack $name was not created by Bosun (no stored compose file), so $op is not possible" ;; esac
+  case "$op" in up|pull|update) fail "the stack $name was not created by Bosun (no stored compose file), so $op is not possible" ;; esac
 fi
 errf=$(mktemp) || fail 'cannot create a temporary file'
 trap 'rm -f "$errf"' EXIT
 echo 'PROGRESS 0/1'; echo "[step] Running docker compose $op for the stack $name"
+# update: fetch the stored branch of a git stack (public repositories only, there is no token here), then rebuild and start with the
+# stored .env and override, so nothing has to be entered again.
+if [ "$op" = update ] && [ "$(meta_get source)" = git ]; then
+  ub=$(meta_get branch)
+  case "$ub" in ''|*[!A-Za-z0-9._/-]*) fail 'the stored stack record is damaged' ;; esac
+  command -v git >/dev/null 2>&1 || fail 'git is not installed on this host'
+  [ -d "$DIR/repo/.git" ] || fail "the stored checkout of the stack $name is missing"
+  echo '[step] Fetching the latest source'
+  ( export GIT_TERMINAL_PROMPT=0 GIT_ALLOW_PROTOCOL=https
+    git -C "$DIR/repo" fetch --depth 1 origin "$ub" >/dev/null 2>"$errf" && git -C "$DIR/repo" reset --hard FETCH_HEAD >/dev/null 2>>"$errf" ) \
+    || fail "fetching the source failed (a private repository needs Deploy with a token): $(tr -d '\r' < "$errf" | sed '/^$/d' | tail -n 2 | tr '\n' ' ' | cut -c1-300)"
+fi
 # the override file of a stack deployed with overrides (ports, volumes, networks, container name) belongs to every operation
 OF=''; [ -z "$CF" ] || [ ! -f "$DIR/compose.override.yaml" ] || OF="$DIR/compose.override.yaml"
 if [ -z "$CF" ]; then $D compose -p "$name" "$@" >/dev/null 2>"$errf"; rc=$?
