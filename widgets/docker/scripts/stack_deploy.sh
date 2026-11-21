@@ -15,6 +15,8 @@
 # They are written as compose.override.yaml (`!override` tags: Docker Compose 2.24 or newer) next to the stored compose file, passed
 # as a second -f file, and the risky check below reads the MERGED configuration. The lines themselves are stored as bosun.override
 # (stack_get returns them as "override"). No lines: no override file, and an old one is removed.
+# A `network` line that names a network the compose file does not declare adds it to the override as an external network
+# (`networks: <name>: external: true`), so it must already exist on the host (for example a shared `ainet`).
 # Progress: PROGRESS n/5 lines and plain `[step] text` lines that say what happens.
 fail() { printf 'ERROR: %s\n' "$*"; exit 0; }
 SECRET_TOKEN=$BOSUN_SECRET_git_token; unset BOSUN_SECRET_git_token   # never let docker, compose or git inherit it by accident
@@ -217,6 +219,20 @@ case "$BOSUN_PARAM_env" in *[![:space:]]*)
   EF="$DIR/.env.new" ;;
 esac
 if [ -n "$OVRYAML" ]; then
+  # A network named by an override that the compose file does not declare is attached as an external network
+  # (it must already exist on the host, for example a shared `ainet`). Networks the file declares are left alone.
+  declared=$( OF=''; dc config --networks 2>/dev/null | tr -d '\r')
+  extra=''
+  for n in $(printf '%s\n' "$OVR" | tr -d '\r' | sed -n 's/^svc\.[A-Za-z0-9][A-Za-z0-9_.-]*\.network=\(.\{1,\}\)$/\1/p' | sort -u); do
+    printf '%s\n' "$declared" | grep -qxF -- "$n" || extra="$extra  \"$n\":
+    external: true
+"
+  done
+  if [ -n "$extra" ]; then
+    OVRYAML="$OVRYAML
+networks:
+$extra"
+  fi
   printf '%s\n' "$OVRYAML" > "$DIR/compose.override.yaml.new" || die 'cannot write the override file'
   OF="$DIR/compose.override.yaml.new"
 fi
