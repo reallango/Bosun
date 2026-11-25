@@ -16,6 +16,10 @@ BOSUN_JOIN="${RQLITE_JOIN:-}"
 BOSUN_EXPECT="${RQLITE_BOOTSTRAP_EXPECT:-}"
 BOSUN_RQLITE_AUTH=""
 BOSUN_RQLITE_USER=""
+BOSUN_NODE_CA=""
+BOSUN_NODE_CERT=""
+BOSUN_NODE_KEY=""
+BOSUN_NODE_SERVER_NAME=""
 if [ -f /app/src/lib/cluster/boot.js ]; then
     BOOT_OUT="$(RQLITE_DATA_DIR="${RQLITE_DATA_DIR}" node /app/src/lib/cluster/boot.js)" && eval "${BOOT_OUT}"
 fi
@@ -68,12 +72,24 @@ else
     HTTP_BIND="127.0.0.1"
 fi
 
-echo "[rqlite] node ${BOSUN_NODE_ID} advertising ${RQLITE_RAFT_ADV}${CLUSTER_FLAGS:+ (${CLUSTER_FLAGS})}${AUTH_FLAGS:+, authentication on}"
+# Node-to-node mutual TLS on the Raft port (4002): traffic is encrypted and only
+# nodes with a certificate from the cluster CA (derived from AUTH_SECRET, see
+# src/lib/cluster/node-tls.js) may connect. Every node of a cluster must agree.
+TLS_FLAGS=""
+if [ -n "${BOSUN_NODE_CERT}" ] && [ -f "${BOSUN_NODE_CERT}" ] && [ -f "${BOSUN_NODE_KEY}" ] && [ -f "${BOSUN_NODE_CA}" ]; then
+    TLS_FLAGS="-node-cert=${BOSUN_NODE_CERT} -node-key=${BOSUN_NODE_KEY} -node-ca-cert=${BOSUN_NODE_CA} -node-verify-client -node-verify-server-name=${BOSUN_NODE_SERVER_NAME}"
+else
+    echo "[rqlite] WARNING: no node TLS files; port ${RQLITE_RAFT_PORT} is neither encrypted nor authenticated"
+fi
+[ ! -d /run/bosun ] || chown -R node:node /run/bosun
+
+echo "[rqlite] node ${BOSUN_NODE_ID} advertising ${RQLITE_RAFT_ADV}${CLUSTER_FLAGS:+ (${CLUSTER_FLAGS})}${AUTH_FLAGS:+, authentication on}${TLS_FLAGS:+, node TLS on}"
 chown -R node:node "${RQLITE_DATA_DIR}"
 exec s6-setuidgid node /usr/local/bin/rqlited \
     -node-id="${BOSUN_NODE_ID}" \
     -http-addr="${HTTP_BIND}:${RQLITE_HTTP_PORT}" \
     ${AUTH_FLAGS} \
+    ${TLS_FLAGS} \
     -http-adv-addr="${RQLITE_HTTP_ADV}" \
     -raft-addr="0.0.0.0:${RQLITE_RAFT_PORT}" \
     -raft-adv-addr="${RQLITE_RAFT_ADV}" \
