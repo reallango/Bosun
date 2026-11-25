@@ -17,8 +17,9 @@ services:
       - bosun-data:/data/rqlite
     ports:
       - "${BOSUN_PORT:-3042}:3042"
-      # rqlite HTTP and Raft: other cluster nodes join through these. They are
-      # not authenticated; firewall them to the cluster machines.
+      # rqlite HTTP and Raft: other cluster nodes join through these. The HTTP API
+      # needs Bosun's credentials (derived from AUTH_SECRET); Raft is neither
+      # authenticated nor encrypted. Firewall both to the cluster machines.
       - "4001:4001"
       - "4002:4002"
     networks:

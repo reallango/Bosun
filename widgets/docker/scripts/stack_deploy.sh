@@ -229,7 +229,9 @@ if [ -n "$OVRYAML" ]; then
 "
   done
   if [ -n "$extra" ]; then
+    # Blank line between the services and networks blocks ($OVRYAML comes from a command substitution, which drops it).
     OVRYAML="$OVRYAML
+
 networks:
 $extra"
   fi

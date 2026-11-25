@@ -41,7 +41,7 @@ const { SHELL_VERIFY_COMMAND, parseShellVerification } = require('./src/lib/ssh/
 const { WINDOWS_SHELL_VERIFY_COMMAND, parseWindowsShellVerification } = require('./src/lib/ssh/windows-shell-account');
 
 const RQLITE_HOST = process.env.RQLITE_HOST || '127.0.0.1:4001';
-const { getMasterKey } = require('./src/lib/secrets');
+const { getMasterKey, rqliteAuthHeaders } = require('./src/lib/secrets');
 const HEALTH_PORT = parseInt(process.env.POLLER_HEALTH_PORT, 10) || 3003;
 const MAX_PARALLEL = parseInt(process.env.POLLER_MAX_PARALLEL, 10) || 8;
 const TICK_MS = 1000;
@@ -74,7 +74,7 @@ const warn = (...a) => console.warn('[Poller]', ...a);
 async function rq(path, body, timeoutMs = 15000) {
   const res = await fetch(`http://${RQLITE_HOST}${path}`, {
     method: body ? 'POST' : 'GET',
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    headers: body ? { ...rqliteAuthHeaders(), 'Content-Type': 'application/json' } : rqliteAuthHeaders(),
     body: body ? JSON.stringify(body) : undefined,
     signal: AbortSignal.timeout(timeoutMs),
   });

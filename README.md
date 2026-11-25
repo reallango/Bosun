@@ -284,8 +284,20 @@ Settings → Cluster (admins) covers the whole lifecycle without editing `.env` 
 
 Settings made here are stored in `<data volume>/bosun/cluster.json` and take
 precedence over `NODE_NAME`, `RQLITE_ADV_HOST` and `RQLITE_JOIN`, which remain the
-defaults. Ports 4001 and 4002 are not authenticated: allow them only between the
-cluster machines.
+defaults.
+
+**Database authentication.** rqlite's HTTP API (port 4001) only answers requests that
+carry Bosun's credentials; without them only `/readyz` responds. The password is
+derived from `AUTH_SECRET`, so every node of a cluster gets it with the join code and
+nothing has to be configured. The credentials are written to `/run/bosun/rqlite-auth.json`
+inside the container on every start (not kept on the data volume). To use the `rqlite`
+shell inside the container, read the user and password from that file. Raft traffic on
+port 4002 is not authenticated or encrypted: still allow 4001 and 4002 only between
+the cluster machines.
+
+Upgrading an existing cluster to a version with database authentication: update all
+nodes together. A node that requires credentials and one that does not send them
+cannot work with each other.
 
 ### Setting up a cluster with environment variables
 
@@ -301,8 +313,10 @@ AUTH_SECRET=...                      # identical on all nodes
 ```
 
 All three start with the same join list and `RQLITE_BOOTSTRAP_EXPECT=3`, and form the
-cluster together once all are up. Ports 4001 and 4002 must be reachable between the
-nodes and should be firewalled from everything else.
+cluster together once all are up. `AUTH_SECRET` must be identical on all nodes, since
+the database credentials are derived from it (see *Database authentication*). Ports 4001
+and 4002 must be reachable between the nodes and should be firewalled from everything
+else.
 
 ## Access levels, users and API keys
 

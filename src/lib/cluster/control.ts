@@ -124,7 +124,7 @@ export async function removeNode(nodeId: string): Promise<void> {
   const base = leader.id === self || !leader.api_addr ? `http://localhost:${process.env.RQLITE_HTTP_PORT || '4001'}` : leader.api_addr;
   const res = await fetch(`${base}/remove`, {
     method: 'DELETE',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { ...secrets.rqliteAuthHeaders(), 'Content-Type': 'application/json' },
     body: JSON.stringify({ id: nodeId }),
     cache: 'no-store',
     signal: AbortSignal.timeout(15_000),
