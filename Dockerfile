@@ -3,6 +3,9 @@
 # ============================================================
 FROM node:20-alpine AS builder
 
+# openssl: the node-to-node TLS tests run it (as the rqlite start script does at runtime).
+RUN apk add --no-cache openssl
+
 WORKDIR /app
 ENV NEXT_TELEMETRY_DISABLED=1
 
@@ -21,7 +24,7 @@ RUN npx vitest run && npm run build && npm prune --omit=dev
 FROM node:20-slim AS runtime
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    wget xz-utils ca-certificates openssh-client procps nginx \
+    wget xz-utils ca-certificates openssl openssh-client procps nginx \
     && rm -rf /var/lib/apt/lists/* \
     && rm -f /etc/nginx/sites-enabled/default
 
@@ -33,8 +36,9 @@ RUN tar -C / -Jxpf /tmp/s6-overlay-noarch.tar.xz && \
     tar -C / -Jxpf /tmp/s6-overlay-x86_64.tar.xz && \
     rm -f /tmp/s6-overlay-*.tar.xz
 
-# rqlite
-ARG RQLITE_VERSION=8.26.7
+# rqlite. 9.x is the first release that enforces client certificates on the
+# node-to-node port (-node-verify-client); 8.x accepted the flag but ignored it.
+ARG RQLITE_VERSION=9.4.5
 ADD https://github.com/rqlite/rqlite/releases/download/v${RQLITE_VERSION}/rqlite-v${RQLITE_VERSION}-linux-amd64.tar.gz /tmp
 RUN tar -C /tmp -xzf /tmp/rqlite-v${RQLITE_VERSION}-linux-amd64.tar.gz && \
     mv /tmp/rqlite-v${RQLITE_VERSION}-linux-amd64/rqlited /usr/local/bin/ && \
@@ -63,8 +67,8 @@ COPY --from=builder /app/src/lib/ssh/shell-account.js /app/src/lib/ssh/windows-s
 COPY --from=builder /app/src/lib/widgets/runtime/data.js /app/src/lib/widgets/runtime/script-run.js ./src/lib/widgets/runtime/
 # Widget packages installed by default (see widgets/bundled.json).
 COPY --from=builder /app/widgets ./widgets
-# Cluster settings + the start-time helper used by the rqlite service.
-COPY --from=builder /app/src/lib/cluster/config.js /app/src/lib/cluster/boot.js ./src/lib/cluster/
+# Cluster settings + the start-time helper used by the rqlite service (and its node-to-node TLS files).
+COPY --from=builder /app/src/lib/cluster/config.js /app/src/lib/cluster/boot.js /app/src/lib/cluster/node-tls.js ./src/lib/cluster/
 # Next writes its cache under .next at runtime; services run as `node`.
 RUN chown -R node:node /app/.next
 

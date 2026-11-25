@@ -291,13 +291,37 @@ carry Bosun's credentials; without them only `/readyz` responds. The password is
 derived from `AUTH_SECRET`, so every node of a cluster gets it with the join code and
 nothing has to be configured. The credentials are written to `/run/bosun/rqlite-auth.json`
 inside the container on every start (not kept on the data volume). To use the `rqlite`
-shell inside the container, read the user and password from that file. Raft traffic on
-port 4002 is not authenticated or encrypted: still allow 4001 and 4002 only between
-the cluster machines.
+shell inside the container, read the user and password from that file.
 
-Upgrading an existing cluster to a version with database authentication: update all
-nodes together. A node that requires credentials and one that does not send them
-cannot work with each other.
+**Node-to-node encryption.** Traffic between nodes on port 4002 (Raft replication and
+requests forwarded to the leader) uses mutual TLS: it is encrypted, and only nodes
+with a certificate from the cluster's CA can connect. The CA key is also derived from
+`AUTH_SECRET`, so this needs no setup either. Each node makes its certificate on every
+start in `/run/bosun/tls/`. `BOSUN_NODE_TLS=0` turns it off (not recommended; then every
+node must have it off).
+
+Upgrading an existing cluster to a version with database authentication or node-to-node
+encryption: update all nodes together. A node that requires credentials or TLS and one
+that does not cannot work with each other. The same release moves rqlite from 8.26.7 to
+9.4.5 (8.x did not enforce client certificates). The database files are used as they are,
+but export a backup first (Settings → Database).
+
+**Firewall.** Keep ports 4001 and 4002 reachable only from the other cluster machines.
+Ports that Docker publishes bypass `ufw`, so a `ufw` rule does not limit them. Either
+publish them on the LAN address only (for example `192.168.1.161:4002:4002` instead of
+`4002:4002`), or filter in the `DOCKER-USER` chain, which Docker checks first:
+
+```bash
+# On each node: allow 4001/4002 from the other nodes only (adjust the addresses).
+for p in 4001 4002; do
+  iptables -I DOCKER-USER -p tcp --dport $p -j DROP
+  for ip in 192.168.1.131 192.168.1.171; do
+    iptables -I DOCKER-USER -p tcp -s $ip --dport $p -j RETURN
+  done
+done
+```
+
+These rules are lost on reboot unless saved (for example with `iptables-persistent`).
 
 ### Setting up a cluster with environment variables
 
@@ -314,9 +338,9 @@ AUTH_SECRET=...                      # identical on all nodes
 
 All three start with the same join list and `RQLITE_BOOTSTRAP_EXPECT=3`, and form the
 cluster together once all are up. `AUTH_SECRET` must be identical on all nodes, since
-the database credentials are derived from it (see *Database authentication*). Ports 4001
-and 4002 must be reachable between the nodes and should be firewalled from everything
-else.
+the database credentials and the node certificates are derived from it (see *Database
+authentication* and *Node-to-node encryption*). Ports 4001 and 4002 must be reachable
+between the nodes and should be firewalled from everything else (see *Firewall*).
 
 ## Access levels, users and API keys
 

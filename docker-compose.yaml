@@ -18,8 +18,9 @@ services:
     ports:
       - "${BOSUN_PORT:-3042}:3042"
       # rqlite HTTP and Raft: other cluster nodes join through these. The HTTP API
-      # needs Bosun's credentials (derived from AUTH_SECRET); Raft is neither
-      # authenticated nor encrypted. Firewall both to the cluster machines.
+      # needs Bosun's credentials and Raft uses mutual TLS (both derived from
+      # AUTH_SECRET). Still firewall both to the cluster machines (README "Firewall":
+      # Docker-published ports bypass ufw).
       - "4001:4001"
       - "4002:4002"
     networks:
