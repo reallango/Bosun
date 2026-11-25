@@ -1,103 +1,52 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/auth/middleware';
-import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
-import { randomUUID } from 'crypto';
+import { requireAuth, requireRole } from '@/lib/auth/middleware';
+import { ok, fail, internalError } from '@/lib/api/response';
+import { listForViewer, markRead, notify } from '@/lib/notifications/store';
 
+/** The notifications the caller may see (newest first). `?unread=true` for unread only. */
 export async function GET(request: NextRequest) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
   try {
-    const { searchParams } = new URL(request.url);
-    const unreadOnly = searchParams.get('unread') === 'true';
-    
-    let query = 'SELECT * FROM notifications WHERE 1=1';
-    const params: any[] = [];
-    
-    // Notifications are global (the table has no per-user column).
-    if (unreadOnly) {
-      query += ' AND is_read = 0';
-    }
-    
-    query += ' ORDER BY created_at DESC LIMIT 50';
-    
-    const result = await rqlite.query(query, params);
-    const notifications = rowsToObjects(result).map((n: any) => ({
-      ...n,
-      config: n.config ? JSON.parse(n.config) : {}
-    }));
-
-    return NextResponse.json({ data: { notifications } });
+    const unreadOnly = new URL(request.url).searchParams.get('unread') === 'true';
+    return ok({ notifications: await listForViewer(auth, { unreadOnly }) });
   } catch (error) {
-    return NextResponse.json({ error: { message: String(error) } }, { status: 500 });
+    return internalError(error);
   }
 }
 
+/** Post a notification by hand (Full access): { title, message, severity?, server_id?, link? }. */
 export async function POST(request: NextRequest) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
-  const user = auth as any;
-  
-  // Only admins can create notifications
-  if (user.role !== 'admin') {
-    return NextResponse.json({ error: { message: 'Admin only' } }, { status: 403 });
-  }
-
+  const denied = requireRole(auth, 'admin');
+  if (denied) return denied;
+  let body: { title?: unknown; message?: unknown; severity?: unknown; server_id?: unknown; link?: unknown };
+  try { body = await request.json(); } catch { return fail('Invalid JSON body'); }
+  const title = typeof body.title === 'string' ? body.title.trim() : '';
+  const message = typeof body.message === 'string' ? body.message : '';
+  if (!title) return fail('title required');
+  const severity = ['info', 'success', 'warning', 'critical'].includes(String(body.severity)) ? body.severity as 'info' : 'info';
   try {
-    const body = await request.json();
-    const { server_id, severity, title, message } = body;
-    
-    const id = randomUUID();
-    const now = new Date().toISOString();
-    
-    await rqlite.execute(
-      `INSERT INTO notifications (id, server_id, severity, title, message, is_read, is_dismissed, delivered_via, created_at) 
-       VALUES (?, ?, ?, ?, ?, 0, 0, 'in_app', ?)`,
-      [id, server_id || null, severity || 'info', title, message, now]
-    );
-
-    return NextResponse.json({ data: { id, message: 'Notification created' } }, { status: 201 });
+    await notify({ kind: 'alert', severity, title, message, serverId: typeof body.server_id === 'string' ? body.server_id : null,
+      link: typeof body.link === 'string' ? body.link : null });
+    return ok({ message: 'Notification created' }, { status: 201 });
   } catch (error) {
-    return NextResponse.json({ error: { message: String(error) } }, { status: 500 });
+    return internalError(error);
   }
 }
 
+/** Mark read: { read: true } marks every visible notification read; { id, read|is_read: true } marks one. */
 export async function PATCH(request: NextRequest) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
-
+  let body: { id?: unknown; read?: unknown; is_read?: unknown };
+  try { body = await request.json(); } catch { return fail('Invalid JSON body'); }
+  if (!(body.read ?? body.is_read)) return fail('Only { read: true } is supported');
   try {
-    const body = await request.json();
-    const { id, is_read, is_dismissed } = body;
-    
-    if (!id) {
-      return NextResponse.json({ error: { message: 'ID required' } }, { status: 400 });
-    }
-
-    const updates: string[] = [];
-    const params: any[] = [];
-    
-    if (is_read !== undefined) {
-      updates.push('is_read = ?');
-      params.push(is_read ? 1 : 0);
-    }
-    if (is_dismissed !== undefined) {
-      updates.push('is_dismissed = ?');
-      params.push(is_dismissed ? 1 : 0);
-    }
-    
-    if (updates.length === 0) {
-      return NextResponse.json({ error: { message: 'No fields to update' } }, { status: 400 });
-    }
-    
-    params.push(id);
-    
-    await rqlite.execute(
-      `UPDATE notifications SET ${updates.join(', ')} WHERE id = ?`,
-      params
-    );
-
-    return NextResponse.json({ data: { message: 'Updated' } });
+    const updated = await markRead(auth, typeof body.id === 'string' && body.id ? body.id : undefined);
+    return ok({ updated });
   } catch (error) {
-    return NextResponse.json({ error: { message: String(error) } }, { status: 500 });
+    return internalError(error);
   }
 }

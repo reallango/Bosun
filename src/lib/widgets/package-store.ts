@@ -206,6 +206,10 @@ export async function installPackage(opts: InstallOptions): Promise<InstallResul
   await materializeNow(manifest.id).catch(err => console.warn(`[widgets] could not write the files of ${manifest.id}: ${err instanceof Error ? err.message : err}`));
   invalidatePermissionCache();
   invalidateRuntimeCache();
+  // The notification bell: "upgraded" (and the package's "update available" notices are closed).
+  const { announceInstalled } = await import('@/lib/widgets/update-check');
+  await announceInstalled({ id: manifest.id, name: manifest.name, version: manifest.version, previousVersion, source: opts.source, userId: opts.userId })
+    .catch(() => {});
   return { id: manifest.id, version: manifest.version, previousVersion, widgetTypes: newTypes, permissions: permIds };
 }
 

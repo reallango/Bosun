@@ -16,6 +16,9 @@ export async function register() {
         // Every node keeps the packages' files on its own disk, written from the database (see lib/widgets/materialize.ts).
         const { startPackageFileSync } = await import('@/lib/widgets/materialize-db');
         startPackageFileSync();
+        // Widget updates in the notification bell (the leader checks; see lib/widgets/update-check.ts).
+        const { startWidgetUpdateCheck } = await import('@/lib/widgets/update-check');
+        startWidgetUpdateCheck();
       })
       .catch(err => console.error('[db] initialisation failed:', err));
   }

@@ -595,6 +595,19 @@ const V14_JOB_TASKS: string[] = [
     `CREATE INDEX IF NOT EXISTS idx_package_jobs_recent ON package_jobs(started_at)`,
 ];
 
+// ---- Version 15: notifications that are not metric alerts ----
+// `kind` says what raised it (alert, widget_update, widget_upgraded, ...), `link` is where clicking it goes,
+// `dedupe_key` makes "raise once" notices idempotent (INSERT OR IGNORE), `audience` limits who sees it
+// (NULL = everyone, otherwise the lowest access level) and `data` holds kind-specific JSON. Additive columns.
+const V15_NOTIFICATION_KINDS: string[] = [
+    `ALTER TABLE notifications ADD COLUMN kind TEXT NOT NULL DEFAULT 'alert'`,
+    `ALTER TABLE notifications ADD COLUMN link TEXT`,
+    `ALTER TABLE notifications ADD COLUMN dedupe_key TEXT`,
+    `ALTER TABLE notifications ADD COLUMN audience TEXT`,
+    `ALTER TABLE notifications ADD COLUMN data TEXT`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_dedupe ON notifications(dedupe_key) WHERE dedupe_key IS NOT NULL`,
+];
+
 export const MIGRATIONS: Migration[] = [
     {
         version: 1,
@@ -618,6 +631,7 @@ export const MIGRATIONS: Migration[] = [
     { version: 12, name: 'package_jobs', statements: V12_PACKAGE_JOBS },
     { version: 13, name: 'exec_permission', statements: V13_EXEC_PERMISSION },
     { version: 14, name: 'job_tasks', statements: V14_JOB_TASKS },
+    { version: 15, name: 'notification_kinds', statements: V15_NOTIFICATION_KINDS },
 ];
 
 /** The schema version this build expects. */
