@@ -7,7 +7,7 @@ const crypto = require('crypto');
 const { Client } = require('ssh2');
 
 const PORT = process.env.WS_PORT || 3002;
-const { getAuthSecret } = require('./src/lib/secrets');
+const { getAuthSecret, rqliteAuthHeaders } = require('./src/lib/secrets');
 // Signing secret: env AUTH_SECRET, else the data-volume secrets file (re-read
 // when it changes, e.g. after this node joins a cluster).
 if (!getAuthSecret()) {
@@ -48,7 +48,7 @@ async function queryRqlite(sql, params = []) {
   try {
     const res = await fetch(`http://${RQLITE_HOST}/db/query`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...rqliteAuthHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify([[sql, ...params]]),
     });
     const json = await res.json();
@@ -66,7 +66,7 @@ async function auditLog(entry) {
   try {
     await fetch(`http://${RQLITE_HOST}/db/execute`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...rqliteAuthHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify([[
         'INSERT INTO audit_log (id, user_id, server_id, action, category, details, status, ip_address, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
         crypto.randomUUID(), entry.userId || null, entry.serverId || null, entry.action, String(entry.action).split('.')[0],

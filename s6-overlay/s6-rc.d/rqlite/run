@@ -14,6 +14,8 @@ BOSUN_NODE_ID="${NODE_NAME:-node1}"
 BOSUN_ADV_HOST="${RQLITE_ADV_HOST:-localhost}"
 BOSUN_JOIN="${RQLITE_JOIN:-}"
 BOSUN_EXPECT="${RQLITE_BOOTSTRAP_EXPECT:-}"
+BOSUN_RQLITE_AUTH=""
+BOSUN_RQLITE_USER=""
 if [ -f /app/src/lib/cluster/boot.js ]; then
     BOOT_OUT="$(RQLITE_DATA_DIR="${RQLITE_DATA_DIR}" node /app/src/lib/cluster/boot.js)" && eval "${BOOT_OUT}"
 fi
@@ -48,11 +50,30 @@ if [ "${RQLITE_FORCE_SINGLE}" = "1" ]; then
     CLUSTER_FLAGS=""
 fi
 
-echo "[rqlite] node ${BOSUN_NODE_ID} advertising ${RQLITE_RAFT_ADV}${CLUSTER_FLAGS:+ (${CLUSTER_FLAGS})}"
+# Authentication: the HTTP API (4001) only answers the Bosun user, whose
+# password is derived from AUTH_SECRET (see src/lib/secrets.js); anonymous
+# callers may only ask /readyz. Joining nodes present the same credentials.
+# Without an auth file the API is kept to this container (no clustering) rather
+# than left open to the network.
+AUTH_FLAGS=""
+HTTP_BIND="0.0.0.0"
+if [ -n "${BOSUN_RQLITE_AUTH}" ] && [ -f "${BOSUN_RQLITE_AUTH}" ]; then
+    chown node:node "$(dirname "${BOSUN_RQLITE_AUTH}")" "${BOSUN_RQLITE_AUTH}"
+    AUTH_FLAGS="-auth=${BOSUN_RQLITE_AUTH}"
+    if [ -n "${CLUSTER_FLAGS}" ]; then
+        CLUSTER_FLAGS="${CLUSTER_FLAGS} -join-as=${BOSUN_RQLITE_USER}"
+    fi
+else
+    echo "[rqlite] WARNING: no auth file; the HTTP API listens on 127.0.0.1 only"
+    HTTP_BIND="127.0.0.1"
+fi
+
+echo "[rqlite] node ${BOSUN_NODE_ID} advertising ${RQLITE_RAFT_ADV}${CLUSTER_FLAGS:+ (${CLUSTER_FLAGS})}${AUTH_FLAGS:+, authentication on}"
 chown -R node:node "${RQLITE_DATA_DIR}"
 exec s6-setuidgid node /usr/local/bin/rqlited \
     -node-id="${BOSUN_NODE_ID}" \
-    -http-addr="0.0.0.0:${RQLITE_HTTP_PORT}" \
+    -http-addr="${HTTP_BIND}:${RQLITE_HTTP_PORT}" \
+    ${AUTH_FLAGS} \
     -http-adv-addr="${RQLITE_HTTP_ADV}" \
     -raft-addr="0.0.0.0:${RQLITE_RAFT_PORT}" \
     -raft-adv-addr="${RQLITE_RAFT_ADV}" \
