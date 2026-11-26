@@ -781,13 +781,32 @@ exit 0`);
       expect(fs.readFileSync(path.join(bin, 'calls.log.env'), 'utf8')).not.toContain(TOKEN);
     });
 
-    it.skipIf(!hasSh)('sends no authorization to hosts other than github.com, and refuses an odd token', () => {
+    it.skipIf(!hasSh)('sends the GitHub token only to github.com, other hosts their own credential, and refuses an odd one before anything changes', () => {
       fakeGit();
-      const res = deploy({ ...g, repo: 'https://git.example.com/o/r' }, { BOSUN_SECRET_git_token: TOKEN });
-      expect(res.stdout).toMatch(/only used for github.com/);
+      deploy({ ...g, repo: 'https://git.example.com/o/r' }, { BOSUN_SECRET_git_token: TOKEN });
       expect(envLines()).toContain('ENV GIT_CONFIG_COUNT=');
       expect(envLines().some((l) => l.includes('Authorization'))).toBe(false);
-      expect(parseScriptOutput(deploy(g, { BOSUN_SECRET_git_token: 'a b;c' }).stdout).error).toMatch(/Git token has unexpected characters/);
+      fs.rmSync(stackDir('demo'), { recursive: true, force: true });
+      fs.writeFileSync(log, '');
+      fakeGit();
+      const res = deploy({ ...g, repo: 'https://git.lan:3000/o/r' }, { BOSUN_SECRET_git_token: TOKEN, BOSUN_SECRET_git_credentials: 'git.lan:3000=bosun:s3cret' });
+      expect(parseScriptOutput(res.stdout).done).toBe('deployed demo');
+      expect(envLines()).toContain(`ENV GIT_CONFIG_VALUE_0=Authorization: Basic ${Buffer.from('bosun:s3cret').toString('base64')}`);
+      expect(res.stdout + res.stderr).not.toContain('s3cret');
+      fs.rmSync(stackDir('demo'), { recursive: true, force: true });
+      expect(parseScriptOutput(deploy(g, { BOSUN_SECRET_git_token: 'a b;c' }).stdout).error).toMatch(/a Git credential has unexpected characters/);
+      expect(fs.existsSync(stackDir('demo'))).toBe(false);
+    });
+
+    it.skipIf(!hasSh)('stack update fetches a private repository with its stored credential', () => {
+      seed('p', { 'repo/.git/HEAD': 'x', 'repo/d/compose.yaml': 'x', 'bosun.meta': 'source=git\nrepo=https://gitlab.com/o/r\nbranch=main\nfile=d/compose.yaml\n' });
+      composeFake(config('      "ports": []'));
+      fakeGit();
+      fs.writeFileSync(log, '');
+      const r = out('stack_action.sh', { name: 'p', op: 'update' }, { BOSUN_SECRET_git_credentials: 'gitlab.com=glpat-XYZ', BOSUN_SECRET_git_token: TOKEN });
+      expect(r.done).toBe('update: p');
+      expect(envLines()).toContain(`ENV GIT_CONFIG_VALUE_0=Authorization: Basic ${Buffer.from('oauth2:glpat-XYZ').toString('base64')}`);
+      expect(envLines()).toContain('ENV SECRET=');
     });
 
     it.skipIf(!hasSh)('a refused or broken git deployment removes a fresh clone, and a failing clone leaves no stack folder', () => {
@@ -868,7 +887,7 @@ exit 0`);
     fs.writeFileSync(log, '');
     composeFake(config('      "ports": []'));
     expect(out('stack_action.sh', { name: 'g', op: 'update' }).done).toBe('update: g');
-    expect(gitArgs()).toEqual([`-C ${repo} rev-parse HEAD`, `-C ${repo} fetch --depth 1 origin main`, `-C ${repo} reset --hard FETCH_HEAD`]);
+    expect(gitArgs()).toEqual([`-C ${repo} rev-parse HEAD`, `-c core.hooksPath=/dev/null -C ${repo} fetch --depth 1 origin main`, `-c core.hooksPath=/dev/null -C ${repo} reset --hard FETCH_HEAD`]);
   });
 
   it('stack_deploy and stack_action (update) use the same risk check, word for word', () => {
@@ -2302,6 +2321,8 @@ exit 0`);
     const block = (f: string, name: string) => new RegExp(`# >>> ${name}[\\s\\S]*# <<< ${name}`).exec(script(f))![0];
     expect(block('git_branches.sh', 'git helpers')).toBe(block('git_files.sh', 'git helpers'));
     expect(block('git_branches.sh', 'git helpers')).toBe(block('git_services.sh', 'git helpers'));
+    // the credentials code is shared by every script that uses git
+    for (const f of ['git_files.sh', 'git_services.sh', 'stack_deploy.sh', 'stack_action.sh']) expect(block(f, 'git credentials'), f).toBe(block('git_branches.sh', 'git credentials'));
     expect(block('convert.sh', 'json flatten')).toBe(block('git_services.sh', 'json flatten'));
     expect(block('git_services.sh', 'json flatten').length).toBeGreaterThan(2000);
   });
@@ -2334,11 +2355,40 @@ exit 0`);
       fs.writeFileSync(log, '');
       run(f, { repo: 'https://gitlab.com/o/r', ...p }, { BOSUN_SECRET_git_token: TOKEN });
       expect(envLines().every((l) => !l.includes('Authorization') && l !== 'ENV GIT_CONFIG_COUNT=2'), f).toBe(true);
-      expect(run(f, { repo: R, ...p }, { BOSUN_SECRET_git_token: 'a b' }).stdout, f).toBe('ERROR: the Git token has unexpected characters\n');
+      expect(run(f, { repo: R, ...p }, { BOSUN_SECRET_git_token: 'a b' }).stdout, f).toBe('ERROR: a Git credential has unexpected characters\n');
       for (const [repo, why] of [['http://github.com/o/r', /^ERROR: repo: use an https/], ['https://github.com', /^ERROR: repo: use https:\/\/host\/owner\/name/], ['https://-x.com/o/r', /invalid host/], ['https://github.com/o/../r', /invalid path/], ['https://github.com/o/r;x', /invalid path/], ['file:///etc', /use an https/]] as const) {
         expect(run(f, { repo, ...p }).stdout, `${f} ${repo}`).toMatch(why);
       }
     }
+  });
+
+  it.skipIf(!hasSh)('git credentials for other hosts: each entry only for its own host (port included), user:token or a default user', () => {
+    const basic = (pair: string) => `ENV GIT_CONFIG_VALUE_0=Authorization: Basic ${Buffer.from(pair).toString('base64')}`;
+    const creds = 'gitlab.com=glpat-AAA, git.lan:3000=bosun:tok-B; bitbucket.org=bbt-C Git.Example.org=gt-D';
+    const cases: [string, string | null][] = [
+      ['https://gitlab.com/o/r', 'oauth2:glpat-AAA'],
+      ['https://git.lan:3000/o/r', 'bosun:tok-B'],
+      ['https://git.lan/o/r', null],                 // another port is another host
+      ['https://bitbucket.org/o/r', 'x-token-auth:bbt-C'],
+      ['https://git.example.org/o/r', 'git:gt-D'],   // host names compare case-insensitively
+      ['https://evil.example/o/r', null],
+      ['https://github.com/o/r', `x-access-token:${TOKEN}`], // github.com still uses git_token
+    ];
+    for (const [repo, pair] of cases) {
+      gitFake({ lsremote: `ref: refs/heads/main${T}HEAD\n1${T}refs/heads/main\n` });
+      fs.writeFileSync(log, '');
+      run('git_branches.sh', { repo }, { BOSUN_SECRET_git_token: TOKEN, BOSUN_SECRET_git_credentials: creds });
+      const auth = envLines().filter((l) => l.startsWith('ENV GIT_CONFIG_VALUE_0='));
+      if (pair) expect(auth, repo).toEqual([basic(pair)]);
+      else expect(auth.every((l) => l === 'ENV GIT_CONFIG_VALUE_0='), repo).toBe(true);
+      expect(fs.readFileSync(log, 'utf8'), repo).not.toMatch(/glpat-AAA|tok-B|bbt-C|gt-D/);
+    }
+    // an entry for github.com wins over git_token; odd characters are refused before git runs
+    gitFake({ lsremote: '' }); fs.writeFileSync(log, '');
+    run('git_branches.sh', { repo: R }, { BOSUN_SECRET_git_token: TOKEN, BOSUN_SECRET_git_credentials: 'github.com=me:pat-E' });
+    expect(envLines().filter((l) => l.startsWith('ENV GIT_CONFIG_VALUE_0='))).toEqual([basic('me:pat-E')]);
+    expect(run('git_branches.sh', { repo: 'https://gitlab.com/o/r' }, { BOSUN_SECRET_git_credentials: 'gitlab.com=a$(reboot)' }).stdout).toBe('ERROR: a Git credential has unexpected characters\n');
+    expect(run('git_branches.sh', { repo: 'https://git.lan:x/o/r' }).stdout).toMatch(/invalid port/);
   });
 
   it.skipIf(!hasSh)('git_branches: a repository git cannot read is an ERROR with git\'s words', () => {
