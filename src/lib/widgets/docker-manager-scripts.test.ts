@@ -901,6 +901,27 @@ exit 0`);
     expect(a).toEqual(d);
   });
 
+  it.skipIf(!hasSh)('stack_action guard_up returns at once and starts the stack from its files once nothing of it runs', async () => {
+    seed('web', { 'compose.yaml': 'x', 'bosun.meta': 'source=editor\n' });
+    // first two checks: still running (Portainer has not stopped it yet); then nothing runs
+    fs.writeFileSync(path.join(bin, 'n'), '0');
+    fake(`case "$*" in *"ps -q"*) n=$(cat "${sp(path.join(bin, 'n'))}"); echo $((n + 1)) > "${sp(path.join(bin, 'n'))}"; [ "$n" -lt 2 ] && echo abc123 ;; esac; exit 0`);
+    const started = Date.now();
+    expect(out('stack_action.sh', { name: 'web', op: 'guard_up' }).done).toBe('guard_up: web');
+    expect(Date.now() - started).toBeLessThan(3000);
+    const web = shDir('web');
+    const up = ['compose', '-p', 'web', '--project-directory', web, '-f', web + '/compose.yaml', 'up', '-d', '--remove-orphans'];
+    let seen = false;
+    for (let i = 0; i < 40 && !seen; i++) {
+      await new Promise(r => setTimeout(r, 250));
+      seen = dockerCalls().some(c => c.join(' ') === up.join(' '));
+    }
+    expect(seen).toBe(true);
+    expect(dockerCalls().filter(c => c.includes('-q')).length).toBeGreaterThanOrEqual(3);
+    // an external stack (no stored files) cannot be guarded
+    expect(out('stack_action.sh', { name: 'ext', op: 'guard_up' }).error).toMatch(/not created by Bosun/);
+  });
+
   it.skipIf(!hasSh)('stack_deploy also catches shared namespaces, volumes_from, build settings and host files used as secrets', () => {
     const risky: [string, string, RegExp][] = [
       ['      "volumes_from": [\n        "db"\n      ]', '', /volumes of db/],

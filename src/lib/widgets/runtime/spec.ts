@@ -172,6 +172,8 @@ export interface WidgetSpec {
   datasets?: Record<string, DatasetSpec>;
   screens?: Record<string, ScreenSpec>;
   menu?: MenuEntry[];
+  /** Version 2: how this widget manages Compose stacks, for importing stacks from other tools (see StacksSpec). */
+  stacks?: StacksSpec;
 }
 
 
@@ -819,6 +821,13 @@ export function validateWidgetSpec(raw: unknown, ownPermissions: readonly string
   for (const a of actions) if (a.kind === 'screen' && !(a.screen! in screens.value)) return fail(`action "${a.id}": the screen "${a.screen}" is not declared`);
   const menu = v2on ? validateMenu(raw.menu, screens.value, own) : { ok: true as const, value: [] as MenuEntry[] };
   if (!menu.ok) return menu;
+  let stacks: StacksSpec | undefined;
+  if (raw.stacks !== undefined) {
+    if (!v2on) return fail('"stacks" needs spec version 2');
+    const s = validateStacks(raw.stacks, actions, datasets.value);
+    if (!s.ok) return s;
+    stacks = s.value;
+  }
   let metrics: MetricSpec[] | undefined;
   if (raw.metrics !== undefined) {
     const m = validateMetrics(raw.metrics, packageId);
@@ -835,6 +844,52 @@ export function validateWidgetSpec(raw: unknown, ownPermissions: readonly string
       ...(Object.keys(datasets.value).length ? { datasets: datasets.value } : {}),
       ...(Object.keys(screens.value).length ? { screens: screens.value } : {}),
       ...(menu.value.length ? { menu: menu.value } : {}),
+      ...(stacks ? { stacks } : {}),
+    },
+  };
+}
+
+/**
+ * A package that manages Compose stacks says how, so Bosun can import stacks that another tool (Portainer) created without
+ * knowing the package: `list` (a dataset of the host's stacks with `name` and `source`, where "external" means not this
+ * package's), `deploy` / `deployPrivileged` (actions taking name, source, yaml, env, repo, branch, file, pull, override),
+ * `guard` (an action taking `name` that restarts the stack from its stored files once something else has stopped it),
+ * `export` (a dataset taking `name` that writes one container as a compose file) and `fields` (the data row fields naming a
+ * container's id, name, state, project and service).
+ */
+export interface StacksSpec {
+  list: string; deploy: string; deployPrivileged?: string; guard: string; export?: string;
+  fields: { id: string; name: string; state: string; project: string; service: string };
+}
+
+function validateStacks(raw: unknown, actions: ActionSpec[], datasets: Record<string, DatasetSpec>): Validated<StacksSpec> {
+  if (!isObj(raw)) return fail('"stacks" must be an object');
+  const action = (k: string, optional = false): Validated<string | undefined> => {
+    const v = raw[k];
+    if (v === undefined && optional) return { ok: true, value: undefined };
+    if (typeof v !== 'string' || !actions.some(a => a.id === v && (a.kind === 'script' || a.kind === 'command'))) return fail(`stacks.${k} must name one of the widget's runnable actions`);
+    return { ok: true, value: v };
+  };
+  const dataset = (k: string, optional = false): Validated<string | undefined> => {
+    const v = raw[k];
+    if (v === undefined && optional) return { ok: true, value: undefined };
+    if (typeof v !== 'string' || !(v in datasets)) return fail(`stacks.${k} must name one of the widget's datasets`);
+    return { ok: true, value: v };
+  };
+  const list = dataset('list'); if (!list.ok) return list;
+  const deploy = action('deploy'); if (!deploy.ok) return deploy;
+  const priv = action('deployPrivileged', true); if (!priv.ok) return priv;
+  const guard = action('guard'); if (!guard.ok) return guard;
+  const exp = dataset('export', true); if (!exp.ok) return exp;
+  const f = raw.fields;
+  if (!isObj(f) || !['id', 'name', 'state', 'project', 'service'].every(k => typeof f[k] === 'string' && FIELD_RE.test(f[k] as string))) {
+    return fail('stacks.fields must name the row fields id, name, state, project and service');
+  }
+  return {
+    ok: true,
+    value: {
+      list: list.value!, deploy: deploy.value!, ...(priv.value ? { deployPrivileged: priv.value } : {}), guard: guard.value!, ...(exp.value ? { export: exp.value } : {}),
+      fields: { id: String(f.id), name: String(f.name), state: String(f.state), project: String(f.project), service: String(f.service) },
     },
   };
 }

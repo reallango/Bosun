@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "docker",
   "name": "Docker Containers",
-  "version": "1.0.10",
+  "version": "1.0.11",
   "description": "Containers on the host with logs, a shell, start, stop and restart; edit a container, create containers and stacks (a compose file, or one from a Git repository), and a Manage page for images, volumes and networks.",
   "author": "Bosun",
   "permissions": [
@@ -505,7 +505,8 @@
                   "pull",
                   "update",
                   "stop",
-                  "start"
+                  "start",
+                  "guard_up"
                 ],
                 "maxLength": 20
               },
@@ -672,7 +673,8 @@
             "state": "State",
             "status": "Status",
             "ports": "Ports",
-            "compose": "ComposeProject"
+            "compose": "ComposeProject",
+            "service": "ComposeService"
           },
           "resources": {
             "container": "name",
@@ -1710,6 +1712,34 @@
               "text": "The new version may use privileged mode, the host network, devices, the Docker socket or host folders.",
               "destructive": true
             }
+          },
+          {
+            "id": "stack_guard_up",
+            "label": "Restart after hand-over",
+            "description": "Used when importing a stack from another tool: waits until that tool has stopped the stack, then starts it again from the files Bosun stored.",
+            "permission": "docker.manage",
+            "target": {
+              "kind": "stack",
+              "param": "name"
+            },
+            "kind": "script",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
+                "maxLength": 63,
+                "from": "name"
+              }
+            },
+            "variants": [
+              {
+                "script": "stack_action",
+                "args": {
+                  "op": "literal:guard_up"
+                }
+              }
+            ],
+            "icon": "refresh-cw"
           },
           {
             "id": "stack_remove",
@@ -4010,7 +4040,21 @@
             "icon": "settings",
             "screen": "manage"
           }
-        ]
+        ],
+        "stacks": {
+          "list": "stacks",
+          "deploy": "stack_deploy",
+          "deployPrivileged": "stack_deploy_privileged",
+          "guard": "stack_guard_up",
+          "export": "export_compose",
+          "fields": {
+            "id": "ID",
+            "name": "name",
+            "state": "state",
+            "project": "compose",
+            "service": "service"
+          }
+        }
       }
     }
   ],

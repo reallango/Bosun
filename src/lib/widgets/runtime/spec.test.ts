@@ -409,3 +409,19 @@ describe('chart views', () => {
     expect(validateWidgetSpec(chart(undefined), PERMS).ok).toBe(false);
   });
 });
+
+describe('the stacks declaration (import from other tools)', () => {
+  it('must point at the widget\'s own runnable actions, datasets and row fields', async () => {
+    const fs = await import('fs');
+    const m = JSON.parse(fs.readFileSync('widgets/docker/manifest.json', 'utf8'));
+    const own = m.permissions.map((p: { id: string }) => p.id);
+    const spec = m.widgets[0].spec;
+    const ok = validateWidgetSpec(spec, own, m.id);
+    expect(ok.ok && ok.value.stacks?.deploy).toBeTruthy();
+    for (const [k, v] of [['deploy', 'nope'], ['guard', 'stack_edit'], ['list', 'nope'], ['export', 'nope']] as const) {
+      const bad = validateWidgetSpec({ ...spec, stacks: { ...spec.stacks, [k]: v } }, own, m.id);
+      expect(bad.ok, k).toBe(false);
+    }
+    expect(validateWidgetSpec({ ...spec, stacks: { ...spec.stacks, fields: { id: 'ID' } } }, own, m.id).ok).toBe(false);
+  });
+});
