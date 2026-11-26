@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { fitsSize, sizeClassFor, splitActions, validateHideBelow, validateInline } from './size';
+import { fitsSize, sizeClassFor, splitActions, splitTableActions, validateHideBelow, validateInline } from './size';
 import { validateWidgetSpec } from './spec';
 
 describe('widget size classes', () => {
@@ -48,6 +48,35 @@ describe('splitActions', () => {
     expect(splitActions(six, 'md', { sm: 2 })).toEqual({ shown: ['a', 'b'], more: ['c', 'd', 'e', 'f'] });
     // lg not named and nothing smaller named either: the default (all) applies.
     expect(splitActions(six, 'lg', { lg: undefined })).toEqual({ shown: six, more: [] });
+  });
+});
+
+describe('splitTableActions', () => {
+  const act = (id: string, destructive = false) => ({ id, destructive });
+  const ids = (list: { id: string }[]) => list.map(a => a.id);
+
+  it('shows at most two actions as icons and keeps the rest in the menu', () => {
+    const all = ['edit', 'logs', 'restart', 'remove'].map(id => act(id, id === 'remove'));
+    const { shown, more } = splitTableActions(all, 2, a => a.destructive);
+    expect(ids(shown)).toEqual(['edit', 'logs']);
+    expect(ids(more)).toEqual(['restart', 'remove']);
+  });
+
+  it('puts the destructive actions last in the menu, whatever their place in the spec', () => {
+    const all = [act('remove', true), act('edit'), act('prune', true), act('logs')];
+    const { shown, more } = splitTableActions(all, 2, a => a.destructive);
+    expect(ids(shown)).toEqual(['remove', 'edit']);
+    expect(ids(more)).toEqual(['logs', 'prune']);
+  });
+
+  it('keeps a menu with a single entry (unlike splitActions)', () => {
+    const all = [act('run'), act('logs'), act('remove', true)];
+    expect(splitTableActions(all, 2, a => a.destructive)).toEqual({ shown: [all[0], all[1]], more: [all[2]] });
+  });
+
+  it('shows everything when there are no more than two', () => {
+    const all = [act('edit'), act('remove', true)];
+    expect(splitTableActions(all, 2, a => a.destructive)).toEqual({ shown: all, more: [] });
   });
 });
 

@@ -179,7 +179,10 @@ A `form` or `editor` block can sit behind a button instead of taking the top of 
 closes it. Without `open`, the block renders inline exactly as before. `"open"` accepts only `"dialog"`.
 
 When a tab's `buttons` blocks and dialog forms/editors come directly before a `view`, Bosun puts them on one row above the
-view (right-aligned on wide screens) instead of stacking the blocks.
+view (right-aligned on wide screens) instead of stacking the blocks. Every button of that toolbar has the same height,
+padding and font size. At most one is solid: the first dialog-form trigger, or else the first action that is not
+destructive. The rest are outlined, and an action whose `confirm.destructive` is true gets the outlined destructive look.
+Widget-sized toolbars use the same rule at a smaller size.
 
 ```jsonc
 "blocks": [
@@ -195,6 +198,34 @@ view (right-aligned on wide screens) instead of stacking the blocks.
 
 An older Bosun ignores these keys: it shows the tabs without counts and the forms inline, and a page still opens on its
 first tab.
+
+### Sortable tables and row details
+
+A table can sort itself, over the rows it already has (nothing is asked of the host). Give a column a `sort` naming a
+raw row field: the value the column shows may be formatted, so a "1.2 GB" column sorts by `size_bytes`. Values sort
+numerically when both are numbers, otherwise as case-insensitive text (ISO dates order correctly as text). Clicking a
+sortable header toggles ascending and descending and shows an arrow; `aria-sort` is set on the header. `defaultSort` names
+the column (by title, which must have a `sort`) and the direction the table starts in.
+
+A table or list can open a row's details: `"open": "<screen id>"` opens that screen in a side sheet (from the right on a
+desktop, full screen on a phone) with the clicked row as the screen's `context`, exactly as a row action that opens a
+screen would pass it. Rows answer Enter as well as a click. Without `open`, rows are not clickable.
+
+```jsonc
+"view": {
+  "type": "table",
+  "defaultSort": { "column": "Size", "dir": "desc" },
+  "columns": [
+    { "title": "Name", "value": "{name}", "sort": "name" },
+    { "title": "Size", "value": "{size}", "sort": "size_bytes" }
+  ],
+  "open": "image_detail"
+}
+```
+
+At the largest size class (a full-page or dialog screen, or a wide widget) a table shows at most two row actions as icons
+and puts the rest in a per-row ⋯ menu, destructive actions last and in red. A smaller table keeps showing every action,
+as before. An older Bosun ignores these keys and renders the table without sorting or row details.
 
 ## Managing the Ollama installation
 

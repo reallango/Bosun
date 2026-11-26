@@ -7,7 +7,7 @@ import { ChevronDown, ChevronRight, Loader2, X } from 'lucide-react';
 import type { Block, FormField } from '@/lib/widgets/runtime/spec-v2';
 import type { ViewSpec } from '@/lib/widgets/runtime/spec';
 import {
-  actionApplies, activeTabId, formInitial, formParams, jobHeadline, layoutRows, selectCurrent, selectParams, tabCount, text, visible, visibleBadges,
+  actionApplies, activeTabId, formInitial, formParams, jobHeadline, layoutRows, opensInDialog, primaryToolbarEntry, selectCurrent, selectParams, tabCount, text, visible, visibleBadges,
   type JobState, type PublicActionLike, type ViewContext,
 } from '@/lib/widgets/runtime/layout';
 import { Bar, Fields } from './parts';
@@ -16,6 +16,7 @@ import { useWidgetSize } from '@/components/dashboard/widget-size';
 import { CodeBlock, EditorBlock } from './EditorBlock';
 import {
   buttonClass, DIALOG_CONTENT, DIALOG_FOOTER, DIALOG_HEADER, DIALOG_OVERLAY, DIALOG_TITLE, DIALOG_WIDTH, iconButtonClass, inputClass, NOTICE_CLASS as NOTICE, primarySubmitClass,
+  toolbarButtonClass,
 } from './styles';
 
 const BADGE: Record<string, string> = {
@@ -59,11 +60,7 @@ export function LayoutBlocks({ blocks, ctx, ui, groupToolbar }: { blocks: Block[
     return (
       <div className="space-y-2">
         {layoutRows(shown).map((row, i) => row.kind === 'toolbar'
-          ? (
-            <div key={i} className="flex flex-wrap items-center gap-1.5 sm:justify-end">
-              {row.blocks.map((b, j) => <BlockView key={j} block={b} ctx={ctx} ui={ui} />)}
-            </div>
-          )
+          ? <Toolbar key={i} blocks={row.blocks} ctx={ctx} ui={ui} />
           : <BlockView key={i} block={row.block} ctx={ctx} ui={ui} />)}
       </div>
     );
@@ -75,18 +72,59 @@ export function LayoutBlocks({ blocks, ctx, ui, groupToolbar }: { blocks: Block[
   );
 }
 
-function BlockView({ block, ctx, ui }: { block: Block; ctx: ViewContext; ui: LayoutUi }) {
+/** Which button of a toolbar is its one solid button (see `primaryToolbarEntry`). */
+interface ToolbarLook { primaryActionId?: string; primaryDialog?: boolean }
+
+/** The actions of a `buttons` block that this person can use in this context, in the order the block lists them. */
+const toolbarActions = (block: Extract<Block, { type: 'buttons' }>, ctx: ViewContext, ui: LayoutUi): PublicActionLike[] =>
+  block.actions.map(id => ui.actions.get(id)).filter((a): a is PublicActionLike => !!a && ui.allowed(a) && actionApplies(a, ctx));
+
+/** Can a dialog-form trigger be used at all? (Its action exists, this person may run it, and it applies.) */
+const dialogUsable = (block: Extract<Block, { type: 'form' | 'editor' }>, ctx: ViewContext, ui: LayoutUi): boolean =>
+  block.type === 'form'
+    ? (() => { const a = ui.actions.get(block.submit.action); return !!a && ui.allowed(a) && actionApplies(a, ctx); })()
+    : block.submits.some(s => { const a = ui.actions.get(s.action); return !!a && ui.allowed(a) && actionApplies(a, ctx); });
+
+/**
+ * One row of a tab's toolbar: its dialog-form triggers and `buttons` blocks, all the same size and exactly one solid
+ * (the first dialog trigger, else the first action that is not destructive; the rest are outlined).
+ */
+function Toolbar({ blocks, ctx, ui }: { blocks: Block[]; ctx: ViewContext; ui: LayoutUi }) {
+  const entries: { kind: 'dialog' | 'action'; blockIndex: number; actionId?: string; destructive: boolean }[] = [];
+  blocks.forEach((b, i) => {
+    if (b.type === 'buttons') {
+      for (const a of toolbarActions(b, ctx, ui)) entries.push({ kind: 'action', blockIndex: i, actionId: a.id, destructive: !!a.confirm?.destructive });
+    } else if (opensInDialog(b) && dialogUsable(b, ctx, ui)) {
+      entries.push({ kind: 'dialog', blockIndex: i, destructive: false });
+    }
+  });
+  const at = primaryToolbarEntry(entries);
+  const primary = at >= 0 ? entries[at] : null;
+  return (
+    <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
+      {blocks.map((b, i) => (
+        <BlockView key={i} block={b} ctx={ctx} ui={ui}
+          toolbar={{
+            primaryActionId: primary?.kind === 'action' && primary.blockIndex === i ? primary.actionId : undefined,
+            primaryDialog: primary?.kind === 'dialog' && primary.blockIndex === i,
+          }} />
+      ))}
+    </div>
+  );
+}
+
+function BlockView({ block, ctx, ui, toolbar }: { block: Block; ctx: ViewContext; ui: LayoutUi; toolbar?: ToolbarLook }) {
   switch (block.type) {
     case 'section': return <Section block={block} ctx={ctx} ui={ui} />;
     case 'kv': return <Fields fields={block.items} data={ctx} />;
     case 'text': return <p className="whitespace-pre-wrap break-words text-xs text-foreground">{text(block.text, ctx)}</p>;
     case 'notice': return <div role={block.level === 'error' ? 'alert' : 'status'} className={`rounded-md border px-2 py-1.5 text-xs ${NOTICE[block.level]}`}>{text(block.text, ctx)}</div>;
-    case 'buttons': return <Buttons block={block} ctx={ctx} ui={ui} />;
-    case 'form': return block.open === 'dialog' ? <DialogBlock block={block} ctx={ctx} ui={ui} /> : <Form block={block} ctx={ctx} ui={ui} />;
+    case 'buttons': return <Buttons block={block} ctx={ctx} ui={ui} toolbar={toolbar} />;
+    case 'form': return block.open === 'dialog' ? <DialogBlock block={block} ctx={ctx} ui={ui} toolbar={toolbar} /> : <Form block={block} ctx={ctx} ui={ui} />;
     case 'select': return <SelectBlock block={block} ctx={ctx} ui={ui} />;
     case 'jobProgress': return <JobProgress job={ctx.job ?? null} ui={ui} />;
     case 'tabs': return <Tabs block={block} ctx={ctx} ui={ui} />;
-    case 'editor': return block.open === 'dialog' ? <DialogBlock block={block} ctx={ctx} ui={ui} /> : <EditorBlock block={block} ctx={ctx} ui={ui} />;
+    case 'editor': return block.open === 'dialog' ? <DialogBlock block={block} ctx={ctx} ui={ui} toolbar={toolbar} /> : <EditorBlock block={block} ctx={ctx} ui={ui} />;
     case 'code': return <CodeBlock title={block.title} text={String(pathOf(ctx, block.value) ?? '')} filename={block.filename} />;
     case 'view': {
       // A path that starts with `datasets.` or `context.` reads the screen's context; any other reads the widget's data.
@@ -192,17 +230,21 @@ function Section({ block, ctx, ui }: { block: Extract<Block, { type: 'section' }
   );
 }
 
-function Buttons({ block, ctx, ui }: { block: Extract<Block, { type: 'buttons' }>; ctx: ViewContext; ui: LayoutUi }) {
-  const list = block.actions.map(id => ui.actions.get(id)).filter((a): a is PublicActionLike => !!a && ui.allowed(a) && actionApplies(a, ctx));
+function Buttons({ block, ctx, ui, toolbar }: { block: Extract<Block, { type: 'buttons' }>; ctx: ViewContext; ui: LayoutUi; toolbar?: ToolbarLook }) {
+  const list = toolbarActions(block, ctx, ui);
   if (!list.length) return null;
+  const size = ui.large ? 'large' : 'small';
   return (
     <div className="flex flex-wrap gap-1.5">
       {list.map(a => {
         const params: Record<string, unknown> = {};
         for (const [n, p] of Object.entries(a.params ?? {})) if (p.default !== undefined) params[n] = p.default;
         const needsInput = Object.keys(a.params ?? {}).some(n => params[n] === undefined);
+        const cls = toolbar
+          ? toolbarButtonClass(size, toolbar.primaryActionId === a.id ? 'primary' : a.confirm?.destructive ? 'destructive' : 'outline')
+          : buttonClass;
         return (
-          <button key={a.id} type="button" className={buttonClass} disabled={ui.busy !== null || needsInput || (a.job && (ctx.job?.status === 'running'))}
+          <button key={a.id} type="button" className={cls} disabled={ui.busy !== null || needsInput || (a.job && (ctx.job?.status === 'running'))}
             title={needsInput ? 'This action needs a value: use its form' : a.description} onClick={() => ui.onAction(a, params)}>
             {ui.busy === a.id && <Loader2 className="size-3 animate-spin motion-reduce:animate-none" aria-hidden />}{a.label}
           </button>
@@ -213,18 +255,19 @@ function Buttons({ block, ctx, ui }: { block: Extract<Block, { type: 'buttons' }
 }
 
 /** A form or editor block that shows as a button and opens in a dialog (spec key `"open": "dialog"`). */
-function DialogBlock({ block, ctx, ui }: { block: Extract<Block, { type: 'form' | 'editor' }>; ctx: ViewContext; ui: LayoutUi }) {
+function DialogBlock({ block, ctx, ui, toolbar }: { block: Extract<Block, { type: 'form' | 'editor' }>; ctx: ViewContext; ui: LayoutUi; toolbar?: ToolbarLook }) {
   const [open, setOpen] = useState(false);
-  const usable = block.type === 'form'
-    ? (() => { const a = ui.actions.get(block.submit.action); return !!a && ui.allowed(a) && actionApplies(a, ctx); })()
-    : block.submits.some(s => { const a = ui.actions.get(s.action); return !!a && ui.allowed(a) && actionApplies(a, ctx); });
+  const usable = dialogUsable(block, ctx, ui);
   if (!usable) return null;
   const title = block.type === 'form' && block.title ? block.title : block.label!;
   const close = () => setOpen(false);
   const dialogUi: LayoutUi = { ...ui, onSubmitted: ok => { if (ok) close(); ui.onSubmitted?.(ok); } };
+  const triggerClass = toolbar
+    ? toolbarButtonClass(ui.large ? 'large' : 'small', toolbar.primaryDialog ? 'primary' : 'outline')
+    : primarySubmitClass;
   return (
     <>
-      <button type="button" className={primarySubmitClass} onClick={() => setOpen(true)}>{block.label}</button>
+      <button type="button" className={triggerClass} onClick={() => setOpen(true)}>{block.label}</button>
       <Dialog.Root open={open} onOpenChange={setOpen}>
         <Dialog.Portal>
           <Dialog.Overlay className={DIALOG_OVERLAY} />

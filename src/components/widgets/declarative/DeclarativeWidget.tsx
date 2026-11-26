@@ -2,10 +2,11 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Ellipsis, Info, Loader2, Search, X } from 'lucide-react';
+import { ChevronDown, ChevronUp, Ellipsis, Info, Loader2, Search, X } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useWidgetSize } from '@/components/dashboard/widget-size';
-import { fitsSize, splitActions } from '@/lib/widgets/runtime/size';
+import { fitsSize, splitActions, splitTableActions } from '@/lib/widgets/runtime/size';
+import { nextSortDir, sortRows, type SortState } from '@/lib/widgets/runtime/sort';
 import { LayoutGrid, List, Package, Plus, RefreshCw, Settings, SquareTerminal } from 'lucide-react';
 import { useWidgetData } from '@/hooks/useWidgetData';
 import { useAuth } from '@/hooks/useAuth';
@@ -23,6 +24,7 @@ import { Bar, DOT, Fields, formatValue, ICONS, IconBtn, type Row } from './parts
 import { LayoutBlocks, type LayoutUi } from './LayoutView';
 import { inputClass } from './styles';
 import { ScreenDialog } from './ScreenDialog';
+import { RowSheet } from './RowSheet';
 import { useActionRunner, type PublicAction } from './useActionRunner';
 
 /** What the browser gets from /api/widget-runtime/:type (no commands, no scripts). */
@@ -70,23 +72,33 @@ export interface V1Props {
   allowed: (a: PublicAction) => boolean;
   busy: string | null;
   start: (a: PublicAction, row: Row | null) => void;
+  /** Open the screen named by `view.open` in a side sheet, with the clicked row as its context. */
+  openRow?: (screenId: string, row: Row) => void;
 }
 
 /** A version 1 view (list, table, fields, text, chart) over some data, with its filter, toggles, summary and row actions. */
-export function V1View({ view, data, widgetId, serverId, actions, allowed, busy, start }: V1Props) {
+export function V1View({ view, data, widgetId, serverId, actions, allowed, busy, start, openRow }: V1Props) {
   const [query, setQuery] = useState('');
   const [toggles, setToggles] = useState<Record<string, boolean>>(() => Object.fromEntries((view.toggles ?? []).map(t => [t.key, t.default])));
+  const defaultSort = useMemo<SortState | null>(() => {
+    const d = view.defaultSort;
+    if (!d) return null;
+    const column = (view.columns ?? []).find(c => c.title === d.column && c.sort);
+    return column ? { field: column.sort!, dir: d.dir } : null;
+  }, [view.defaultSort, view.columns]);
+  const [sort, setSort] = useState<SortState | null>(defaultSort);
 
   const rows: Row[] = useMemo(() => {
     if (view.type === 'text' || view.type === 'fields' || view.type === 'chart' || view.type === 'layout') return [];
     const list = Array.isArray(data) ? (data as Row[]) : data && typeof data === 'object' ? [data as Row] : [];
     const q = query.trim().toLowerCase();
-    return list.filter(r => {
+    const filtered = list.filter(r => {
       for (const t of view.toggles ?? []) if (!toggles[t.key] && evalCond(t.hideWhen, r)) return false;
       if (q && view.filter) return view.filter.fields.some(f => String(getPath(r, f) ?? '').toLowerCase().includes(q));
       return true;
     });
-  }, [data, view, query, toggles]);
+    return sort ? sortRows(filtered, sort.field, sort.dir) : filtered;
+  }, [data, view, query, toggles, sort]);
   const { size } = useWidgetSize();
 
   if (view.type === 'chart') return <MetricsChartWidget widgetId={widgetId} serverId={serverId} defaultMetrics={view.chart?.metrics} />;
@@ -94,11 +106,15 @@ export function V1View({ view, data, widgetId, serverId, actions, allowed, busy,
   const all: Row[] = Array.isArray(data) ? (data as Row[]) : [];
 
   // The row's actions that apply: as many as the widget has room for are buttons, the rest sit in a "more" menu.
-  const rowButtons = (row: Row, ids: string[]) => {
+  // A page-size table shows at most two icons and keeps the rest (destructive ones last) in that menu.
+  const rowButtons = (row: Row, ids: string[], mode: 'widget' | 'table' | 'all' = 'widget') => {
     const list = ids.map(id => actions.get(id)).filter((a): a is PublicAction => !!a)
       .filter(a => allowed(a) && (!a.when || evalCond(a.when, row)));
     const rowName = view.type === 'list' && view.row ? fillTemplate(view.row.title, row) : '';
-    const { shown, more } = splitActions(list, size, view.row?.inline);
+    const { shown, more } = mode === 'table'
+      ? splitTableActions(list, 2, a => !!a.confirm?.destructive)
+      : mode === 'all' ? { shown: list, more: [] as PublicAction[] }
+      : splitActions(list, size, view.row?.inline);
     const iconOf = (a: PublicAction) => (a.icon && ICONS[a.icon]) || Info;
     return (
       <>
@@ -114,7 +130,7 @@ export function V1View({ view, data, widgetId, serverId, actions, allowed, busy,
             <DropdownMenuContent>
               {more.map(a => {
                 const Icon = iconOf(a);
-                return <DropdownMenuItem key={a.id} onSelect={() => start(a, row)}><Icon />{a.label}</DropdownMenuItem>;
+                return <DropdownMenuItem key={a.id} variant={a.confirm?.destructive ? 'destructive' : 'default'} onSelect={() => start(a, row)}><Icon />{a.label}</DropdownMenuItem>;
               })}
             </DropdownMenuContent>
           </DropdownMenu>
@@ -122,6 +138,14 @@ export function V1View({ view, data, widgetId, serverId, actions, allowed, busy,
       </>
     );
   };
+  // A row opens the view's `open` screen (in a side sheet) when the spec says so; otherwise it is not clickable.
+  const clickable = !!view.open && !!openRow;
+  const openRowFor = (row: Row) => { if (view.open && openRow) openRow(view.open, row); };
+  const rowProps = (row: Row) => clickable ? {
+    tabIndex: 0,
+    onClick: () => openRowFor(row),
+    onKeyDown: (e: React.KeyboardEvent) => { if (e.key === 'Enter') { e.preventDefault(); openRowFor(row); } },
+  } : {};
   const columns = (view.columns ?? []).filter(c => fitsSize(c, size));
   const showSubtitle = !view.row?.subtitleHideBelow || fitsSize({ hideBelow: view.row.subtitleHideBelow }, size);
   const summary = (view.summary ?? []).filter(s => fitsSize(s, size));
@@ -144,7 +168,7 @@ export function V1View({ view, data, widgetId, serverId, actions, allowed, busy,
       return (
         <ul className="min-h-0 flex-1 divide-y divide-border overflow-auto">
           {rows.map((row, i) => (
-            <li key={i} className="flex items-center gap-2 py-1.5">
+            <li key={i} {...rowProps(row)} className={`flex items-center gap-2 py-1.5 ${clickable ? 'cursor-pointer hover:bg-muted' : ''}`}>
               {r.dot && <span className={`size-2 shrink-0 rounded-full ${DOT[r.dot.colors[String(getPath(row, r.dot.field) ?? '')]] || 'bg-muted-foreground'}`} aria-hidden />}
               <div className="min-w-0 flex-1">
                 <div className="flex items-baseline gap-2">
@@ -154,7 +178,7 @@ export function V1View({ view, data, widgetId, serverId, actions, allowed, busy,
                 {r.subtitle && showSubtitle && <div className="truncate text-xs text-muted-foreground" title={fillTemplate(r.subtitle, row)}>{fillTemplate(r.subtitle, row)}</div>}
                 {r.fields && <div className="mt-1"><Fields fields={r.fields} data={row} /></div>}
               </div>
-              <div className="flex shrink-0 items-center gap-0.5">
+              <div className="flex shrink-0 items-center gap-0.5" onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>
                 {busy !== null && <Loader2 className="size-4 animate-spin text-muted-foreground motion-reduce:animate-none" aria-label="Working" />}
                 {rowButtons(row, r.actions)}
               </div>
@@ -168,17 +192,34 @@ export function V1View({ view, data, widgetId, serverId, actions, allowed, busy,
       <div className="min-h-0 flex-1 overflow-auto">
         <table className="w-full text-left text-xs">
           <thead className="sticky top-0 bg-card text-muted-foreground">
-            <tr>{cols.map(c => <th key={c.title} className="px-2 py-1 font-medium">{c.title}</th>)}{(view.rowActions?.length ?? 0) > 0 && <th className="w-0" />}</tr>
+            <tr>
+              {cols.map(c => (
+                <th key={c.title} className="px-2 py-1 font-medium"
+                  aria-sort={c.sort ? (sort?.field === c.sort ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none') : undefined}>
+                  {c.sort ? (
+                    <button type="button" className="inline-flex items-center gap-1 hover:text-foreground"
+                      onClick={() => {
+                        const field = c.sort!;
+                        setSort(s => ({ field, dir: s && s.field === field ? nextSortDir(s.dir) : 'asc' }));
+                      }}>
+                      {c.title}
+                      {sort?.field === c.sort && (sort.dir === 'asc' ? <ChevronUp className="size-3" aria-hidden /> : <ChevronDown className="size-3" aria-hidden />)}
+                    </button>
+                  ) : c.title}
+                </th>
+              ))}
+              {(view.rowActions?.length ?? 0) > 0 && <th className="w-0" />}
+            </tr>
           </thead>
           <tbody className="divide-y divide-border">
             {rows.map((row, i) => (
-              <tr key={i}>
+              <tr key={i} {...rowProps(row)} className={clickable ? 'cursor-pointer hover:bg-muted' : undefined}>
                 {cols.map(c => {
                   const text = formatValue(fillTemplate(c.value, row), c.format);
                   const bar = c.format === 'bar' ? Number(fillTemplate(c.value, row)) : NaN;
                   return <td key={c.title} className="px-2 py-1">{c.format === 'badge' ? <span className="rounded bg-muted px-1">{text}</span> : Number.isFinite(bar) ? <div className="min-w-[4rem]"><div className="text-right">{text}</div><Bar value={bar} /></div> : text}</td>;
                 })}
-                {(view.rowActions?.length ?? 0) > 0 && <td className="px-2 py-1 text-right"><div className="flex justify-end gap-0.5">{rowButtons(row, view.rowActions ?? [])}</div></td>}
+                {(view.rowActions?.length ?? 0) > 0 && <td className="px-2 py-1 text-right" onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}><div className="flex justify-end gap-0.5">{rowButtons(row, view.rowActions ?? [], size === 'lg' ? 'table' : 'all')}</div></td>}
               </tr>
             ))}
           </tbody>
@@ -234,6 +275,8 @@ export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
   const frame = useWidgetFrame();
   const { spec, error: specError } = usePublicSpec(widgetType);
   const [screen, setScreen] = useState<{ id: string; row: Row | null } | null>(null);
+  // A row's details, opened by clicking a table/list row whose view names a screen with `open` (shown in a side sheet).
+  const [detail, setDetail] = useState<{ id: string; row: Row } | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
 
   const view = spec?.view;
@@ -280,7 +323,8 @@ export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
   const fullCtx: ViewContext = { ...ctx, job };
 
   const v1 = (v: ViewSpec, d: unknown) => (
-    <V1View view={v} data={d} widgetId={widgetId} serverId={serverId} actions={actionsById} allowed={allowed} busy={busy} start={start} />
+    <V1View view={v} data={d} widgetId={widgetId} serverId={serverId} actions={actionsById} allowed={allowed} busy={busy} start={start}
+      openRow={(id, row) => { if (spec.screens?.[id]) setDetail({ id, row }); }} />
   );
 
   const ui: LayoutUi = {
@@ -303,6 +347,7 @@ export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
     : v1(view, data);
 
   const open = screen ? spec.screens?.[screen.id] : undefined;
+  const detailScreen = detail ? spec.screens?.[detail.id] : undefined;
 
   return (
     <div className="flex h-full min-h-0 flex-col gap-2 text-sm">
@@ -317,6 +362,8 @@ export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
 
       <ScreenDialog id={screen?.id ?? null} row={screen?.row ?? null} screen={open} ctx={fullCtx} serverId={serverId} widgetType={widgetType} ui={ui}
         reloadToken={reloadToken} onClose={() => setScreen(null)} onDone={refresh} />
+      <RowSheet id={detail?.id ?? null} row={detail?.row ?? null} screen={detailScreen} ctx={fullCtx} serverId={serverId} widgetType={widgetType} ui={ui}
+        reloadToken={reloadToken} onClose={() => setDetail(null)} onDone={refresh} />
     </div>
   );
 }

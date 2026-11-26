@@ -83,6 +83,16 @@ export function layoutRows(blocks: Block[]): LayoutRow[] {
 
 export const visibleBadges = (badges: Badge[], ctx: ViewContext): Badge[] => badges.filter(b => visible(b, ctx));
 
+/**
+ * Which entry of a toolbar is its single solid button: the first dialog trigger, else the first action that is not
+ * destructive (-1 when every entry is destructive). `entries` are in toolbar order.
+ */
+export function primaryToolbarEntry(entries: readonly { kind: 'dialog' | 'action'; destructive: boolean }[]): number {
+  const dialog = entries.findIndex(e => e.kind === 'dialog');
+  if (dialog >= 0) return dialog;
+  return entries.findIndex(e => !e.destructive);
+}
+
 /** The value of a parameter when nothing supplies one: its default. */
 const defaultOf = (spec: ParamSpec): unknown => spec.default;
 
