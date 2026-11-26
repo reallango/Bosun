@@ -425,6 +425,18 @@ describe('the stacks declaration (import from other tools)', () => {
     expect(validateWidgetSpec({ ...spec, stacks: { ...spec.stacks, fields: { id: 'ID' } } }, own, m.id).ok).toBe(false);
   });
 
+  it('setup names a detect dataset and an install action without required parameters', async () => {
+    const fs = await import('fs');
+    const m = JSON.parse(fs.readFileSync('widgets/docker/manifest.json', 'utf8'));
+    const own = m.permissions.map((p: { id: string }) => p.id);
+    const spec = m.widgets[0].spec;
+    const ok = validateWidgetSpec(spec, own, m.id);
+    expect(ok.ok && ok.value.setup).toMatchObject({ label: 'Docker Engine', detect: 'host_detect', install: 'docker_install' });
+    for (const bad of [{ ...spec.setup, detect: 'nope' }, { ...spec.setup, install: 'nope' }, { ...spec.setup, install: 'stack_deploy' }, { ...spec.setup, label: '' }, 'x']) {
+      expect(validateWidgetSpec({ ...spec, setup: bad }, own, m.id).ok, JSON.stringify(bad)).toBe(false);
+    }
+  });
+
   it('startLater must be a parameter of both deploy actions that accepts "later"', async () => {
     const fs = await import('fs');
     const m = JSON.parse(fs.readFileSync('widgets/docker/manifest.json', 'utf8'));

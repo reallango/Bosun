@@ -410,6 +410,26 @@ containers once from Bosun's copy, so importing is a short restart of the stack.
   after it is back. From another node's Bosun it works as for any other stack, without the restart of the page you use.
 
 The outcome of each import and detach appears in the bell.
+
+### Setting up a new server (Docker, then Bosun itself)
+
+A fresh Linux install can be taken over from Bosun: add it (Settings → Servers → Add → *Set up automatically* with an
+administrator login, which creates Bosun's service account), then open it under Settings → Servers → *Set up this server*.
+
+- **Software from widgets.** Each installed widget can offer what it needs on a host. The Docker widget (1.0.14) offers
+  **Docker Engine**: it adds Docker's apt repository (the key is only trusted with Docker's published fingerprint), installs
+  Docker Engine with the Compose and Buildx plugins, starts it and lets the service account use it. Debian, Ubuntu and
+  their derivatives so far. A server does not have to become a Bosun node for this: Docker, Ollama and the rest are
+  managed over SSH as before. Needs the permission *Install Docker on a host* (Full access by default).
+- **Deploy Bosun** (Full access, needs Docker on the server and port 3042 free):
+  - **Join this cluster** (the default; clustering must be enabled here): Bosun deploys itself as the stack `bosun` from
+    the published image of the update channel (Settings → Updates), with ports 3042, 4001 and 4002, then creates a
+    one-time join code and redeems it on the new node, and waits until it is a reachable member. Users, servers and
+    settings come from the cluster.
+  - **Standalone**: the same stack with port 3042 only, left at its first-run page to create its own admin account.
+
+  Either way the new Bosun runs from a Bosun stack, so it updates itself (Settings → Updates). Progress shows on the
+  card, the outcome in the bell.
 ### Access requests (for agents and people)
 
 An API key or user that lacks something can ask for it instead of being given broad access up front:
