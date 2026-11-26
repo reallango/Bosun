@@ -30,7 +30,7 @@ export { effectiveGrants };
 export async function hasPermission(payload: TokenPayload, permission: string, serverId?: string | null): Promise<boolean> {
   if (payload.role === 'admin') return true;
   const extra = await registeredPermissionDefs();
-  const server: ServerContext | null = serverId ? await serverContext(serverId).catch(() => ({ id: serverId, groupIds: [] })) : null;
+  const server: ServerContext | null = serverId ? await serverContext(serverId) /* no catch: an unreadable server group must not skip a group-scoped deny */ : null;
   const grants = await effectiveGrants(payload, extra, true);
   if (server && permission !== 'servers.view' && !grantsAllow(grants, 'servers.view', server, extra)) return false;
   return grantsAllow(grants, permission, server, extra);
@@ -44,7 +44,7 @@ export async function permissionMap(payload: TokenPayload): Promise<Record<strin
   const defs = fullCatalog(extra);
   if (payload.role === 'admin') return Object.fromEntries(defs.map(d => [d.id, '*' as const]));
   const grants = await effectiveGrants(payload, extra, true);
-  const servers = await allServerContexts().catch(() => [] as ServerContext[]);
+  const servers = await allServerContexts();
   const out: Record<string, '*' | string[]> = {};
   for (const d of defs) {
     const where = allowedServerIds(grants, d.id, servers, extra);

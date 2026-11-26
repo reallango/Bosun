@@ -118,6 +118,7 @@ export default function NewServerPage() {
           ssh_port: provisionForm.ssh_port,
           ssh_user: provisionData.service_account,
           ssh_key_id: provisionData.ssh_key_id,
+                    host_key_fingerprint: provisionData.host_key_fingerprint ?? undefined,
           ...(provisionData.shell_user && provisionData.shell_key_id
             ? { shell_user: provisionData.shell_user, shell_key_id: provisionData.shell_key_id } : {}),
           platform: provisionForm.platform,

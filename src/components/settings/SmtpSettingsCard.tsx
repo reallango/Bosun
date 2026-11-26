@@ -168,7 +168,7 @@ export default function SmtpSettingsCard() {
                 <Label htmlFor="smtp-app-url">Public URL of Bosun</Label>
                 <Input id="smtp-app-url" type="url" value={s.app_url} placeholder="https://bosun.example.com"
                   onChange={e => set({ app_url: e.target.value })} />
-                <p className="text-xs text-muted-foreground">Used in emailed links such as password reset.</p>
+                <p className="text-xs text-muted-foreground">Used in emailed links such as password reset. Required for reset emails: links are never built from the address a request came in on.</p>
               </div>
             </fieldset>
             <div className="flex flex-wrap items-center gap-3">

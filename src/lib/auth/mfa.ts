@@ -85,9 +85,12 @@ export async function registerAttempt(c: Challenge): Promise<boolean> {
 
 /** Mark used exactly once (false if someone else already did). */
 export async function markChallengeUsed(c: Challenge, codeHash?: string): Promise<boolean> {
+  // One statement, so the TOTP replay check and the claim cannot interleave: two sign-ins racing with the same
+  // TOTP step (on two challenges) can't both succeed, because the second sees the first's used row.
   const r = await rqlite.execute(
-    'UPDATE mfa_challenges SET used_at = ?, code_hash = COALESCE(?, code_hash) WHERE id = ? AND used_at IS NULL',
-    [new Date().toISOString(), codeHash ?? null, c.id]);
+    'UPDATE mfa_challenges SET used_at = ?, code_hash = COALESCE(?, code_hash) WHERE id = ? AND used_at IS NULL'
+    + ' AND (? IS NULL OR NOT EXISTS (SELECT 1 FROM mfa_challenges WHERE user_id = ? AND code_hash = ? AND used_at IS NOT NULL))',
+    [new Date().toISOString(), codeHash ?? null, c.id, codeHash ?? null, c.user_id, codeHash ?? null]);
   return r.rows_affected === 1;
 }
 

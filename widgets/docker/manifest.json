@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "docker",
   "name": "Docker Containers",
-  "version": "1.0.7",
+  "version": "1.0.8",
   "description": "Containers on the host with logs, a shell, start, stop and restart; edit a container, create containers and stacks (a compose file, or one from a GitHub repository), and a Manage page for images, volumes and networks.",
   "author": "Bosun",
   "permissions": [
@@ -507,6 +507,15 @@
                   "start"
                 ],
                 "maxLength": 20
+              },
+              "allow_risky": {
+                "type": "string",
+                "values": [
+                  "true",
+                  "false"
+                ],
+                "maxLength": 20,
+                "default": "false"
               }
             },
             "secrets": [
@@ -1596,6 +1605,38 @@
             "icon": "refresh-cw",
             "job": true,
             "after": "refresh"
+          },
+          {
+            "id": "stack_update_privileged",
+            "label": "Update with elevated options",
+            "description": "Update from source and redeploy when the new version uses privileged mode, the host network, devices, the Docker socket or host folders.",
+            "permission": "docker.privileged",
+            "kind": "script",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
+                "maxLength": 63,
+                "from": "name"
+              }
+            },
+            "variants": [
+              {
+                "script": "stack_action",
+                "args": {
+                  "op": "literal:update",
+                  "allow_risky": "literal:true"
+                }
+              }
+            ],
+            "icon": "refresh-cw",
+            "job": true,
+            "after": "refresh",
+            "confirm": {
+              "title": "Update stack {name} with elevated options?",
+              "text": "The new version may use privileged mode, the host network, devices, the Docker socket or host folders.",
+              "destructive": true
+            }
           },
           {
             "id": "stack_remove",
@@ -3834,6 +3875,7 @@
                             "stack_restart",
                             "stack_pull",
                             "stack_update",
+                            "stack_update_privileged",
                             "stack_remove"
                           ],
                           "filter": {

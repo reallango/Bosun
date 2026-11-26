@@ -6,6 +6,7 @@ import { joinStalled } from '@/lib/auth/setup-state';
 import { effectiveClusterConfig } from '@/lib/cluster/config';
 import { checkLoginRateLimit, recordLoginAttempt } from '@/lib/utils/rate-limiter';
 import { ok, fail, failFrom } from '@/lib/api/response';
+import { clientIp } from '@/lib/auth/session';
 
 export const dynamic = 'force-dynamic';
 
@@ -60,7 +61,7 @@ export async function GET() {
 
 /** Join this fresh node to a cluster: { code, adv_host, node_id }. */
 export async function POST(request: NextRequest) {
-  const ip = request.headers.get('x-forwarded-for')?.split(',')[0] || 'unknown';
+  const ip = clientIp(request);
   const limit = checkLoginRateLimit(ip);
   if (!limit.allowed) return fail('Too many attempts', 429, 'RATE_LIMITED');
   recordLoginAttempt(ip);
@@ -78,7 +79,7 @@ export async function POST(request: NextRequest) {
 
 /** Cancel a join that has not completed: wipe the (empty) local database and start fresh. */
 export async function DELETE(request: NextRequest) {
-  const ip = request.headers.get('x-forwarded-for')?.split(',')[0] || 'unknown';
+  const ip = clientIp(request);
   const limit = checkLoginRateLimit(ip);
   if (!limit.allowed) return fail('Too many attempts', 429, 'RATE_LIMITED');
   recordLoginAttempt(ip);

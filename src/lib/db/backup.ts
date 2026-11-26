@@ -16,6 +16,10 @@
  * placeholder can never overwrite a real credential.
  */
 import { rqlite, rowsToObjects } from './rqlite-client';
+import { runMigrations } from './migrations';
+import { invalidateUserStatus } from '@/lib/auth/user-status';
+import { invalidateApiKeyCache } from '@/lib/auth/api-key-auth';
+import { invalidatePermissionCache } from '@/lib/permissions/store';
 import {
   EXPECTED_MIGRATIONS,
   SCHEMA_VERSION,
@@ -175,7 +179,10 @@ async function buildSqlDump(): Promise<string> {
     '',
   ];
 
-  for (const table of BACKUP_TABLES) {
+  // schema_migrations comes along so a restore knows which migrations the data already has (without it every migration
+  // would run again on the restored tables); indexes are dumped too, since DROP TABLE takes them with it.
+  const dumpTables = BACKUP_TABLES.includes('schema_migrations') ? BACKUP_TABLES : [...BACKUP_TABLES, 'schema_migrations'];
+  for (const table of dumpTables) {
     const schemaResult = await rqlite.query(
       "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
       [table],
@@ -194,6 +201,11 @@ async function buildSqlDump(): Promise<string> {
       lines.push(`INSERT INTO ${table} (${cols.join(', ')}) VALUES (${vals.join(', ')});`);
     }
     lines.push('');
+  }
+
+  const indexes = await rqlite.query("SELECT sql, tbl_name FROM sqlite_master WHERE type = 'index' AND sql IS NOT NULL ORDER BY name");
+  for (const [ddl, tbl] of indexes.values || []) {
+    if (ddl && dumpTables.includes(String(tbl))) lines.push(`${String(ddl).replace(/^CREATE (UNIQUE )?INDEX (IF NOT EXISTS )?/i, (_m, u) => `CREATE ${u || ''}INDEX IF NOT EXISTS `)};`);
   }
 
   return lines.join('\n');
@@ -274,13 +286,14 @@ export async function importDatabase(
   const format = detectFormat(data);
   const warnings: string[] = [];
 
-  if (format === 'sqlite') {
-    await rqlite.load(data, 'application/octet-stream');
-    return { format, schemaVersion: null, counts: {}, warnings };
-  }
-
-  if (format === 'sql') {
-    await rqlite.load(Buffer.from(data).toString('utf8'), 'text/plain');
+  // sqlite/sql replace the whole database, so they need the explicit replace flag (the route's contract). The loaded
+  // database is then brought up to this build's schema (an older backup lacks newer tables and indexes).
+  if (format === 'sqlite' || format === 'sql') {
+    if (!options.replace) throw new Error(`A ${format} backup replaces the whole database: confirm with replace=true`);
+    if (format === 'sqlite') await rqlite.load(data, 'application/octet-stream');
+    else await rqlite.load(Buffer.from(data).toString('utf8'), 'text/plain');
+    await runMigrations();
+    invalidateCaches();
     return { format, schemaVersion: null, counts: {}, warnings };
   }
 
@@ -312,20 +325,46 @@ export async function importDatabase(
     }
     if (usableRows.length === 0) continue;
 
-    if (replace) {
-      await rqlite.execute(`DELETE FROM ${table}`);
+    // Column names come from the uploaded file: only this table's real columns are used (never put into SQL unchecked).
+    const info = rowsToObjects(await rqlite.query(`PRAGMA table_info(${table})`));
+    const known = new Set(info.map(c => String(c.name)));
+    const pk = info.filter(c => Number(c.pk) > 0).sort((a, b) => Number(a.pk) - Number(b.pk)).map(c => String(c.name));
+    const seen = Array.from(new Set(usableRows.flatMap(row => Object.keys(row))));
+    const columns = seen.filter(c => known.has(c));
+    const dropped = seen.filter(c => !known.has(c));
+    if (dropped.length) warnings.push(`${table}: ignored unknown column(s) ${dropped.slice(0, 5).join(', ')}`);
+    if (!columns.length || (pk.length && !pk.every(c => columns.includes(c)))) {
+      warnings.push(`${table}: skipped (no usable columns)`);
+      continue;
     }
-
-    const columns = Object.keys(usableRows[0]);
-    const statements = usableRows.map(row => {
-      const placeholders = columns.map(() => '?').join(', ');
-      const values = columns.map(c => row[c] ?? null);
-      return { sql: `INSERT OR REPLACE INTO ${table} (${columns.join(', ')}) VALUES (${placeholders})`, params: values };
-    });
-
-    await rqlite.executeBatch(statements);
+    // Upsert by primary key. Unlike INSERT OR REPLACE, a clash on another unique column (a user name, a server name)
+    // fails the table instead of silently deleting the existing row with a different id.
+    const placeholders = columns.map(() => '?').join(', ');
+    const updates = columns.filter(c => !pk.includes(c)).map(c => `${c} = excluded.${c}`).join(', ');
+    const upsert = pk.length
+      ? `INSERT INTO ${table} (${columns.join(', ')}) VALUES (${placeholders}) ON CONFLICT(${pk.join(', ')}) DO ${updates ? `UPDATE SET ${updates}` : 'NOTHING'}`
+      : `INSERT INTO ${table} (${columns.join(', ')}) VALUES (${placeholders})`;
+    const statements = [
+      ...(replace ? [{ sql: `DELETE FROM ${table}`, params: [] as unknown[] }] : []),
+      ...usableRows.map(row => ({ sql: upsert, params: columns.map(c => row[c] ?? null) })),
+    ];
+    // One transaction per table: it is restored completely or not at all.
+    try {
+      await rqlite.executeBatch(statements, { transaction: true });
+    } catch (err) {
+      invalidateCaches();
+      throw new Error(`Restoring ${table} failed, so that table was left unchanged${Object.keys(counts).length ? ` (already restored: ${Object.keys(counts).join(', ')})` : ''}: ${err instanceof Error ? err.message : String(err)}`);
+    }
     counts[table] = usableRows.length;
   }
 
-  return { format, schemaVersion: doc.meta.schemaVersion, counts, warnings };
+  invalidateCaches();  return { format, schemaVersion: doc.meta.schemaVersion, counts, warnings };
+}
+
+/** Users, API keys and permissions were possibly rewritten: drop the cached copies in this process.
+ * (Other nodes pick the changes up when their short-lived caches expire.) */
+function invalidateCaches(): void {
+  invalidateUserStatus();
+  invalidateApiKeyCache();
+  invalidatePermissionCache();
 }

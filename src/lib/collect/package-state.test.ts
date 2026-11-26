@@ -22,6 +22,12 @@ describe('script data collectors', () => {
     expect(c.map(x => x.key)).toEqual(['demo#w1', 'demo#w2']);
     expect(c[0]).toMatchObject({ type: 'demo', instanceId: 'w1', as: 'shell', intervalMs: 45_000, timeoutMs: 20_000 });
     expect(c[1].intervalMs).toBe(10_000);
+    // The interval from the settings is clamped to 5..86400 seconds.
+    const clamp = (interval: unknown) => collectorsFrom([row({ config: JSON.stringify({ command: 'uptime', interval }) })])[0].intervalMs;
+    expect(clamp(1)).toBe(5_000);
+    expect(clamp(0.001)).toBe(5_000);
+    expect(clamp(1e12)).toBe(86_400_000);
+    expect(clamp(-5)).toBe(30_000);          // not a positive number: the spec's cacheSec
     expect(sectionFor('demo', 'w1')).toBe('pkg:demo#w1');
     expect(sectionFor('demo')).toBe('pkg:demo');
   });

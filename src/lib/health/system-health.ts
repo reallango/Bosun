@@ -45,7 +45,8 @@ async function probeHttp(url: string): Promise<{ status: ComponentStatus; detail
 
 async function checkWebsocket(): Promise<ComponentHealth> {
   const port = process.env.WS_PORT || '3002';
-  const { status, detail } = await probeHttp(`http://localhost:${port}/health`);
+  // ws-server listens on 127.0.0.1 only ("localhost" may resolve to ::1).
+  const { status, detail } = await probeHttp(`http://127.0.0.1:${port}/health`);
   return { name: 'websocket', status, detail };
 }
 

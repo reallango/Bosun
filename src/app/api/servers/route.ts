@@ -50,7 +50,9 @@ export async function POST(request: NextRequest) {
   try {
     const payload = await requireLevel(request, 'admin');
     if (payload instanceof NextResponse) return payload;
-    const { name, hostname, ssh_port, ssh_user, ssh_key_id, shell_user, shell_key_id, notes, tags, platform, mac_address, mac_address_alt } = await request.json();
+    const { name, hostname, ssh_port, ssh_user, ssh_key_id, shell_user, shell_key_id, notes, tags, platform, mac_address, mac_address_alt, host_key_fingerprint } = await request.json();
+    // The host key seen while provisioning (optional): pinned from the start instead of on the first poll.
+    const hostKey = typeof host_key_fingerprint === 'string' && /^SHA256:[A-Za-z0-9+/]{43}$/.test(host_key_fingerprint) ? host_key_fingerprint : null;
     // Unset MACs stay NULL so the poller fills them from the host's NICs.
     let mac: string | null = null;
     let macAlt: string | null = null;
@@ -72,7 +74,7 @@ export async function POST(request: NextRequest) {
     // Windows runs PowerShell per poll, which costs more than a sh script; poll it less often.
     const configured = Number((await rqlite.query("SELECT value FROM app_config WHERE key = 'poller.default_interval_sec'")).values?.[0]?.[0]) || 15;
     const pollInterval = platformValue === 'windows' ? Math.max(30, configured) : configured;
-    await rqlite.execute("INSERT INTO servers (id,name,hostname,ssh_port,ssh_user,ssh_key_id,shell_user,shell_key_id,notes,tags,platform,poll_interval_sec,mac_address,mac_address_alt,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [serverId, name, hostname, ssh_port||22, ssh_user, ssh_key_id||null, shell_user||null, shell_key_id||null, notes||null, JSON.stringify(tags||[]), platformValue, pollInterval, mac, macAlt, now, now]);
+    await rqlite.execute("INSERT INTO servers (id,name,hostname,ssh_port,ssh_user,ssh_key_id,shell_user,shell_key_id,notes,tags,platform,poll_interval_sec,mac_address,mac_address_alt,host_key_fingerprint,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)", [serverId, name, hostname, ssh_port||22, ssh_user, ssh_key_id||null, shell_user||null, shell_key_id||null, notes||null, JSON.stringify(tags||[]), platformValue, pollInterval, mac, macAlt, hostKey, now, now]);
     await rqlite.execute("INSERT INTO dashboards (id,name,type,server_id,sort_order,created_at,updated_at) VALUES (?,?,'server',?,(SELECT COALESCE(MAX(sort_order),0)+1 FROM dashboards WHERE type='server'),?,?)", [crypto.randomUUID(), name, serverId, now, now]);
     await logAudit({ userId: payload.userId, serverId, action: AuditActions.SERVER_CREATE, status: 'success' });
     return NextResponse.json({ data: { id: serverId, name, hostname } }, { status: 201 });

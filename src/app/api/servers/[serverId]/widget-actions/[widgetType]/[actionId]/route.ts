@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/auth/middleware';
+import { clientIp, requireAuth } from '@/lib/auth/middleware';
 import { requirePermission } from '@/lib/permissions/authorize';
 import { consumeActionRateLimit } from '@/lib/utils/rate-limiter';
 import { logAudit, AuditActions } from '@/lib/audit/logger';
@@ -11,7 +11,7 @@ import { storeActionData } from '@/lib/widgets/runtime/store-data';
 import { ParamError } from '@/lib/widgets/runtime/command';
 import { openTerminalAction } from '@/lib/widgets/runtime/terminal-action';
 import { decryptOrigin, editorFieldsOf, encryptOrigin, maskValues, resolveTokens, sanitizeOrigin } from '@/lib/widgets/jobs/origin';
-import { getJob, getOriginEnc } from '@/lib/widgets/jobs/store';
+import { getJob, getOriginEnc, redactParams } from '@/lib/widgets/jobs/store';
 
 /**
  * Run one action of a package widget: POST /api/servers/:serverId/widget-actions/:widgetType/:actionId
@@ -47,7 +47,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (!limit.allowed) return fail('Too many actions, slow down', 429, 'RATE_LIMITED');
 
     const started = Date.now();
-    const ip = request.headers.get('x-forwarded-for')?.split(',')[0];
+    // What the audit log records: before saved secrets are put back, with text and secret-looking values masked.
+    const auditParams = redactParams(body.params);
+    const ip = (clientIp(request) ?? undefined);
 
     // Version 2 script action: the variant that applies to this host runs its package script. With `job: true` it runs
     // in the background (answers 202 with the job to follow), otherwise the answer comes when the script ends.
@@ -79,7 +81,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           const { job } = await startJob({ serverId, loaded, action, prepared, userId: auth.userId, params: (body.params && typeof body.params === 'object' ? body.params : {}) as Record<string, unknown>, instanceId: instance?.id, ip, originEnc, scrub });
           await logAudit({
             userId: auth.userId, serverId, action: AuditActions.WIDGET_ACTION, status: 'success',
-            details: JSON.stringify({ widget: widgetType, action: actionId, job: job.id, started: true, params: body.params ?? {} }).slice(0, 900), ipAddress: ip,
+            details: JSON.stringify({ widget: widgetType, action: actionId, job: job.id, started: true, params: auditParams }).slice(0, 900), ipAddress: ip,
           });
           return ok({ jobId: job.id, status: job.status }, { status: 202 });
         }
@@ -89,14 +91,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         if (r.success && !r.protocol.error && action.after === 'refresh') await rqlite.execute('UPDATE servers SET poll_requested_at = ? WHERE id = ?', [Date.now(), serverId]).catch(() => undefined);
         await logAudit({
           userId: auth.userId, serverId, action: AuditActions.WIDGET_ACTION, status: r.success ? 'success' : 'failure',
-          details: JSON.stringify({ widget: widgetType, action: actionId, as: action.as, params: body.params ?? {}, exitCode: r.exitCode, output: r.stdout.slice(0, 200) }).slice(0, 900),
+          details: JSON.stringify({ widget: widgetType, action: actionId, as: action.as, params: auditParams, exitCode: r.exitCode, output: r.stdout.slice(0, 200) }).slice(0, 900),
           durationMs: Date.now() - started, ipAddress: ip,
         });
         return ok({ success: r.success && !r.protocol.error, output: r.stdout, error: r.stderr, exitCode: r.exitCode, timedOut: r.timedOut, message: r.protocol.done ?? r.protocol.error });
       } catch (error) {
         await logAudit({
           userId: auth.userId, serverId, action: AuditActions.WIDGET_ACTION, status: 'failure',
-          details: JSON.stringify({ widget: widgetType, action: actionId, params: body.params ?? {}, error: String(error).slice(0, 300) }).slice(0, 900), ipAddress: ip,
+          details: JSON.stringify({ widget: widgetType, action: actionId, params: auditParams, error: String(error).slice(0, 300) }).slice(0, 900), ipAddress: ip,
         });
         if (error instanceof ParamError) return fail(error.message, 400, 'INVALID_PARAMS');
         throw error;
@@ -106,14 +108,14 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       const r = await runAction(serverId, action, body.params);
       await logAudit({
         userId: auth.userId, serverId, action: AuditActions.WIDGET_ACTION, status: r.success ? 'success' : 'failure',
-        details: JSON.stringify({ widget: widgetType, action: actionId, as: action.as, params: body.params ?? {}, exitCode: r.exitCode, output: r.stdout.slice(0, 200) }).slice(0, 900),
+        details: JSON.stringify({ widget: widgetType, action: actionId, as: action.as, params: auditParams, exitCode: r.exitCode, output: r.stdout.slice(0, 200) }).slice(0, 900),
         durationMs: Date.now() - started, ipAddress: ip,
       });
       return ok({ success: r.success, output: r.stdout, error: r.stderr, exitCode: r.exitCode, timedOut: r.timedOut });
     } catch (error) {
       await logAudit({
         userId: auth.userId, serverId, action: AuditActions.WIDGET_ACTION, status: 'failure',
-        details: JSON.stringify({ widget: widgetType, action: actionId, params: body.params ?? {}, error: String(error).slice(0, 300) }).slice(0, 900), ipAddress: ip,
+        details: JSON.stringify({ widget: widgetType, action: actionId, params: auditParams, error: String(error).slice(0, 300) }).slice(0, 900), ipAddress: ip,
       });
       if (error instanceof ParamError) return fail(error.message, 400, 'INVALID_PARAMS');
       throw error;

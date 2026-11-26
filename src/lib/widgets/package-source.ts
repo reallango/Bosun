@@ -4,7 +4,8 @@
  * is ever contacted; the branch is limited to ALLOWED_REFS, and every package is validated
  * exactly like an uploaded one before it is offered or installed.
  */
-import { validateManifest, validateFiles, MAX_FILES, type PackageManifest, type PackageFiles } from '@/lib/widgets/package-manifest';
+import crypto from 'crypto';
+import { validateManifest, validateFiles, manifestToJson, MAX_FILES, type PackageManifest, type PackageFiles } from '@/lib/widgets/package-manifest';
 import { reservedPackageNames } from '@/lib/widgets/system-packages';
 
 export const SOURCE_REPO = 'reallango/Bosun';
@@ -156,4 +157,12 @@ export async function listRemotePackagesCached(ref: SourceRef, force = false): P
   const listing = await listRemotePackages(ref);
   listingCache.set(ref, { at: Date.now(), listing });
   return listing;
+}
+
+/**
+ * A stable fingerprint of a (validated) manifest: what the admin reviews in the list of available packages. The install
+ * request carries it back, so a package that changed on the branch after the review is refused instead of installed.
+ */
+export function manifestHashOf(manifest: PackageManifest): string {
+  return crypto.createHash('sha256').update(JSON.stringify(manifestToJson(manifest))).digest('hex');
 }

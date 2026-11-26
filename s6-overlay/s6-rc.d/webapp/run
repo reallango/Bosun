@@ -5,4 +5,4 @@ until wget -q -O /dev/null "${RQLITE_URL}/readyz?noleader" 2>/dev/null; do
     sleep 1
 done
 cd /app
-exec s6-setuidgid node ./node_modules/.bin/next start -p "${PORT:-3000}"
+exec s6-setuidgid node ./node_modules/.bin/next start -H "${BOSUN_INTERNAL_HOST:-127.0.0.1}" -p "${PORT:-3000}"

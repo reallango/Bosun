@@ -47,7 +47,7 @@ sensitive() {
       if (tolower(p) ~ /(docker|containerd|crio|podman)\.sock$/) exit 0
       if (p == "/") exit 0
       n = split("/etc /root /home /var/run /run /var/lib/docker /proc /sys /dev /boot /usr /bin /sbin /lib /lib64 /var/lib/containerd", r, " ")
-      for (i = 1; i <= n; i++) if (p == r[i] || index(p, r[i] "/") == 1) exit 0
+      for (i = 1; i <= n; i++) if (p == r[i] || index(p, r[i] "/") == 1 || index(r[i], p "/") == 1) exit 0
       exit 1
     }'
 }

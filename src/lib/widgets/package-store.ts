@@ -14,6 +14,9 @@ import { reservedPackageNames } from '@/lib/widgets/system-packages';
 import { contentHashOf } from '@/lib/widgets/materialize';
 import { materializeNow } from '@/lib/widgets/materialize-db';
 import { markBundledRemoved, unmarkBundledRemoved, isBundledId } from '@/lib/widgets/bundled';
+import { packageSecretRows } from '@/lib/widgets/package-secrets';
+import { cancelJob } from '@/lib/widgets/jobs/runtime';
+import { finishJob, getJob } from '@/lib/widgets/jobs/store';
 
 export class PackageError extends Error {
   status: number;
@@ -95,6 +98,49 @@ export interface InstallResult {
   previousVersion: string | null;
   widgetTypes: string[];
   permissions: string[];
+  /** The installed package came from somewhere else (another source or author), so the secrets stored for it were deleted. */
+  secretsCleared: boolean;
+}
+
+/**
+ * Where a package comes from, for deciding whether a replacement may inherit the secrets stored for the installed one:
+ * the Bosun repository (installed from GitHub or bundled with Bosun, any branch) or a zip upload, plus the author the
+ * manifest names. A package with the same id from somewhere else is a different package and starts without secrets.
+ */
+export function sameOrigin(installed: { source: string; author: string }, next: { source: string; author: string }): boolean {
+  const origin = (src: string) => (src === 'upload' ? 'upload' : 'repo');
+  return origin(installed.source) === origin(next.source) && installed.author.trim() === next.author.trim();
+}
+
+/** The SQL condition (and its parameters) that matches exactly the stored secrets of a package (no LIKE: "_" is a wildcard there). */
+const secretRowsOf = packageSecretRows;
+
+async function hasStoredSecrets(id: string): Promise<boolean> {
+  const { where, params } = secretRowsOf(id);
+  const r = await rqlite.query(`SELECT COUNT(*) FROM app_config WHERE ${where}`, params);
+  return Number(r.values?.[0]?.[0] ?? 0) > 0;
+}
+
+/** Would installing `next` over the installed package with the same id delete the secrets stored for it? */
+export async function secretsWouldBeCleared(next: { id: string; source: string; author: string }): Promise<boolean> {
+  const existing = await getInstalledPackage(next.id);
+  if (!existing || sameOrigin(existing.pkg, next)) return false;
+  return hasStoredSecrets(next.id);
+}
+
+/**
+ * Every snapshot section a widget type's data lives in: `pkg:<type>` (shared data), `pkg:<type>:state` (its state probe)
+ * and `pkg:<type>#<widget id>` (data of one widget). Exact comparisons only: a type may contain "_", a LIKE wildcard.
+ */
+export function sectionRowsOf(types: string[]): { where: string; params: unknown[] } {
+  const parts: string[] = [];
+  const params: unknown[] = [];
+  for (const t of types) {
+    const perWidget = `pkg:${t}#`;
+    parts.push('section = ?', 'section = ?', 'substr(section, 1, ?) = ?');
+    params.push(`pkg:${t}`, `pkg:${t}:state`, perWidget.length, perWidget);
+  }
+  return { where: parts.length ? `(${parts.join(' OR ')})` : '0', params };
 }
 
 /** Install a validated package, or upgrade the installed one. */
@@ -108,6 +154,8 @@ export async function installPackage(opts: InstallOptions): Promise<InstallResul
   }
   const existing = await getInstalledPackage(manifest.id);
   const previousVersion = existing?.pkg.version ?? null;
+  // A package with the same id from another source or author must not inherit the secrets an admin set for the installed one.
+  const secretsCleared = !!existing && !sameOrigin(existing.pkg, { source: opts.source, author: manifest.author }) && (await hasStoredSecrets(manifest.id));
   if (existing && !opts.allowSameOrOlder && compareVersions(manifest.version, existing.pkg.version) <= 0) {
     throw new PackageError(`Version ${existing.pkg.version} is already installed (this is ${manifest.version})`, 409, 'NOT_NEWER');
   }
@@ -167,7 +215,14 @@ export async function installPackage(opts: InstallOptions): Promise<InstallResul
     });
   }
   for (const t of dropped) stmts.push({ sql: 'DELETE FROM custom_widgets WHERE type = ? AND package_id = ?', params: [t, manifest.id] });
-  for (const t of dropped) stmts.push({ sql: 'DELETE FROM host_snapshots WHERE section = ?', params: [`pkg:${t}`] });
+  if (dropped.length) {
+    const sec = sectionRowsOf(dropped);
+    stmts.push({ sql: `DELETE FROM host_snapshots WHERE ${sec.where}`, params: sec.params });
+  }
+  if (secretsCleared) {
+    const sr = secretRowsOf(manifest.id);
+    stmts.push({ sql: `DELETE FROM app_config WHERE ${sr.where}`, params: sr.params });
+  }
 
   // The statistics this version tracks (and how long their history lives); the poller reads these.
   stmts.push({ sql: 'DELETE FROM metric_definitions WHERE package_id = ?', params: [manifest.id] });
@@ -210,7 +265,7 @@ export async function installPackage(opts: InstallOptions): Promise<InstallResul
   const { announceInstalled } = await import('@/lib/widgets/update-check');
   await announceInstalled({ id: manifest.id, name: manifest.name, version: manifest.version, previousVersion, source: opts.source, userId: opts.userId })
     .catch(() => {});
-  return { id: manifest.id, version: manifest.version, previousVersion, widgetTypes: newTypes, permissions: permIds };
+  return { id: manifest.id, version: manifest.version, previousVersion, widgetTypes: newTypes, permissions: permIds, secretsCleared };
 }
 
 export async function removePackage(id: string, removeWidgets: boolean): Promise<{ removedWidgets: number }> {
@@ -220,16 +275,22 @@ export async function removePackage(id: string, removeWidgets: boolean): Promise
   if (inUse > 0 && !removeWidgets) {
     throw new PackageError(`${inUse} widget${inUse === 1 ? ' is' : 's are'} using this package. Remove them first, or remove the package together with its widgets.`, 409, 'IN_USE');
   }
+  // Jobs of the package that are still running are stopped (on this node at once, elsewhere at their next heartbeat).
+  await stopRunningJobs(id);
   const stmts: { sql: string; params?: unknown[] }[] = [];
   const types = found.pkg.widgetTypes;
   if (types.length) stmts.push({ sql: `DELETE FROM widgets WHERE widget_type IN (${placeholders(types.length)})`, params: types });
   // Data the poller collected for these widgets goes with them.
-  if (types.length) stmts.push({ sql: `DELETE FROM host_snapshots WHERE section IN (${placeholders(types.length)})`, params: types.map(t => `pkg:${t}`) });
+  if (types.length) {
+    const sec = sectionRowsOf(types);
+    stmts.push({ sql: `DELETE FROM host_snapshots WHERE ${sec.where}`, params: sec.params });
+  }
   stmts.push({ sql: 'DELETE FROM permission_grants WHERE permission IN (SELECT id FROM permission_definitions WHERE source = ?)', params: [`package:${id}`] });
   stmts.push({ sql: 'DELETE FROM permission_definitions WHERE source = ?', params: [`package:${id}`] });
   stmts.push({ sql: 'DELETE FROM custom_widgets WHERE package_id = ?', params: [id] });
   stmts.push({ sql: 'DELETE FROM metric_definitions WHERE package_id = ?', params: [id] });
-  stmts.push({ sql: 'DELETE FROM app_config WHERE key LIKE ?', params: [`pkgsecret.${id}.%`] });   // the package's secrets go with it
+  const sr = secretRowsOf(id);
+  stmts.push({ sql: `DELETE FROM app_config WHERE ${sr.where}`, params: sr.params });   // the package's secrets go with it
   stmts.push({ sql: 'DELETE FROM widget_packages WHERE id = ?', params: [id] });
   await rqlite.executeBatch(stmts as { sql: string; params?: never[] }[], { transaction: true });
   await materializeNow(id).catch(() => undefined);   // the row is gone, so this removes the files of this node
@@ -238,4 +299,18 @@ export async function removePackage(id: string, removeWidgets: boolean): Promise
   invalidatePermissionCache();
   invalidateRuntimeCache();
   return { removedWidgets: inUse };
+}
+
+/** Cancel the running jobs of a package and mark them cancelled, so none keeps running (or reporting) for a package that is gone. */
+async function stopRunningJobs(packageId: string): Promise<void> {
+  let ids: string[] = [];
+  try {
+    const r = await rqlite.query("SELECT id FROM package_jobs WHERE package_id = ? AND status = 'running'", [packageId]);
+    ids = rowsToObjects(r).map(row => String(row.id));
+  } catch { return; }
+  for (const jobId of ids) {
+    await cancelJob(jobId).catch(() => false);
+    const j = await getJob(jobId).catch(() => null);
+    await finishJob(jobId, 'cancelled', { steps: j?.steps ?? [], percent: j?.percent ?? null, message: 'Cancelled: the package was removed' }).catch(() => undefined);
+  }
 }
