@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireUserLevel } from '@/lib/auth/middleware';
 import { enableClustering, removeNode, convertToSingle, createJoinCode } from '@/lib/cluster/control';
 import { logAudit } from '@/lib/audit/logger';
+import { getConfig } from '@/lib/db/migrations';
 import { ok, fail, failFrom } from '@/lib/api/response';
 
 export const dynamic = 'force-dynamic';
@@ -9,7 +10,7 @@ export const dynamic = 'force-dynamic';
 /**
  * Cluster management (admin, explicit confirm):
  *   { action: 'enable', adv_host, node_id? }   single node -> cluster-ready (restarts rqlite)
- *   { action: 'join_code' }                     code for adding a node (contains secrets)
+ *   { action: 'join_code' }                     one-time code for adding a node (24 h)
  *   { action: 'remove', node_id }               remove a member from the cluster
  *   { action: 'to_single' }                     make this node a one-node cluster
  */
@@ -32,7 +33,12 @@ export async function POST(request: NextRequest) {
         return ok({ restarting: true });
       }
       case 'join_code': {
-        const r = await createJoinCode();
+        // Where the joining node redeems the code: Bosun's public URL and the address the admin is using now (each member on
+        // port 3042 is added as a fallback).
+        const appUrl = await getConfig('app.url').catch(() => null);
+        const host = request.headers.get('host');
+        const here = host ? `${request.headers.get('x-forwarded-proto') === 'https' ? 'https' : 'http'}://${host}` : null;
+        const r = await createJoinCode([here, appUrl, process.env.APP_URL].filter((x): x is string => !!x));
         await audit('success', { members: r.members.map(m => m.id), expires_at: r.expires_at });
         return ok(r);
       }

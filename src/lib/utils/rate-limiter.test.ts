@@ -55,3 +55,18 @@ describe('RateLimiter', () => {
     expect(rl.consume('u').allowed).toBe(true);
   });
 });
+
+describe('RateLimiter.unrecord', () => {
+  it('takes back an attempt counted up front, without touching a lockout', () => {
+    const { rl } = limiter();
+    for (let i = 0; i < 4; i++) rl.record('ip');
+    rl.record('ip');
+    rl.unrecord('ip'); // that one succeeded
+    expect(rl.check('ip').allowed).toBe(true);
+    rl.record('ip');
+    expect(rl.check('ip').allowed).toBe(false); // locks out
+    rl.unrecord('ip');
+    expect(rl.check('ip').allowed).toBe(false); // still locked
+    rl.unrecord('nobody');
+  });
+});

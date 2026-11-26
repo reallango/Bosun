@@ -41,6 +41,18 @@ describe('Docker package scripts', () => {
     expect(r.stderr).toMatch(/Docker is not available/);
   });
 
+  it('ps prints only the listed fields, never the start command, labels or mounts (they can hold secrets)', () => {
+    const fmt = script('ps.sh').match(/--format '([^']*)'/)?.[1] ?? '';
+    expect(fmt).not.toBe('');
+    expect(fmt).not.toMatch(/\{\{\s*json\s+\.\s*\}\}/);
+    const fields = Array.from(fmt.matchAll(/\{\{json \.(\w+)/g), m => m[1]);
+    expect(fields.length).toBeGreaterThan(0);
+    for (const f of fields) expect(['ID', 'Names', 'Image', 'State', 'Status', 'Ports', 'CreatedAt', 'RunningFor']).toContain(f);
+    expect(fmt).not.toMatch(/Command|Labels|Mounts|Networks/);
+    // Only the compose project and service labels, by name.
+    expect(Array.from(fmt.matchAll(/\.Label "([^"]+)"/g), m => m[1])).toEqual(['com.docker.compose.project', 'com.docker.compose.service']);
+  });
+
   it.skipIf(!hasSh)('logs asks for the number of lines of the named container', () => {
     fake(`case "$1" in ps) exit 0 ;; logs) echo "docker $*" >> "$LOG"; echo hello ;; esac`);
     const r = run('logs.sh', { name: 'web-1', lines: '50' });

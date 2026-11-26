@@ -17,6 +17,7 @@
 import { cond, fail, FIELD_RE, ID_RE, PARAM_RE, intIn, isObj, scalar, text, validateParam, type Obj, type Validated } from './spec-util';
 export type { Validated } from './spec-util';
 import { validateDatasets, validateMenu, validateScreens, type DatasetSpec, type MenuEntry, type ScreenSpec } from './spec-screens';
+import { validateResourceFields, validateTarget, type ResourceFields, type ResourceTarget } from './resources';
 import { validateLayout, validateLookups, validateScripts, validateState, validateVariants, type ActionVariant, type Block, type LookupSpec, type ScriptSpec, type StateSpec } from './spec-v2';
 export type { ActionVariant, Block, LookupSpec, ScriptSpec, StateSpec } from './spec-v2';
 
@@ -57,7 +58,11 @@ export interface ConfigFilter { field: string; config: string; all?: string; def
 /** When the collected data matches `when`, the widget shows `message` (a `{field}` template over that data) instead of rows. */
 export interface Unavailable { when: Cond; message: string }
 
-interface DataCommon { filter?: ConfigFilter[]; unavailable?: Unavailable }
+interface DataCommon {
+  filter?: ConfigFilter[]; unavailable?: Unavailable;
+  /** Row fields naming each row's container/stack: someone holding the data permission only for some stacks or containers sees only those rows. */
+  resources?: ResourceFields;
+}
 
 export type DataSpec =
   | ({ source: 'snapshot'; section: string; also?: string[]; server?: boolean; path?: string; map?: Record<string, string>; permission: string } & DataCommon)
@@ -110,6 +115,8 @@ export interface ActionSpec {
   confirm?: { title: string; text?: string; destructive: boolean; requireText?: string };
   result: 'toast' | 'text' | 'none';
   after: 'refresh' | 'none';
+  /** The parameter that names the stack or container this action acts on (grants limited to one are checked against it). */
+  target?: ResourceTarget;
 }
 
 /** One labelled value. `bar` (a template that gives 0-100) draws a gauge under it; `when` hides it for data it does not match. */
@@ -165,6 +172,10 @@ export interface WidgetSpec {
   datasets?: Record<string, DatasetSpec>;
   screens?: Record<string, ScreenSpec>;
   menu?: MenuEntry[];
+  /** Version 2: how this widget manages Compose stacks, for importing stacks from other tools (see StacksSpec). */
+  stacks?: StacksSpec;
+  /** Version 2: software this widget can install on a host, offered under "Set up this server" (see SetupSpec). */
+  setup?: SetupSpec;
 }
 
 
@@ -193,17 +204,94 @@ export function placeholders(command: string): string[] {
   return Array.from(command.matchAll(PLACEHOLDER_RE)).map(m => m[1]);
 }
 
-function validateCommand(command: unknown, params: Record<string, ParamSpec> | null, where: string): Validated<string> {
+/** Programs that run their arguments (or the argument of a command flag) as code again. */
+const SHELLS = new Set(['sh', 'bash', 'dash', 'zsh', 'ksh', 'ash', 'mksh', 'busybox', 'powershell', 'pwsh', 'cmd']);
+/** Words that make everything after them code again, whatever flags follow. */
+const REPARSERS = new Set(['eval', 'invoke-expression', 'iex', 'ssh', 'watch', 'su', 'runuser', 'start-process']);
+/** A flag whose argument is a command string: `-c` (sh, su), `-Command` / `-EncodedCommand` (PowerShell), `/c` (cmd). */
+const COMMAND_FLAG_RE = /^(-c|-command|-encodedcommand|\/c|\/k)$/i;
+/** The command flags a shell may be given, including combined short flags (`-lc`, `-ec`) and PowerShell's abbreviations. */
+const SHELL_FLAG_RE = /^(-[a-z]*c|-com\w*|-e|-ec|-en\w*|\/c|\/k)$/i;
+
+/**
+ * Why the `{{name}}` placeholders of a command template are not safely placed, or null when they are. The template is
+ * read with shell quoting rules (POSIX: '...', "...", backslash; PowerShell: '...', "...", backtick, typographic quotes):
+ * a value is inserted as one quoted word, which is only safe where a word starts unquoted and where nothing runs the
+ * text again as code (`sh -c`, `bash -c`, `eval`, `powershell -Command`, `ssh`, ...).
+ */
+export function placeholderPlacementProblem(command: string, platform: 'linux' | 'windows', opts: { allowQuoted?: boolean } = {}): string | null {
+  const ps = platform === 'windows';
+  const starts = new Map<number, string>();
+  for (const m of Array.from(command.matchAll(PLACEHOLDER_RE))) starts.set(m.index ?? 0, m[0]);
+  if (starts.size === 0) return null;
+  const isSingle = (c: string) => c === "'" || (ps && '‘’‚‛'.includes(c));
+  const isDouble = (c: string) => c === '"' || (ps && '“”„'.includes(c));
+  const escape = ps ? '`' : '\\';
+
+  let quote: 'single' | 'double' | null = null;
+  let word = '';            // the literal text of the current word, quotes removed (for spotting flags and programs)
+  let inWord = false;       // the current word has started (it may be empty text, such as '')
+  let prevWord = '';
+  let reparse = false;      // everything from here on is run as code again
+  let shellSeen = false;    // the current simple command runs a shell
+  const endWord = () => {
+    if (inWord) {
+      const lower = word.toLowerCase();
+      const base = lower.replace(/^.*[\\/]/, '').replace(/\.exe$/, '');
+      if (REPARSERS.has(base)) reparse = true;
+      if (SHELLS.has(base)) shellSeen = true;
+      else if (shellSeen && SHELL_FLAG_RE.test(lower)) reparse = true;
+      prevWord = lower;
+    }
+    word = '';
+    inWord = false;
+  };
+
+  for (let i = 0; i < command.length; i++) {
+    const ph = starts.get(i);
+    if (ph) {
+      const name = ph.slice(2, -2);
+      const before = command[i - 1];
+      if (before === '\\' || before === '`' || before === '$') return `{{${name}}} must not follow "${before}"; put it on its own as a word`;
+      if (quote && !opts.allowQuoted) return `do not put {{${name}}} inside quotes; Bosun quotes parameter values itself`;
+      if (reparse) return `{{${name}}} is part of a command that is run again as code (sh -c, eval, powershell -Command, ssh, ...); a parameter cannot be used there`;
+      if (COMMAND_FLAG_RE.test(prevWord)) return `{{${name}}} must not be the argument of ${prevWord}`;
+      inWord = true;
+      word += '\u0000'; // a value: never a flag or program name the author wrote
+      i += ph.length - 1;
+      continue;
+    }
+    const c = command[i];
+    // An escape in front of a placeholder would swallow the opening quote of the value.
+    if (c === escape && quote !== 'single' && starts.has(i + 1)) return `{{${(starts.get(i + 1) as string).slice(2, -2)}}} must not follow "${c}"; put it on its own as a word`;
+    if (quote === 'single') {
+      if (isSingle(c)) quote = null; else word += c;
+      continue;
+    }
+    if (quote === 'double') {
+      if (c === escape) { word += command[i + 1] ?? ''; i++; continue; }
+      if (isDouble(c)) quote = null; else word += c;
+      continue;
+    }
+    if (c === escape) { inWord = true; word += command[i + 1] ?? ''; i++; continue; }
+    if (isSingle(c)) { quote = 'single'; inWord = true; continue; }
+    if (isDouble(c)) { quote = 'double'; inWord = true; continue; }
+    if (/\s/.test(c)) { endWord(); continue; }
+    if (';&|()<>'.includes(c)) { endWord(); prevWord = ''; shellSeen = false; continue; }
+    inWord = true;
+    word += c;
+  }
+  return null;
+}
+
+function validateCommand(command: unknown, params: Record<string, ParamSpec> | null, where: string, platform: 'linux' | 'windows' = 'linux'): Validated<string> {
   if (typeof command !== 'string' || !command.trim() || command.length > MAX_COMMAND_LENGTH) return fail(`${where}: a command is required (max ${MAX_COMMAND_LENGTH} characters)`);
   if (params === null) return { ok: true, value: command };
-  for (const m of command.matchAll(PLACEHOLDER_RE)) {
+  for (const m of Array.from(command.matchAll(PLACEHOLDER_RE))) {
     if (!(m[1] in params)) return fail(`${where}: the command uses {{${m[1]}}} but no parameter "${m[1]}" is declared`);
-    const before = command[(m.index ?? 0) - 1];
-    const after = command[(m.index ?? 0) + m[0].length];
-    if (before === "'" || before === '"' || after === "'" || after === '"') {
-      return fail(`${where}: do not put quotes around {{${m[1]}}}; Bosun quotes parameter values itself`);
-    }
   }
+  const problem = placeholderPlacementProblem(command, platform);
+  if (problem) return fail(`${where}: ${problem}`);
   return { ok: true, value: command };
 }
 
@@ -257,7 +345,9 @@ function validateData(raw: unknown, ownPerms: ReadonlySet<string>, v2?: { script
   if (!map.ok) return map;
   const extras = dataExtras(raw);
   if (!extras.ok) return extras;
-  const base = { ...(path.value ? { path: path.value } : {}), ...(map.value ? { map: map.value } : {}), permission: perm, ...extras.value };
+  const res = validateResourceFields(raw.resources, 'data');
+  if (!res.ok) return fail(res.error);
+  const base = { ...(path.value ? { path: path.value } : {}), ...(map.value ? { map: map.value } : {}), permission: perm, ...extras.value, ...(res.value ? { resources: res.value } : {}) };
   if (raw.source === 'snapshot') {
     if (typeof raw.section !== 'string' || !(SNAPSHOT_SECTIONS as readonly string[]).includes(raw.section)) {
       return fail(`data.section must be one of: ${SNAPSHOT_SECTIONS.join(', ')}`);
@@ -298,7 +388,8 @@ function validateData(raw: unknown, ownPerms: ReadonlySet<string>, v2?: { script
     if (cacheSec === null || timeoutSec === null || initialDelaySec === null) return fail('data.cacheSec must be 5-86400, data.timeoutSec 1-900 and data.initialDelaySec 0-3600');
     let cacheSecFrom: string | undefined;
     if (raw.cacheSecFrom !== undefined) {
-      // The interval can be an instance setting (seconds), clamped to 5..cacheSec.
+      // The interval can be an instance setting (seconds), clamped by the poller to 5..86400 (the range of cacheSec);
+      // cacheSec is the interval when the setting is missing or not a positive number.
       if (typeof raw.cacheSecFrom !== 'string' || !raw.cacheSecFrom.startsWith('config.') || !FIELD_RE.test(raw.cacheSecFrom)) return fail('data.cacheSecFrom must be an instance setting such as "config.interval"');
       cacheSecFrom = raw.cacheSecFrom;
     }
@@ -316,7 +407,7 @@ function validateData(raw: unknown, ownPerms: ReadonlySet<string>, v2?: { script
     if (!command.ok) return command;
     let windowsCommand: string | undefined;
     if (raw.windowsCommand !== undefined) {
-      const w = validateCommand(raw.windowsCommand, null, 'data.windowsCommand');
+      const w = validateCommand(raw.windowsCommand, null, 'data.windowsCommand', 'windows');
       if (!w.ok) return w;
       windowsCommand = w.value;
     }
@@ -393,6 +484,8 @@ function validateAction(raw: unknown, ownPerms: ReadonlySet<string>, v2?: { scri
     try { new RegExp(t.refPattern); } catch { return fail(`${where}: "terminal.refPattern" is not a valid regular expression`); }
     if (typeof t.command !== 'string' || t.command.length < 1 || t.command.length > 500 || /[\u0000-\u001f]/.test(t.command)) return fail(`${where}: "terminal.command" must be one line of up to 500 characters`);
     if ((t.command.match(/\{\{ref\}\}/g) ?? []).length !== 1 || t.command.replace('{{ref}}', '').includes('{{')) return fail(`${where}: "terminal.command" must contain {{ref}} exactly once and no other placeholder`);
+    const tp = placeholderPlacementProblem(t.command, 'linux', { allowQuoted: true });
+    if (tp) return fail(`${where}: "terminal.command": ${tp}`);
     let check: string | undefined;
     if (t.check !== undefined) {
       if (!v2) return fail(`${where}: "terminal.check" needs spec version 2`);
@@ -409,10 +502,13 @@ function validateAction(raw: unknown, ownPerms: ReadonlySet<string>, v2?: { scri
       if (!c.ok) return c;
       when = c.value;
     }
+    const ttarget = validateTarget(raw.target, where, ['ref']);
+    if (!ttarget.ok) return fail(ttarget.error);
     return {
       ok: true,
       value: {
         id, label, ...(description ? { description } : {}), ...(raw.icon ? { icon: raw.icon as ActionSpec['icon'] } : {}), permission: raw.permission,
+        ...(ttarget.value ? { target: ttarget.value } : {}),
         kind: 'terminal', terminal: { ref: t.ref, refPattern: t.refPattern, command: t.command, ...(check ? { check } : {}) }, as: 'service', command: '', params: {}, timeoutSec: 30,
         ...(when ? { when } : {}), result: 'none', after: 'none',
       },
@@ -449,12 +545,15 @@ function validateAction(raw: unknown, ownPerms: ReadonlySet<string>, v2?: { scri
     if (!stail.ok) return stail;
     if (raw.job !== undefined && typeof raw.job !== 'boolean') return fail(`${where}: "job" must be true or false`);
     if (raw.stores !== undefined && raw.stores !== 'data') return fail(`${where}: "stores" must be "data" or left out`);
+    const starget = validateTarget(raw.target, where, Object.keys(sparams.value));
+    if (!starget.ok) return fail(starget.error);
     return {
       ok: true,
       value: {
         id, label, ...(description ? { description } : {}), ...(raw.icon ? { icon: raw.icon as ActionSpec['icon'] } : {}), permission: raw.permission,
         kind: 'script', as: v2.scripts[variants.value[0].script].as, command: '', params: sparams.value, timeoutSec: 30,
         variants: variants.value, ...(raw.job === true ? { job: true } : {}), ...(raw.stores === 'data' ? { stores: 'data' as const } : {}), ...stail.value,
+        ...(starget.value ? { target: starget.value } : {}),
       },
     };
   }
@@ -468,7 +567,7 @@ function validateAction(raw: unknown, ownPerms: ReadonlySet<string>, v2?: { scri
   if (!command.ok) return command;
   let windowsCommand: string | undefined;
   if (raw.windowsCommand !== undefined) {
-    const w = validateCommand(raw.windowsCommand, params.value, `${where} windowsCommand`);
+    const w = validateCommand(raw.windowsCommand, params.value, `${where} windowsCommand`, 'windows');
     if (!w.ok) return w;
     windowsCommand = w.value;
   }
@@ -476,11 +575,14 @@ function validateAction(raw: unknown, ownPerms: ReadonlySet<string>, v2?: { scri
   if (timeoutSec === null) return fail(`${where}: timeoutSec must be 1-300`);
   const tail = actionTail(raw, where);
   if (!tail.ok) return tail;
+  const ctarget = validateTarget(raw.target, where, Object.keys(params.value));
+  if (!ctarget.ok) return fail(ctarget.error);
   return {
     ok: true,
     value: {
       id, label, ...(description ? { description } : {}), ...(raw.icon ? { icon: raw.icon as ActionSpec['icon'] } : {}), permission: raw.permission, kind: 'command', as: raw.as,
       command: command.value, ...(windowsCommand ? { windowsCommand } : {}), params: params.value, timeoutSec, ...tail.value,
+      ...(ctarget.value ? { target: ctarget.value } : {}),
     },
   };
 }
@@ -721,6 +823,20 @@ export function validateWidgetSpec(raw: unknown, ownPermissions: readonly string
   for (const a of actions) if (a.kind === 'screen' && !(a.screen! in screens.value)) return fail(`action "${a.id}": the screen "${a.screen}" is not declared`);
   const menu = v2on ? validateMenu(raw.menu, screens.value, own) : { ok: true as const, value: [] as MenuEntry[] };
   if (!menu.ok) return menu;
+  let stacks: StacksSpec | undefined;
+  if (raw.stacks !== undefined) {
+    if (!v2on) return fail('"stacks" needs spec version 2');
+    const s = validateStacks(raw.stacks, actions, datasets.value);
+    if (!s.ok) return s;
+    stacks = s.value;
+  }
+  let setup: SetupSpec | undefined;
+  if (raw.setup !== undefined) {
+    if (!v2on) return fail('"setup" needs spec version 2');
+    const s = validateSetup(raw.setup, actions, datasets.value);
+    if (!s.ok) return s;
+    setup = s.value;
+  }
   let metrics: MetricSpec[] | undefined;
   if (raw.metrics !== undefined) {
     const m = validateMetrics(raw.metrics, packageId);
@@ -737,6 +853,83 @@ export function validateWidgetSpec(raw: unknown, ownPermissions: readonly string
       ...(Object.keys(datasets.value).length ? { datasets: datasets.value } : {}),
       ...(Object.keys(screens.value).length ? { screens: screens.value } : {}),
       ...(menu.value.length ? { menu: menu.value } : {}),
+      ...(stacks ? { stacks } : {}),
+      ...(setup ? { setup } : {}),
+    },
+  };
+}
+
+/**
+ * A package that manages Compose stacks says how, so Bosun can import stacks that another tool (Portainer) created without
+ * knowing the package: `list` (a dataset of the host's stacks with `name` and `source`, where "external" means not this
+ * package's), `deploy` / `deployPrivileged` (actions taking name, source, yaml, env, repo, branch, file, pull, override),
+ * `guard` (an action taking `name` that restarts the stack from its stored files once something else has stopped it),
+ * `export` (a dataset taking `name` that writes one container as a compose file) and `fields` (the data row fields naming a
+ * container's id, name, state, project and service).
+ */
+export interface StacksSpec {
+  list: string; deploy: string; deployPrivileged?: string; guard: string; export?: string;
+  /** An action taking name, service, image and as: pull image, tag it as s and re-create that service (self-update). */
+  retag?: string;
+  /**
+   * Deploy actions (same parameters as deploy / deployPrivileged) that store the stack and start it from a job on the host after
+   * the action has answered. With them, a node's own stack (the Bosun that asks) can be imported on that same node.
+   */
+  deployLater?: string;
+  deployPrivilegedLater?: string;
+  fields: { id: string; name: string; state: string; project: string; service: string };
+}
+
+/**
+ * Software a widget can install on a host ("Set up this server" on the server's page): `detect` is a dataset answering one
+ * object `{ installed: boolean, running?, version?, supported?, system?, note? }`, `install` a runnable action without
+ * parameters (usually a job). Core lists every installed widget's setup for a server; it never knows what is installed.
+ */
+export interface SetupSpec { label: string; description?: string; detect: string; install: string }
+
+function validateSetup(raw: unknown, actions: ActionSpec[], datasets: Record<string, DatasetSpec>): Validated<SetupSpec> {
+  if (!isObj(raw)) return fail('"setup" must be an object');
+  if (typeof raw.label !== 'string' || !raw.label.trim() || raw.label.length > 60) return fail('setup.label must be 1-60 characters');
+  if (raw.description !== undefined && (typeof raw.description !== 'string' || raw.description.length > 300)) return fail('setup.description must be at most 300 characters');
+  if (typeof raw.detect !== 'string' || !(raw.detect in datasets)) return fail('setup.detect must name one of the widget\'s datasets');
+  const a = actions.find(x => x.id === raw.install);
+  if (!a || (a.kind !== 'script' && a.kind !== 'command')) return fail('setup.install must name one of the widget\'s runnable actions');
+  if (a.params && Object.values(a.params).some(p => p.default === undefined && !p.from)) return fail('setup.install must be an action that needs no parameters');
+  return { ok: true, value: { label: raw.label.trim(), ...(raw.description ? { description: String(raw.description) } : {}), detect: raw.detect, install: String(raw.install) } };
+}
+
+function validateStacks(raw: unknown, actions: ActionSpec[], datasets: Record<string, DatasetSpec>): Validated<StacksSpec> {
+  if (!isObj(raw)) return fail('"stacks" must be an object');
+  const action = (k: string, optional = false): Validated<string | undefined> => {
+    const v = raw[k];
+    if (v === undefined && optional) return { ok: true, value: undefined };
+    if (typeof v !== 'string' || !actions.some(a => a.id === v && (a.kind === 'script' || a.kind === 'command'))) return fail(`stacks.${k} must name one of the widget's runnable actions`);
+    return { ok: true, value: v };
+  };
+  const dataset = (k: string, optional = false): Validated<string | undefined> => {
+    const v = raw[k];
+    if (v === undefined && optional) return { ok: true, value: undefined };
+    if (typeof v !== 'string' || !(v in datasets)) return fail(`stacks.${k} must name one of the widget's datasets`);
+    return { ok: true, value: v };
+  };
+  const list = dataset('list'); if (!list.ok) return list;
+  const deploy = action('deploy'); if (!deploy.ok) return deploy;
+  const priv = action('deployPrivileged', true); if (!priv.ok) return priv;
+  const guard = action('guard'); if (!guard.ok) return guard;
+  const exp = dataset('export', true); if (!exp.ok) return exp;
+  const retag = action('retag', true); if (!retag.ok) return retag;
+  const later = action('deployLater', true); if (!later.ok) return later;
+  const privLater = action('deployPrivilegedLater', true); if (!privLater.ok) return privLater;
+  const f = raw.fields;
+  if (!isObj(f) || !['id', 'name', 'state', 'project', 'service'].every(k => typeof f[k] === 'string' && FIELD_RE.test(f[k] as string))) {
+    return fail('stacks.fields must name the row fields id, name, state, project and service');
+  }
+  return {
+    ok: true,
+    value: {
+      list: list.value!, deploy: deploy.value!, ...(priv.value ? { deployPrivileged: priv.value } : {}), guard: guard.value!, ...(exp.value ? { export: exp.value } : {}), ...(retag.value ? { retag: retag.value } : {}),
+      ...(later.value ? { deployLater: later.value } : {}), ...(privLater.value ? { deployPrivilegedLater: privLater.value } : {}),
+      fields: { id: String(f.id), name: String(f.name), state: String(f.state), project: String(f.project), service: String(f.service) },
     },
   };
 }

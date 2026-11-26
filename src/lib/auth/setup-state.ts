@@ -2,6 +2,8 @@ import { rqlite } from '@/lib/db/rqlite-client';
 import { getConfig } from '@/lib/db/migrations';
 import { readClusterFile, writeClusterFile } from '@/lib/cluster/config';
 
+const JOIN_MARKER_TTL_MS = 24 * 60 * 60 * 1000;
+
 /**
  * Is a join started from the setup page still unfinished? True from the moment
  * the join is submitted until this node can see the cluster's data (more than
@@ -11,7 +13,13 @@ import { readClusterFile, writeClusterFile } from '@/lib/cluster/config';
  * join is retried or cancelled.
  */
 export async function joinStalled(): Promise<boolean> {
-  if (!readClusterFile().join_started_at) return false;
+  const started = readClusterFile().join_started_at;
+  if (!started) return false;
+  // The marker lets an unauthenticated page wipe or re-join this node, so it never lasts forever: the poller clears
+  // it once the join has worked, and after a day it no longer counts (a join that is still stuck by then needs
+  // Settings > Cluster or the README's recovery steps).
+  const age = Date.now() - Date.parse(String(started));
+  if (!Number.isFinite(age) || age > JOIN_MARKER_TTL_MS) return false;
   try {
     if (await rqlite.isReady()) {
       const users = Number((await rqlite.query('SELECT COUNT(*) FROM users')).values?.[0]?.[0] || 0);

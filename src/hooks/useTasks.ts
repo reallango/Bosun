@@ -21,6 +21,8 @@ export interface Task {
   finishedAt: number | null;
   screenId: string | null;
   cancelRequested: boolean;
+  /** Who started it (a person's name or "<key> (API key)"); null when Bosun did. */
+  startedBy: string | null;
 }
 
 const SEEN_KEY = 'bosun.tasks.seen';

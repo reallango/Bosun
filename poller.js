@@ -41,7 +41,7 @@ const { SHELL_VERIFY_COMMAND, parseShellVerification } = require('./src/lib/ssh/
 const { WINDOWS_SHELL_VERIFY_COMMAND, parseWindowsShellVerification } = require('./src/lib/ssh/windows-shell-account');
 
 const RQLITE_HOST = process.env.RQLITE_HOST || '127.0.0.1:4001';
-const { getMasterKey } = require('./src/lib/secrets');
+const { getMasterKey, rqliteAuthHeaders } = require('./src/lib/secrets');
 const HEALTH_PORT = parseInt(process.env.POLLER_HEALTH_PORT, 10) || 3003;
 const MAX_PARALLEL = parseInt(process.env.POLLER_MAX_PARALLEL, 10) || 8;
 const TICK_MS = 1000;
@@ -74,7 +74,7 @@ const warn = (...a) => console.warn('[Poller]', ...a);
 async function rq(path, body, timeoutMs = 15000) {
   const res = await fetch(`http://${RQLITE_HOST}${path}`, {
     method: body ? 'POST' : 'GET',
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    headers: body ? { ...rqliteAuthHeaders(), 'Content-Type': 'application/json' } : rqliteAuthHeaders(),
     body: body ? JSON.stringify(body) : undefined,
     signal: AbortSignal.timeout(timeoutMs),
   });
@@ -112,6 +112,23 @@ async function schemaReady() {
     return Number(rows[0] && rows[0].v) >= 1;
   } catch {
     return false;
+  }
+}
+
+/**
+ * A join started from the setup page leaves a marker (cluster.json join_started_at) that lets the unauthenticated
+ * setup page retry or cancel it. Clear it here, on every node, as soon as the join has visibly worked (more than one
+ * voter and the cluster's users are readable), so it never outlives the join just because nobody opened the UI.
+ */
+async function clearFinishedJoin() {
+  if (!clusterConfig.readClusterFile().join_started_at) return;
+  const users = await query('SELECT COUNT(*) AS n FROM users');
+  if (!(Number(users[0] && users[0].n) > 0)) return;
+  const json = await rq('/nodes?nonvoters&ver=2&timeout=2s');
+  const list = Array.isArray(json && json.nodes) ? json.nodes : Object.values(json || {});
+  if (list.filter(n => n && n.voter !== false).length > 1) {
+    clusterConfig.writeClusterFile({ join_started_at: null });
+    log('the cluster join has completed; cleared the setup-page join marker');
   }
 }
 
@@ -174,6 +191,8 @@ class HostAgent {
   }
 
   close() {
+    // A connect still in flight sees the new generation and drops its client instead of keeping it.
+    this.generation = (this.generation || 0) + 1;
     if (this.client) {
       try { this.client.end(); } catch { /* ignore */ }
     }
@@ -189,6 +208,7 @@ class HostAgent {
   async ensureConnected() {
     if (this.client) return this.client;
     if (this.connecting) return this.connecting;
+    const gen = this.generation || 0;
     this.connecting = (async () => {
       if (!this.row.ssh_key_id) throw new Error('no SSH key assigned');
       const keys = await query('SELECT private_key_enc, passphrase_enc FROM ssh_keys WHERE id = ?', [this.row.ssh_key_id]);
@@ -208,6 +228,10 @@ class HostAgent {
             .catch(err => warn(`${this.row.name}: storing host key failed:`, err.message));
         },
       });
+      if ((this.generation || 0) !== gen) {
+        try { client.end(); } catch { /* ignore */ }
+        throw new Error('closed while connecting (settings changed or no longer the leader)');
+      }
       client.on('close', () => {
         if (this.client === client) {
           log(`${this.row.name}: connection closed`);
@@ -251,6 +275,9 @@ class HostAgent {
   async ensureShellClient() {
     if (!this.row.shell_user || !this.row.shell_key_id) throw new Error('this server has no non-admin account (re-provision it)');
     if (!this.shellClient) {
+      // The main connection pins the host key first; never connect this account to an unpinned host.
+      if (!this.row.host_key_fingerprint) throw new Error('the host key is not pinned yet');
+      const gen = this.generation || 0;
       const keys = await query('SELECT private_key_enc, passphrase_enc FROM ssh_keys WHERE id = ?', [this.row.shell_key_id]);
       if (!keys.length) throw new Error('the non-admin account key was not found');
       const client = await ssh.connect({
@@ -259,8 +286,12 @@ class HostAgent {
         username: this.row.shell_user,
         privateKey: ssh.decryptSecret(keys[0].private_key_enc, getMasterKey()),
         passphrase: keys[0].passphrase_enc ? ssh.decryptSecret(keys[0].passphrase_enc, getMasterKey()) : undefined,
-        expectedFingerprint: this.row.host_key_fingerprint || undefined,
+        expectedFingerprint: this.row.host_key_fingerprint,
       });
+      if ((this.generation || 0) !== gen) {
+        try { client.end(); } catch { /* ignore */ }
+        throw new Error('closed while connecting');
+      }
       client.on('close', () => { if (this.shellClient === client) { this.shellClient = null; this.shellVerifiedAt = 0; } });
       client.on('error', (err) => warn(`${this.row.name}: non-admin connection error:`, err.message));
       this.shellClient = client;
@@ -368,6 +399,7 @@ class HostAgent {
     this.busy = true;
     const started = Date.now();
     const lib = this.platform === 'windows' ? windows : linux;
+    const gen0 = this.generation || 0;
     try {
       const client = await this.ensureConnected();
       // First poll after (re)connecting collects everything so widgets fill in.
@@ -393,10 +425,18 @@ class HostAgent {
         this.caps = caps;
         stmts.push({ sql: 'UPDATE servers SET capabilities = ? WHERE id = ?', params: [JSON.stringify(caps), this.id] });
       }
+      // Leadership lost (or the agent was closed) during this poll: the new leader writes and alerts from now on.
+      if (!leader || (this.generation || 0) !== gen0) return;
       const fired = alerts.evaluateRules(alertRules, { id: this.id, name: this.row.name }, snap.metrics, Date.now(), alertLastFired);
       const alertMailer = fired.length ? await getAlertMailer() : null;
       stmts.push(...alerts.alertStatements(fired, { id: this.id }, Date.now(), { email: !!alertMailer }));
-      await executeBatch(stmts);
+      try {
+        await executeBatch(stmts);
+      } catch (err) {
+        // Not recorded, so not fired: let these alerts fire again on the next poll instead of being silenced.
+        for (const f of fired) alertLastFired.delete(`${f.rule.id}|${this.id}`);
+        throw err;
+      }
       if (fired.length) {
         log(`${this.row.name}: ${fired.length} alert(s) fired`);
         alerts.deliverWebhooks(fired, alertChannels).catch(err => warn('alert delivery failed:', err.message));
@@ -422,6 +462,7 @@ class HostAgent {
       this.tierLast = {};
       this.polls = 0;
       const offline = this.failures >= 2 || err.code === 'HOST_KEY_MISMATCH' ? 0 : 1;
+      if (!leader) return; // only the leader records host status
       executeBatch([{
         sql: 'UPDATE servers SET is_online = CASE WHEN ? = 0 THEN 0 ELSE is_online END, last_error = ? WHERE id = ?',
         params: [offline, String(err.message).slice(0, 500), this.id],
@@ -446,6 +487,7 @@ class HostAgent {
 const agents = new Map();
 let leader = false;
 let lastLeaderCheck = 0;
+let lastJoinCheck = 0;
 let lastHeartbeat = 0;
 let lastServerSync = 0;
 let lastRetention = 0;
@@ -529,8 +571,22 @@ async function tick() {
         if (!leader) {
           for (const a of agents.values()) a.close();
           agents.clear();
+        } else {
+          // Per-host alert cooldowns as the previous poller left them (see alerts.seedLastFired).
+          try {
+            alerts.seedLastFired(await query(alerts.LAST_FIRED_SQL), alertLastFired);
+          } catch (err) {
+            warn('alert cooldown seed failed (using the rules\' last trigger time):', err.message);
+            alertLastFired.clear();
+            alertLastFired.seeded = false;
+          }
         }
       }
+    }
+    // Every node: drop a finished join's marker (see clearFinishedJoin).
+    if (now - lastJoinCheck > 20000) {
+      lastJoinCheck = now;
+      await clearFinishedJoin().catch(() => undefined);
     }
     if (!leader) return;
 
@@ -569,6 +625,9 @@ async function tick() {
       const cfg = await readRetention();
       const defs = await query('SELECT pattern, raw_hours, rollup_5m_days, rollup_1h_days FROM metric_definitions').catch(() => []);
       await executeBatch(store.retentionStatements(cfg, now, defs)).catch(err => warn('retention failed:', err.message));
+      // Audit log, notifications and expired sessions, per the cleanup.* settings.
+      const cleanupRows = await query("SELECT key, value FROM app_config WHERE key LIKE 'cleanup.%'").catch(() => null);
+      if (cleanupRows) await executeBatch(store.cleanupStatements(store.cleanupConfig(cleanupRows))).catch(err => warn('cleanup failed:', err.message));
     }
   } catch (err) {
     warn('tick failed:', err.message);

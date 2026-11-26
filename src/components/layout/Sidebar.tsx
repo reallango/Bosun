@@ -28,8 +28,7 @@ import {
   UserCog,
   Users,
   X,
-  type LucideIcon,
-} from 'lucide-react';
+  type LucideIcon, Download } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { readJson } from '@/lib/api/readJson';
@@ -75,10 +74,12 @@ const SETTINGS_NAV: NavItem[] = [
   { href: '/settings/users', label: 'Users', icon: Users },
   { href: '/settings/permissions', label: 'Permissions', icon: ShieldCheck },
   { href: '/settings/api-access', label: 'API Access', icon: KeySquare },
+  { href: '/settings/access-requests', label: 'Access Requests', icon: KeyRound },
   { href: '/settings/cluster', label: 'Cluster', icon: Network },
   { href: '/settings/database', label: 'Database', icon: Database },
   { href: '/settings/alerts', label: 'Alerts', icon: Bell },
   { href: '/settings/widgets', label: 'Widgets', icon: Package },
+  { href: '/settings/updates', label: 'Updates', icon: Download },
   { href: '/settings/audit-log', label: 'Audit Log', icon: FileClock },
   { href: '/settings/account', label: 'My Account', icon: UserCog },
 ];

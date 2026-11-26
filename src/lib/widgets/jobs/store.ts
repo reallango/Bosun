@@ -6,6 +6,7 @@
 import crypto from 'crypto';
 import os from 'os';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
+import { isSecretName } from '@/lib/widgets/runtime/layout';
 
 export type JobStatus = 'running' | 'success' | 'error' | 'cancelled' | 'lost';
 
@@ -59,9 +60,21 @@ export const nodeName = (): string => process.env.BOSUN_NODE_ID || os.hostname()
 /** How much of a job's output is kept. */
 export const LOG_KEEP = 64 * 1024;
 
-/** Parameters as they are recorded with a job: text parameters (settings, a compose file) are not copied there, only their size. */
-function redactParams(params: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(params).map(([k, v]) => [k, typeof v === 'string' && (v.length > 200 || v.includes('\n')) ? `(${v.length} characters)` : v]));
+/**
+ * Parameters as they are recorded with a job or in the audit log: text parameters (settings, a compose file)
+ * are not copied, only their size; a parameter whose name looks secret, or a NAME=value whose name does, is masked.
+ */
+export function redactParams(params: unknown): Record<string, unknown> {
+  if (!params || typeof params !== 'object' || Array.isArray(params)) return {};
+  const one = (k: string, v: unknown): unknown => {
+    if (typeof v !== 'string') return Array.isArray(v) ? v.map(x => one(k, x)) : v;
+    if (v.length > 200 || v.includes('\n')) return `(${v.length} characters)`;
+    if (isSecretName(k) && v) return '***';
+    const eq = v.indexOf('=');
+    if (eq > 0 && isSecretName(v.slice(0, eq))) return `${v.slice(0, eq)}=***`;
+    return v;
+  };
+  return Object.fromEntries(Object.entries(params as Record<string, unknown>).map(([k, v]) => [k, one(k, v)]));
 }
 
 /** The newest jobs, any server, for the notification area. */

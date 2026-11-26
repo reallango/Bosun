@@ -71,6 +71,45 @@ describe('validateWidgetSpec', () => {
     expect(placeholders("docker ps --format '{{json .}}' {{name}}")).toEqual(['name']);
   });
 
+  it('refuses placeholders inside quoted regions or in text that is run again as code', () => {
+    const cmd = (c: string) => bad(s => { s.actions[1].command = c; }).ok;
+    const win = (c: string) => bad(s => { s.actions[1].windowsCommand = c; }).ok;
+    // Inside quotes, even when not right next to the quote.
+    expect(cmd("sh -c 'echo {{name}}'")).toBe(false);
+    expect(cmd('echo "id: {{name}}"')).toBe(false);
+    expect(cmd("echo 'a {{name}} b'")).toBe(false);
+    expect(cmd('echo "$(docker inspect {{name}})"')).toBe(false);
+    // Escaped or glued to $ / a backslash.
+    expect(cmd('echo \\{{name}}')).toBe(false);
+    expect(cmd('echo ${{name}}')).toBe(false);
+    // The argument of -c / -Command / -EncodedCommand, or anything after a shell given a command string, eval or ssh.
+    expect(cmd('sh -c {{name}}')).toBe(false);
+    expect(cmd('bash -lc {{name}}')).toBe(false);
+    expect(cmd('/bin/sh -c "docker restart" {{name}}')).toBe(false);
+    expect(cmd('su root -c {{name}}')).toBe(false);
+    expect(cmd('eval docker restart {{name}}')).toBe(false);
+    expect(cmd('ssh other-host docker restart {{name}}')).toBe(false);
+    expect(win('powershell -Command {{name}}')).toBe(false);
+    expect(win('pwsh.exe -NoProfile -command Restart-Service {{name}}')).toBe(false);
+    expect(win('powershell -EncodedCommand {{name}}')).toBe(false);
+    expect(win("Write-Output 'x {{name}}'")).toBe(false);
+    expect(win('Write-Output ‘x {{name}}’')).toBe(false);
+    expect(win('Invoke-Expression {{name}}')).toBe(false);
+    // Fine: a bare word, a word with text glued on, quoted text elsewhere, a shell given a script after the value.
+    expect(cmd('docker restart {{name}}')).toBe(true);
+    expect(cmd("docker logs --since=10m {{name}} 2>&1 | grep -v 'x y'")).toBe(true);
+    expect(cmd('docker restart --name={{name}}')).toBe(true);
+    expect(cmd("docker exec {{name}} sh -c 'echo hi'")).toBe(true);
+    expect(cmd("echo 'it''s' {{name}}")).toBe(true);
+    expect(win('Restart-Service -Name {{name}}')).toBe(true);
+  });
+
+  it('checks where the {{ref}} of a terminal command is used', () => {
+    const t = (terminal: any) => bad(s => { s.actions[1] = { id: 'restart', label: 'Shell', permission: 'dk.control', terminal: { ref: 'name', refPattern: '^[a-z]+$', ...terminal } }; s.view.row.actions = ['logs']; });
+    expect(t({ command: "docker exec -it {{ref}} sh -c 'exec bash'" }).ok).toBe(true);
+    expect(t({ command: "docker exec -it x sh -c 'cd /{{ref}}; exec bash'" }).ok).toBe(false);
+  });
+
   it('requires strict parameter declarations', () => {
     expect(bad(s => { s.actions[1].params.name = { type: 'string' }; }).ok).toBe(false);                       // no pattern or values
     expect(bad(s => { s.actions[1].params.name = { type: 'string', pattern: '[a-z]+' }; }).ok).toBe(false);    // not anchored
@@ -149,6 +188,9 @@ describe('command rendering', () => {
   it('quotes values as a single word', () => {
     expect(quoteSh("a'b")).toBe(`'a'\\''b'`);
     expect(quotePs("a'b")).toBe("'a''b'");
+    // PowerShell treats the typographic single quotes as quotes too: each must be doubled, or it would end the string.
+    expect(quotePs('a\u2018b\u2019c\u201Ad\u201Be')).toBe("'a\u2018\u2018b\u2019\u2019c\u201A\u201Ad\u201B\u201Be'");
+    expect(quotePs('x\u2019; Remove-Item C:\\ -Recurse; \u2019')).toBe("'x\u2019\u2019; Remove-Item C:\\ -Recurse; \u2019\u2019'");
     const v = validateParams(action, { name: 'web-1' });
     expect(renderCommand(action.command, v, 'linux')).toBe("docker restart 'web-1'");
   });
@@ -365,5 +407,60 @@ describe('chart views', () => {
     expect(validateWidgetSpec(chart({ metrics: [] }), PERMS).ok).toBe(false);
     expect(validateWidgetSpec(chart({ metrics: ['Bad Name'] }), PERMS).ok).toBe(false);
     expect(validateWidgetSpec(chart(undefined), PERMS).ok).toBe(false);
+  });
+});
+
+describe('the stacks declaration (import from other tools)', () => {
+  it('must point at the widget\'s own runnable actions, datasets and row fields', async () => {
+    const fs = await import('fs');
+    const m = JSON.parse(fs.readFileSync('widgets/docker/manifest.json', 'utf8'));
+    const own = m.permissions.map((p: { id: string }) => p.id);
+    const spec = m.widgets[0].spec;
+    const ok = validateWidgetSpec(spec, own, m.id);
+    expect(ok.ok && ok.value.stacks?.deploy).toBeTruthy();
+    for (const [k, v] of [['deploy', 'nope'], ['guard', 'stack_edit'], ['list', 'nope'], ['export', 'nope']] as const) {
+      const bad = validateWidgetSpec({ ...spec, stacks: { ...spec.stacks, [k]: v } }, own, m.id);
+      expect(bad.ok, k).toBe(false);
+    }
+    expect(validateWidgetSpec({ ...spec, stacks: { ...spec.stacks, fields: { id: 'ID' } } }, own, m.id).ok).toBe(false);
+  });
+
+  it('setup names a detect dataset and an install action without required parameters', async () => {
+    const fs = await import('fs');
+    const m = JSON.parse(fs.readFileSync('widgets/docker/manifest.json', 'utf8'));
+    const own = m.permissions.map((p: { id: string }) => p.id);
+    const spec = m.widgets[0].spec;
+    const ok = validateWidgetSpec(spec, own, m.id);
+    expect(ok.ok && ok.value.setup).toMatchObject({ label: 'Docker Engine', detect: 'host_detect', install: 'docker_install' });
+    for (const bad of [{ ...spec.setup, detect: 'nope' }, { ...spec.setup, install: 'nope' }, { ...spec.setup, install: 'stack_deploy' }, { ...spec.setup, label: '' }, 'x']) {
+      expect(validateWidgetSpec({ ...spec, setup: bad }, own, m.id).ok, JSON.stringify(bad)).toBe(false);
+    }
+  });
+
+  it('deployLater and deployPrivilegedLater name runnable actions; without them nothing changes', async () => {
+    const fs = await import('fs');
+    const m = JSON.parse(fs.readFileSync('widgets/docker/manifest.json', 'utf8'));
+    const own = m.permissions.map((p: { id: string }) => p.id);
+    const spec = m.widgets[0].spec;
+    const ok = validateWidgetSpec(spec, own, m.id);
+    expect(ok.ok && ok.value.stacks).toMatchObject({ deployLater: 'stack_deploy_later', deployPrivilegedLater: 'stack_deploy_privileged_later' });
+    for (const v of ['nope', 3]) {
+      expect(validateWidgetSpec({ ...spec, stacks: { ...spec.stacks, deployLater: v } }, own, m.id).ok, String(v)).toBe(false);
+    }
+    // a widget without them: own stacks are imported from another node, as before
+    const { deployLater: _a, deployPrivilegedLater: _b, ...without } = spec.stacks;
+    const old = validateWidgetSpec({ ...spec, stacks: without }, own, m.id);
+    expect(old.ok && old.value.stacks?.deployLater).toBeUndefined();
+  });
+
+  it('every caller of the deploy script gets start from the action itself (Bosun does not fill in defaults)', async () => {
+    const fs = await import('fs');
+    const m = JSON.parse(fs.readFileSync('widgets/docker/manifest.json', 'utf8'));
+    const users = m.widgets[0].spec.actions.filter((a: { variants?: { script: string }[] }) => a.variants?.some(v => v.script === 'stack_deploy'));
+    expect(users.map((a: { id: string }) => a.id).sort()).toEqual(['stack_deploy', 'stack_deploy_later', 'stack_deploy_privileged', 'stack_deploy_privileged_later']);
+    for (const a of users) {
+      expect(a.params.start, a.id).toBeUndefined();
+      expect(a.variants[0].args.start, a.id).toBe(a.id.endsWith('_later') ? 'literal:later' : 'literal:now');
+    }
   });
 });

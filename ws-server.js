@@ -4,10 +4,11 @@ const http = require('http');
 const url = require('url');
 const WebSocket = require('ws');
 const crypto = require('crypto');
-const { Client } = require('ssh2');
+const sshHelpers = require('./src/lib/collect/ssh');
+const { clientIpFromHeaders } = require('./src/lib/net/client-ip');
 
 const PORT = process.env.WS_PORT || 3002;
-const { getAuthSecret } = require('./src/lib/secrets');
+const { getAuthSecret, rqliteAuthHeaders } = require('./src/lib/secrets');
 // Signing secret: env AUTH_SECRET, else the data-volume secrets file (re-read
 // when it changes, e.g. after this node joins a cluster).
 if (!getAuthSecret()) {
@@ -29,8 +30,51 @@ const sshSessions = new Map();
 // Heartbeat interval to prevent idle disconnects
 const HEARTBEAT_MS = Number(process.env.WS_HEARTBEAT_MS) || 30000;
 
-// Grace period for reattach (Gap 5)
-const GRACE_PERIOD_MS = Number(process.env.WS_GRACE_PERIOD_MS) || 30000;
+// How long an SSH session is kept with no browser attached, so a reload or a
+// dropped connection can reattach to it.
+const DETACHED_TTL_MS = Number(process.env.WS_DETACHED_TTL_MS) || 15 * 60 * 1000;
+
+/** End a session's SSH connection and forget it. */
+function destroySession(sessionId) {
+  const session = sshSessions.get(sessionId);
+  if (!session) return;
+  sshSessions.delete(sessionId);
+  if (session.detachTimer) clearTimeout(session.detachTimer);
+  session.detachTimer = null;
+  try { if (session.stream) session.stream.close(); } catch {}
+  try { if (session.client) session.client.end(); } catch {}
+  try { if (session.ws && session.ws.readyState === WebSocket.OPEN) session.ws.close(); } catch {}
+}
+
+/** Attach a browser to a session (cancels its detached timer). */
+function attachSocket(sessionId, session, ws) {
+  if (session.detachTimer) clearTimeout(session.detachTimer);
+  session.detachTimer = null;
+  // A previous browser still attached to this session is replaced.
+  if (session.ws && session.ws !== ws && session.ws.readyState === WebSocket.OPEN) {
+    try { session.ws.close(4004, 'Session opened elsewhere'); } catch {}
+  }
+  session.ws = ws;
+  session.lastActivity = Date.now();
+  ws.on('close', () => {
+    // Only the socket currently attached may detach the session (an older one closing late must not).
+    if (sshSessions.get(sessionId) !== session || session.ws !== ws) return;
+    console.log('[WS] Client disconnected: session=' + sessionId + ' (keeping SSH for ' + Math.round(DETACHED_TTL_MS / 1000) + 's)');
+    session.ws = null;
+    session.detachTimer = setTimeout(() => {
+      console.log('[WS] Detached session expired: ' + sessionId);
+      destroySession(sessionId);
+    }, DETACHED_TTL_MS);
+  });
+  ws.on('error', (err) => console.error('[WS] Error on session: ' + sessionId, err.message));
+}
+
+/** Send terminal output to whichever browser is attached now. */
+function sendToSession(session, data) {
+  if (session.ws && session.ws.readyState === WebSocket.OPEN) {
+    try { session.ws.send(data); } catch {}
+  }
+}
 
 // Rate limiting
 const rateLimitMap = new Map();
@@ -48,7 +92,7 @@ async function queryRqlite(sql, params = []) {
   try {
     const res = await fetch(`http://${RQLITE_HOST}/db/query`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...rqliteAuthHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify([[sql, ...params]]),
     });
     const json = await res.json();
@@ -66,7 +110,7 @@ async function auditLog(entry) {
   try {
     await fetch(`http://${RQLITE_HOST}/db/execute`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { ...rqliteAuthHeaders(), 'Content-Type': 'application/json' },
       body: JSON.stringify([[
         'INSERT INTO audit_log (id, user_id, server_id, action, category, details, status, ip_address, duration_ms) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
         crypto.randomUUID(), entry.userId || null, entry.serverId || null, entry.action, String(entry.action).split('.')[0],
@@ -85,39 +129,50 @@ async function auditLog(entry) {
 // health checks and OS detection keep using the service account via the
 // connection pool; only the interactive terminal uses the user's own account.
 // The password is supplied per-connection and never stored.
+//
+// The host key is checked before the password is sent: the server's pinned
+// fingerprint must match (pinned on first use, as for the service account).
 async function connectToServer(serverId, sshUser, sshPassword) {
-  const conn = new Client();
-  
-  // Get server details from rqlite (hostname/port/platform only)
-  const servers = await queryRqlite('SELECT id, hostname, ssh_port, platform FROM servers WHERE id = ?', [serverId]);
+  // Get server details from rqlite (hostname/port/platform/pinned host key)
+  const servers = await queryRqlite('SELECT id, hostname, ssh_port, platform, host_key_fingerprint FROM servers WHERE id = ?', [serverId]);
   if (!servers || servers.length === 0) {
     throw new Error('Server not found');
   }
-  
+
   const server = servers[0];
   const serverHostname = server[1];
   const sshPort = server[2] || 22;
   const platform = server[3] || 'linux';
-  
-  return new Promise((resolve, reject) => {
-    conn.connect({
-      host: serverHostname,
-      port: sshPort,
-      username: sshUser,
-      password: sshPassword,
-      readyTimeout: 10000,
-    });
-    
-    conn.on('ready', () => {
-      console.log('[WS] SSH connected to', serverHostname, 'as', sshUser);
-      resolve({ client: conn, platform });
-    });
-    
-    conn.on('error', (err) => {
-      console.error('[WS] SSH error:', err.message);
-      reject(err);
-    });
+  const pinned = server[4] || undefined;
+
+  const client = await sshHelpers.connect({
+    host: serverHostname,
+    port: sshPort,
+    username: sshUser,
+    password: sshPassword,
+    readyTimeout: 10000,
+    keepaliveInterval: 30000,
+    expectedFingerprint: pinned,
+    onNewFingerprint: (fp) => {
+      rqliteExecute('UPDATE servers SET host_key_fingerprint = ? WHERE id = ? AND host_key_fingerprint IS NULL', [fp, serverId]);
+    },
   });
+  client.on('error', (err) => console.error('[WS] SSH error:', err.message));
+  console.log('[WS] SSH connected to', serverHostname, 'as', sshUser);
+  return { client, platform };
+}
+
+// Run one write statement (best effort; never throws).
+async function rqliteExecute(sql, params = []) {
+  try {
+    await fetch(`http://${RQLITE_HOST}/db/execute`, {
+      method: 'POST',
+      headers: { ...rqliteAuthHeaders(), 'Content-Type': 'application/json' },
+      body: JSON.stringify([[sql, ...params]]),
+    });
+  } catch (err) {
+    console.error('[WS] rqlite write failed:', err.message);
+  }
 }
 
 // Health check
@@ -220,8 +275,13 @@ wss.on('connection', async (ws, req) => {
   const cmdToken = (parsedUrl.query.cmdToken || '').toString();
   const cmdLabel = (parsedUrl.query.cmdLabel || '').toString().trim();
 
-  // Get client IP (respect x-forwarded-for for Cloudflare)
-  const clientIP = req.headers['x-forwarded-for']?.split(',')[0] || req.socket.remoteAddress;
+  // Client IP: nginx's X-Bosun-Peer, and X-Forwarded-For only from a trusted proxy (src/lib/net/client-ip.js).
+  // The header is only believed from nginx on this machine.
+  const socketAddr = req.socket.remoteAddress || '';
+  const viaLocalNginx = /^(127\.|::1$|::ffff:127\.)/.test(socketAddr);
+  const clientIP = viaLocalNginx
+    ? clientIpFromHeaders((name) => req.headers[name], socketAddr)
+    : clientIpFromHeaders(() => undefined, socketAddr);
 
   // API terminals have their own handler and token type; nothing below is shared with them.
   if (parsedUrl.pathname === API_WS_PATH) {
@@ -281,88 +341,47 @@ wss.on('connection', async (ws, req) => {
   
   // ========== CHECK FOR EXISTING SESSION (REATTACH) ==========
   const existingSession = sshSessions.get(sessionId);
-  // A session can only be reattached by the same Bosun user, for the same
-  // server/terminal and SSH account; anything else starts a fresh session.
+  // Another user's session is never reattached or torn down from here.
+  if (existingSession && existingSession.ownerUserId !== payload.userId) {
+    ws.close(4003, 'Session belongs to someone else');
+    return;
+  }
+  // A session can only be reattached for the same server/terminal and SSH
+  // account; anything else starts a fresh session.
   const sameTarget = existingSession &&
-    existingSession.ownerUserId === payload.userId &&
     existingSession.serverId === serverId &&
     (existingSession.cmdLabel || '') === cmdLabel &&
     existingSession.username === sshUser;
-  if (existingSession && existingSession.stream && existingSession.authenticated && sameTarget) {
+  if (existingSession && existingSession.stream && sameTarget) {
     console.log('[WS] Reattaching to existing session: ' + sessionId);
+    attachSocket(sessionId, existingSession, ws);
 
-    // Cancel grace period timer (Gap 5)
-    if (existingSession.graceTimer) {
-      clearTimeout(existingSession.graceTimer);
-      existingSession.graceTimer = null;
-      console.log('[WS-Server] Grace period cancelled on reattach:', sessionId);
-    }
-
-    // Attach new WebSocket
-    existingSession.ws = ws;
-    existingSession.lastActivity = Date.now();
-
-    // Send session restored marker
     ws.send('\r\n\x1b[33m[Session restored]\x1b[0m\r\n');
-
     // Replay buffer so user sees previous output
-    for (const chunk of existingSession.buffer) {
-      ws.send(chunk);
-    }
+    for (const chunk of existingSession.buffer) ws.send(chunk);
 
-    // Set up input: WebSocket -> SSH stream
     ws.on('message', (msg) => {
+      if (existingSession.ws !== ws) return;
       try {
         const parsed = JSON.parse(msg.toString());
         // A reconnect may still send the auth frame; the session is already
         // authenticated, so drop it rather than typing it into the shell.
         if (parsed.type === 'auth') return;
-        if (parsed.type === 'resize' && existingSession.stream) {
+        if (parsed.type === 'resize') {
           existingSession.stream.setWindow(parsed.rows, parsed.cols);
           return;
         }
       } catch {}
-      // Raw input
-      if (existingSession.stream) {
-        existingSession.stream.write(msg.toString());
-        existingSession.lastActivity = Date.now();
-      }
+      existingSession.stream.write(msg.toString());
+      existingSession.lastActivity = Date.now();
     });
-
-    // Handle WebSocket disconnect (DON'T kill SSH) - Gap 5: grace period
-    ws.on('close', () => {
-      console.log('[WS-Server] Client disconnected, starting grace period for session:', sessionId);
-      const session = sshSessions.get(sessionId);
-      if (session) {
-        session.ws = null;
-        // Start grace period timer
-        session.graceTimer = setTimeout(() => {
-          console.log('[WS-Server] Grace period expired, destroying SSH session:', sessionId);
-          if (session.client) session.client.end();
-          if (session.stream) session.stream.close();
-          sshSessions.delete(sessionId);
-        }, GRACE_PERIOD_MS); // 30 seconds
-      }
-    });
-
-    ws.on('error', (err) => {
-      console.error('[WS] Error on reattached session: ' + sessionId, err.message);
-      const session = sshSessions.get(sessionId);
-      if (session) session.ws = null;
-    });
-
     return; // SKIP creating new SSH connection
   }
 
-  // An existing session for a *different* account can't be reused; tear it down
-  // so its SSH connection doesn't linger before the new one starts.
-  if (existingSession && !sameTarget) {
-    console.log('[WS] Discarding stale session for a different user/target: ' + sessionId);
-    if (existingSession.graceTimer) clearTimeout(existingSession.graceTimer);
-    if (existingSession.idleTimeout) clearTimeout(existingSession.idleTimeout);
-    if (existingSession.client) existingSession.client.end();
-    if (existingSession.stream) existingSession.stream.close();
-    sshSessions.delete(sessionId);
+  // The same user's session for another target (or one still connecting) is replaced.
+  if (existingSession) {
+    console.log('[WS] Replacing session for a different target: ' + sessionId);
+    destroySession(sessionId);
   }
 
   // A package terminal needs its signed command token (a reattach above needs none: the session already exists).
@@ -376,17 +395,33 @@ wss.on('connection', async (ws, req) => {
   }
 
   // ========== NEW SESSION ==========
-  let sshClient = null;
-  let sshStream = null;
   let ptyReady = false;
   let passwordResolver = null;
-  const outputBuffer = [];
   const earlyMessages = [];
+  // The session record exists from the start, so a browser that leaves while
+  // the SSH login is still in progress is noticed and the login is abandoned.
+  const session = {
+    client: null,
+    stream: null,
+    ws: null,
+    buffer: [],
+    createdAt: Date.now(),
+    lastActivity: Date.now(),
+    detachTimer: null,
+    username: sshUser,
+    serverId: serverId,
+    cmdLabel: cmdLabel,
+    ownerUserId: payload.userId,
+  };
+  sshSessions.set(sessionId, session);
+  attachSocket(sessionId, session, ws);
+  const abandoned = () => sshSessions.get(sessionId) !== session || session.ws === null;
 
   // Single input handler for the new session. Until the PTY is ready we buffer
   // browser input (and resolve the password frame); afterwards it goes straight
   // to the SSH stream. The password never travels in the URL.
   ws.on('message', (data) => {
+    if (session.ws !== ws) return;
     const msg = data.toString();
     let parsed = null;
     try { parsed = JSON.parse(msg); } catch {}
@@ -398,16 +433,17 @@ wss.on('connection', async (ws, req) => {
       return;
     }
 
-    if (ptyReady && sshStream) {
+    if (ptyReady && session.stream) {
       if (parsed && parsed.type === 'resize') {
-        sshStream.setWindow(parsed.rows, parsed.cols);
+        session.stream.setWindow(parsed.rows, parsed.cols);
       } else {
-        sshStream.write(msg);
+        session.stream.write(msg);
+        session.lastActivity = Date.now();
       }
       return;
     }
 
-    earlyMessages.push(msg);
+    if (earlyMessages.length < 200) earlyMessages.push(msg);
   });
 
   // Resolves once the client's password frame has been received.
@@ -423,35 +459,44 @@ wss.on('connection', async (ws, req) => {
       waitForPassword(),
       new Promise((resolve) => setTimeout(() => resolve(''), 15000)),
     ]);
+    if (abandoned()) { destroySession(sessionId); return; }
     if (!sshPassword) {
       ws.send('\r\n*** SSH connection failed: credentials not provided ***\r\n');
       ws.close(4002, 'credentials not provided');
+      destroySession(sessionId);
       return;
     }
 
     // Connect to server via SSH as the user's own account
     const connected = await connectToServer(serverId, sshUser, sshPassword);
-    sshClient = connected.client;
+    session.client = connected.client;
+    // The browser left (or the session was replaced) while logging in: don't keep a shell nobody asked for.
+    if (abandoned()) {
+      try { connected.client.end(); } catch {}
+      if (sshSessions.get(sessionId) === session) sshSessions.delete(sessionId);
+      return;
+    }
+    connected.client.on('close', () => {
+      if (sshSessions.get(sessionId) === session) destroySession(sessionId);
+    });
 
     // Open a PTY. Windows hosts get an interactive PowerShell session; Linux
     // hosts get their login shell. Everything downstream (stream, reattach,
     // buffer, resize) is transport-agnostic once a stream exists.
     const openPty = (err, stream) => {
       if (err) {
-        ws.send('\r\n*** SSH shell failed: ' + err.message + ' ***\r\n');
-        ws.close(4002, err.message);
+        sendToSession(session, '\r\n*** SSH shell failed: ' + err.message + ' ***\r\n');
+        if (session.ws) session.ws.close(4002, err.message);
+        destroySession(sessionId);
         return;
       }
+      if (sshSessions.get(sessionId) !== session) { try { stream.close(); } catch {} return; }
 
-      sshStream = stream;
-      // The session record is created before this callback runs; give it the
-      // stream so a reconnecting browser can reattach.
-      const stored = sshSessions.get(sessionId);
-      if (stored) stored.stream = stream;
+      session.stream = stream;
       // Windows sessions have no MOTD/"Last login" preamble, so only Linux
       // needs the post-login screen clear.
       let loginBannerCleared = connected.platform === 'windows';
-      ws.send(connected.platform === 'windows'
+      sendToSession(session, connected.platform === 'windows'
         ? '\r\n\x1b[32mConnected to server via PowerShell\x1b[0m\r\n\r\n'
         : '\r\n\x1b[32mConnected to server via SSH\x1b[0m\r\n\r\n');
 
@@ -469,7 +514,7 @@ wss.on('connection', async (ws, req) => {
         stream.write(msg);
       }
 
-      // SSH output -> browser + buffer
+      // SSH output -> whichever browser is attached now (after a reattach, the new one) + buffer
       stream.on('data', (data) => {
         const str = data.toString('utf-8');
 
@@ -485,100 +530,41 @@ wss.on('connection', async (ws, req) => {
         }
 
         // Buffer output (keep last 1000 chunks)
-        outputBuffer.push(str);
-        if (outputBuffer.length > 1000) {
-          outputBuffer.shift();
-        }
-
-        // Update last activity
-        const session = sshSessions.get(sessionId);
-        if (session) session.lastActivity = Date.now();
-
-        // Send to WebSocket if connected
-        if (ws.readyState === WebSocket.OPEN) {
-          ws.send(str);
-        }
+        session.buffer.push(str);
+        if (session.buffer.length > 1000) session.buffer.shift();
+        session.lastActivity = Date.now();
+        sendToSession(session, str);
       });
 
       stream.on('close', () => {
         console.log('[WS] SSH stream closed for session: ' + sessionId);
-        const session = sshSessions.get(sessionId);
-        if (session) {
-          if (session.idleTimeout) clearTimeout(session.idleTimeout);
-          if (session.ws && session.ws.readyState === WebSocket.OPEN) {
-            session.ws.close();
-          }
-          if (session.client) session.client.end();
-          sshSessions.delete(sessionId);
-        }
+        if (sshSessions.get(sessionId) === session) destroySession(sessionId);
       });
     };
 
     if (command) {
       // A package's terminal: its one command through the host's SSH session (the person's own login).
-      ws.send('\r\n\x1b[36mOpening ' + cmdLabel + '...\x1b[0m\r\n');
-      sshClient.exec(command, { pty: { term: 'xterm-256color', cols: 80, rows: 24 } }, openPty);
+      sendToSession(session, '\r\n\x1b[36mOpening ' + cmdLabel + '...\x1b[0m\r\n');
+      connected.client.exec(command, { pty: { term: 'xterm-256color', cols: 80, rows: 24 } }, openPty);
     } else if (connected.platform === 'windows') {
       // exec() gives a stream we can drive directly; with a pty, powershell.exe
       // renders an interactive prompt (client.shell() would run cmd.exe).
-      sshClient.exec('powershell -NoLogo -NoProfile', { pty: { term: 'xterm-256color', cols: 80, rows: 24 } }, openPty);
+      connected.client.exec('powershell -NoLogo -NoProfile', { pty: { term: 'xterm-256color', cols: 80, rows: 24 } }, openPty);
     } else {
-      sshClient.shell({ term: 'xterm-256color', cols: 80, rows: 24 }, openPty);
+      connected.client.shell({ term: 'xterm-256color', cols: 80, rows: 24 }, openPty);
     }
-
-    // Store expanded session data
-    const sessionData = {
-      client: sshClient,
-      stream: sshStream,
-      ws: ws,
-      buffer: outputBuffer,
-      createdAt: Date.now(),
-      lastActivity: Date.now(),
-      idleTimeout: null,
-      username: sshUser,
-      authenticated: true, // Shell created successfully - server-side auth complete
-      serverId: serverId,
-      cmdLabel: cmdLabel,
-      ownerUserId: payload.userId,
-    };
-    sshSessions.set(sessionId, sessionData);
-
-    // Handle new session WebSocket disconnect
-    ws.on('close', () => {
-      console.log('[WS] Client disconnected: session=' + sessionId + ' (keeping SSH alive)');
-      const session = sshSessions.get(sessionId);
-      if (session) {
-        session.ws = null;
-        // Start idle timeout
-        session.idleTimeout = setTimeout(() => {
-          console.log('[WS] Idle timeout for session: ' + sessionId + ', cleaning up');
-          if (session.client) session.client.end();
-          if (session.stream) session.stream.close();
-          sshSessions.delete(sessionId);
-        }, 15 * 60 * 1000); // 15 minutes
-      }
-    });
-    
-    // WebSocket error for new session
-    ws.on('error', (err) => {
-      console.error('[WS] Error on session: ' + sessionId, err.message);
-      const session = sshSessions.get(sessionId);
-      if (session) {
-        if (session.idleTimeout) clearTimeout(session.idleTimeout);
-        if (session.client) session.client.end();
-        sshSessions.delete(sessionId);
-      }
-    });
-
   } catch (err) {
     console.error('[WS] SSH connection error:', err.message);
-    ws.send('\r\n*** SSH connection failed: ' + err.message + ' ***\r\n');
-    ws.close(4002, err.message);
-    sshSessions.delete(sessionId);
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send('\r\n*** SSH connection failed: ' + err.message + ' ***\r\n');
+      ws.close(4002, String(err.message).slice(0, 120));
+    }
+    if (sshSessions.get(sessionId) === session) destroySession(sessionId);
   }
 });
 
-server.listen(PORT, '0.0.0.0', () => {
+// Loopback only by default: browsers reach this through nginx on port 3042.
+server.listen(PORT, process.env.BOSUN_INTERNAL_HOST || '127.0.0.1', () => {
   console.log('[WS] Bosun WebSocket server running on port ' + PORT);
   console.log('[WS] Path: ' + WS_PATH);
   console.log('[WS] Heartbeat: ' + HEARTBEAT_MS + 'ms');

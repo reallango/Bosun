@@ -10,6 +10,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { isNoQuorumError } from '@/lib/db/rqlite-client';
 import { verifyAccessToken } from '@/lib/auth/jwt';
+import { getUserStatus } from '@/lib/auth/user-status';
 import { logAudit } from '@/lib/audit/logger';
 import { clientIp, findUserByEmail, findUserByUsername, type AuthUser } from '@/lib/auth/session';
 import { createResetToken, forgotLimiter, RESET_TTL_MS } from '@/lib/auth/password-reset';
@@ -21,7 +22,10 @@ async function adminId(request: NextRequest): Promise<string | null> {
   const token = request.cookies.get('access_token')?.value;
   if (!token) return null;
   const p = await verifyAccessToken(token);
-  return p?.role === 'admin' ? p.userId : null;
+  if (!p?.userId || p.authType === 'api_key' || String(p.userId).startsWith('apikey:')) return null;
+  // The current role and state, not the (up to 15 minutes old) claim in the token.
+  const status = await getUserStatus(String(p.userId));
+  return status && !status.disabled && status.role === 'admin' ? String(p.userId) : null;
 }
 
 async function sendResetEmail(user: AuthUser, link: string): Promise<void> {
@@ -53,13 +57,15 @@ export async function POST(request: NextRequest) {
     if (!user && (email || username.includes('@'))) user = await findUserByEmail(email || username);
 
     let outcome = 'no matching account';
+    let baseUrl: string | null = null;
     if (user) {
       if (user.disabled) outcome = 'account disabled';
       else if (!user.email) outcome = 'account has no email address';
       else if (!(await isSmtpEnabled())) outcome = 'email (SMTP) is not enabled';
+      else if (!(baseUrl = await appBaseUrl())) outcome = 'Bosun\'s public URL is not set (Settings > Email), so no link could be built';
       else {
         const token = await createResetToken(user.id, ip);
-        const link = `${await appBaseUrl(request)}/reset-password?token=${encodeURIComponent(token)}`;
+        const link = `${baseUrl}/reset-password?token=${encodeURIComponent(token)}`;
         outcome = 'reset link emailed';
         const target = user;
         sendResetEmail(target, link).catch(async err => {

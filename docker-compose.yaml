@@ -8,6 +8,8 @@ services:
       - NODE_NAME=${NODE_NAME:-server-a}
       - RQLITE_JOIN=${RQLITE_JOIN:-}
       - COOKIE_SECURE=${COOKIE_SECURE:-false}
+      # Reverse proxies allowed to name the client (X-Forwarded-For): IPs, CIDRs or container names, e.g. cloudflared.
+      - TRUSTED_PROXIES=${TRUSTED_PROXIES:-}
       # Optional: if unset, Bosun generates both and keeps them in the data volume.
       - MASTER_KEY=${MASTER_KEY:-}
       - AUTH_SECRET=${AUTH_SECRET:-}
@@ -17,8 +19,10 @@ services:
       - bosun-data:/data/rqlite
     ports:
       - "${BOSUN_PORT:-3042}:3042"
-      # rqlite HTTP and Raft: other cluster nodes join through these. They are
-      # not authenticated; firewall them to the cluster machines.
+      # rqlite HTTP and Raft: other cluster nodes join through these. The HTTP API
+      # needs Bosun's credentials and Raft uses mutual TLS (both derived from
+      # AUTH_SECRET). Still firewall both to the cluster machines (README "Firewall":
+      # Docker-published ports bypass ufw).
       - "4001:4001"
       - "4002:4002"
     networks:

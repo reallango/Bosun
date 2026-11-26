@@ -17,9 +17,12 @@ export function quoteSh(v: string): string {
   return `'${v.replace(/'/g, `'\\''`)}'`;
 }
 
-/** PowerShell: single-quoted string, quotes doubled. */
+/**
+ * PowerShell: single-quoted string, quotes doubled. PowerShell also treats the typographic single quotes
+ * (U+2018, U+2019, U+201A, U+201B) as single quotes, so those are doubled too (same as script-run.js).
+ */
 export function quotePs(v: string): string {
-  return `'${v.replace(/'/g, "''")}'`;
+  return `'${v.replace(/['‘’‚‛]/g, c => c + c)}'`;
 }
 
 /** Validate caller-supplied params against an action's declarations. Unknown params are rejected. */

@@ -8,7 +8,18 @@ import { rqlite } from '@/lib/db/rqlite-client';
 import { decrypt, encrypt } from '@/lib/crypto/keys';
 import { getMasterKey } from '@/lib/secrets';
 
-const key = (packageId: string, id: string) => `pkgsecret.${packageId}.${id}`;
+/** The start of the app_config keys holding a package's secrets. */
+export const packageSecretKeyPrefix = (packageId: string) => `pkgsecret.${packageId}.`;
+const key = (packageId: string, id: string) => `${packageSecretKeyPrefix(packageId)}${id}`;
+
+/**
+ * The SQL condition (and its parameters) matching exactly the secrets of one package. Not LIKE: package ids contain "_",
+ * which LIKE treats as a wildcard, so `pkgsecret.a_b.%` would also match the secrets of a package "axb".
+ */
+export function packageSecretRows(packageId: string): { where: string; params: [number, string] } {
+  const prefix = packageSecretKeyPrefix(packageId);
+  return { where: 'substr(key, 1, ?) = ?', params: [prefix.length, prefix] };
+}
 export const SECRET_ID_RE = /^[a-z][a-z0-9_]{0,29}$/;
 export const MAX_SECRET_LENGTH = 2000;
 
@@ -26,7 +37,8 @@ export async function deletePackageSecret(packageId: string, id: string): Promis
 }
 
 export async function deleteAllPackageSecrets(packageId: string): Promise<void> {
-  await rqlite.execute('DELETE FROM app_config WHERE key LIKE ?', [`pkgsecret.${packageId}.%`]);
+  const { where, params } = packageSecretRows(packageId);
+  await rqlite.execute(`DELETE FROM app_config WHERE ${where}`, params);
 }
 
 /** Which of the given secrets are set (true/false), without reading their values. */

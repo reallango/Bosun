@@ -6,6 +6,12 @@
  * Applies a one-shot pending action from the UI-managed cluster settings and
  * prints the effective settings as shell assignments for the start script:
  *   BOSUN_NODE_ID, BOSUN_ADV_HOST, BOSUN_JOIN, BOSUN_EXPECT
+ * It also writes rqlite's auth file (credentials derived from AUTH_SECRET,
+ * see src/lib/secrets.js) and prints its path and user:
+ *   BOSUN_RQLITE_AUTH, BOSUN_RQLITE_USER
+ * and the node-to-node TLS files (see ./node-tls.js; BOSUN_NODE_TLS=0 turns
+ * this off):
+ *   BOSUN_NODE_CA, BOSUN_NODE_CERT, BOSUN_NODE_KEY, BOSUN_NODE_SERVER_NAME
  * Logs go to stderr. Never throws: on any problem it prints the environment
  * defaults so rqlite still starts.
  */
@@ -13,8 +19,13 @@
 const fs = require('fs');
 const path = require('path');
 const cfg = require('./config');
+const secrets = require('../secrets');
+const nodeTls = require('./node-tls');
 
 const DATA = process.env.RQLITE_DATA_DIR || '/data/rqlite';
+// tmpfs: rewritten on every start, never kept on the data volume.
+const AUTH_FILE = process.env.BOSUN_RQLITE_AUTH_FILE || '/run/bosun/rqlite-auth.json';
+const TLS_DIR = process.env.BOSUN_NODE_TLS_DIR || path.join(path.dirname(AUTH_FILE), 'tls');
 const log = m => process.stderr.write(`[cluster-boot] ${m}\n`);
 const q = s => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
@@ -68,8 +79,53 @@ function main() {
   ].join('\n') + '\n');
 }
 
-try {
-  main();
-} catch (err) {
-  log(`failed, using environment defaults: ${err.message}`);
+/** Write rqlite's auth file; returns its path, or '' when there is no AUTH_SECRET to derive it from. */
+function writeRqliteAuth(file = AUTH_FILE) {
+  const conf = secrets.rqliteAuthConfig();
+  if (!conf) return '';
+  fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const tmp = `${file}.${process.pid}.tmp`;
+  fs.writeFileSync(tmp, JSON.stringify(conf) + '\n', { mode: 0o600 });
+  fs.renameSync(tmp, file);
+  return file;
 }
+
+if (require.main === module) {
+  try {
+    main();
+  } catch (err) {
+    log(`failed, using environment defaults: ${err.message}`);
+  }
+  // Separate from the cluster settings: a problem there must not turn authentication off.
+  try {
+    const file = writeRqliteAuth();
+    if (file) {
+      process.stdout.write(`BOSUN_RQLITE_AUTH=${q(file)}\nBOSUN_RQLITE_USER=${q(secrets.RQLITE_USER)}\n`);
+    } else {
+      log('WARNING: no AUTH_SECRET (env or secrets file), so rqlite cannot be given credentials');
+    }
+  } catch (err) {
+    log(`WARNING: could not write the rqlite auth file: ${err.message}`);
+  }
+  // Node-to-node TLS (port 4002). Every node of a cluster must agree: a node with it and one
+  // without cannot talk to each other.
+  if (process.env.BOSUN_NODE_TLS === '0') {
+    log('WARNING: node-to-node TLS is off (BOSUN_NODE_TLS=0); port 4002 is neither encrypted nor authenticated');
+  } else {
+    try {
+      const secret = secrets.getAuthSecret();
+      if (!secret) throw new Error('no AUTH_SECRET');
+      const t = nodeTls.writeNodeTls(TLS_DIR, secret);
+      process.stdout.write([
+        `BOSUN_NODE_CA=${q(t.caCert)}`,
+        `BOSUN_NODE_CERT=${q(t.cert)}`,
+        `BOSUN_NODE_KEY=${q(t.key)}`,
+        `BOSUN_NODE_SERVER_NAME=${q(t.serverName)}`,
+      ].join('\n') + '\n');
+    } catch (err) {
+      log(`WARNING: could not create the node-to-node TLS files: ${err.message}`);
+    }
+  }
+}
+
+module.exports = { writeRqliteAuth };

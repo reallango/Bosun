@@ -25,7 +25,20 @@ if [ -d "$DIR" ]; then
   [ -z "$CF" ] || { PD=$(dirname "$CF"); [ ! -f "$DIR/.env" ] || EF="$DIR/.env"; }
 fi
 errf=$(mktemp) || fail 'cannot create a temporary file'
-trap 'rm -f "$errf"' EXIT
+# One operation per stack at a time: deploy, update, remove and the compose operations all take this lock, so two of them
+# never work on the same stack folder at once. A lock left by a process that is gone (a cancelled job) is taken over.
+LOCK="$HOME/bosun-stacks/.lock-$name"
+mkdir -p "$HOME/bosun-stacks" 2>/dev/null
+take_lock() { mkdir "$LOCK" 2>/dev/null && echo $$ > "$LOCK/pid"; }
+if ! take_lock; then
+  lp=$(cat "$LOCK/pid" 2>/dev/null); case "$lp" in ''|*[!0-9]*) lp='' ;; esac
+  busy="another operation is running on the stack $name; try again when it has finished"
+  if [ -n "$lp" ] && kill -0 "$lp" 2>/dev/null; then fail "$busy"; fi
+  # no pid yet: another run may have just taken it, so only a lock older than a minute counts as left over
+  if [ -z "$lp" ] && [ -n "$(find "$LOCK" -maxdepth 0 -mmin -1 2>/dev/null)" ]; then fail "$busy"; fi
+  rm -rf "$LOCK"; take_lock || fail "$busy"
+fi
+trap 'rm -f "$errf"; rm -rf "$LOCK"' EXIT
 echo 'PROGRESS 0/2'; echo "[step] Taking the stack $name down"
 if [ -z "$CF" ]; then $D compose -p "$name" "$@" >/dev/null 2>"$errf"; rc=$?
 elif [ -n "$EF" ]; then $D compose -p "$name" --project-directory "$PD" -f "$CF" --env-file "$EF" "$@" >/dev/null 2>"$errf"; rc=$?

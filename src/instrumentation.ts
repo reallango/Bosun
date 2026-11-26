@@ -16,6 +16,12 @@ export async function register() {
         // Every node keeps the packages' files on its own disk, written from the database (see lib/widgets/materialize.ts).
         const { startPackageFileSync } = await import('@/lib/widgets/materialize-db');
         startPackageFileSync();
+        // Widget updates in the notification bell (the leader checks; see lib/widgets/update-check.ts).
+        const { startWidgetUpdateCheck } = await import('@/lib/widgets/update-check');
+        startWidgetUpdateCheck();
+        // Self-update: where this node runs, closing a finished rolling update, and new Bosun images (lib/update/rollout.ts).
+        const { startUpdateTasks } = await import('@/lib/update/rollout');
+        startUpdateTasks();
       })
       .catch(err => console.error('[db] initialisation failed:', err));
   }

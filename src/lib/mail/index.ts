@@ -3,7 +3,6 @@
  * the password encrypted with the master key. Transport code is shared with
  * the poller in lib/collect/mailer.js.
  */
-import type { NextRequest } from 'next/server';
 import { rqlite } from '@/lib/db/rqlite-client';
 import { decrypt } from '@/lib/crypto/keys';
 import { getMasterKey } from '@/lib/secrets';
@@ -69,17 +68,18 @@ export async function sendMail(msg: MailMessage, options: { ignoreEnabled?: bool
 }
 
 /**
- * Base URL for links in emails: app.url when set, else the request's origin
- * (as seen through the reverse proxy). Setting app.url is recommended, since
- * the Host header is client-controlled.
+ * Base URL for links in emails: app.url (Settings > Email), else the APP_URL
+ * environment variable, else null. Never taken from the request: its Host and
+ * X-Forwarded-Host headers are client-controlled, so anyone could have a reset
+ * link for someone else's account point at their own site.
  */
-export async function appBaseUrl(request: NextRequest): Promise<string> {
+export async function appBaseUrl(): Promise<string | null> {
   const values = await readSmtpValues().catch(() => ({} as Record<string, string | null>));
-  const configured = (values['app.url'] || '').trim().replace(/\/+$/, '');
-  if (/^https?:\/\//i.test(configured)) return configured;
-  const proto = request.headers.get('x-forwarded-proto')?.split(',')[0].trim() || request.nextUrl.protocol.replace(/:$/, '');
-  const host = request.headers.get('x-forwarded-host')?.split(',')[0].trim() || request.headers.get('host') || request.nextUrl.host;
-  return `${proto}://${host}`;
+  for (const candidate of [values['app.url'], process.env.APP_URL]) {
+    const url = (candidate || '').trim().replace(/\/+$/, '');
+    if (/^https?:\/\/[^\s/?#]+/i.test(url)) return url;
+  }
+  return null;
 }
 
 /** A plain-text + minimal HTML email: paragraphs, an optional button link and footer. */

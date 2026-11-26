@@ -8,7 +8,7 @@ import crypto from 'crypto';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import type { Grant } from './evaluate';
 import type { GroupInput, ServerGroupInput } from './validate';
-import { invalidatePermissionCache } from './store';
+import { invalidatePermissionCache, toResource } from './store';
 
 export interface GroupDto {
   id: string;
@@ -40,8 +40,9 @@ export class DuplicateNameError extends Error {
 const isUnique = (err: unknown) => /UNIQUE constraint failed/i.test(String((err as Error)?.message));
 const str = (v: unknown): string | null => (v === null || v === undefined ? null : String(v));
 const grantRow = (groupId: string, g: Grant) => ({
-  sql: 'INSERT OR IGNORE INTO permission_grants (id, group_id, permission, scope_type, scope_id, effect) VALUES (?, ?, ?, ?, ?, ?)',
-  params: [crypto.randomUUID(), groupId, g.permission, g.scope.type, g.scope.type === 'all' ? '' : g.scope.id, g.effect === 'deny' ? 'deny' : 'allow'],
+  sql: 'INSERT OR IGNORE INTO permission_grants (id, group_id, permission, scope_type, scope_id, effect, resource_kind, resource_name, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+  params: [crypto.randomUUID(), groupId, g.permission, g.scope.type, g.scope.type === 'all' ? '' : g.scope.id, g.effect === 'deny' ? 'deny' : 'allow',
+    g.resource?.kind ?? '', g.resource?.name ?? '', g.expiresAt ?? null],
 });
 
 // ---------------------------------------------------------------- permission groups
@@ -49,7 +50,7 @@ const grantRow = (groupId: string, g: Grant) => ({
 export async function listGroups(): Promise<GroupDto[]> {
   const [groups, grants, users, keys] = await Promise.all([
     rqlite.query('SELECT id, name, description, created_at, updated_at FROM permission_groups ORDER BY name COLLATE NOCASE'),
-    rqlite.query('SELECT group_id, permission, scope_type, scope_id, effect FROM permission_grants ORDER BY permission'),
+    rqlite.query('SELECT group_id, permission, scope_type, scope_id, effect, resource_kind, resource_name, expires_at FROM permission_grants ORDER BY permission, resource_name'),
     rqlite.query('SELECT group_id, COUNT(*) AS n FROM user_groups GROUP BY group_id'),
     rqlite.query('SELECT group_id, COUNT(*) AS n FROM api_key_groups GROUP BY group_id'),
   ]);
@@ -58,7 +59,12 @@ export async function listGroups(): Promise<GroupDto[]> {
     const type = String(r.scope_type);
     const scope = type === 'all' ? { type: 'all' as const } : { type: type as 'server' | 'server_group', id: String(r.scope_id) };
     const k = String(r.group_id);
-    grantsBy.set(k, [...(grantsBy.get(k) || []), { permission: String(r.permission), scope, effect: r.effect === 'deny' ? 'deny' as const : 'allow' as const }]);
+    const resource = toResource(r.resource_kind, r.resource_name);
+    if (resource === undefined) continue;
+    grantsBy.set(k, [...(grantsBy.get(k) || []), {
+      permission: String(r.permission), scope, effect: r.effect === 'deny' ? 'deny' as const : 'allow' as const,
+      ...(resource ? { resource } : {}), ...(r.expires_at ? { expiresAt: String(r.expires_at) } : {}),
+    }]);
   }
   const count = (res: Awaited<ReturnType<typeof rqlite.query>>) =>
     new Map(rowsToObjects(res).map(r => [String(r.group_id), Number(r.n) || 0]));

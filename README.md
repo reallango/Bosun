@@ -80,12 +80,16 @@ join an existing cluster with a join code (see *Clustering*).
 | `MASTER_KEY` | Encrypts stored SSH private keys, SMTP password and MFA seeds. If unset, Bosun generates one into `<data volume>/bosun/secrets.json`. Changing it makes stored secrets unreadable, so back up the data volume (or set it explicitly). |
 | `AUTH_SECRET` | Signs login and terminal tokens. Generated like `MASTER_KEY` if unset. |
 | `COOKIE_SECURE` | `true` when served over HTTPS (e.g. behind Cloudflare). |
+| `TRUSTED_PROXIES` | Comma-separated addresses, CIDRs or host names of reverse proxies in front of Bosun (a cloudflared container, nginx, Traefik), e.g. `cloudflared` or `172.18.0.0/16`. A name (such as a container on the same Docker network) is looked up when Bosun starts and every minute, so it follows the container to a new address; the container log shows what it resolved to (`[trusted-proxies] cloudflared -> 172.18.0.5`). Only requests from these addresses may name the client in `X-Forwarded-For`; everyone else is identified by the address that connected. Login rate limits and audit entries use this address. Unset: no proxy is trusted. |
+| `APP_URL` | Public address of Bosun (e.g. `https://bosun.example.com`). Emailed links (password reset) use *App URL* from Settings → General, else this; without either, no reset link is sent. |
 | `NODE_NAME`, `RQLITE_ADV_HOST`, `RQLITE_JOIN`, `RQLITE_BOOTSTRAP_EXPECT` | Clustering (see *Clustering*). |
 | `RQLITE_FORCE_SINGLE` | `1` = disaster recovery: make this node a single-node cluster (see *Clustering*). |
 | `BOSUN_PORT` | Published port (default 3042). |
 | `BOSUN_DB_RESET` | `1` drops a legacy (pre-2.0) schema once. |
 
 All services except nginx run as the unprivileged `node` user inside the container.
+
+Only port 3042 (nginx) is meant to be reached: the web app (3000) and the terminal server (3002) listen on the container's loopback only. A reverse proxy or tunnel must point at port 3042, not 3000 or 3002 (from 3000/3002 it would no longer connect). Behind one, add its address to `TRUSTED_PROXIES` so each visitor keeps their own login rate limit; otherwise every visitor coming through it shares one.
 
 ### Adding hosts
 
@@ -273,9 +277,13 @@ Settings → Cluster (admins) covers the whole lifecycle without editing `.env` 
    no join settings needed), open its setup page, choose **Join an existing cluster**
    and paste the code with that machine's address and a node name. No admin account is
    created there: the node discards its empty database, joins, and from then on uses
-   the cluster's users, servers and settings. The code contains the cluster's
-   `MASTER_KEY` and `AUTH_SECRET`, so treat it like a password. Joining is only
-   offered on a node with no users and setup not completed.
+   the cluster's users, servers and settings. The code does not contain the cluster's
+   secrets: it holds a one-time token that the new node exchanges (encrypted) at a
+   member's Bosun web address for `MASTER_KEY` and `AUTH_SECRET`, so the new node must
+   be able to reach a member on port 3042 (or the address you created the code from). A
+   code works once and for 24 hours; a used or expired code is worthless. Joining is only
+   offered on a node with no users and setup not completed. (A code from an older Bosun,
+   `BOSUN-JOIN-1.`, still works for joining such a cluster; it did carry the secrets.)
 3. **Remove a node.** The trash icon on a node row removes it from the membership
    (needs a leader). Reset that machine's data volume before reusing it.
 4. **Convert to single node.** With a majority available the other nodes are removed
@@ -284,8 +292,44 @@ Settings → Cluster (admins) covers the whole lifecycle without editing `.env` 
 
 Settings made here are stored in `<data volume>/bosun/cluster.json` and take
 precedence over `NODE_NAME`, `RQLITE_ADV_HOST` and `RQLITE_JOIN`, which remain the
-defaults. Ports 4001 and 4002 are not authenticated: allow them only between the
-cluster machines.
+defaults.
+
+**Database authentication.** rqlite's HTTP API (port 4001) only answers requests that
+carry Bosun's credentials; without them only `/readyz` responds. The password is
+derived from `AUTH_SECRET`, so every node of a cluster gets it with the join code and
+nothing has to be configured. The credentials are written to `/run/bosun/rqlite-auth.json`
+inside the container on every start (not kept on the data volume). To use the `rqlite`
+shell inside the container, read the user and password from that file.
+
+**Node-to-node encryption.** Traffic between nodes on port 4002 (Raft replication and
+requests forwarded to the leader) uses mutual TLS: it is encrypted, and only nodes
+with a certificate from the cluster's CA can connect. The CA key is also derived from
+`AUTH_SECRET`, so this needs no setup either. Each node makes its certificate on every
+start in `/run/bosun/tls/`. `BOSUN_NODE_TLS=0` turns it off (not recommended; then every
+node must have it off).
+
+Upgrading an existing cluster to a version with database authentication or node-to-node
+encryption: update all nodes together. A node that requires credentials or TLS and one
+that does not cannot work with each other. The same release moves rqlite from 8.26.7 to
+9.4.5 (8.x did not enforce client certificates). The database files are used as they are,
+but export a backup first (Settings → Database).
+
+**Firewall.** Keep ports 4001 and 4002 reachable only from the other cluster machines.
+Ports that Docker publishes bypass `ufw`, so a `ufw` rule does not limit them. Either
+publish them on the LAN address only (for example `192.168.1.161:4002:4002` instead of
+`4002:4002`), or filter in the `DOCKER-USER` chain, which Docker checks first:
+
+```bash
+# On each node: allow 4001/4002 from the other nodes only (adjust the addresses).
+for p in 4001 4002; do
+  iptables -I DOCKER-USER -p tcp --dport $p -j DROP
+  for ip in 192.168.1.131 192.168.1.171; do
+    iptables -I DOCKER-USER -p tcp -s $ip --dport $p -j RETURN
+  done
+done
+```
+
+These rules are lost on reboot unless saved (for example with `iptables-persistent`).
 
 ### Setting up a cluster with environment variables
 
@@ -301,8 +345,10 @@ AUTH_SECRET=...                      # identical on all nodes
 ```
 
 All three start with the same join list and `RQLITE_BOOTSTRAP_EXPECT=3`, and form the
-cluster together once all are up. Ports 4001 and 4002 must be reachable between the
-nodes and should be firewalled from everything else.
+cluster together once all are up. `AUTH_SECRET` must be identical on all nodes, since
+the database credentials and the node certificates are derived from it (see *Database
+authentication* and *Node-to-node encryption*). Ports 4001 and 4002 must be reachable
+between the nodes and should be firewalled from everything else (see *Firewall*).
 
 ## Access levels, users and API keys
 
@@ -329,6 +375,90 @@ exactly as described above when no group is involved.
   Installing a widget will register the permissions it declares, so they appear in the
   editor on their own.
 - **Scope.** A grant applies to all servers, to one server, or to a **server group**.
+- **Stacks and containers.** A widget package's permission can also be limited, on those
+  servers, to some stacks or containers by name (a name ending in `*` matches by prefix, so
+  `test-*` covers every stack starting with `test-`). A stack limit covers the stack and its
+  containers. Actions that name what they act on (restart a container, deploy or update a stack,
+  their logs and shell) are checked against it; lists show only the allowed stacks and containers;
+  actions about the whole host (pull an image, prune, create a volume) need the permission for the
+  whole server. Example: give an AI agent's API key *Docker: manage* limited to the stack
+  `test-ai` on one server, and it can deploy, update and restart that stack and nothing else.
+- **Expiry.** Any grant can have an end time; after it, the grant no longer counts (and it is
+  deleted a week later).
+### Importing stacks from Portainer
+
+Stacks that another tool started (for example Portainer) can become Bosun stacks: **Settings → Servers → a server →
+Import stacks**. Each is stored under the same project name, so its volumes (data) are kept; Docker Compose re-creates the
+containers once from Bosun's copy, so importing is a short restart of the stack.
+
+- **From Portainer** (needs Portainer's address and an API key from *My account → Access tokens*; tick *Accept a
+  self-signed certificate* for Portainer's default HTTPS): the exact compose file and variables, or, for a stack Portainer
+  deploys from git, the same repository, branch and file (private repositories use the Git credentials of the Docker widget).
+- **Rebuilt from the containers** (no Portainer needed): a compose file written from the running containers, with values
+  written out literally.
+- **Detach from Portainer** is chosen per stack. Portainer cannot forget a stack without stopping it (its delete runs
+  `docker compose down`, volumes kept), so Bosun first starts a small waiter on the host that brings the stack straight back
+  from Bosun's copy, then deletes it in Portainer: one more short restart. Without detaching, Portainer keeps listing it, and it
+  must not be redeployed or deleted there.
+- **Detach later:** a stack imported without detaching is listed under *Bosun stacks Portainer still lists* (once Portainer
+  is connected for that server), with **Detach from Portainer**: the same waiter, then Portainer's delete.
+- Before anything starts, a confirmation says what the chosen options cost (for example: values written into the compose
+  file when rebuilt from the containers, no git source to update from, two tools managing a stack that is not detached).
+- **A node's own Bosun stack** can be imported (and detached) on that same node, which a single-node install needs
+  (Docker widget 1.0.13 or newer). Bosun stores the stack and the widget starts it from a job on the host a few seconds
+  later; Bosun restarts (again when it is detached), and the restarted Bosun reports the outcome in the bell about a minute
+  after it is back. From another node's Bosun it works as for any other stack, without the restart of the page you use.
+
+The outcome of each import and detach appears in the bell.
+
+### Setting up a new server (Docker, then Bosun itself)
+
+A fresh Linux install can be taken over from Bosun: add it (Settings → Servers → Add → *Set up automatically* with an
+administrator login, which creates Bosun's service account), then open it under Settings → Servers → *Set up this server*.
+
+- **Software from widgets.** Each installed widget can offer what it needs on a host. The Docker widget (1.0.14) offers
+  **Docker Engine**: it adds Docker's apt repository (the key is only trusted with Docker's published fingerprint), installs
+  Docker Engine with the Compose and Buildx plugins, starts it and lets the service account use it. Debian, Ubuntu and
+  their derivatives so far. A server does not have to become a Bosun node for this: Docker, Ollama and the rest are
+  managed over SSH as before. Needs the permission *Install Docker on a host* (Full access by default).
+- **Deploy Bosun** (Full access, needs Docker on the server and port 3042 free):
+  - **Join this cluster** (the default; clustering must be enabled here): Bosun deploys itself as the stack `bosun` from
+    the published image of the update channel (Settings → Updates), with ports 3042, 4001 and 4002, then creates a
+    one-time join code and redeems it on the new node, and waits until it is a reachable member. Users, servers and
+    settings come from the cluster.
+  - **Standalone**: the same stack with port 3042 only, left at its first-run page to create its own admin account.
+
+  Either way the new Bosun runs from a Bosun stack, so it updates itself (Settings → Updates). Progress shows on the
+  card, the outcome in the bell.
+### Access requests (for agents and people)
+
+An API key or user that lacks something can ask for it instead of being given broad access up front:
+
+1. **Discover.** `GET /api/access` lists what the caller holds (including stack/container limits and expiries),
+   every permission with its risk and whether it can be limited to a stack or container, the servers it can see,
+   its own requests, and examples of both kinds of request. Every 403 for a missing permission also includes the
+   exact body to send.
+2. **Ask.** `POST /api/access-requests` with either
+   - `{ "kind": "grant", "permission": "...", "server_id": "...", "resource": { "kind": "stack", "name": "test-ai" }, "duration_hours": 8, "reason": "..." }`
+     (leave out `server_id` for all servers, `resource` for the whole server, `duration_hours` for a permanent grant), or
+   - `{ "kind": "one_time", "server_id": "...", "widget_type": "...", "action_id": "...", "params": { ... }, "reason": "..." }`:
+     one widget action, run once, exactly with these parameters.
+3. **Decide.** The request appears in the bell with **Approve** and **Deny** (and under Settings → Access requests).
+   Whoever decides must be signed in (never an API key), must not be the requester, must hold the permission there
+   themselves, and needs Full access for high-risk permissions.
+4. **Result.** An approved grant goes into a permission group "Approved requests: <name>" (with its expiry), which
+   can be edited or deleted like any group. An approved one-time action runs at once, as the requester (its task
+   and audit entry name them and the approver).
+5. **Hearing back.** The requester reads the outcome with `GET /api/access-requests/{id}`: the status, who decided,
+   their note and (one-time actions) the action's answer. Adding `?wait=50` holds the call open until the request is
+   decided (at most 50 seconds, then it answers `pending`; ask again), so an agent need not poll. People also get the
+   decision in their own bell, and so does the person who created an API key when that key's request is decided
+   (only they see it).
+
+Requests expire after 24 hours; a requester can have at most 10 pending, and can withdraw one with
+`DELETE /api/access-requests/{id}`. Example flow for an agent: ask once to run *Deploy stack* for `test-ai`, then
+ask for *Docker: manage* limited to the stack `test-ai` to keep working on it, without ever holding Docker access
+for the whole host.
   Server groups are optional named sets of servers (a server can be in several); create
   them on the same page, or skip them and grant per server.
 - **Who holds a group.** Assign groups to a user (Settings → Users) or to an API key
@@ -412,7 +542,8 @@ keeps their history for the time its package declares.
 
 **Email (SMTP)**, under Settings → General (admins), enables password reset links,
 emailed sign-in codes and email alert actions. Set *App URL* to the address users open
-Bosun at: reset links are built from it. The SMTP password is stored encrypted.
+Bosun at: reset links are built from it (or from `APP_URL`), never from the address a request came in on, so without
+either no reset link is sent. The SMTP password is stored encrypted.
 
 **Two-step verification** is optional per user: an authenticator app (TOTP) or codes
 sent by email, plus ten single-use backup codes. Password reset needs SMTP; without it,
@@ -437,6 +568,24 @@ npm run typecheck && npm run lint
 Shared collector code lives in `src/lib/collect/` as dependency-free CommonJS so
 `poller.js`, `ws-server.js` and the Next.js server use the same implementation.
 
+## Self-update
+
+Settings → **Updates** keeps every node on the newest published image of a branch:
+
+- **Images.** The repository's image workflow (`.github/workflows/image.yml`) builds every push to `main` and `dev` (the
+  build runs the tests, lint and the production build) and publishes `ghcr.io/<owner>/bosun:<branch>` and
+  `:sha-<commit>`. Pull requests are built but not published. The first time, make the package public on GitHub
+  (your profile → Packages → bosun → Package settings → Change visibility), so nodes can pull it without a login.
+- **What runs where.** Each image knows its commit and branch (`/api/health` → `version`). The cluster leader checks the
+  registry every 6 hours and posts *Bosun update available* in the bell when a node runs something else.
+- **Requirements.** Each node's Bosun stack must be a Bosun stack: import it first (*Importing stacks from Portainer*,
+  on the same node or from another one), and each node must know its server (it finds it by itself, or set it under
+  Settings → Wake-on-LAN). The page lists anything missing.
+- **Update all nodes.** The database is backed up into the data volume (`backups/`, the last 3 are kept), then the nodes
+  are updated one at a time: on its host the new image is pulled, tagged as the image the Bosun service runs (for
+  example `bosun:latest`, so the compose file stays as it is) and that service is re-created. Bosun waits until the node
+  answers on the new version and is back in the cluster before the next one; the node you started from goes last and
+  reports the result in the bell when it is back. If a node does not come back within 10 minutes the update stops there.
 ## Upgrading and rolling back
 
 - Back up first: Settings → Database → Export, or copy the `bosun-data` volume.

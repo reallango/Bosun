@@ -29,7 +29,7 @@ case "$1" in
     for i in 1 2 3; do
       if [ "$(docker inspect -f '{{.State.Running}}' bosun-n$i 2>/dev/null)" != "true" ]; then echo "n$i: DOWN"; continue; fi
       docker exec bosun-n$i sh -c '
-        st=$(wget -qO- http://127.0.0.1:4001/status 2>/dev/null | node -e "let s=\"\";process.stdin.on(\"data\",d=>s+=d).on(\"end\",()=>{try{const j=JSON.parse(s);console.log((j.store.raft.state||\"?\")+\" leader=\"+((j.store.leader||{}).node_id||\"-\"))}catch(e){console.log(\"?\")}})")
+        st=$(cd /app && node -e "fetch(\"http://127.0.0.1:4001/status\",{headers:require(\"./src/lib/secrets\").rqliteAuthHeaders()}).then(r=>r.json()).then(j=>console.log((j.store.raft.state||\"?\")+\" leader=\"+((j.store.leader||{}).node_id||\"-\"))).catch(()=>console.log(\"?\"))")
         rd=$(wget -qO- "http://127.0.0.1:4001/readyz" >/dev/null 2>&1 && echo ready || echo no-leader)
         pl=$(wget -qO- http://127.0.0.1:3003/health 2>/dev/null | node -e "let s=\"\";process.stdin.on(\"data\",d=>s+=d).on(\"end\",()=>{try{const j=JSON.parse(s);console.log(\"poller \"+(j.leader?\"ACTIVE hosts=\"+j.hosts.length:\"idle\"))}catch(e){console.log(\"poller ?\")}})")
         echo "$NODE_NAME: raft=$st $rd $pl"'

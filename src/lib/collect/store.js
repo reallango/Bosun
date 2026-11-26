@@ -158,4 +158,39 @@ function retentionStatements(cfg, nowMs, defs) {
   return stmts;
 }
 
-module.exports = { buildPollStatements, metricStatements, retentionStatements, mergeDefinitions, likeFor, capabilitiesOf, macAutofillStatements, hashOf, ROLLUP_RESOLUTIONS };
+
+/**
+ * Housekeeping of the audit log, notifications and sessions (Settings > Database: cleanup.*_days). Rows are
+ * compared with julianday() because some were written as ISO strings and some as SQLite timestamps. A setting
+ * that is missing or not a number keeps its default; 0 turns the cleanup of that table off.
+ * cfg: { auditDays, notificationDays, sessionDays }
+ */
+const CLEANUP_DEFAULTS = { auditDays: 90, notificationDays: 30, sessionDays: 7 };
+function cleanupConfig(rows) {
+  const cfg = { ...CLEANUP_DEFAULTS };
+  const keys = { 'cleanup.audit_log_days': 'auditDays', 'cleanup.notification_days': 'notificationDays', 'cleanup.session_days': 'sessionDays' };
+  for (const { key, value } of rows || []) {
+    const name = keys[key];
+    if (!name) continue;
+    const n = Number(value);
+    if (Number.isFinite(n) && n >= 0) cfg[name] = n;
+  }
+  return cfg;
+}
+function cleanupStatements(cfg) {
+  const days = (n) => `-${Math.max(1, Math.floor(n))} days`;
+  const stmts = [];
+  if (cfg.auditDays > 0) stmts.push({ sql: "DELETE FROM audit_log WHERE julianday(created_at) < julianday('now', ?)", params: [days(cfg.auditDays)] });
+  if (cfg.notificationDays > 0) stmts.push({ sql: "DELETE FROM notifications WHERE julianday(created_at) < julianday('now', ?)", params: [days(cfg.notificationDays)] });
+  // Sessions: the expired ones, once they have been expired for that many days.
+  if (cfg.sessionDays > 0) stmts.push({ sql: "DELETE FROM sessions WHERE julianday(expires_at) < julianday('now', ?)", params: [days(cfg.sessionDays)] });
+  // Permission grants that expired more than a week ago (they stopped counting when they expired).
+  stmts.push({ sql: "DELETE FROM permission_grants WHERE expires_at IS NOT NULL AND julianday(expires_at) < julianday('now', '-7 days')", params: [] });
+  // Access requests nobody decided within their time expire and leave the bell; decided ones are kept 90 days.
+  stmts.push({ sql: "UPDATE access_requests SET status = 'expired' WHERE status = 'pending' AND expires_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now')", params: [] });
+  stmts.push({ sql: "UPDATE notifications SET is_read = 1, is_dismissed = 1 WHERE kind = 'access_request' AND is_dismissed = 0 AND dedupe_key IN (SELECT 'access-request:' || id FROM access_requests WHERE status <> 'pending')", params: [] });
+  stmts.push({ sql: "DELETE FROM access_requests WHERE status <> 'pending' AND julianday(created_at) < julianday('now', '-90 days')", params: [] });
+  return stmts;
+}
+
+module.exports = { cleanupConfig, cleanupStatements, buildPollStatements, metricStatements, retentionStatements, mergeDefinitions, likeFor, capabilitiesOf, macAutofillStatements, hashOf, ROLLUP_RESOLUTIONS };

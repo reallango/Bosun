@@ -89,6 +89,14 @@ export class RateLimiter {
     return result;
   }
 
+  /** Take back the most recent attempt (an attempt counted up front that turned out fine). */
+  unrecord(key: string): void {
+    const entry = this.entries.get(key);
+    if (!entry || !entry.attempts.length) return;
+    entry.attempts.pop();
+    if (!entry.attempts.length && !entry.lockedUntil) this.entries.delete(key);
+  }
+
   reset(key: string): void {
     this.entries.delete(key);
   }
@@ -109,12 +117,30 @@ const sshLimiter = new RateLimiter(sshRateLimit);
 const apiLimiter = new RateLimiter(apiRateLimit);
 const actionLimiter = new RateLimiter(actionRateLimit);
 
-export function checkLoginRateLimit(ip: string): RateLimitResult {
-  return loginLimiter.check(ip);
+/**
+ * Failed logins per account, whatever the address: slows password guessing
+ * spread over many addresses (or behind one shared proxy address). No lockout,
+ * so nobody can lock a person out of their own account for long.
+ */
+export const accountLoginRateLimit: RateLimitConfig = { maxAttempts: 10, windowMs: 15 * 60 * 1000, lockoutMs: 0 };
+const accountLoginLimiter = new RateLimiter(accountLoginRateLimit);
+
+/** The address limit, plus the per-account one when a username is given. */
+export function checkLoginRateLimit(ip: string, username?: string): RateLimitResult {
+  const byIp = loginLimiter.check(ip);
+  if (!byIp.allowed || !username) return byIp;
+  return accountLoginLimiter.check(username.toLowerCase());
 }
 
-export function recordLoginAttempt(ip: string): void {
+export function recordLoginAttempt(ip: string, username?: string): void {
   loginLimiter.record(ip);
+  if (username) accountLoginLimiter.record(username.toLowerCase());
+}
+
+/** Undo recordLoginAttempt for an attempt that succeeded (attempts are counted before the slow password check). */
+export function unrecordLoginAttempt(ip: string, username?: string): void {
+  loginLimiter.unrecord(ip);
+  if (username) accountLoginLimiter.unrecord(username.toLowerCase());
 }
 
 export function checkSSHRateLimit(serverId: string): RateLimitResult {

@@ -25,10 +25,12 @@ sensitive() {
     for (i = 1; i <= n; i++) { if (a[i] == "" || a[i] == ".") continue; if (a[i] == "..") { if (k > 0) k--; continue } k++; s[k] = a[i] }
     if (k == 0) exit 0
     p = ""; for (i = 1; i <= k; i++) p = p "/" s[i]
-    b = tolower(s[k]); if (b == "docker.sock" || b == "containerd.sock") exit 0
-    n = split("/etc /root /proc /sys /boot /usr /var/lib/docker", r, " ")
-    for (i = 1; i <= n; i++) if (p == r[i] || index(p, r[i] "/") == 1) exit 0
-    if (k >= 3 && s[1] == "home" && s[3] == ".ssh") exit 0
+    b = tolower(s[k]); if (b ~ /(docker|containerd|crio|podman)\.sock$/) exit 0
+    # The folder itself, anything inside it, or a folder that contains it (mounting /var exposes /var/run/docker.sock).
+    n = split("/etc /root /proc /sys /dev /boot /usr /bin /sbin /lib /lib32 /lib64 /libx32 /run /var/run /var/lib/docker /var/lib/containerd /var/lib/kubelet /var/spool/cron", r, " ")
+    for (i = 1; i <= n; i++) if (p == r[i] || index(p, r[i] "/") == 1 || index(r[i], p "/") == 1) exit 0
+    # Home folders: /home, a whole /home/<user>, or anything hidden in one (.ssh, .bashrc, .config ...).
+    if (s[1] == "home" && (k <= 2 || substr(s[3], 1, 1) == ".")) exit 0
     exit 1 }'
 }
 host_path_risk() {

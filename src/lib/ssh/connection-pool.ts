@@ -87,7 +87,8 @@ export class SSHConnectionPool {
 
     const entry = e;
     entry.connecting = (async () => {
-      const fpRes = await rqlite.query('SELECT host_key_fingerprint FROM servers WHERE id = ?', [serverId]).catch(() => null);
+      // No catch: if the pinned key can't be read, don't connect (never fall back to accepting any key).
+      const fpRes = await rqlite.query('SELECT host_key_fingerprint FROM servers WHERE id = ?', [serverId]);
       const expected = (fpRes?.values?.[0]?.[0] as string | null) || undefined;
       const client: Client = await sshHelpers.connect({
         host: cfg.host,

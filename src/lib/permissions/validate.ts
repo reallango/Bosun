@@ -2,7 +2,7 @@
  * Validation of permission-group and server-group input from the API. Pure.
  */
 import { permissionDef, type PermissionDef } from './catalog';
-import type { Grant } from './evaluate';
+import { RESOURCE_NAME_RE, type Grant } from './evaluate';
 
 export const MAX_NAME = 60;
 export const MAX_DESCRIPTION = 300;
@@ -26,7 +26,18 @@ export interface ServerGroupInput {
   server_ids?: string[];
 }
 
-export const grantKey = (g: Grant) => `${g.permission}|${g.scope.type}|${g.scope.type === 'all' ? '' : g.scope.id}`;
+export const grantKey = (g: Grant) => `${g.permission}|${g.scope.type}|${g.scope.type === 'all' ? '' : g.scope.id}|${g.resource ? `${g.resource.kind}:${g.resource.name}` : ''}`;
+
+/** At most this far ahead (an expiring grant is for a while, not for years). */
+export const MAX_EXPIRY_MS = 366 * 24 * 3600 * 1000;
+
+/**
+ * Permissions a grant may limit to one stack or container: those of widget packages that act on one host (their
+ * actions name what they act on). Core permissions (servers, power, shell, dashboards) are never limited.
+ */
+export function allowsResourceLimit(def: PermissionDef): boolean {
+  return def.scope === 'server' && def.source.startsWith('package:');
+}
 
 function str(v: unknown): string | null {
   return typeof v === 'string' ? v.trim() : null;
@@ -53,7 +64,7 @@ function nameAndDescription(body: Record<string, unknown>, creating: boolean): R
 }
 
 /** Normalise the grants of a permission group: known permissions only, scopes that make sense, no duplicates. */
-export function validateGrants(raw: unknown, defs: readonly PermissionDef[] = []): Result<Grant[]> {
+export function validateGrants(raw: unknown, defs: readonly PermissionDef[] = [], now = Date.now()): Result<Grant[]> {
   if (!Array.isArray(raw)) return { ok: false, error: 'grants must be a list' };
   if (raw.length > MAX_GRANTS) return { ok: false, error: `A group can have at most ${MAX_GRANTS} grants` };
   const seen = new Set<string>();
@@ -75,6 +86,24 @@ export function validateGrants(raw: unknown, defs: readonly PermissionDef[] = []
       grant = { permission, scope: { type, id } };
     } else {
       return { ok: false, error: `Unknown scope "${String(type)}"` };
+    }
+    const rawResource = (item as Record<string, unknown>).resource;
+    if (rawResource !== undefined && rawResource !== null) {
+      const r = rawResource as Record<string, unknown>;
+      const kind = typeof rawResource === 'object' ? r.kind : undefined;
+      const name = typeof rawResource === 'object' ? str(r.name) : null;
+      if (kind !== 'stack' && kind !== 'container') return { ok: false, error: `The "${def.label}" grant can be limited to a stack or a container` };
+      if (!name || !RESOURCE_NAME_RE.test(name)) return { ok: false, error: `The ${kind} name for "${def.label}" must be a name (letters, digits, _ . -) or a prefix ending in *` };
+      if (!allowsResourceLimit(def)) return { ok: false, error: `"${def.label}" cannot be limited to a stack or container` };
+      grant.resource = { kind, name };
+    }
+    const rawExpiry = (item as Record<string, unknown>).expiresAt ?? (item as Record<string, unknown>).expires_at;
+    if (rawExpiry !== undefined && rawExpiry !== null && rawExpiry !== '') {
+      const at = typeof rawExpiry === 'string' || typeof rawExpiry === 'number' ? Date.parse(String(rawExpiry)) : NaN;
+      if (!Number.isFinite(at)) return { ok: false, error: `The expiry of "${def.label}" is not a date` };
+      if (at <= now) return { ok: false, error: `The expiry of "${def.label}" is in the past` };
+      if (at - now > MAX_EXPIRY_MS) return { ok: false, error: `The expiry of "${def.label}" can be at most a year ahead` };
+      grant.expiresAt = new Date(at).toISOString();
     }
     const rawEffect = (item as Record<string, unknown>).effect;
     if (rawEffect !== undefined && rawEffect !== 'allow' && rawEffect !== 'deny') return { ok: false, error: 'Each grant must be either allow or deny' };

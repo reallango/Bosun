@@ -50,7 +50,7 @@ function LogDialog({ task, onClose }: { task: Task | null; onClose: () => void }
         <Dialog.Overlay className="fixed inset-0 z-[70] bg-black/50" />
         <Dialog.Content className="fixed inset-x-2 top-8 z-[70] mx-auto flex max-h-[85vh] flex-col rounded-xl border bg-popover p-4 text-popover-foreground shadow-xl sm:max-w-3xl" aria-describedby={undefined}>
           <div className="mb-2 flex items-start justify-between gap-2">
-            <Dialog.Title className="min-w-0 truncate text-base font-semibold">{task ? `${task.actionLabel} on ${task.serverName}` : ''}</Dialog.Title>
+            <Dialog.Title className="min-w-0 truncate text-base font-semibold">{task ? `${task.actionLabel} on ${task.serverName}${task.startedBy ? ` (by ${task.startedBy})` : ''}` : ''}</Dialog.Title>
             <Dialog.Close asChild><button type="button" className="rounded p-1 text-muted-foreground hover:bg-accent" aria-label="Close"><X className="size-4" /></button></Dialog.Close>
           </div>
           {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : !log ? <p className="text-sm text-muted-foreground">Loading…</p> : (
@@ -71,9 +71,11 @@ function LogDialog({ task, onClose }: { task: Task | null; onClose: () => void }
 }
 
 /** The tasks at the top of the notification list: what is running, what finished, with its log and the way back to its screen. */
-export function TasksSection({ tasks, seen, markSeen, onNavigate, reload }: { tasks: Task[]; seen: Set<string>; markSeen: (ids: string[]) => void; onNavigate: () => void; reload: () => void }) {
+export function TasksSection({ tasks: all, seen, markSeen, onNavigate, reload, which = 'all' }: { tasks: Task[]; seen: Set<string>; markSeen: (ids: string[]) => void; onNavigate: () => void; which?: 'all' | 'running' | 'finished'; reload: () => void }) {
   const router = useRouter();
   const [logOf, setLogOf] = useState<Task | null>(null);
+  // The bell shows running tasks near the top and finished ones below the notifications.
+  const tasks = which === 'all' ? all : all.filter(t => (t.status === 'running') === (which === 'running'));
   if (!tasks.length) return null;
   const cancel = async (t: Task) => {
     await fetchWithAuth(`/api/servers/${t.serverId}/widget-jobs/${encodeURIComponent(t.widgetType)}/${t.id}/cancel`, { method: 'POST' }).catch(() => undefined);
@@ -82,7 +84,7 @@ export function TasksSection({ tasks, seen, markSeen, onNavigate, reload }: { ta
   return (
     <div className="border-b">
       <div className="flex items-center justify-between px-3 pb-1 pt-2">
-        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Tasks</span>
+        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{which === 'running' ? 'Running' : which === 'finished' ? 'Finished tasks' : 'Tasks'}</span>
         {tasks.some(t => t.status !== 'running' && !seen.has(t.id)) && (
           <button type="button" className="text-xs text-primary hover:underline" onClick={() => markSeen(tasks.filter(t => t.status !== 'running').map(t => t.id))}>Mark all seen</button>
         )}
@@ -100,7 +102,7 @@ export function TasksSection({ tasks, seen, markSeen, onNavigate, reload }: { ta
                 <div className="mt-1 h-1 w-full overflow-hidden rounded bg-muted"><div className="h-full bg-primary" style={{ width: `${t.percent}%` }} /></div>
               )}
               <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
-                <span className="text-muted-foreground/80">{formatDistanceToNow(new Date(t.finishedAt ?? t.startedAt))}</span>
+                <span className="text-muted-foreground/80">{t.startedBy ? `${t.startedBy} · ` : ''}{formatDistanceToNow(new Date(t.finishedAt ?? t.startedAt))}</span>
                 <button type="button" className="text-primary hover:underline" onClick={() => { setLogOf(t); markSeen([t.id]); }}>Log</button>
                 {t.screenId && t.widgetId && (
                   <button type="button" className="inline-flex items-center gap-0.5 text-primary hover:underline"

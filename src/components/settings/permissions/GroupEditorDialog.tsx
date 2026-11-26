@@ -6,7 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
-import { send, type Grant, type PermissionData, type PermissionDef, type PermissionGroup } from './data';
+import { allowsResourceLimit, RESOURCE_NAME_RE, send, type Grant, type GrantResource, type PermissionData, type PermissionDef, type PermissionGroup } from './data';
 
 /** What the editor holds for one permission. */
 interface Row {
@@ -16,9 +16,21 @@ interface Row {
   mode: 'all' | 'selected';
   servers: string[];
   groups: string[];
+  /** Only these stacks/containers (empty: the whole server). */
+  resources: GrantResource[];
+  /** datetime-local value, or '' for never. */
+  expires: string;
 }
 
-const EMPTY: Row = { on: false, effect: 'allow', mode: 'all', servers: [], groups: [] };
+const EMPTY: Row = { on: false, effect: 'allow', mode: 'all', servers: [], groups: [], resources: [], expires: '' };
+
+/** An ISO time as a datetime-local value (local time, minutes). */
+function toLocalInput(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
 
 const RISK_STYLE: Record<PermissionDef['risk'], string> = {
   low: 'bg-muted text-muted-foreground',
@@ -32,10 +44,12 @@ function rowsFromGrants(grants: Grant[]): Record<string, Row> {
   for (const g of grants) {
     // A row starts as "only some" and becomes "all" when an all-servers grant is seen. (Starting from the
     // empty row's "all" would show a server-scoped grant as all servers, and saving would then widen it.)
-    const r = rows[g.permission] ?? { ...EMPTY, on: true, mode: 'selected' as const, effect: g.effect === 'deny' ? 'deny' as const : 'allow' as const, servers: [], groups: [] };
+    const r = rows[g.permission] ?? { ...EMPTY, on: true, mode: 'selected' as const, effect: g.effect === 'deny' ? 'deny' as const : 'allow' as const, servers: [], groups: [], resources: [], expires: '' };
     if (g.scope.type === 'all') r.mode = 'all';
-    else if (g.scope.type === 'server') r.servers.push(g.scope.id);
-    else r.groups.push(g.scope.id);
+    else if (g.scope.type === 'server') { if (!r.servers.includes(g.scope.id)) r.servers.push(g.scope.id); }
+    else if (!r.groups.includes(g.scope.id)) r.groups.push(g.scope.id);
+    if (g.resource && !r.resources.some(x => x.kind === g.resource!.kind && x.name === g.resource!.name)) r.resources.push(g.resource);
+    if (g.expiresAt && !r.expires) r.expires = toLocalInput(g.expiresAt);
     rows[g.permission] = r;
   }
   // A permission granted for everything stays "all" even if narrower grants were also saved.
@@ -49,14 +63,20 @@ function grantsFromRows(rows: Record<string, Row>, catalog: PermissionDef[]): { 
   for (const def of catalog) {
     const r = rows[def.id];
     if (!r?.on) continue;
-    if (def.scope === 'global' || r.mode === 'all') {
-      grants.push({ permission: def.id, scope: { type: 'all' }, ...(r.effect === 'deny' ? { effect: 'deny' as const } : {}) });
-      continue;
+    let expiresAt: string | undefined;
+    if (r.expires) {
+      const at = new Date(r.expires);
+      if (Number.isNaN(at.getTime()) || at.getTime() <= Date.now()) return { error: `The expiry of "${def.label}" must be in the future.` };
+      expiresAt = at.toISOString();
     }
-    if (r.servers.length + r.groups.length === 0) return { error: `Choose at least one server or server group for "${def.label}", or switch it to all servers.` };
-    const eff = r.effect === 'deny' ? { effect: 'deny' as const } : {};
-    for (const id of r.servers) grants.push({ permission: def.id, scope: { type: 'server', id }, ...eff });
-    for (const id of r.groups) grants.push({ permission: def.id, scope: { type: 'server_group', id }, ...eff });
+    const extra = { ...(r.effect === 'deny' ? { effect: 'deny' as const } : {}), ...(expiresAt ? { expiresAt } : {}) };
+    // Each chosen server (or all servers) times each chosen stack/container (or the whole server).
+    const limits: Array<GrantResource | undefined> = allowsResourceLimit(def) && r.resources.length ? r.resources : [undefined];
+    const scopes: Grant['scope'][] = def.scope === 'global' || r.mode === 'all'
+      ? [{ type: 'all' }]
+      : [...r.servers.map(id => ({ type: 'server' as const, id })), ...r.groups.map(id => ({ type: 'server_group' as const, id }))];
+    if (!scopes.length) return { error: `Choose at least one server or server group for "${def.label}", or switch it to all servers.` };
+    for (const scope of scopes) for (const resource of limits) grants.push({ permission: def.id, scope, ...extra, ...(resource ? { resource } : {}) });
   }
   return { grants };
 }
@@ -184,6 +204,17 @@ export function GroupEditorDialog({
                         )}
                       </div>
 
+                      {r.on && allowsResourceLimit(def) && (
+                        <ResourceLimits row={r} label={def.label} onChange={resources => patch(def.id, { resources })} />
+                      )}
+                      {r.on && (
+                        <div className="mt-2 flex flex-wrap items-center gap-2 pl-6 text-xs">
+                          <label htmlFor={`exp-${def.id}`} className="text-muted-foreground">Expires</label>
+                          <input id={`exp-${def.id}`} type="datetime-local" className="form-input !h-7 !w-auto text-xs" value={r.expires} onChange={e => patch(def.id, { expires: e.target.value })} />
+                          {r.expires ? <button type="button" className="text-primary hover:underline" onClick={() => patch(def.id, { expires: '' })}>Never</button> : <span className="text-muted-foreground">Never</span>}
+                        </div>
+                      )}
+
                       {scoped && (
                         <div className="mt-2 pl-6">
                           <button type="button" className="text-xs text-primary hover:underline" onClick={() => setOpenScope(openScope === def.id ? null : def.id)}>
@@ -233,5 +264,47 @@ export function GroupEditorDialog({
         </form>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** "Only these stacks/containers": chips plus a small form to add one (a name, or a prefix ending in *). */
+function ResourceLimits({ row, label, onChange }: { row: Row; label: string; onChange: (r: GrantResource[]) => void }) {
+  const [kind, setKind] = useState<GrantResource['kind']>('stack');
+  const [name, setName] = useState('');
+  const [bad, setBad] = useState(false);
+  const add = () => {
+    const n = name.trim();
+    if (!RESOURCE_NAME_RE.test(n)) { setBad(true); return; }
+    if (!row.resources.some(r => r.kind === kind && r.name === n)) onChange([...row.resources, { kind, name: n }]);
+    setName(''); setBad(false);
+  };
+  return (
+    <div className="mt-2 space-y-1 pl-6 text-xs">
+      <div className="text-muted-foreground">
+        {row.resources.length === 0 ? 'Whole server (every stack and container).' : 'Only these (a stack also covers its containers):'}
+      </div>
+      {row.resources.length > 0 && (
+        <div className="flex flex-wrap gap-1">
+          {row.resources.map(r => (
+            <span key={`${r.kind}:${r.name}`} className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5">
+              <span className="text-muted-foreground">{r.kind}</span> <span className="font-mono">{r.name}</span>
+              <button type="button" aria-label={`Remove ${r.kind} ${r.name}`} className="text-muted-foreground hover:text-destructive"
+                onClick={() => onChange(row.resources.filter(x => !(x.kind === r.kind && x.name === r.name)))}>×</button>
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="flex flex-wrap items-center gap-1">
+        <select aria-label={`Limit ${label} to a`} className="form-select !h-7 !w-auto text-xs" value={kind} onChange={e => setKind(e.target.value as GrantResource['kind'])}>
+          <option value="stack">Stack</option>
+          <option value="container">Container</option>
+        </select>
+        <input aria-label={`${kind} name for ${label}`} className={cn('form-input !h-7 !w-40 text-xs', bad && 'border-destructive')} value={name}
+          placeholder="name, or prefix*" onChange={e => { setName(e.target.value); setBad(false); }}
+          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); add(); } }} />
+        <button type="button" className="rounded border px-2 py-0.5 hover:bg-accent" onClick={add}>Limit to it</button>
+        {bad && <span className="text-destructive">Letters, digits, _ . - (a trailing * matches by prefix)</span>}
+      </div>
+    </div>
   );
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/middleware';
 import { requirePermission } from '@/lib/permissions/authorize';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
+import { widgetVisible } from '@/lib/widgets/visibility';
 import { denyGuardedConfigChange } from '@/lib/widgets/config-guard-http';
 import { resolveWidgetDefinition } from '@/components/widgets/registry-loader';
 import { visibleWidgets } from '@/lib/widgets/visibility';
@@ -10,6 +11,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
   const { widgetId } = await params;
+  // A widget of a server this caller may not see does not exist for them.
+  if (!(await widgetVisible(auth, widgetId))) return NextResponse.json({ error: { message: 'Widget not found' } }, { status: 404 });
   try {
     const r = await rqlite.query('SELECT * FROM widgets WHERE id=?', [widgetId]);
     const widgets = rowsToObjects(r);
@@ -31,6 +34,8 @@ export async function PATCH(request: NextRequest, { params }: { params: Promise<
   const roleError = await requirePermission(auth, 'dashboards.edit');
   if (roleError) return roleError;
   const { widgetId } = await params;
+  // A widget of a server this caller may not see does not exist for them.
+  if (!(await widgetVisible(auth, widgetId))) return NextResponse.json({ error: { message: 'Widget not found' } }, { status: 404 });
   try {
     const { config, title_override, grid_x, grid_y, grid_w, grid_h } = await request.json();
     const u: string[]=[]; const v: any[]=[];
@@ -65,6 +70,8 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
   const roleError = await requirePermission(auth, 'dashboards.edit');
   if (roleError) return roleError;
   const { widgetId } = await params;
+  // A widget of a server this caller may not see does not exist for them.
+  if (!(await widgetVisible(auth, widgetId))) return NextResponse.json({ error: { message: 'Widget not found' } }, { status: 404 });
   try {
     const existing = await rqlite.query('SELECT id FROM widgets WHERE id=?', [widgetId]);
     const existingWidgets = rowsToObjects(existing);

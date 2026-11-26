@@ -16,7 +16,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireUserSession } from '@/lib/auth/middleware';
 import type { TokenPayload } from '@/lib/auth/jwt';
 import { fullCatalog, permissionDef, type PermissionDef } from './catalog';
-import { allowedServerIds, grantsAllow, type ServerContext } from './evaluate';
+import { allowedResources, allowedServerIds, grantsAllow, type GrantResource, type ResourceContext, type ServerContext } from './evaluate';
 import { allServerContexts, registeredPermissionDefs, serverContext } from './store';
 import { effectiveGrants, serverVisible } from './effective';
 
@@ -27,13 +27,42 @@ export { effectiveGrants };
  * A server a principal may not see (a group denies `servers.view` for it) allows nothing on it.
  * Group grants that cannot be read make this throw rather than ignore a deny.
  */
-export async function hasPermission(payload: TokenPayload, permission: string, serverId?: string | null): Promise<boolean> {
+export async function hasPermission(payload: TokenPayload, permission: string, serverId?: string | null, resource?: ResourceContext | null): Promise<boolean> {
   if (payload.role === 'admin') return true;
   const extra = await registeredPermissionDefs();
-  const server: ServerContext | null = serverId ? await serverContext(serverId).catch(() => ({ id: serverId, groupIds: [] })) : null;
+  const server: ServerContext | null = serverId ? await serverContext(serverId) /* no catch: an unreadable server group must not skip a group-scoped deny */ : null;
   const grants = await effectiveGrants(payload, extra, true);
   if (server && permission !== 'servers.view' && !grantsAllow(grants, 'servers.view', server, extra)) return false;
-  return grantsAllow(grants, permission, server, extra);
+  return grantsAllow(grants, permission, server, extra, { resource });
+}
+
+/**
+ * Which stacks/containers of a server a principal may see under `permission`: 'all', a check per stack/container
+ * (it holds the permission only for some, or some are denied), or null (none at all). For filtering lists.
+ */
+export async function resourceFilter(payload: TokenPayload, permission: string, serverId: string): Promise<'all' | ((r: ResourceContext) => boolean) | null> {
+  if (payload.role === 'admin') return 'all';
+  const extra = await registeredPermissionDefs();
+  const server = await serverContext(serverId);
+  const grants = await effectiveGrants(payload, extra, true);
+  if (!grantsAllow(grants, 'servers.view', server, extra)) return null;
+  const check = (r: ResourceContext) => grantsAllow(grants, permission, server, extra, { resource: r });
+  if (grantsAllow(grants, permission, server, extra)) return grants.some(g => g.effect === 'deny' && g.resource) ? check : 'all';
+  const limits = allowedResources(grants, permission, server, extra);
+  return limits === 'all' || limits.length ? check : null;
+}
+
+/**
+ * The stacks/containers under which a principal holds `permission` on a server: 'all' (no limit) or the list of
+ * limits (empty: none).
+ */
+export async function permittedResources(payload: TokenPayload, permission: string, serverId: string): Promise<'all' | GrantResource[]> {
+  if (payload.role === 'admin') return 'all';
+  const extra = await registeredPermissionDefs();
+  const server = await serverContext(serverId);
+  const grants = await effectiveGrants(payload, extra, true);
+  if (!grantsAllow(grants, 'servers.view', server, extra)) return [];
+  return allowedResources(grants, permission, server, extra);
 }
 
 export { serverVisible };
@@ -44,7 +73,7 @@ export async function permissionMap(payload: TokenPayload): Promise<Record<strin
   const defs = fullCatalog(extra);
   if (payload.role === 'admin') return Object.fromEntries(defs.map(d => [d.id, '*' as const]));
   const grants = await effectiveGrants(payload, extra, true);
-  const servers = await allServerContexts().catch(() => [] as ServerContext[]);
+  const servers = await allServerContexts();
   const out: Record<string, '*' | string[]> = {};
   for (const d of defs) {
     const where = allowedServerIds(grants, d.id, servers, extra);
@@ -53,9 +82,15 @@ export async function permissionMap(payload: TokenPayload): Promise<Record<strin
   return out;
 }
 
-function forbidden(permission: string, label: string) {
+function forbidden(permission: string, label: string, resource?: ResourceContext | null, serverId?: string | null) {
+  const on = resource ? ` for the ${resource.kind} "${resource.name}"` : '';
+  // What to send to POST /api/access-requests to ask for exactly this (GET /api/access explains the rest).
+  const request = {
+    endpoint: 'POST /api/access-requests',
+    body: { kind: 'grant', permission, ...(serverId ? { server_id: serverId } : {}), ...(resource ? { resource: { kind: resource.kind, name: resource.name } } : {}), reason: '<why>' },
+  };
   return NextResponse.json(
-    { data: null, error: { message: `Not permitted: requires the "${label}" permission`, code: 'FORBIDDEN', permission } },
+    { data: null, error: { message: `Not permitted: requires the "${label}" permission${on}`, code: 'FORBIDDEN', permission, ...(resource ? { resource } : {}), request } },
     { status: 403 },
   );
 }
@@ -65,10 +100,10 @@ function forbidden(permission: string, label: string) {
  * Use it when the permission is only known after the request has been read
  * (the action in the body, or a server looked up from a widget).
  */
-export async function requirePermission(payload: TokenPayload, permission: string, serverId?: string | null): Promise<NextResponse | null> {
-  if (await hasPermission(payload, permission, serverId)) return null;
+export async function requirePermission(payload: TokenPayload, permission: string, serverId?: string | null, resource?: ResourceContext | null): Promise<NextResponse | null> {
+  if (await hasPermission(payload, permission, serverId, resource)) return null;
   const extra = await registeredPermissionDefs();
-  return forbidden(permission, permissionDef(permission, extra)?.label ?? permission);
+  return forbidden(permission, permissionDef(permission, extra)?.label ?? permission, resource, serverId);
 }
 
 /**

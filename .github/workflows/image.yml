@@ -1,0 +1,59 @@
+# Builds the Bosun image (the Dockerfile runs the tests, lint and the production build) and publishes it to the GitHub container
+# registry for self-update: ghcr.io/<owner>/bosun:<branch> and :sha-<7 characters of the commit>. Nodes pull these instead of
+# building, so an update is a quick pull per node. Pull requests only build (nothing is published).
+name: image
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main, dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Names
+        id: names
+        run: |
+          owner=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr 'A-Z' 'a-z')
+          echo "image=ghcr.io/${owner}/bosun" >> "$GITHUB_OUTPUT"
+          echo "short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          branch="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"; echo "branch=${branch//\//-}" >> "$GITHUB_OUTPUT"   # a tag cannot hold "/"
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Sign in to the registry
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build (and publish on main/dev)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          push: ${{ github.event_name != 'pull_request' }}
+          build-args: |
+            BOSUN_COMMIT=${{ github.sha }}
+            BOSUN_CHANNEL=${{ steps.names.outputs.branch }}
+          tags: |
+            ${{ steps.names.outputs.image }}:${{ steps.names.outputs.branch }}
+            ${{ steps.names.outputs.image }}:sha-${{ steps.names.outputs.short }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

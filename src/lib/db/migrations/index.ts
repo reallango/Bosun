@@ -595,6 +595,71 @@ const V14_JOB_TASKS: string[] = [
     `CREATE INDEX IF NOT EXISTS idx_package_jobs_recent ON package_jobs(started_at)`,
 ];
 
+// ---- Version 15: notifications that are not metric alerts ----
+// `kind` says what raised it (alert, widget_update, widget_upgraded, ...), `link` is where clicking it goes,
+// `dedupe_key` makes "raise once" notices idempotent (INSERT OR IGNORE), `audience` limits who sees it
+// (NULL = everyone, otherwise the lowest access level) and `data` holds kind-specific JSON. Additive columns.
+const V15_NOTIFICATION_KINDS: string[] = [
+    `ALTER TABLE notifications ADD COLUMN kind TEXT NOT NULL DEFAULT 'alert'`,
+    `ALTER TABLE notifications ADD COLUMN link TEXT`,
+    `ALTER TABLE notifications ADD COLUMN dedupe_key TEXT`,
+    `ALTER TABLE notifications ADD COLUMN audience TEXT`,
+    `ALTER TABLE notifications ADD COLUMN data TEXT`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_dedupe ON notifications(dedupe_key) WHERE dedupe_key IS NOT NULL`,
+];
+
+// V16: a grant can be limited to one stack or container (resource_kind/resource_name, a name or a prefix ending in *)
+// and can expire (expires_at, ISO time; NULL = never). The unique key now includes the resource, so the table is
+// rebuilt (SQLite cannot change a constraint); existing grants keep their ids and become unlimited, never-expiring.
+const V16_RESOURCE_GRANTS: string[] = [
+    `CREATE TABLE permission_grants_v16 (
+        id TEXT PRIMARY KEY,
+        group_id TEXT NOT NULL REFERENCES permission_groups(id) ON DELETE CASCADE,
+        permission TEXT NOT NULL,
+        scope_type TEXT NOT NULL DEFAULT 'all' CHECK (scope_type IN ('all', 'server', 'server_group')),
+        scope_id TEXT NOT NULL DEFAULT '',
+        effect TEXT NOT NULL DEFAULT 'allow',
+        resource_kind TEXT NOT NULL DEFAULT '' CHECK (resource_kind IN ('', 'stack', 'container')),
+        resource_name TEXT NOT NULL DEFAULT '',
+        expires_at TEXT,
+        UNIQUE (group_id, permission, scope_type, scope_id, resource_kind, resource_name)
+    )`,
+    `INSERT INTO permission_grants_v16 (id, group_id, permission, scope_type, scope_id, effect)
+        SELECT id, group_id, permission, scope_type, scope_id, effect FROM permission_grants`,
+    `DROP TABLE permission_grants`,
+    `ALTER TABLE permission_grants_v16 RENAME TO permission_grants`,
+    `CREATE INDEX IF NOT EXISTS idx_permission_grants_group ON permission_grants(group_id)`,
+];
+
+// V17: access requests. An API key or user asks for a permission (a grant, permanent or for some hours, optionally
+// limited to one server and stack/container) or for one widget action to be run once; someone who holds that
+// permission approves or denies it from the bell or Settings > Access requests.
+const V17_ACCESS_REQUESTS: string[] = [
+    `CREATE TABLE IF NOT EXISTS access_requests (
+        id TEXT PRIMARY KEY,
+        requester_type TEXT NOT NULL CHECK (requester_type IN ('user', 'api_key')),
+        requester_id TEXT NOT NULL,
+        requester_name TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('grant', 'one_time')),
+        permission TEXT NOT NULL,
+        server_id TEXT,
+        resource_kind TEXT NOT NULL DEFAULT '',
+        resource_name TEXT NOT NULL DEFAULT '',
+        duration_hours INTEGER,
+        action TEXT,
+        reason TEXT,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'denied', 'expired', 'cancelled', 'failed')),
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        decided_by TEXT,
+        decided_by_name TEXT,
+        decided_at TEXT,
+        decision_note TEXT,
+        result TEXT
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_access_requests_status ON access_requests(status, created_at)`,
+    `CREATE INDEX IF NOT EXISTS idx_access_requests_requester ON access_requests(requester_type, requester_id)`,
+];
 export const MIGRATIONS: Migration[] = [
     {
         version: 1,
@@ -618,6 +683,9 @@ export const MIGRATIONS: Migration[] = [
     { version: 12, name: 'package_jobs', statements: V12_PACKAGE_JOBS },
     { version: 13, name: 'exec_permission', statements: V13_EXEC_PERMISSION },
     { version: 14, name: 'job_tasks', statements: V14_JOB_TASKS },
+    { version: 15, name: 'notification_kinds', statements: V15_NOTIFICATION_KINDS },
+    { version: 16, name: 'resource_grants', statements: V16_RESOURCE_GRANTS },
+    { version: 17, name: 'access_requests', statements: V17_ACCESS_REQUESTS },
 ];
 
 /** The schema version this build expects. */

@@ -2,8 +2,8 @@
   "schema": 1,
   "id": "docker",
   "name": "Docker Containers",
-  "version": "1.0.3",
-  "description": "Containers on the host with logs, a shell, start, stop and restart; edit a container, create containers and stacks (a compose file, or one from a GitHub repository), and a Manage page for images, volumes and networks.",
+  "version": "1.0.14",
+  "description": "Containers on the host with logs, a shell, start, stop and restart; edit a container, create containers and stacks (a compose file, or one from a Git repository), and a Manage page for images, volumes and networks.",
   "author": "Bosun",
   "permissions": [
     {
@@ -64,6 +64,15 @@
       "id": "docker.delete",
       "label": "Remove containers, images, volumes, networks and stacks",
       "description": "Delete things from the host, including pruning unused images, volumes and networks.",
+      "group": "Docker",
+      "defaultLevel": "admin",
+      "risk": "high",
+      "scope": "server"
+    },
+    {
+      "id": "docker.install",
+      "label": "Install Docker on a host",
+      "description": "Install Docker Engine and the Compose plugin from Docker's apt repository (runs apt-get as root through the service account).",
       "group": "Docker",
       "defaultLevel": "admin",
       "risk": "high",
@@ -439,7 +448,7 @@
               },
               "repo": {
                 "type": "string",
-                "pattern": "^(-|https://[A-Za-z0-9.-]+/[A-Za-z0-9._/-]+)$",
+                "pattern": "^(-|https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/[A-Za-z0-9._/-]+)$",
                 "maxLength": 300,
                 "default": "-"
               },
@@ -479,10 +488,19 @@
                 "maxLines": 100,
                 "linePattern": "^(#.*|svc\\.[A-Za-z0-9_.-]+\\.(container_name|port|volume|network)=.+)$",
                 "default": ""
+              },
+              "start": {
+                "type": "string",
+                "values": [
+                  "now",
+                  "later"
+                ],
+                "maxLength": 10
               }
             },
             "secrets": [
-              "git_token"
+              "git_token",
+              "git_credentials"
             ]
           },
           "stack_action": {
@@ -502,14 +520,45 @@
                   "down",
                   "restart",
                   "pull",
+                  "update",
                   "stop",
-                  "start"
+                  "start",
+                  "guard_up",
+                  "retag"
                 ],
                 "maxLength": 20
+              },
+              "allow_risky": {
+                "type": "string",
+                "values": [
+                  "true",
+                  "false"
+                ],
+                "maxLength": 20,
+                "default": "false"
+              },
+              "image": {
+                "type": "string",
+                "pattern": "^(-|[a-z0-9][a-z0-9._/:@-]{0,254})$",
+                "maxLength": 255,
+                "default": "-"
+              },
+              "as": {
+                "type": "string",
+                "pattern": "^(-|[a-z0-9][a-z0-9._/:@-]{0,254})$",
+                "maxLength": 255,
+                "default": "-"
+              },
+              "service": {
+                "type": "string",
+                "pattern": "^(-|[A-Za-z0-9][A-Za-z0-9_.-]{0,62})$",
+                "maxLength": 63,
+                "default": "-"
               }
             },
             "secrets": [
-              "git_token"
+              "git_token",
+              "git_credentials"
             ]
           },
           "stack_remove": {
@@ -588,12 +637,13 @@
             "params": {
               "repo": {
                 "type": "string",
-                "pattern": "^https://[A-Za-z0-9.-]+/[A-Za-z0-9._/-]+$",
+                "pattern": "^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/[A-Za-z0-9._/-]+$",
                 "maxLength": 300
               }
             },
             "secrets": [
-              "git_token"
+              "git_token",
+              "git_credentials"
             ]
           },
           "git_files": {
@@ -603,7 +653,7 @@
             "params": {
               "repo": {
                 "type": "string",
-                "pattern": "^https://[A-Za-z0-9.-]+/[A-Za-z0-9._/-]+$",
+                "pattern": "^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/[A-Za-z0-9._/-]+$",
                 "maxLength": 300
               },
               "branch": {
@@ -613,7 +663,8 @@
               }
             },
             "secrets": [
-              "git_token"
+              "git_token",
+              "git_credentials"
             ]
           },
           "git_services": {
@@ -623,7 +674,7 @@
             "params": {
               "repo": {
                 "type": "string",
-                "pattern": "^https://[A-Za-z0-9.-]+/[A-Za-z0-9._/-]+$",
+                "pattern": "^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/[A-Za-z0-9._/-]+$",
                 "maxLength": 300
               },
               "branch": {
@@ -638,8 +689,21 @@
               }
             },
             "secrets": [
-              "git_token"
+              "git_token",
+              "git_credentials"
             ]
+          },
+          "host_detect": {
+            "as": "service",
+            "timeoutSec": 30,
+            "linux": "scripts/host_detect.sh",
+            "params": {}
+          },
+          "host_install": {
+            "as": "service",
+            "timeoutSec": 1800,
+            "linux": "scripts/host_install.sh",
+            "params": {}
           }
         },
         "data": {
@@ -657,7 +721,12 @@
             "state": "State",
             "status": "Status",
             "ports": "Ports",
-            "compose": "Labels"
+            "compose": "ComposeProject",
+            "service": "ComposeService"
+          },
+          "resources": {
+            "container": "name",
+            "stack": "compose"
           }
         },
         "metrics": [
@@ -736,6 +805,10 @@
             "label": "Logs",
             "icon": "scroll-text",
             "permission": "docker.logs",
+            "target": {
+              "kind": "container",
+              "param": "name"
+            },
             "kind": "script",
             "result": "text",
             "params": {
@@ -765,6 +838,10 @@
             "label": "Shell",
             "icon": "terminal-square",
             "permission": "docker.shell",
+            "target": {
+              "kind": "container",
+              "param": "ref"
+            },
             "when": {
               "field": "state",
               "equals": "running"
@@ -781,6 +858,10 @@
             "label": "Restart",
             "icon": "rotate-cw",
             "permission": "docker.containers.control",
+            "target": {
+              "kind": "container",
+              "param": "name"
+            },
             "kind": "script",
             "after": "refresh",
             "when": {
@@ -814,6 +895,10 @@
             "label": "Stop",
             "icon": "square",
             "permission": "docker.containers.control",
+            "target": {
+              "kind": "container",
+              "param": "name"
+            },
             "kind": "script",
             "after": "refresh",
             "when": {
@@ -847,6 +932,10 @@
             "label": "Start",
             "icon": "play",
             "permission": "docker.containers.control",
+            "target": {
+              "kind": "container",
+              "param": "name"
+            },
             "kind": "script",
             "after": "refresh",
             "when": {
@@ -962,6 +1051,10 @@
             "id": "recreate",
             "label": "Save and replace container",
             "permission": "docker.manage",
+            "target": {
+              "kind": "container",
+              "param": "name"
+            },
             "kind": "script",
             "params": {
               "name": {
@@ -997,6 +1090,10 @@
             "id": "recreate_privileged",
             "label": "Save with elevated options",
             "permission": "docker.privileged",
+            "target": {
+              "kind": "container",
+              "param": "name"
+            },
             "kind": "script",
             "params": {
               "name": {
@@ -1032,6 +1129,10 @@
             "id": "remove",
             "label": "Remove",
             "permission": "docker.delete",
+            "target": {
+              "kind": "container",
+              "param": "name"
+            },
             "kind": "script",
             "params": {
               "name": {
@@ -1312,6 +1413,10 @@
             "id": "stack_deploy",
             "label": "Deploy stack",
             "permission": "docker.manage",
+            "target": {
+              "kind": "stack",
+              "param": "name"
+            },
             "kind": "script",
             "params": {
               "name": {
@@ -1342,7 +1447,7 @@
               },
               "repo": {
                 "type": "string",
-                "pattern": "^(-|https://[A-Za-z0-9.-]+/[A-Za-z0-9._/-]+)$",
+                "pattern": "^(-|https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/[A-Za-z0-9._/-]+)$",
                 "maxLength": 300,
                 "default": "-"
               },
@@ -1375,7 +1480,8 @@
                 "script": "stack_deploy",
                 "args": {
                   "allow_risky": "literal:false",
-                  "pull": "param.pull"
+                  "pull": "param.pull",
+                  "start": "literal:now"
                 }
               }
             ],
@@ -1387,6 +1493,10 @@
             "id": "stack_deploy_privileged",
             "label": "Deploy with elevated options",
             "permission": "docker.privileged",
+            "target": {
+              "kind": "stack",
+              "param": "name"
+            },
             "kind": "script",
             "params": {
               "name": {
@@ -1417,7 +1527,7 @@
               },
               "repo": {
                 "type": "string",
-                "pattern": "^(-|https://[A-Za-z0-9.-]+/[A-Za-z0-9._/-]+)$",
+                "pattern": "^(-|https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/[A-Za-z0-9._/-]+)$",
                 "maxLength": 300,
                 "default": "-"
               },
@@ -1450,7 +1560,8 @@
                 "script": "stack_deploy",
                 "args": {
                   "allow_risky": "literal:true",
-                  "pull": "param.pull"
+                  "pull": "param.pull",
+                  "start": "literal:now"
                 }
               }
             ],
@@ -1464,9 +1575,176 @@
             }
           },
           {
+            "id": "stack_deploy_later",
+            "label": "Deploy stack (start in the background)",
+            "permission": "docker.manage",
+            "target": {
+              "kind": "stack",
+              "param": "name"
+            },
+            "kind": "script",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
+                "maxLength": 63
+              },
+              "source": {
+                "type": "string",
+                "values": [
+                  "editor",
+                  "git"
+                ],
+                "maxLength": 20
+              },
+              "yaml": {
+                "type": "text",
+                "maxLength": 65536,
+                "maxLines": 2000,
+                "default": ""
+              },
+              "env": {
+                "type": "text",
+                "maxLength": 8000,
+                "maxLines": 200,
+                "linePattern": "^(#.*|[A-Za-z_][A-Za-z0-9_]*=.*)$",
+                "default": ""
+              },
+              "repo": {
+                "type": "string",
+                "pattern": "^(-|https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/[A-Za-z0-9._/-]+)$",
+                "maxLength": 300,
+                "default": "-"
+              },
+              "branch": {
+                "type": "string",
+                "pattern": "^(-|[A-Za-z0-9._/-]{1,100})$",
+                "maxLength": 100,
+                "default": "-"
+              },
+              "file": {
+                "type": "string",
+                "pattern": "^(-|[A-Za-z0-9._/-]{1,200})$",
+                "maxLength": 200,
+                "default": "-"
+              },
+              "pull": {
+                "type": "boolean",
+                "default": false
+              },
+              "override": {
+                "type": "text",
+                "maxLength": 8000,
+                "maxLines": 100,
+                "linePattern": "^(#.*|svc\\.[A-Za-z0-9_.-]+\\.(container_name|port|volume|network)=.+)$",
+                "default": ""
+              }
+            },
+            "variants": [
+              {
+                "script": "stack_deploy",
+                "args": {
+                  "allow_risky": "literal:false",
+                  "pull": "param.pull",
+                  "start": "literal:later"
+                }
+              }
+            ],
+            "icon": "upload",
+            "job": true
+          },
+          {
+            "id": "stack_deploy_privileged_later",
+            "label": "Deploy with elevated options (start in the background)",
+            "permission": "docker.privileged",
+            "target": {
+              "kind": "stack",
+              "param": "name"
+            },
+            "kind": "script",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
+                "maxLength": 63
+              },
+              "source": {
+                "type": "string",
+                "values": [
+                  "editor",
+                  "git"
+                ],
+                "maxLength": 20
+              },
+              "yaml": {
+                "type": "text",
+                "maxLength": 65536,
+                "maxLines": 2000,
+                "default": ""
+              },
+              "env": {
+                "type": "text",
+                "maxLength": 8000,
+                "maxLines": 200,
+                "linePattern": "^(#.*|[A-Za-z_][A-Za-z0-9_]*=.*)$",
+                "default": ""
+              },
+              "repo": {
+                "type": "string",
+                "pattern": "^(-|https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/[A-Za-z0-9._/-]+)$",
+                "maxLength": 300,
+                "default": "-"
+              },
+              "branch": {
+                "type": "string",
+                "pattern": "^(-|[A-Za-z0-9._/-]{1,100})$",
+                "maxLength": 100,
+                "default": "-"
+              },
+              "file": {
+                "type": "string",
+                "pattern": "^(-|[A-Za-z0-9._/-]{1,200})$",
+                "maxLength": 200,
+                "default": "-"
+              },
+              "pull": {
+                "type": "boolean",
+                "default": false
+              },
+              "override": {
+                "type": "text",
+                "maxLength": 8000,
+                "maxLines": 100,
+                "linePattern": "^(#.*|svc\\.[A-Za-z0-9_.-]+\\.(container_name|port|volume|network)=.+)$",
+                "default": ""
+              }
+            },
+            "variants": [
+              {
+                "script": "stack_deploy",
+                "args": {
+                  "allow_risky": "literal:true",
+                  "pull": "param.pull",
+                  "start": "literal:later"
+                }
+              }
+            ],
+            "icon": "upload",
+            "job": true,
+            "confirm": {
+              "title": "Deploy with elevated options?",
+              "text": "The stack may use privileged mode, the host network, devices, the Docker socket or host folders.",
+              "destructive": true
+            }
+          },
+          {
             "id": "stack_start",
             "label": "Start stack",
             "permission": "docker.manage",
+            "target": {
+              "kind": "stack",
+              "param": "name"
+            },
             "kind": "script",
             "params": {
               "name": {
@@ -1492,6 +1770,10 @@
             "id": "stack_stop",
             "label": "Stop stack",
             "permission": "docker.manage",
+            "target": {
+              "kind": "stack",
+              "param": "name"
+            },
             "kind": "script",
             "params": {
               "name": {
@@ -1521,6 +1803,10 @@
             "id": "stack_restart",
             "label": "Restart stack",
             "permission": "docker.manage",
+            "target": {
+              "kind": "stack",
+              "param": "name"
+            },
             "kind": "script",
             "params": {
               "name": {
@@ -1550,6 +1836,10 @@
             "id": "stack_pull",
             "label": "Pull and redeploy",
             "permission": "docker.manage",
+            "target": {
+              "kind": "stack",
+              "param": "name"
+            },
             "kind": "script",
             "params": {
               "name": {
@@ -1572,9 +1862,151 @@
             "after": "refresh"
           },
           {
+            "id": "stack_update",
+            "label": "Update from source and redeploy",
+            "permission": "docker.manage",
+            "target": {
+              "kind": "stack",
+              "param": "name"
+            },
+            "kind": "script",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
+                "maxLength": 63,
+                "from": "name"
+              }
+            },
+            "variants": [
+              {
+                "script": "stack_action",
+                "args": {
+                  "op": "literal:update"
+                }
+              }
+            ],
+            "icon": "refresh-cw",
+            "job": true,
+            "after": "refresh"
+          },
+          {
+            "id": "stack_update_privileged",
+            "label": "Update with elevated options",
+            "description": "Update from source and redeploy when the new version uses privileged mode, the host network, devices, the Docker socket or host folders.",
+            "permission": "docker.privileged",
+            "target": {
+              "kind": "stack",
+              "param": "name"
+            },
+            "kind": "script",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
+                "maxLength": 63,
+                "from": "name"
+              }
+            },
+            "variants": [
+              {
+                "script": "stack_action",
+                "args": {
+                  "op": "literal:update",
+                  "allow_risky": "literal:true"
+                }
+              }
+            ],
+            "icon": "refresh-cw",
+            "job": true,
+            "after": "refresh",
+            "confirm": {
+              "title": "Update stack {name} with elevated options?",
+              "text": "The new version may use privileged mode, the host network, devices, the Docker socket or host folders.",
+              "destructive": true
+            }
+          },
+          {
+            "id": "stack_guard_up",
+            "label": "Restart after hand-over",
+            "description": "Used when importing a stack from another tool: waits until that tool has stopped the stack, then starts it again from the files Bosun stored.",
+            "permission": "docker.manage",
+            "target": {
+              "kind": "stack",
+              "param": "name"
+            },
+            "kind": "script",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
+                "maxLength": 63,
+                "from": "name"
+              }
+            },
+            "variants": [
+              {
+                "script": "stack_action",
+                "args": {
+                  "op": "literal:guard_up"
+                }
+              }
+            ],
+            "icon": "refresh-cw"
+          },
+          {
+            "id": "stack_retag",
+            "label": "Move a service to a new image",
+            "description": "Pulls an image, tags it as the image the service runs and re-creates that service (self-update of Bosun). The compose file is not changed.",
+            "permission": "docker.privileged",
+            "target": {
+              "kind": "stack",
+              "param": "name"
+            },
+            "kind": "script",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
+                "maxLength": 63
+              },
+              "service": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$",
+                "maxLength": 63
+              },
+              "image": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9._/:@-]{0,254}$",
+                "maxLength": 255
+              },
+              "as": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9._/:@-]{0,254}$",
+                "maxLength": 255
+              }
+            },
+            "variants": [
+              {
+                "script": "stack_action",
+                "args": {
+                  "op": "literal:retag",
+                  "image": "param.image",
+                  "as": "param.as",
+                  "service": "param.service"
+                }
+              }
+            ],
+            "icon": "download"
+          },
+          {
             "id": "stack_remove",
             "label": "Remove stack",
             "permission": "docker.delete",
+            "target": {
+              "kind": "stack",
+              "param": "name"
+            },
             "kind": "script",
             "params": {
               "name": {
@@ -1601,13 +2033,34 @@
               "requireText": "{name}"
             },
             "job": true
+          },
+          {
+            "id": "docker_install",
+            "label": "Install Docker",
+            "permission": "docker.install",
+            "kind": "script",
+            "variants": [
+              {
+                "script": "host_install"
+              }
+            ],
+            "icon": "download",
+            "job": true,
+            "confirm": {
+              "title": "Install Docker on this server?",
+              "text": "Adds Docker's apt repository (download.docker.com, key checked by its fingerprint) and installs Docker Engine with the Compose and Buildx plugins as root, then starts Docker and lets Bosun's service account use it. Debian, Ubuntu and their derivatives."
+            }
           }
         ],
         "datasets": {
           "inspect": {
             "script": "inspect",
             "cacheSec": 0,
-            "permission": "docker.manage"
+            "permission": "docker.manage",
+            "target": {
+              "kind": "container",
+              "param": "name"
+            }
           },
           "images": {
             "script": "images",
@@ -1632,22 +2085,37 @@
           "stacks": {
             "script": "stacks",
             "cacheSec": 5,
-            "permission": "docker.view"
+            "permission": "docker.view",
+            "resources": {
+              "stack": "name"
+            }
           },
           "stack_get": {
             "script": "stack_get",
             "cacheSec": 0,
-            "permission": "docker.manage"
+            "permission": "docker.manage",
+            "target": {
+              "kind": "stack",
+              "param": "name"
+            }
           },
           "export_run": {
             "script": "export_run",
             "cacheSec": 0,
-            "permission": "docker.manage"
+            "permission": "docker.manage",
+            "target": {
+              "kind": "container",
+              "param": "name"
+            }
           },
           "export_compose": {
             "script": "export_compose",
             "cacheSec": 0,
-            "permission": "docker.manage"
+            "permission": "docker.manage",
+            "target": {
+              "kind": "container",
+              "param": "name"
+            }
           },
           "convert": {
             "script": "convert",
@@ -1673,6 +2141,11 @@
             "script": "git_services",
             "cacheSec": 30,
             "permission": "docker.manage"
+          },
+          "host_detect": {
+            "script": "host_detect",
+            "cacheSec": 0,
+            "permission": "docker.view"
           }
         },
         "screens": {
@@ -2861,7 +3334,7 @@
             "kind": "dialog",
             "size": "xl",
             "title": "New stack",
-            "description": "A stack is a Docker Compose project: write the compose file here, or deploy one from a GitHub repository.",
+            "description": "A stack is a Docker Compose project: write the compose file here, or deploy one from a Git repository (GitHub, GitLab, Gitea, your own server).",
             "blocks": [
               {
                 "type": "editor",
@@ -2885,7 +3358,7 @@
                       },
                       {
                         "value": "git",
-                        "label": "A GitHub repository"
+                        "label": "A Git repository"
                       }
                     ]
                   },
@@ -2910,7 +3383,7 @@
                       "field": "values.source",
                       "equals": "git"
                     },
-                    "help": "Private repository? An admin sets a GitHub access token under Settings, Widgets, Docker Containers (key icon)."
+                    "help": "Private repository? An admin sets the GitHub access token, or Git credentials for other hosts, under Settings, Widgets, Docker Containers (key icon)."
                   },
                   {
                     "name": "branch",
@@ -3120,7 +3593,7 @@
                       },
                       {
                         "value": "git",
-                        "label": "A GitHub repository"
+                        "label": "A Git repository"
                       }
                     ]
                   },
@@ -3147,7 +3620,7 @@
                       "field": "values.source",
                       "equals": "git"
                     },
-                    "help": "Private repository? An admin sets a GitHub access token under Settings, Widgets, Docker Containers (key icon)."
+                    "help": "Private repository? An admin sets the GitHub access token, or Git credentials for other hosts, under Settings, Widgets, Docker Containers (key icon)."
                   },
                   {
                     "name": "branch",
@@ -3807,6 +4280,8 @@
                             "stack_stop",
                             "stack_restart",
                             "stack_pull",
+                            "stack_update",
+                            "stack_update_privileged",
                             "stack_remove"
                           ],
                           "filter": {
@@ -3845,7 +4320,30 @@
             "icon": "settings",
             "screen": "manage"
           }
-        ]
+        ],
+        "stacks": {
+          "list": "stacks",
+          "deploy": "stack_deploy",
+          "deployPrivileged": "stack_deploy_privileged",
+          "guard": "stack_guard_up",
+          "export": "export_compose",
+          "fields": {
+            "id": "ID",
+            "name": "name",
+            "state": "state",
+            "project": "compose",
+            "service": "service"
+          },
+          "retag": "stack_retag",
+          "deployLater": "stack_deploy_later",
+          "deployPrivilegedLater": "stack_deploy_privileged_later"
+        },
+        "setup": {
+          "label": "Docker Engine",
+          "description": "Containers and Compose stacks (also needed to deploy Bosun to this server).",
+          "detect": "host_detect",
+          "install": "docker_install"
+        }
       }
     }
   ],
@@ -3853,7 +4351,12 @@
     {
       "id": "git_token",
       "label": "GitHub access token",
-      "description": "Lets stacks be deployed from a private GitHub repository. Not needed for public repositories."
+      "description": "Lets stacks be deployed and updated from a private GitHub repository. Not needed for public repositories."
+    },
+    {
+      "id": "git_credentials",
+      "label": "Git credentials for other hosts",
+      "description": "For private repositories on GitLab, Gitea, Bitbucket or your own Git server: entries \"host=token\" or \"host=user:token\" separated by spaces, e.g. \"gitlab.com=glpat-xxx git.lan:3000=bosun:token\". Each is sent only to its own host."
     }
   ]
 }

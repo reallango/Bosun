@@ -96,6 +96,15 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       return await installWol(auth, await senderContext(sender.serverId));
     }
 
+    // power.wake is granted per server: someone who is not Full access may only wake this server's own MACs, and only to
+    // its own broadcast address, not any MAC or network they name.
+    if (auth.role !== 'admin' && (body?.mac_address || body?.broadcast)) {
+      const known = await macsFor(server, null);
+      const asked = body?.mac_address ? normalizeMac(String(body.mac_address)) : null;
+      if ((body?.mac_address && (!asked || !known.includes(asked))) || body?.broadcast) {
+        return NextResponse.json({ error: { message: 'Only Full access can wake a different MAC address or choose the broadcast address', code: 'FORBIDDEN' } }, { status: 403 });
+      }
+    }
     const macs = await macsFor(server, body?.mac_address);
     if (!macs.length) {
       return NextResponse.json({ error: { message: 'No valid MAC address known for this server (set one, or wait for the next poll to detect it)' } }, { status: 400 });

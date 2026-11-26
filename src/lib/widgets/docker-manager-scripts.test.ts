@@ -195,18 +195,20 @@ describe('risky settings', () => {
   });
 
   it.skipIf(!hasSh)('cap_drop, ordinary host paths, named volumes and bridge networks are not risky', () => {
-    expect(create(base + 'cap_drop=ALL\ncap_drop=NET_RAW\nvolume=/srv/data:/d\nvolume=/etcetera:/e\nvolume=/usrlocal:/u\nvolume=/home/me/data:/h\nvolume=/home/me/.sshx:/h2\nvolume=/var/lib/dockerx:/v\nvolume=named:/n\nnetwork=bridge').error).toBeNull();
+    expect(create(base + 'cap_drop=ALL\ncap_drop=NET_RAW\nvolume=/srv/data:/d\nvolume=/etcetera:/e\nvolume=/usrlocal:/u\nvolume=/home/me/data:/h\nvolume=/home/me/sshx:/h2\nvolume=/var/lib/dockerx:/v\nvolume=named:/n\nnetwork=bridge').error).toBeNull();
   });
 
   it.skipIf(!hasSh)('detects sensitive host paths, also through ".." and trailing parts', () => {
     const risky = ['/', '/etc', '/etc/', '/etc/ssh', '/root', '/root/.ssh', '/proc', '/proc/1', '/sys', '/boot', '/usr', '/usr/bin', '/var/lib/docker', '/var/lib/docker/volumes',
-      '/var/run/docker.sock', '/run/docker.sock', '/opt/run/containerd.sock', '/srv/../etc', '/srv/data/../../etc/passwd', '/./etc', '//etc', '/etc/../', '/home/alice/.ssh', '/home/alice/.ssh/keys', '/srv/..', '/a/b/../../../etc'];
+      '/var/run/docker.sock', '/run/docker.sock', '/opt/run/containerd.sock', '/srv/../etc', '/srv/data/../../etc/passwd', '/./etc', '//etc', '/etc/../', '/home/alice/.ssh', '/home/alice/.ssh/keys', '/srv/..', '/a/b/../../../etc',
+      // a folder that contains a sensitive one, runtime sockets, devices, whole home folders and hidden files in them
+      '/var', '/var/lib', '/run', '/run/user/1000', '/dev', '/dev/sda', '/lib', '/bin', '/home', '/home/alice', '/home/alice/.bashrc', '/home/alice/.config/x', '/opt/podman.sock'];
     for (const p of risky) {
       const r = create(`${base}volume=${p}:/x`);
       expect(r.error, p).toMatch(/needs the permission to use elevated container options: host path /);
       expect(create(`${base}volume=${p}:/x`, 'true').error, p).toBeNull();
     }
-    for (const p of ['/srv', '/srv/etc', '/etcfoo', '/usrlocal', '/home', '/home/alice', '/home/alice/docs', '/var/lib', '/var/lib/other', '/opt/proc', '/tmp/..foo']) {
+    for (const p of ['/srv', '/srv/etc', '/etcfoo', '/usrlocal', '/home/alice/docs', '/home/alice/docs/.git', '/var/lib/other', '/var/log', '/mnt/data', '/opt/proc', '/tmp/..foo']) {
       expect(create(`${base}volume=${p}:/x`).error, p).toBeNull();
     }
   });
@@ -657,6 +659,24 @@ exit 0`);
     expect(dockerCalls().filter((x) => x[1] === '-p').map((x) => x.slice(-1)[0] === 'json' ? 'config' : x[x.length - 1] === '--remove-orphans' ? 'up' : x.slice(-1)[0])).toEqual(['config', 'pull', 'up']);
   });
 
+  it.skipIf(!hasSh)('stack_deploy start=later stores the stack, answers at once, and starts it from a background job', async () => {
+    composeFake(config('      "ports": []'));
+    const r = parseScriptOutput(deploy({ start: 'later' }).stdout);
+    expect(r.error).toBeNull();
+    expect(r.done).toBe('deployed demo (starting in the background)');
+    const sd = shDir('demo');
+    expect(fs.readFileSync(path.join(stackDir('demo'), 'compose.yaml'), 'utf8')).toBe('services:\n  web:\n    image: nginx\n');
+    const up = ['compose', '-p', 'demo', '--project-directory', sd, '-f', sd + '/compose.yaml', '--env-file', sd + '/.env', 'up', '-d', '--remove-orphans'].join(' ');
+    // not yet when the script answers; a few seconds later, from the job it left behind
+    expect(dockerCalls().some(c => c.join(' ') === up)).toBe(false);
+    let seen = false;
+    for (let i = 0; i < 40 && !seen; i++) {
+      await new Promise(res => setTimeout(res, 250));
+      seen = dockerCalls().some(c => c.join(' ') === up);
+    }
+    expect(seen).toBe(true);
+  }, 20000);
+
   it.skipIf(!hasSh)('stack_deploy refuses an invalid file or risky options (nothing stored, nothing started), and lets them through with allow_risky', () => {
     const risky: [string, RegExp][] = [
       ['      "privileged": true', /privileged/],
@@ -779,13 +799,32 @@ exit 0`);
       expect(fs.readFileSync(path.join(bin, 'calls.log.env'), 'utf8')).not.toContain(TOKEN);
     });
 
-    it.skipIf(!hasSh)('sends no authorization to hosts other than github.com, and refuses an odd token', () => {
+    it.skipIf(!hasSh)('sends the GitHub token only to github.com, other hosts their own credential, and refuses an odd one before anything changes', () => {
       fakeGit();
-      const res = deploy({ ...g, repo: 'https://git.example.com/o/r' }, { BOSUN_SECRET_git_token: TOKEN });
-      expect(res.stdout).toMatch(/only used for github.com/);
+      deploy({ ...g, repo: 'https://git.example.com/o/r' }, { BOSUN_SECRET_git_token: TOKEN });
       expect(envLines()).toContain('ENV GIT_CONFIG_COUNT=');
       expect(envLines().some((l) => l.includes('Authorization'))).toBe(false);
-      expect(parseScriptOutput(deploy(g, { BOSUN_SECRET_git_token: 'a b;c' }).stdout).error).toMatch(/Git token has unexpected characters/);
+      fs.rmSync(stackDir('demo'), { recursive: true, force: true });
+      fs.writeFileSync(log, '');
+      fakeGit();
+      const res = deploy({ ...g, repo: 'https://git.lan:3000/o/r' }, { BOSUN_SECRET_git_token: TOKEN, BOSUN_SECRET_git_credentials: 'git.lan:3000=bosun:s3cret' });
+      expect(parseScriptOutput(res.stdout).done).toBe('deployed demo');
+      expect(envLines()).toContain(`ENV GIT_CONFIG_VALUE_0=Authorization: Basic ${Buffer.from('bosun:s3cret').toString('base64')}`);
+      expect(res.stdout + res.stderr).not.toContain('s3cret');
+      fs.rmSync(stackDir('demo'), { recursive: true, force: true });
+      expect(parseScriptOutput(deploy(g, { BOSUN_SECRET_git_token: 'a b;c' }).stdout).error).toMatch(/a Git credential has unexpected characters/);
+      expect(fs.existsSync(stackDir('demo'))).toBe(false);
+    });
+
+    it.skipIf(!hasSh)('stack update fetches a private repository with its stored credential', () => {
+      seed('p', { 'repo/.git/HEAD': 'x', 'repo/d/compose.yaml': 'x', 'bosun.meta': 'source=git\nrepo=https://gitlab.com/o/r\nbranch=main\nfile=d/compose.yaml\n' });
+      composeFake(config('      "ports": []'));
+      fakeGit();
+      fs.writeFileSync(log, '');
+      const r = out('stack_action.sh', { name: 'p', op: 'update' }, { BOSUN_SECRET_git_credentials: 'gitlab.com=glpat-XYZ', BOSUN_SECRET_git_token: TOKEN });
+      expect(r.done).toBe('update: p');
+      expect(envLines()).toContain(`ENV GIT_CONFIG_VALUE_0=Authorization: Basic ${Buffer.from('oauth2:glpat-XYZ').toString('base64')}`);
+      expect(envLines()).toContain('ENV SECRET=');
     });
 
     it.skipIf(!hasSh)('a refused or broken git deployment removes a fresh clone, and a failing clone leaves no stack folder', () => {
@@ -822,11 +861,13 @@ exit 0`);
     fake('exit 0');
     const web = shDir('web');
     const base = ['compose', '-p', 'web', '--project-directory', web, '-f', web + '/compose.yaml', '--env-file', web + '/.env'];
-    const expected: Record<string, string[]> = { up: ['up', '-d', '--remove-orphans'], down: ['down'], restart: ['restart'], pull: ['pull'], stop: ['stop'], start: ['start'] };
+    const expected: Record<string, string[]> = { up: ['up', '-d', '--remove-orphans'], down: ['down'], restart: ['restart'], pull: ['pull'], update: ['up', '-d', '--build', '--remove-orphans'], stop: ['stop'], start: ['start'] };
     for (const [op, tail] of Object.entries(expected)) {
       fs.writeFileSync(log, '');
       expect(out('stack_action.sh', { name: 'web', op }).done, op).toBe(`${op}: web`);
-      expect(dockerCalls().filter((c) => c[0] === 'compose' && c[1] === '-p')).toEqual([[...base, ...tail]]);
+      // update checks the files for risky options first (the same check as a deployment)
+      const check = op === 'update' ? [[...base, 'config', '--format', 'json']] : [];
+      expect(dockerCalls().filter((c) => c[0] === 'compose' && c[1] === '-p')).toEqual([...check, [...base, ...tail]]);
     }
     fs.writeFileSync(log, '');
     out('stack_action.sh', { name: 'g', op: 'restart' });
@@ -841,6 +882,114 @@ exit 0`);
     expect(out('stack_action.sh', { name: 'web', op: 'start' }).error).toMatch(/docker compose start failed: service web: no such image/);
     fake('case "$1 $2" in "compose version") exit 1 ;; esac');
     expect(out('stack_action.sh', { name: 'web', op: 'start' }).error).toMatch(/is not installed/);
+  });
+
+  it.skipIf(!hasSh)('stack_action update re-checks the new version: risky options are refused (checkout restored) unless allow_risky', () => {
+    seed('g', { 'repo/.git/HEAD': 'x', 'repo/d/compose.yaml': 'x', 'bosun.meta': 'source=git\nbranch=main\nfile=d/compose.yaml\n' });
+    fakeCmd('git', `case "$*" in *'rev-parse HEAD'*) echo cafe1234 ;; esac; exit 0`);
+    const repo = shDir('g') + '/repo';
+    const gitArgs = () => calls().filter((c) => c[0] === 'git').map((c) => c.slice(1).join(' '));
+    for (const svc of ['      "privileged": true', '      "volumes_from": [\n        "other"\n      ]', '      "network_mode": "service:vpn"',
+      '      "volumes": [\n        {\n          "type": "bind",\n          "source": "/run",\n          "target": "/r"\n        }\n      ]']) {
+      fs.writeFileSync(log, '');
+      composeFake(config(svc));
+      const r = out('stack_action.sh', { name: 'g', op: 'update' });
+      expect(r.error, svc).toMatch(/the new version needs the permission to use elevated container options .*it was not deployed/);
+      expect(dockerCalls().some((c) => c.includes('up')), svc).toBe(false);
+      expect(gitArgs().at(-1), svc).toBe(`-C ${repo} reset --hard cafe1234`);
+      fs.writeFileSync(log, '');
+      expect(out('stack_action.sh', { name: 'g', op: 'update', allow_risky: 'true' }).done, svc).toBe('update: g');
+      expect(dockerCalls().some((c) => c.includes('--build')), svc).toBe(true);
+    }
+    // an ordinary new version goes through
+    fs.writeFileSync(log, '');
+    composeFake(config('      "ports": []'));
+    expect(out('stack_action.sh', { name: 'g', op: 'update' }).done).toBe('update: g');
+    expect(gitArgs()).toEqual([`-C ${repo} rev-parse HEAD`, `-c core.hooksPath=/dev/null -C ${repo} fetch --depth 1 origin main`, `-c core.hooksPath=/dev/null -C ${repo} reset --hard FETCH_HEAD`]);
+  });
+
+  it('stack_deploy and stack_action (update) use the same risk check, word for word', () => {
+    const between = (s: string, from: string, to: string) => { const i = s.indexOf(from); return s.slice(i, s.indexOf(to, i)); };
+    const parts = (f: string) => {
+      const s = script(f).replace(/\r\n/g, '\n');
+      return [between(s, 'sensitive() {', '\n}\n'), between(s, 'host_path_risk() {', '\n}\n'), between(s, '  function key(l,', "  }')")];
+    };
+    const [d, a] = [parts('stack_deploy.sh'), parts('stack_action.sh')];
+    for (const p of d) expect(p.length).toBeGreaterThan(50);
+    expect(a).toEqual(d);
+  });
+
+  it.skipIf(!hasSh)('stack_action guard_up returns at once and starts the stack from its files once nothing of it runs', async () => {
+    seed('web', { 'compose.yaml': 'x', 'bosun.meta': 'source=editor\n' });
+    // first two checks: still running (Portainer has not stopped it yet); then nothing runs
+    fs.writeFileSync(path.join(bin, 'n'), '0');
+    fake(`case "$*" in *"ps -q"*) n=$(cat "${sp(path.join(bin, 'n'))}"); echo $((n + 1)) > "${sp(path.join(bin, 'n'))}"; [ "$n" -lt 2 ] && echo abc123 ;; esac; exit 0`);
+    const started = Date.now();
+    expect(out('stack_action.sh', { name: 'web', op: 'guard_up' }).done).toBe('guard_up: web');
+    expect(Date.now() - started).toBeLessThan(3000);
+    const web = shDir('web');
+    const up = ['compose', '-p', 'web', '--project-directory', web, '-f', web + '/compose.yaml', 'up', '-d', '--remove-orphans'];
+    let seen = false;
+    for (let i = 0; i < 40 && !seen; i++) {
+      await new Promise(r => setTimeout(r, 250));
+      seen = dockerCalls().some(c => c.join(' ') === up.join(' '));
+    }
+    expect(seen).toBe(true);
+    expect(dockerCalls().filter(c => c.includes('-q')).length).toBeGreaterThanOrEqual(3);
+    // an external stack (no stored files) cannot be guarded
+    expect(out('stack_action.sh', { name: 'ext', op: 'guard_up' }).error).toMatch(/not created by Bosun/);
+  }, 20000);
+
+  it.skipIf(!hasSh)('stack_action retag pulls, tags, and re-creates only that service in the background; a failed pull changes nothing', async () => {
+    seed('bosun', { 'compose.yaml': 'x', 'bosun.meta': 'source=editor\n' });
+    fake('exit 0');
+    const params = { name: 'bosun', op: 'retag', image: 'ghcr.io/reallango/bosun:sha-abcdef0', as: 'bosun:latest', service: 'bosun' };
+    expect(out('stack_action.sh', params).done).toBe('retag: bosun bosun -> ghcr.io/reallango/bosun:sha-abcdef0');
+    const d = shDir('bosun');
+    let calls: string[] = [];
+    for (let i = 0; i < 40; i++) {
+      await new Promise(r => setTimeout(r, 250));
+      calls = dockerCalls().map(c => c.join(' ')).filter(c => c !== 'compose version');
+      if (calls.some(c => c.includes(' up '))) break;
+    }
+    expect(calls).toEqual([
+      'pull ghcr.io/reallango/bosun:sha-abcdef0',
+      'tag ghcr.io/reallango/bosun:sha-abcdef0 bosun:latest',
+      `compose -p bosun --project-directory ${d} -f ${d}/compose.yaml up -d --no-build --no-deps bosun`,
+    ]);
+    // a pull that fails: no tag, no restart
+    fs.writeFileSync(log, '');
+    fake('case "$1" in pull) echo "denied: not found" >&2; exit 1 ;; esac; exit 0');
+    expect(out('stack_action.sh', params).error).toMatch(/pulling .* failed: denied: not found/);
+    await new Promise(r => setTimeout(r, 2500));
+    expect(dockerCalls().filter(c => c.join(' ') !== 'compose version').map(c => c[0])).toEqual(['pull']);
+    // odd values are refused before anything runs
+    fs.writeFileSync(log, '');
+    expect(out('stack_action.sh', { ...params, image: 'x;reboot' }).error).toMatch(/image:/);
+    expect(out('stack_action.sh', { ...params, service: '-x' }).error).toMatch(/service:/);
+    expect(dockerCalls().filter(c => c.join(' ') !== 'compose version')).toEqual([]);
+  }, 20000);
+
+  it.skipIf(!hasSh)('stack_deploy also catches shared namespaces, volumes_from, build settings and host files used as secrets', () => {
+    const risky: [string, string, RegExp][] = [
+      ['      "volumes_from": [\n        "db"\n      ]', '', /volumes of db/],
+      ['      "network_mode": "container:abc"', '', /network of container:abc/],
+      ['      "pid": "service:x"', '', /PID namespace of service:x/],
+      ['      "runtime": "runc-hacked"', '', /runtime runc-hacked/],
+      ['      "device_cgroup_rules": [\n        "c 1:3 mr"\n      ]', '', /device rule c 1:3 mr/],
+      ['      "build": {\n        "context": "/etc",\n        "dockerfile": "Dockerfile"\n      }', '', /host path \/etc/],
+      ['      "build": {\n        "context": "/srv/app",\n        "network": "host"\n      }', '', /host network while building/],
+      ['', ',\n  "secrets": {\n    "s": {\n      "name": "demo_s",\n      "file": "/etc/shadow"\n    }\n  }', /host path \/etc\/shadow/],
+      ['', ',\n  "configs": {\n    "c": {\n      "name": "demo_c",\n      "file": "/root/.ssh/id_rsa"\n    }\n  }', /host path \/root\/.ssh\/id_rsa/],
+    ];
+    for (const [svc, top, why] of risky) {
+      composeFake(config(svc, top));
+      const r = parseScriptOutput(deploy().stdout);
+      expect(r.error, svc + top).toMatch(why);
+      expect(fs.existsSync(stackDir('demo')), svc + top).toBe(false);
+    }
+    composeFake(config('      "build": {\n        "context": "/srv/app",\n        "dockerfile": "Dockerfile"\n      }', ',\n  "secrets": {\n    "s": {\n      "name": "demo_s",\n      "file": "/srv/app/secret.txt"\n    }\n  }'));
+    expect(parseScriptOutput(deploy().stdout).error).toBeNull();
   });
 
   it.skipIf(!hasSh)('stack_remove: down (with --volumes when asked), then the folder goes; a failing down keeps it', () => {
@@ -864,9 +1013,11 @@ exit 0`);
 
   describe('overrides (svc.<service>.<key>=value lines)', () => {
     /** compose answers `version --short` with `ver`, and prints `cfg` for config. */
-    const ovFake = (cfg: string, ver = '2.29.1') => {
+    const ovFake = (cfg: string, ver = '2.29.1', declaredNetworks = 'backend\n') => {
       fs.writeFileSync(path.join(bin, 'cfg.json'), cfg);
+      fs.writeFileSync(path.join(bin, 'networks.txt'), declaredNetworks);
       fake(`case "$*" in "compose version --short") echo ${ver}; exit 0 ;; "compose version") echo v2; exit 0 ;; esac
+case "$*" in *' config --networks'*) cat "${path.join(bin, 'networks.txt')}" ;; esac
 case "$*" in *' config --format json'*) cat "${path.join(bin, 'cfg.json')}" ;; esac
 exit 0`);
     };
@@ -886,7 +1037,7 @@ exit 0`);
       ].join('\n'));
       expect(fs.readFileSync(path.join(d, 'bosun.override'), 'utf8')).toBe(OVERRIDE);
       expect(fs.readdirSync(d).sort()).toEqual(['.env', 'bosun.meta', 'bosun.override', 'compose.override.yaml', 'compose.yaml']);
-      const c = dockerCalls().filter((x) => x[0] === 'compose' && x[1] === '-p');
+      const c = dockerCalls().filter((x) => x[0] === 'compose' && x[1] === '-p' && !x.includes('--networks'));
       expect(c[0]).toEqual(['compose', '-p', 'demo', '--project-directory', sd, '-f', sd + '/compose.yaml.new', '-f', sd + '/compose.override.yaml.new', '--env-file', sd + '/.env.new', 'config', '--format', 'json']);
       expect(c[1]).toEqual(['compose', '-p', 'demo', '--project-directory', sd, '-f', sd + '/compose.yaml', '-f', sd + '/compose.override.yaml', '--env-file', sd + '/.env', 'up', '-d', '--remove-orphans']);
       // stack_get hands the lines back, stack_action keeps using the override file
@@ -894,6 +1045,16 @@ exit 0`);
       fs.writeFileSync(log, '');
       out('stack_action.sh', { name: 'demo', op: 'restart' });
       expect(dockerCalls().filter((x) => x[1] === '-p')).toEqual([['compose', '-p', 'demo', '--project-directory', sd, '-f', sd + '/compose.yaml', '-f', sd + '/compose.override.yaml', '--env-file', sd + '/.env', 'restart']]);
+    });
+
+    it.skipIf(!hasSh)('a network the compose file does not declare is attached as an external network; declared ones are left alone', () => {
+      ovFake(config('      "ports": []'), '2.29.1', 'default\nbackend\n');
+      const r = parseScriptOutput(deploy({ override: 'svc.web.network=backend\nsvc.web.network=ainet\n' }).stdout);
+      expect(r.error).toBeNull();
+      expect(fs.readFileSync(path.join(stackDir('demo'), 'compose.override.yaml'), 'utf8')).toBe([
+        'services:', '  "web":', '    networks: !override', '      - "backend"', '      - "ainet"',
+        '', 'networks:', '  "ainet":', '    external: true', '', '',
+      ].join('\n'));
     });
 
     it.skipIf(!hasSh)('no override lines: no override file, and an old one is removed (also when only comments or empty container names are given)', () => {
@@ -2229,6 +2390,8 @@ exit 0`);
     const block = (f: string, name: string) => new RegExp(`# >>> ${name}[\\s\\S]*# <<< ${name}`).exec(script(f))![0];
     expect(block('git_branches.sh', 'git helpers')).toBe(block('git_files.sh', 'git helpers'));
     expect(block('git_branches.sh', 'git helpers')).toBe(block('git_services.sh', 'git helpers'));
+    // the credentials code is shared by every script that uses git
+    for (const f of ['git_files.sh', 'git_services.sh', 'stack_deploy.sh', 'stack_action.sh']) expect(block(f, 'git credentials'), f).toBe(block('git_branches.sh', 'git credentials'));
     expect(block('convert.sh', 'json flatten')).toBe(block('git_services.sh', 'json flatten'));
     expect(block('git_services.sh', 'json flatten').length).toBeGreaterThan(2000);
   });
@@ -2261,11 +2424,40 @@ exit 0`);
       fs.writeFileSync(log, '');
       run(f, { repo: 'https://gitlab.com/o/r', ...p }, { BOSUN_SECRET_git_token: TOKEN });
       expect(envLines().every((l) => !l.includes('Authorization') && l !== 'ENV GIT_CONFIG_COUNT=2'), f).toBe(true);
-      expect(run(f, { repo: R, ...p }, { BOSUN_SECRET_git_token: 'a b' }).stdout, f).toBe('ERROR: the Git token has unexpected characters\n');
+      expect(run(f, { repo: R, ...p }, { BOSUN_SECRET_git_token: 'a b' }).stdout, f).toBe('ERROR: a Git credential has unexpected characters\n');
       for (const [repo, why] of [['http://github.com/o/r', /^ERROR: repo: use an https/], ['https://github.com', /^ERROR: repo: use https:\/\/host\/owner\/name/], ['https://-x.com/o/r', /invalid host/], ['https://github.com/o/../r', /invalid path/], ['https://github.com/o/r;x', /invalid path/], ['file:///etc', /use an https/]] as const) {
         expect(run(f, { repo, ...p }).stdout, `${f} ${repo}`).toMatch(why);
       }
     }
+  });
+
+  it.skipIf(!hasSh)('git credentials for other hosts: each entry only for its own host (port included), user:token or a default user', () => {
+    const basic = (pair: string) => `ENV GIT_CONFIG_VALUE_0=Authorization: Basic ${Buffer.from(pair).toString('base64')}`;
+    const creds = 'gitlab.com=glpat-AAA, git.lan:3000=bosun:tok-B; bitbucket.org=bbt-C Git.Example.org=gt-D';
+    const cases: [string, string | null][] = [
+      ['https://gitlab.com/o/r', 'oauth2:glpat-AAA'],
+      ['https://git.lan:3000/o/r', 'bosun:tok-B'],
+      ['https://git.lan/o/r', null],                 // another port is another host
+      ['https://bitbucket.org/o/r', 'x-token-auth:bbt-C'],
+      ['https://git.example.org/o/r', 'git:gt-D'],   // host names compare case-insensitively
+      ['https://evil.example/o/r', null],
+      ['https://github.com/o/r', `x-access-token:${TOKEN}`], // github.com still uses git_token
+    ];
+    for (const [repo, pair] of cases) {
+      gitFake({ lsremote: `ref: refs/heads/main${T}HEAD\n1${T}refs/heads/main\n` });
+      fs.writeFileSync(log, '');
+      run('git_branches.sh', { repo }, { BOSUN_SECRET_git_token: TOKEN, BOSUN_SECRET_git_credentials: creds });
+      const auth = envLines().filter((l) => l.startsWith('ENV GIT_CONFIG_VALUE_0='));
+      if (pair) expect(auth, repo).toEqual([basic(pair)]);
+      else expect(auth.every((l) => l === 'ENV GIT_CONFIG_VALUE_0='), repo).toBe(true);
+      expect(fs.readFileSync(log, 'utf8'), repo).not.toMatch(/glpat-AAA|tok-B|bbt-C|gt-D/);
+    }
+    // an entry for github.com wins over git_token; odd characters are refused before git runs
+    gitFake({ lsremote: '' }); fs.writeFileSync(log, '');
+    run('git_branches.sh', { repo: R }, { BOSUN_SECRET_git_token: TOKEN, BOSUN_SECRET_git_credentials: 'github.com=me:pat-E' });
+    expect(envLines().filter((l) => l.startsWith('ENV GIT_CONFIG_VALUE_0='))).toEqual([basic('me:pat-E')]);
+    expect(run('git_branches.sh', { repo: 'https://gitlab.com/o/r' }, { BOSUN_SECRET_git_credentials: 'gitlab.com=a$(reboot)' }).stdout).toBe('ERROR: a Git credential has unexpected characters\n');
+    expect(run('git_branches.sh', { repo: 'https://git.lan:x/o/r' }).stdout).toMatch(/invalid port/);
   });
 
   it.skipIf(!hasSh)('git_branches: a repository git cannot read is an ERROR with git\'s words', () => {

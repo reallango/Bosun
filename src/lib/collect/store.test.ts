@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { retentionStatements, metricStatements, likeFor, mergeDefinitions } from './store';
+import { retentionStatements, metricStatements, likeFor, mergeDefinitions, cleanupConfig, cleanupStatements } from './store';
 
 const cfg = { rawHours: 48, rollup5mDays: 30, rollup1hDays: 400 };
 const NOW = 1_700_000_000_000;
@@ -41,5 +41,22 @@ describe('retention', () => {
 
   it('turns metric names into LIKE patterns', () => {
     expect(likeFor('gpu*.vram_mb')).toBe('gpu%.vram!_mb');
+  });
+});
+
+describe('cleanup of the audit log, notifications and sessions', () => {
+  it('uses the cleanup.* settings, falls back to the defaults, and 0 turns a table off', () => {
+    expect(cleanupConfig([])).toEqual({ auditDays: 90, notificationDays: 30, sessionDays: 7 });
+    const cfg = cleanupConfig([
+      { key: 'cleanup.audit_log_days', value: '0' },
+      { key: 'cleanup.notification_days', value: '14' },
+      { key: 'cleanup.session_days', value: 'soon' },
+      { key: 'metrics.raw_retention_hours', value: '1' },
+    ]);
+    expect(cfg).toEqual({ auditDays: 0, notificationDays: 14, sessionDays: 7 });
+    const s = cleanupStatements(cfg);
+    expect(s.map(x => x.sql.split(' WHERE')[0])).toEqual(['DELETE FROM notifications', 'DELETE FROM sessions', 'DELETE FROM permission_grants', "UPDATE access_requests SET status = 'expired'", 'UPDATE notifications SET is_read = 1, is_dismissed = 1', 'DELETE FROM access_requests']);
+    expect(s[0].params).toEqual(['-14 days']);
+    expect(s[1].sql).toContain('expires_at');
   });
 });

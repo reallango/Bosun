@@ -10,6 +10,9 @@
 #
 # Ports 4001 (rqlite HTTP) and 4002 (Raft) must be reachable between the
 # nodes; keep them off the internet (firewall them to the cluster machines).
+# The HTTP API needs Bosun's credentials and Raft uses mutual TLS (both derived
+# from AUTH_SECRET, so they match on every node). Docker-published ports bypass
+# ufw: see README "Firewall".
 services:
   bosun:
     build: .
@@ -22,6 +25,8 @@ services:
       - RQLITE_JOIN=${RQLITE_JOIN:-}
       - RQLITE_BOOTSTRAP_EXPECT=${RQLITE_BOOTSTRAP_EXPECT:-3}
       - COOKIE_SECURE=${COOKIE_SECURE:-false}
+      # Reverse proxies allowed to name the client (X-Forwarded-For): IPs, CIDRs or container names, e.g. cloudflared.
+      - TRUSTED_PROXIES=${TRUSTED_PROXIES:-}
       # Optional: if unset, Bosun generates both and keeps them in the data volume.
       - MASTER_KEY=${MASTER_KEY:-}
       - AUTH_SECRET=${AUTH_SECRET:-}

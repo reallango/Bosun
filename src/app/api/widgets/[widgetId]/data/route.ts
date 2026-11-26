@@ -4,6 +4,7 @@ import { requireAuth } from '@/lib/auth/middleware';
 import { hasPermission, requirePermission } from '@/lib/permissions/authorize';
 import { loadWidgetSpec, loadRuntimeData, RuntimeError } from '@/lib/widgets/runtime/execute';
 import { serverVisible } from '@/lib/permissions/effective';
+import { filterRows, viewFilter } from '@/lib/widgets/runtime/resource-check';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -39,15 +40,16 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     // Package widgets: data comes from the spec's snapshot section or from its command or script.
     // The data permission of a package widget is checked here, before its data is served.
     const loaded = await loadWidgetSpec(widget.widget_type);
-    if (loaded) {
-      if (loaded.spec.data.permission) {
-        const denied = await requirePermission(auth, loaded.spec.data.permission, server.id);
-        if (denied) return denied;
-      }
+    // A view limited to some stacks/containers (data.resources) gets only their rows.
+    let view: Awaited<ReturnType<typeof viewFilter>> = 'all';
+    if (loaded?.spec.data.permission) {
+      view = await viewFilter(auth, loaded.spec.data.permission, server.id, loaded.spec.data.resources);
+      if (!view) return (await requirePermission(auth, loaded.spec.data.permission, server.id))!;
     }
     if (loaded) {
       try {
-        const rt = await loadRuntimeData(server.id, loaded, force, cfg, widgetId);
+        const loadedRt = await loadRuntimeData(server.id, loaded, force, cfg, widgetId);
+        const rt = view === 'all' ? loadedRt : { ...loadedRt, data: filterRows(loadedRt.data, loaded.spec.data.resources!, view!) };
         return NextResponse.json({ ...rt, stale: false, ...(loaded.spec.version >= 2 ? { config: cfg } : {}), server: { is_online: !!server.is_online, last_error: server.last_error ?? null, name: server.name, hostname: server.hostname, platform: server.platform || 'linux' } },
           { headers: { 'Cache-Control': 'no-store' } });
       } catch (err) {

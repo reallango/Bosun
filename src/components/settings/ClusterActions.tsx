@@ -168,7 +168,7 @@ export function ClusterActions({ cfg, voters, onChanged, onRestarting }: {
                 <div className="flex flex-wrap items-center gap-2">
                   <Button size="sm" onClick={copy}><Copy /> Copy</Button>
                   <Button size="sm" variant="outline" onClick={() => setJoin(null)}>Hide</Button>
-                  <span className="text-xs text-muted-foreground">Valid until {new Date(join.expires_at).toLocaleString()}.</span>
+                  <span className="text-xs text-muted-foreground">Works once, until {new Date(join.expires_at).toLocaleString()}.</span>
                 </div>
                 <p className="text-xs text-destructive">
                   The code contains this cluster&apos;s encryption keys. Treat it like a password and only paste it into a Bosun node you control.

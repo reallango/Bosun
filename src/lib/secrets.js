@@ -39,9 +39,19 @@ function writeFile(data, { exclusive = false } = {}) {
   fs.mkdirSync(path.dirname(FILE), { recursive: true, mode: 0o700 });
   const tmp = `${FILE}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
-  if (exclusive && fs.existsSync(FILE)) {
+  if (exclusive) {
+    // link() fails if the file exists, atomically: two processes generating at the same time cannot both win
+    // (an exists-then-rename check could let the second overwrite keys the first already used).
+    try {
+      fs.linkSync(tmp, FILE);
+    } catch (err) {
+      fs.unlinkSync(tmp);
+      if (err && err.code === 'EEXIST') return false;
+      throw err;
+    }
     fs.unlinkSync(tmp);
-    return false;
+    cache = null;
+    return true;
   }
   fs.renameSync(tmp, FILE);
   cache = null;
@@ -87,6 +97,45 @@ function secretSources() {
 }
 
 /**
+ * rqlite credentials. rqlited runs with an auth file (written by
+ * src/lib/cluster/boot.js on every start) so its HTTP API on port 4001 is not
+ * open to the network. The password is derived from AUTH_SECRET, which every
+ * node of a cluster shares (join codes carry it), so all nodes and all local
+ * processes agree on it without any extra setup. Changing AUTH_SECRET changes
+ * it too (all nodes together, as for the secret itself).
+ */
+const RQLITE_USER = 'bosun';
+
+function rqliteCredentials() {
+  const secret = getAuthSecret();
+  if (!secret) return null;
+  const password = crypto.createHmac('sha256', secret).update('bosun-rqlite-v1').digest('hex');
+  return { username: RQLITE_USER, password };
+}
+
+/**
+ * Headers to send with every request to rqlite (empty when there is no AUTH_SECRET).
+ * @returns {Record<string, string>}
+ */
+function rqliteAuthHeaders() {
+  const c = rqliteCredentials();
+  return c ? { Authorization: `Basic ${Buffer.from(`${c.username}:${c.password}`).toString('base64')}` } : {};
+}
+
+/**
+ * The rqlite auth file: the Bosun user may do everything; anyone may only ask
+ * /readyz (used by the start scripts and container health checks).
+ */
+function rqliteAuthConfig() {
+  const c = rqliteCredentials();
+  if (!c) return null;
+  return [
+    { username: c.username, password: c.password, perms: ['all'] },
+    { username: '*', perms: ['ready'] },
+  ];
+}
+
+/**
  * Replace the stored secrets with the cluster's (node join). Refuses when the
  * environment pins different values, since env would keep winning.
  */
@@ -100,4 +149,8 @@ function adoptClusterSecrets(masterKey, authSecret) {
   writeFile({ master_key: masterKey, auth_secret: authSecret, adopted_at: new Date().toISOString() });
 }
 
-module.exports = { getMasterKey, getAuthSecret, secretSources, adoptClusterSecrets, SECRETS_FILE: FILE };
+module.exports = {
+  getMasterKey, getAuthSecret, secretSources, adoptClusterSecrets,
+  rqliteCredentials, rqliteAuthHeaders, rqliteAuthConfig, RQLITE_USER,
+  SECRETS_FILE: FILE,
+};

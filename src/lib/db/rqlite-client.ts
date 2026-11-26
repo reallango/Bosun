@@ -1,4 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
+import { rqliteAuthHeaders } from '@/lib/secrets';
+
 export interface QueryResult {
     columns: string[];
     types: string[];
@@ -87,7 +89,7 @@ export class RqliteClient {
         const res = await fetch(`${this.baseUrl}${path}`, {
             method: 'POST',
             cache: 'no-store',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { ...rqliteAuthHeaders(), 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
             signal: AbortSignal.timeout(15_000),
         });
@@ -165,14 +167,14 @@ export class RqliteClient {
     }
 
     async getStatus(): Promise<any> {
-        const res = await fetch(`${this.baseUrl}/status`, { cache: 'no-store', signal: AbortSignal.timeout(5000) });
+        const res = await fetch(`${this.baseUrl}/status`, { headers: rqliteAuthHeaders(), cache: 'no-store', signal: AbortSignal.timeout(5000) });
         if (!res.ok) throw new Error(`rqlite status failed: ${res.status}`);
         return res.json();
     }
 
     /** Cluster membership with reachability, as seen from this node. */
     async getNodes(): Promise<ClusterNode[]> {
-        const res = await fetch(`${this.baseUrl}/nodes?nonvoters&ver=2&timeout=2s`, { cache: 'no-store', signal: AbortSignal.timeout(8000) });
+        const res = await fetch(`${this.baseUrl}/nodes?nonvoters&ver=2&timeout=2s`, { headers: rqliteAuthHeaders(), cache: 'no-store', signal: AbortSignal.timeout(8000) });
         if (!res.ok) throw new Error(`rqlite nodes failed: ${res.status}`);
         const json = await res.json();
         const list: any[] = Array.isArray(json?.nodes) ? json.nodes : Object.entries(json || {}).map(([id, n]: [string, any]) => ({ id, ...n }));
@@ -190,7 +192,7 @@ export class RqliteClient {
     /** Is this node's rqlite up and serving with a known leader? */
     async isReady(): Promise<boolean> {
         try {
-            const res = await fetch(`${this.baseUrl}/readyz`, { cache: 'no-store', signal: AbortSignal.timeout(3000) });
+            const res = await fetch(`${this.baseUrl}/readyz`, { headers: rqliteAuthHeaders(), cache: 'no-store', signal: AbortSignal.timeout(3000) });
             return res.ok;
         } catch {
             return false;
@@ -200,7 +202,7 @@ export class RqliteClient {
     /** Is this node's rqlite process up (leader or not)? */
     async isUp(): Promise<boolean> {
         try {
-            const res = await fetch(`${this.baseUrl}/readyz?noleader`, { cache: 'no-store', signal: AbortSignal.timeout(3000) });
+            const res = await fetch(`${this.baseUrl}/readyz?noleader`, { headers: rqliteAuthHeaders(), cache: 'no-store', signal: AbortSignal.timeout(3000) });
             return res.ok;
         } catch {
             return false;
@@ -209,7 +211,7 @@ export class RqliteClient {
 
     // Hot backup of the underlying SQLite database (rqlite's recommended backup).
     async backup(): Promise<ArrayBuffer> {
-        const res = await fetch(`${this.baseUrl}/db/backup`, { cache: 'no-store' });
+        const res = await fetch(`${this.baseUrl}/db/backup`, { headers: rqliteAuthHeaders(), cache: 'no-store' });
         if (!res.ok) throw new Error(`rqlite backup failed: ${res.status}`);
         return res.arrayBuffer();
     }
@@ -219,7 +221,7 @@ export class RqliteClient {
         const res = await fetch(`${this.baseUrl}/db/load`, {
             method: 'POST',
             cache: 'no-store',
-            headers: { 'Content-Type': contentType },
+            headers: { ...rqliteAuthHeaders(), 'Content-Type': contentType },
             body: data as any,
         });
         if (!res.ok) {

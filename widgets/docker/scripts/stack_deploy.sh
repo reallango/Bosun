@@ -2,22 +2,53 @@
 # Docker (Linux): deploys a compose stack (`docker compose -p <name> up -d --remove-orphans`) and stores its files under
 # $HOME/bosun-stacks/<name>/ (compose.yaml, .env, bosun.meta, and repo/ for the git source).
 # Parameters: name, source (editor|git), yaml (text, editor), env (text, .env lines, may be empty), repo, branch, file
-# (git; "-" or empty = not given), pull (true/false: pull the images before starting).
+# (git; "-" or empty = not given), pull (true/false: pull the images before starting), start (now|later: later stores the stack and
+# starts it from a background job on the host a few seconds after this session ends, for a stack that contains the asking Bosun).
 # Nothing is stored or started before the compose file has been read by `docker compose config` and checked for risky
 # options (privileged, host namespaces and network, extra capabilities, devices, security options, sysctls, host-path or socket
 # mounts); those need allow_risky=true, which the caller only passes with the elevated permission. For the git source a
 # refused or invalid update is rolled back (the previous commit is restored). stack_action only ever runs checked files.
-# Git over https only; with BOSUN_SECRET_git_token set (exported by Bosun) it is sent as a Basic Authorization header through the
-# environment of the git process only (GIT_CONFIG_*), never on a command line, in a URL, in a file or in the output, and only to
-# github.com.
+# Git over https only. Credentials (see "git credentials") go to the repository's own host only, as a Basic Authorization header
+# through the environment of git (never on a command line, in a URL, in a file or in the output).
 # Override (text, may be empty): lines `svc.<service>.<key>=<value>` with the key container_name (one) or port, volume, network
 # (repeatable; each list REPLACES the list of the compose file for that service; a line with an empty value replaces it by nothing).
 # They are written as compose.override.yaml (`!override` tags: Docker Compose 2.24 or newer) next to the stored compose file, passed
 # as a second -f file, and the risky check below reads the MERGED configuration. The lines themselves are stored as bosun.override
 # (stack_get returns them as "override"). No lines: no override file, and an old one is removed.
+# A `network` line that names a network the compose file does not declare adds it to the override as an external network
+# (`networks: <name>: external: true`), so it must already exist on the host (for example a shared `ainet`).
 # Progress: PROGRESS n/5 lines and plain `[step] text` lines that say what happens.
 fail() { printf 'ERROR: %s\n' "$*"; exit 0; }
-SECRET_TOKEN=$BOSUN_SECRET_git_token; unset BOSUN_SECRET_git_token   # never let docker, compose or git inherit it by accident
+# >>> git credentials (the same text in stack_deploy.sh, stack_action.sh, git_branches.sh, git_files.sh and git_services.sh; a test compares them)
+# Bosun exports the package secrets git_token (GitHub) and git_credentials (entries "host=token" or "host=user:token", host with its
+# port when it has one, separated by spaces, commas or semicolons) only to scripts that name them. They are taken out of the
+# environment at once, so git, docker and compose never inherit them. git_auth <https url> sets AUTH to the Basic Authorization header
+# for exactly that repository's host, or '' when there is no credential for it; it reaches git only through gitrun's environment.
+GIT_TOKEN=${BOSUN_SECRET_git_token-}; GIT_CREDENTIALS=${BOSUN_SECRET_git_credentials-}
+unset BOSUN_SECRET_git_token BOSUN_SECRET_git_credentials
+git_auth() {
+  AUTH=''
+  gh=${1#https://}; gh=${gh%%/*}; gh=$(printf '%s' "$gh" | tr 'A-Z' 'a-z')
+  cred=''
+  set -f
+  for c in $(printf '%s' "$GIT_CREDENTIALS" | tr ',;' '  '); do
+    case "$c" in *=*) [ "$(printf '%s' "${c%%=*}" | tr 'A-Z' 'a-z')" = "$gh" ] && cred=${c#*=} ;; esac
+  done
+  set +f
+  if [ -z "$cred" ] && [ "$gh" = github.com ]; then cred=$GIT_TOKEN; fi
+  [ -n "$cred" ] || return 0
+  case "$cred" in *[!A-Za-z0-9_.~+/=:@-]*) cred=''; fail 'a Git credential has unexpected characters' ;; esac
+  case "$cred" in
+    *:*) pair=$cred ;;
+    *) case "$gh" in github.com) u=x-access-token ;; bitbucket.org) u=x-token-auth ;; *gitlab*) u=oauth2 ;; *) u=git ;; esac; pair="$u:$cred" ;;
+  esac
+  if command -v base64 >/dev/null 2>&1; then b64=$(printf '%s' "$pair" | base64 | tr -d '\n')
+  elif command -v openssl >/dev/null 2>&1; then b64=$(printf '%s' "$pair" | openssl base64 -A)
+  else fail 'neither base64 nor openssl is available to prepare the Git credential'; fi
+  AUTH="Authorization: Basic $b64"
+  cred=''; pair=''; b64=''
+}
+# <<< git credentials
 name=$BOSUN_PARAM_name; source=$BOSUN_PARAM_source
 repo=$BOSUN_PARAM_repo; branch=$BOSUN_PARAM_branch; file=$BOSUN_PARAM_file
 [ "$repo" != - ] || repo=; [ "$branch" != - ] || branch=; [ "$file" != - ] || file=
@@ -33,13 +64,16 @@ else
   rr=${repo#https://}
   case "$rr" in */*) ;; *) fail 'repo: use https://host/owner/name' ;; esac
   rhost=${rr%%/*}; rpath=${rr#*/}
-  case "$rhost" in ''|-*|.*|*[!A-Za-z0-9.-]*|*..*) fail 'repo: invalid host' ;; esac
+  case "$rhost" in *@*) fail 'repo: invalid host' ;; esac
+rport=''; case "$rhost" in *:*) rport=${rhost##*:}; rhost=${rhost%:*}; case "$rport" in ''|*[!0-9]*) fail 'repo: invalid port' ;; esac ;; esac
+case "$rhost" in ''|-*|.*|*[!A-Za-z0-9.-]*|*..*) fail 'repo: invalid host' ;; esac
   case "$rpath" in ''|/*|*..*|*[!A-Za-z0-9._/-]*) fail 'repo: invalid path' ;; esac
   [ "${#repo}" -le 300 ] || fail 'repo: too long'
   case "$branch" in ''|-*|*..*|*[!A-Za-z0-9._/-]*) fail 'branch: use letters, digits and . _ / - only' ;; esac
   [ "${#branch}" -le 100 ] || fail 'branch: too long'
   case "$file" in ''|-*|/*|*..*|*[!A-Za-z0-9._/-]*) fail 'file: a relative path inside the repository (letters, digits and . _ / - only)' ;; esac
   [ "${#file}" -le 200 ] || fail 'file: too long'
+  git_auth "$repo"
 fi
 
 D=docker; $D ps >/dev/null 2>&1 || { command -v sudo >/dev/null 2>&1 && sudo -n docker ps >/dev/null 2>&1 && D='sudo -n docker'; }
@@ -135,7 +169,20 @@ BOSUN_AWK_END
 esac
 
 errf=$(mktemp) || fail 'cannot create a temporary file'
-trap 'rm -f "$errf"' EXIT
+# One operation per stack at a time: deploy, update, remove and the compose operations all take this lock, so two of them
+# never work on the same stack folder at once. A lock left by a process that is gone (a cancelled job) is taken over.
+LOCK="$HOME/bosun-stacks/.lock-$name"
+mkdir -p "$HOME/bosun-stacks" 2>/dev/null
+take_lock() { mkdir "$LOCK" 2>/dev/null && echo $$ > "$LOCK/pid"; }
+if ! take_lock; then
+  lp=$(cat "$LOCK/pid" 2>/dev/null); case "$lp" in ''|*[!0-9]*) lp='' ;; esac
+  busy="another operation is running on the stack $name; try again when it has finished"
+  if [ -n "$lp" ] && kill -0 "$lp" 2>/dev/null; then fail "$busy"; fi
+  # no pid yet: another run may have just taken it, so only a lock older than a minute counts as left over
+  if [ -z "$lp" ] && [ -n "$(find "$LOCK" -maxdepth 0 -mmin -1 2>/dev/null)" ]; then fail "$busy"; fi
+  rm -rf "$LOCK"; take_lock || fail "$busy"
+fi
+trap 'rm -f "$errf"; rm -rf "$LOCK"' EXIT
 lastline() { tr -d '\r' < "$errf" | sed '/^$/d' | tail -n 3 | tr '\n' ' ' | cut -c1-400; }
 
 umask 077
@@ -180,20 +227,6 @@ if [ "$source" = editor ]; then
   CF="$DIR/compose.yaml.new"; PD=$DIR
 else
   command -v git >/dev/null 2>&1 || die 'git is not installed on this host'
-  AUTH=''
-  tok=$SECRET_TOKEN; SECRET_TOKEN=
-  if [ -n "$tok" ]; then
-    case "$tok" in *[!A-Za-z0-9_.~+/=-]*) die 'the Git token has unexpected characters' ;; esac
-    if [ "$rhost" = github.com ]; then
-      if command -v base64 >/dev/null 2>&1; then b64=$(printf 'x-access-token:%s' "$tok" | base64 | tr -d '\n')
-      elif command -v openssl >/dev/null 2>&1; then b64=$(printf 'x-access-token:%s' "$tok" | openssl base64 -A)
-      else die 'neither base64 nor openssl is available to prepare the Git token'; fi
-      AUTH="Authorization: Basic $b64"
-    else
-      echo 'note: the Git token is only used for github.com; this repository is fetched without it'
-    fi
-  fi
-  tok=''
   if [ -d "$DIR/repo/.git" ] && [ "$(gitrun -C "$DIR/repo" config --get remote.origin.url 2>/dev/null)" = "$repo" ]; then
     echo "[step] Fetching $branch from $repo"
     GITPREV=$(gitrun -C "$DIR/repo" rev-parse HEAD 2>/dev/null)
@@ -217,6 +250,22 @@ case "$BOSUN_PARAM_env" in *[![:space:]]*)
   EF="$DIR/.env.new" ;;
 esac
 if [ -n "$OVRYAML" ]; then
+  # A network named by an override that the compose file does not declare is attached as an external network
+  # (it must already exist on the host, for example a shared `ainet`). Networks the file declares are left alone.
+  declared=$( OF=''; dc config --networks 2>/dev/null | tr -d '\r')
+  extra=''
+  for n in $(printf '%s\n' "$OVR" | tr -d '\r' | sed -n 's/^svc\.[A-Za-z0-9][A-Za-z0-9_.-]*\.network=\(.\{1,\}\)$/\1/p' | sort -u); do
+    printf '%s\n' "$declared" | grep -qxF -- "$n" || extra="$extra  \"$n\":
+    external: true
+"
+  done
+  if [ -n "$extra" ]; then
+    # Blank line between the services and networks blocks ($OVRYAML comes from a command substitution, which drops it).
+    OVRYAML="$OVRYAML
+
+networks:
+$extra"
+  fi
   printf '%s\n' "$OVRYAML" > "$DIR/compose.override.yaml.new" || die 'cannot write the override file'
   OF="$DIR/compose.override.yaml.new"
 fi
@@ -234,10 +283,12 @@ sensitive() {
     for (i = 1; i <= n; i++) { if (a[i] == "" || a[i] == ".") continue; if (a[i] == "..") { if (k > 0) k--; continue } k++; s[k] = a[i] }
     if (k == 0) exit 0
     p = ""; for (i = 1; i <= k; i++) p = p "/" s[i]
-    b = tolower(s[k]); if (b == "docker.sock" || b == "containerd.sock") exit 0
-    n = split("/etc /root /proc /sys /boot /usr /var/lib/docker", r, " ")
-    for (i = 1; i <= n; i++) if (p == r[i] || index(p, r[i] "/") == 1) exit 0
-    if (k >= 3 && s[1] == "home" && s[3] == ".ssh") exit 0
+    b = tolower(s[k]); if (b ~ /(docker|containerd|crio|podman)\.sock$/) exit 0
+    # The folder itself, anything inside it, or a folder that contains it (mounting /var exposes /var/run/docker.sock).
+    n = split("/etc /root /proc /sys /dev /boot /usr /bin /sbin /lib /lib32 /lib64 /libx32 /run /var/run /var/lib/docker /var/lib/containerd /var/lib/kubelet /var/spool/cron", r, " ")
+    for (i = 1; i <= n; i++) if (p == r[i] || index(p, r[i] "/") == 1 || index(r[i], p "/") == 1) exit 0
+    # Home folders: /home, a whole /home/<user>, or anything hidden in one (.ssh, .bashrc, .config ...).
+    if (s[1] == "home" && (k <= 2 || substr(s[3], 1, 1) == ".")) exit 0
     exit 1 }'
 }
 host_path_risk() {
@@ -253,11 +304,13 @@ found=$(printf '%s\n' "$cfg" | awk '
   function val(l,   s) { s = l; sub(/^[^:]*: */, "", s); sub(/,$/, "", s); return s }
   function unq(s) { if (s ~ /^".*"$/) s = substr(s, 2, length(s) - 2); return s }
   function item(l,   s) { s = l; sub(/^ */, "", s); sub(/,$/, "", s); return unq(s) }
+  function shared(v) { v = unq(v); return v ~ /^(container|service):/ }
   BEGIN { sec = ""; arr = "" }
   {
     line = $0; match(line, /^ */); ind = RLENGTH
     if (ind == 2 && line ~ /^  "/) { sec = key(line); arr = ""; next }
     if (sec == "volumes" && ind == 8 && key(line) == "device") { v = unq(val(line)); if (v ~ /^\//) print "PATH " v; next }
+    if ((sec == "secrets" || sec == "configs") && ind == 6 && key(line) == "file") { v = unq(val(line)); if (v ~ /^\//) print "PATH " v; next }
     if (sec != "services") next
     if (ind == 4) { arr = ""; next }
     if (ind == 6) {
@@ -265,17 +318,30 @@ found=$(printf '%s\n' "$cfg" | awk '
       k = key(line); v = val(line); arr = ""
       if (k == "privileged" && v == "true") print "RISK privileged"
       else if (k == "network_mode" && v == "\"host\"") print "RISK host network"
+      else if (k == "network_mode" && shared(v)) print "RISK network of " unq(v)
       else if (k == "pid" && v == "\"host\"") print "RISK host PID namespace"
+      else if (k == "pid" && shared(v)) print "RISK PID namespace of " unq(v)
       else if (k == "ipc" && v == "\"host\"") print "RISK host IPC namespace"
+      else if (k == "ipc" && shared(v)) print "RISK IPC namespace of " unq(v)
       else if (k == "uts" && v == "\"host\"") print "RISK host UTS namespace"
       else if (k == "userns_mode" && v == "\"host\"") print "RISK host user namespace"
       else if (k == "cgroup" && v == "\"host\"") print "RISK host cgroup namespace"
-      else if ((k == "cap_add" || k == "devices" || k == "security_opt" || k == "sysctls" || k == "volumes") && line ~ /[\[{]$/) arr = k
+      else if (k == "cgroup_parent") print "RISK cgroup parent " unq(v)
+      else if (k == "runtime") print "RISK runtime " unq(v)
+      else if ((k == "cap_add" || k == "devices" || k == "security_opt" || k == "sysctls" || k == "volumes" || k == "volumes_from" || k == "device_cgroup_rules" || k == "build") && line ~ /[\[{]$/) arr = k
       next
     }
     if (arr == "cap_add" && ind == 8) print "RISK capability " item(line)
     else if (arr == "security_opt" && ind == 8) print "RISK security option " item(line)
     else if (arr == "sysctls" && ind == 8) print "RISK sysctl " key(line)
+    else if (arr == "volumes_from" && ind == 8) print "RISK volumes of " item(line)
+    else if (arr == "device_cgroup_rules" && ind == 8) print "RISK device rule " item(line)
+    else if (arr == "build" && ind == 8) {
+      if (key(line) == "context") { v = unq(val(line)); if (v ~ /^\//) print "PATH " v }
+      else if (key(line) == "network" && unq(val(line)) == "host") print "RISK host network while building"
+      else if (key(line) == "privileged" && val(line) == "true") print "RISK privileged build"
+      else if (key(line) == "entitlements") print "RISK build entitlements"
+    }
     else if (arr == "devices") {
       if (ind == 8 && line ~ /^ *"/) print "RISK device " item(line)
       else if (ind == 10 && key(line) == "source") print "RISK device " unq(val(line))
@@ -329,6 +395,19 @@ if [ "$BOSUN_PARAM_pull" = true ]; then
   dc pull >/dev/null 2>"$errf" || fail "pulling the images failed: $(lastline)"
 fi
 echo 'PROGRESS 4/5'
+if [ "${BOSUN_PARAM_start-now}" = later ]; then
+  # start=later: the stack is (re)started a few seconds after this session ends, by a job on the host that outlives it. Used when
+  # the stack contains the Bosun that asked (importing a node's own stack): re-creating it ends that Bosun, so it cannot wait.
+  echo "[step] Starting the stack $name in a few seconds, in the background"
+  (
+    trap '' HUP
+    sleep 3
+    dc up -d --remove-orphans
+  ) </dev/null >/dev/null 2>&1 &
+  echo 'PROGRESS 5/5'
+  echo "DONE deployed $name (starting in the background)"
+  exit 0
+fi
 echo "[step] Starting the stack $name"
 dc up -d --remove-orphans >/dev/null 2>"$errf" || fail "docker compose up failed: $(lastline)"
 echo 'PROGRESS 5/5'

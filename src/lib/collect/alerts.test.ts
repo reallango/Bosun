@@ -84,3 +84,17 @@ describe('alert emails', () => {
     expect(alerts.alertStatements(withMail, srv, 0)[0].params[6]).toBe('["in_app"]');
   });
 });
+
+describe('alert cooldowns after a restart or failover', () => {
+  it('seeded per host: a rule that just fired for one host does not silence another', () => {
+    const t = Date.parse('2026-01-01T00:10:00Z');
+    const r = rule({ last_triggered: '2026-01-01T00:09:00Z' }); // fired for s1 a minute ago
+    // unseeded: the rule-wide time is the cautious fallback for every host
+    expect(alerts.evaluateRules([r], { id: 's2', name: 'b' }, { 'cpu.usage': 99 }, t, new Map())).toHaveLength(0);
+    const last = new Map<string, number>() as Map<string, number> & { seeded?: boolean };
+    alerts.seedLastFired([{ alert_rule_id: 'r1', server_id: 's1', last_ms: Date.parse('2026-01-01T00:09:00Z') }, { alert_rule_id: '', server_id: 'x', last_ms: 1 }], last);
+    expect(last.size).toBe(1);
+    expect(alerts.evaluateRules([r], srv, { 'cpu.usage': 99 }, t, last)).toHaveLength(0);
+    expect(alerts.evaluateRules([r], { id: 's2', name: 'b' }, { 'cpu.usage': 99 }, t, last)).toHaveLength(1);
+  });
+});
