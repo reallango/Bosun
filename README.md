@@ -404,8 +404,10 @@ containers once from Bosun's copy, so importing is a short restart of the stack.
   is connected for that server), with **Detach from Portainer**: the same waiter, then Portainer's delete.
 - Before anything starts, a confirmation says what the chosen options cost (for example: values written into the compose
   file when rebuilt from the containers, no git source to update from, two tools managing a stack that is not detached).
-- A node's own Bosun stack is imported (and detached) from **another node's** Bosun (open that node's address), so no Bosun
-  ever restarts itself in the middle of it.
+- **A node's own Bosun stack** can be imported (and detached) on that same node, which a single-node install needs
+  (Docker widget 1.0.13 or newer). Bosun stores the stack and the widget starts it from a job on the host a few seconds
+  later; Bosun restarts (again when it is detached), and the restarted Bosun reports the outcome in the bell about a minute
+  after it is back. From another node's Bosun it works as for any other stack, without the restart of the page you use.
 
 The outcome of each import and detach appears in the bell.
 ### Access requests (for agents and people)
@@ -557,7 +559,7 @@ Settings → **Updates** keeps every node on the newest published image of a bra
 - **What runs where.** Each image knows its commit and branch (`/api/health` → `version`). The cluster leader checks the
   registry every 6 hours and posts *Bosun update available* in the bell when a node runs something else.
 - **Requirements.** Each node's Bosun stack must be a Bosun stack: import it first (*Importing stacks from Portainer*,
-  from another node's address), and each node must know its server (it finds it by itself, or set it under
+  on the same node or from another one), and each node must know its server (it finds it by itself, or set it under
   Settings → Wake-on-LAN). The page lists anything missing.
 - **Update all nodes.** The database is backed up into the data volume (`backups/`, the last 3 are kept), then the nodes
   are updated one at a time: on its host the new image is pulled, tagged as the image the Bosun service runs (for

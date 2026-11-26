@@ -250,6 +250,8 @@ export function startUpdateTasks(): void {
       const { recordSelf } = await import('./nodes');
       await recordSelf();
       await finishRolloutOnStart();
+      const { advanceSelfImport } = await import('@/lib/portainer/self-import');
+      await advanceSelfImport().catch(err => console.warn('[import] own stack:', err instanceof Error ? err.message : err));
       const status = await rqlite.getStatus().catch(() => null) as { store?: { raft?: { state?: string } } } | null;
       if (status?.store?.raft?.state === 'Leader') {
         const last = await readJson<Latest>('update.latest');

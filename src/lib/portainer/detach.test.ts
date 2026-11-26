@@ -10,6 +10,11 @@ const loaded = { spec: { stacks: stacksSpec, actions: [{ id: 'stack_deploy' }, {
 
 vi.mock('@/lib/db/rqlite-client', () => ({ rqlite: { query: async () => ({ values: [['docker_containers']] }) } }));
 vi.mock('@/lib/audit/logger', () => ({ logAudit: async () => undefined }));
+vi.mock('./self-import', () => ({
+  beginSelfImport: async (r: { name: string; detach: boolean }) => { calls.push(`self-import ${r.name} detach=${r.detach}`); return true; },
+  advanceSelfImport: async () => { calls.push('advance'); },
+  cancelSelfImport: async () => undefined,
+}));
 vi.mock('@/lib/notifications/store', () => ({ notify: async (n: { title: string; message: string }) => { calls.push(`notify ${n.title}: ${n.message}`); } }));
 vi.mock('@/lib/network/node-host', () => ({ ownContainerIds: () => own }));
 vi.mock('@/lib/widgets/jobs/store', () => ({ getJob: async () => null }));
@@ -55,13 +60,14 @@ describe('stacks Bosun manages that Portainer still lists', () => {
     expect(r.detachable.find(d => d.name === 'bosun')?.portainer.git?.branch).toBe('dev');
   });
 
-  it('this Bosun\'s own stack is refused (it would stop itself)', async () => {
+  it('this Bosun\'s own stack is detached through the self-import record (the restarted process reports)', async () => {
     own = ['bbb222'];
     const { listCandidates, startDetach } = await import('./import');
     const d = (await listCandidates('s1')).detachable.find(x => x.name === 'bosun')!;
-    expect(d.detachable).toBe(false);
-    await expect(startDetach(auth, 's1', 'bosun')).rejects.toThrow(/another node/);
-    expect(calls).toEqual([]);
+    expect(d).toMatchObject({ own: true, detachable: true });
+    await startDetach(auth, 's1', 'bosun');
+    await settle();
+    expect(calls).toEqual(['self-import bosun detach=true', 'advance']);
   });
 
   it('detaching starts the waiter before Portainer deletes the stack, then reports in the bell', async () => {

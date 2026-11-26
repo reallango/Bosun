@@ -424,4 +424,20 @@ describe('the stacks declaration (import from other tools)', () => {
     }
     expect(validateWidgetSpec({ ...spec, stacks: { ...spec.stacks, fields: { id: 'ID' } } }, own, m.id).ok).toBe(false);
   });
+
+  it('startLater must be a parameter of both deploy actions that accepts "later"', async () => {
+    const fs = await import('fs');
+    const m = JSON.parse(fs.readFileSync('widgets/docker/manifest.json', 'utf8'));
+    const own = m.permissions.map((p: { id: string }) => p.id);
+    const spec = m.widgets[0].spec;
+    const ok = validateWidgetSpec(spec, own, m.id);
+    expect(ok.ok && ok.value.stacks?.startLater).toBe('start');
+    for (const v of ['nope', 'pull', 3]) {
+      expect(validateWidgetSpec({ ...spec, stacks: { ...spec.stacks, startLater: v } }, own, m.id).ok, String(v)).toBe(false);
+    }
+    // a widget without it: own stacks are imported from another node, as before
+    const { startLater: _drop, ...without } = spec.stacks;
+    const old = validateWidgetSpec({ ...spec, stacks: without }, own, m.id);
+    expect(old.ok && old.value.stacks?.startLater).toBeUndefined();
+  });
 });
