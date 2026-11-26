@@ -123,12 +123,17 @@ export function validateManifest(
       own.add(pid);
       permissions.push({ id: pid, label, description: desc, group, defaultLevel: p.defaultLevel, risk: p.risk, scope: p.scope, implies: implies as string[] });
     }
+    const levelRank = { viewer: 0, operator: 1, admin: 2 } as const;
     for (const p of permissions) {
       for (const i of p.implies) {
-        if (!own.has(i) && !catalogIds.has(i)) return fail(`permission "${p.id}" implies unknown permission "${i}"`);
-        // A package must not hand out a stronger built-in permission through "implies".
-        if (!own.has(i) && (CATALOG.find(c => c.id === i)?.defaultLevel === 'admin' || CATALOG.find(c => c.id === i)?.risk === 'high')) {
-          return fail(`permission "${p.id}" may not imply the built-in permission "${i}"`);
+        // A package must not hand out a built-in permission through "implies": whoever holds the package's permission
+        // (possibly every viewer) would gain it.
+        if (catalogIds.has(i)) return fail(`permission "${p.id}" may not imply the built-in permission "${i}"`);
+        if (!own.has(i)) return fail(`permission "${p.id}" implies unknown permission "${i}"`);
+        // Nor may a lower-level permission of the package imply one of its own that a higher level is meant to hold.
+        const target = permissions.find(x => x.id === i) as PackagePermission;
+        if (levelRank[target.defaultLevel] > levelRank[p.defaultLevel]) {
+          return fail(`permission "${p.id}" (default level ${p.defaultLevel}) may not imply "${i}", whose default level is ${target.defaultLevel}`);
         }
       }
     }

@@ -59,8 +59,11 @@ describe('jobs and cancelling', () => {
   const id = 'testjob-1234-abcd';
   it('a job records its process id; the cancel command is built for the same id', () => {
     const inv = buildScriptInvocation('linux', 'sleep 1\n', {}, { jobId: id });
-    expect(inv.command).toContain(`/tmp/bosun-job-${id}.pid`);
-    expect(buildCancelInvocation('linux', id).command).toContain(`/tmp/bosun-job-${id}.pid`);
+    expect(inv.command).toContain(`/.bosun-job-${id}.pid`);
+    expect(buildCancelInvocation('linux', id).command).toContain(`/.bosun-job-${id}.pid`);
+    // The cancel only kills a plain process id read from a file of its own account.
+    expect(buildCancelInvocation('linux', id).command).toContain('*[!0-9]*');
+    expect(buildCancelInvocation('linux', id).command).toContain('-O');
     expect(buildScriptInvocation('windows', 'x', {}, { jobId: id }).command).toContain(`bosun-job-${id}.pid`);
     expect(buildCancelInvocation('windows', id).command).toContain('taskkill.exe');
   });
@@ -73,8 +76,8 @@ describe('jobs and cancelling', () => {
   });
 
   it.skipIf(!canKillTree)('cancel stops a running script and removes the process id file; a finished job leaves nothing behind', async () => {
-    const pidFile = `/tmp/bosun-job-${id}.pid`;
-    const exists = () => spawnSync('sh', ['-c', `[ -f ${pidFile} ]`]).status === 0;   // through sh: its /tmp is the one the script uses
+    const pidFile = `"${'$'}HOME/.bosun-job-${id}.pid"`;
+    const exists = () => spawnSync('sh', ['-c', `[ -f ${pidFile} ]`]).status === 0;   // through sh: its $HOME is the one the script uses
     const inv = buildScriptInvocation('linux', 'echo started\nsleep 20\necho never\n', {}, { jobId: id });
     const child = spawn('sh', ['-c', inv.command], { stdio: ['pipe', 'pipe', 'pipe'] });
     let out = '';
@@ -91,6 +94,23 @@ describe('jobs and cancelling', () => {
     expect(out).not.toContain('never');
     expect(exists()).toBe(false);
     spawnSync('sh', ['-c', buildCancelInvocation('linux', id).command]);   // nothing to do, no error
+  }, 15000);
+
+  it.skipIf(!canKillTree)('cancel never passes anything but a plain process id to kill', async () => {
+    const other = 'testjob-9999-planted';
+    // A long-running process the planted file points at in a way kill must not accept.
+    const victim = spawn('sh', ['-c', 'sleep 20'], { stdio: 'ignore' });
+    try {
+      for (const content of [`${victim.pid} 1`, `-${victim.pid}`, `${victim.pid}x`, '-1', '0', '']) {
+        spawnSync('sh', ['-c', `printf '%s' "$1" > "$HOME/.bosun-job-${other}.pid"`, 'sh', content]);
+        spawnSync('sh', ['-c', buildCancelInvocation('linux', other).command]);
+        expect(victim.exitCode, content).toBe(null);
+        expect(victim.signalCode, content).toBe(null);
+      }
+    } finally {
+      victim.kill();
+      spawnSync('sh', ['-c', `rm -f "$HOME/.bosun-job-${other}.pid"`]);
+    }
   }, 15000);
 });
 

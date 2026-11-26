@@ -4,16 +4,16 @@
  * sqlite/sql formats, which replace the whole database.
  */
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth, requireRole } from '@/lib/auth/middleware';
+import { requireUserLevel } from '@/lib/auth/middleware';
 import { importDatabase } from '@/lib/db/backup';
 import { logAudit } from '@/lib/audit/logger';
 import { ok, fail } from '@/lib/api/response';
 
 export async function POST(request: NextRequest) {
-  const auth = await requireAuth(request);
+  // A signed-in admin only, never an API key: a backup holds password hashes and secrets, and a
+  // restore can rewrite users and keys.
+  const auth = await requireUserLevel(request, 'admin');
   if (auth instanceof NextResponse) return auth;
-  const roleError = requireRole(auth, 'admin');
-  if (roleError) return roleError;
 
   try {
     const formData = await request.formData().catch(() => null);

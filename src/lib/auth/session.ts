@@ -10,6 +10,7 @@ import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { createAccessToken, generateRefreshToken, hashToken, verifyAccessToken } from '@/lib/auth/jwt';
 import { logAudit, AuditActions } from '@/lib/audit/logger';
 import { fail } from '@/lib/api/response';
+import { clientIpFromHeaders } from '@/lib/net/client-ip';
 
 export const ACCESS_MAX_AGE = 15 * 60;
 export const REFRESH_MAX_AGE = 7 * 24 * 60 * 60;
@@ -56,11 +57,12 @@ export async function findUserByEmail(email: string): Promise<AuthUser | null> {
   return rows.length === 1 ? toUser(rows[0]) : null;
 }
 
+/** The client's address (see src/lib/net/client-ip.js), or 'unknown'. */
 export function clientIp(request: NextRequest): string {
-  return request.headers.get('x-forwarded-for')?.split(',')[0].trim() || 'unknown';
+  return clientIpFromHeaders((name: string) => request.headers.get(name));
 }
 
-function cookieOptions(maxAge: number) {
+export function cookieOptions(maxAge: number) {
   return { httpOnly: true, secure: process.env.COOKIE_SECURE === 'true', sameSite: 'strict' as const, path: '/', maxAge };
 }
 

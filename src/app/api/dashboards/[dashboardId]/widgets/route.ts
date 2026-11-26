@@ -7,6 +7,7 @@ import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { denyGuardedConfigChange } from '@/lib/widgets/config-guard-http';
 import { resolveWidgetDefinition, supportsPlatform } from '@/components/widgets/registry-loader';
 import { visibleWidgets } from '@/lib/widgets/visibility';
+import { serverVisible } from '@/lib/permissions/effective';
 import { loadWidgetSpec } from '@/lib/widgets/runtime/execute';
 import crypto from 'crypto';
 
@@ -37,6 +38,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   try {
     const { widget_type, server_id, config, title_override, grid_x, grid_y, grid_w, grid_h } = await request.json();
     if (!widget_type||!server_id) return NextResponse.json({ error: { message: 'widget_type and server_id required' } }, { status: 400 });
+    // Nobody places a widget on a server they cannot see.
+    if (!(await serverVisible(auth, String(server_id)))) return NextResponse.json({ error: { message: 'Server not found' } }, { status: 404 });
     const def = await resolveWidgetDefinition(widget_type);
     if (!def) return NextResponse.json({ error: { message: `Unknown widget type: ${widget_type}` } }, { status: 400 });
     // A package widget needs its data permission for that server, so nobody can place a widget they could not see.

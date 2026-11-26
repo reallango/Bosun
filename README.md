@@ -80,12 +80,16 @@ join an existing cluster with a join code (see *Clustering*).
 | `MASTER_KEY` | Encrypts stored SSH private keys, SMTP password and MFA seeds. If unset, Bosun generates one into `<data volume>/bosun/secrets.json`. Changing it makes stored secrets unreadable, so back up the data volume (or set it explicitly). |
 | `AUTH_SECRET` | Signs login and terminal tokens. Generated like `MASTER_KEY` if unset. |
 | `COOKIE_SECURE` | `true` when served over HTTPS (e.g. behind Cloudflare). |
+| `TRUSTED_PROXIES` | Comma-separated addresses or CIDRs of reverse proxies in front of Bosun (a cloudflared container, nginx, Traefik), e.g. `172.18.0.0/16`. Only requests from these addresses may name the client in `X-Forwarded-For`; everyone else is identified by the address that connected. Login rate limits and audit entries use this address. Unset: no proxy is trusted. |
+| `APP_URL` | Public address of Bosun (e.g. `https://bosun.example.com`). Emailed links (password reset) use *App URL* from Settings → General, else this; without either, no reset link is sent. |
 | `NODE_NAME`, `RQLITE_ADV_HOST`, `RQLITE_JOIN`, `RQLITE_BOOTSTRAP_EXPECT` | Clustering (see *Clustering*). |
 | `RQLITE_FORCE_SINGLE` | `1` = disaster recovery: make this node a single-node cluster (see *Clustering*). |
 | `BOSUN_PORT` | Published port (default 3042). |
 | `BOSUN_DB_RESET` | `1` drops a legacy (pre-2.0) schema once. |
 
 All services except nginx run as the unprivileged `node` user inside the container.
+
+Only port 3042 (nginx) is meant to be reached: the web app (3000) and the terminal server (3002) listen on the container's loopback only. A reverse proxy or tunnel must point at port 3042, not 3000 or 3002 (from 3000/3002 it would no longer connect). Behind one, add its address to `TRUSTED_PROXIES` so each visitor keeps their own login rate limit; otherwise every visitor coming through it shares one.
 
 ### Adding hosts
 
@@ -450,7 +454,8 @@ keeps their history for the time its package declares.
 
 **Email (SMTP)**, under Settings → General (admins), enables password reset links,
 emailed sign-in codes and email alert actions. Set *App URL* to the address users open
-Bosun at: reset links are built from it. The SMTP password is stored encrypted.
+Bosun at: reset links are built from it (or from `APP_URL`), never from the address a request came in on, so without
+either no reset link is sent. The SMTP password is stored encrypted.
 
 **Two-step verification** is optional per user: an authenticator app (TOTP) or codes
 sent by email, plus ten single-use backup codes. Password reset needs SMTP; without it,

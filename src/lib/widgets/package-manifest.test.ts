@@ -51,15 +51,43 @@ describe('validateManifest', () => {
     expect(validateManifest(dup).ok).toBe(false);
   });
 
-  it('does not let a package imply a stronger built-in permission', () => {
+  it('does not let a package imply any built-in permission', () => {
     const m: any = good(); m.permissions[0].implies = ['commands.run'];
     expect(validateManifest(m).ok).toBe(false);
     m.permissions[0].implies = ['power.restart'];
     expect(validateManifest(m).ok).toBe(false);
-    m.permissions[0].implies = ['servers.refresh'];
-    expect(validateManifest(m).ok).toBe(true);
+    for (const builtin of ['servers.refresh', 'dashboards.edit', 'power.wake', 'servers.view']) {
+      m.permissions[0].implies = [builtin];
+      expect(validateManifest(m).ok).toBe(false);
+      // Not even from a viewer-level permission, which every user holds.
+      m.permissions[0].defaultLevel = 'viewer';
+      expect(validateManifest(m).ok).toBe(false);
+      m.permissions[0].defaultLevel = 'admin';
+    }
     m.permissions[0].implies = ['nope.nothing'];
     expect(validateManifest(m).ok).toBe(false);
+  });
+
+  it('does not let a lower-level permission imply a higher-level one of the same package', () => {
+    const m: any = good();
+    m.permissions = [
+      { id: 'hello_pkg.view', label: 'View', description: 'd', group: 'Hello', defaultLevel: 'viewer', risk: 'low', scope: 'server', implies: ['hello_pkg.run'] },
+      { id: 'hello_pkg.run', label: 'Run', description: 'd', group: 'Hello', defaultLevel: 'admin', risk: 'low', scope: 'server' },
+    ];
+    expect(validateManifest(m).ok).toBe(false);
+    m.permissions[1].defaultLevel = 'operator';
+    expect(validateManifest(m).ok).toBe(false);
+    m.permissions[1].defaultLevel = 'viewer';
+    expect(validateManifest(m).ok).toBe(true);
+    // The other way round (a stronger permission includes a weaker one) is fine.
+    m.permissions[0].implies = [];
+    m.permissions[1].defaultLevel = 'admin';
+    m.permissions[1].implies = ['hello_pkg.view'];
+    expect(validateManifest(m).ok).toBe(true);
+    // Equal levels are fine too.
+    m.permissions[0].defaultLevel = 'admin';
+    m.permissions[0].implies = ['hello_pkg.run'];
+    expect(validateManifest(m).ok).toBe(true);
   });
 
   it('round-trips through manifestToJson', () => {

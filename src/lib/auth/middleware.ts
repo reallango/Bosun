@@ -5,13 +5,16 @@ import { authenticateApiKey } from './api-key-auth';
 import { getUserStatus } from './user-status';
 import { ACCESS_LEVELS, hasRole, type Role } from './levels';
 import { serverVisible } from '@/lib/permissions/effective';
+import { clientIpFromHeaders } from '@/lib/net/client-ip';
 
 function authError(message: string, code: string, status = 401, headers?: HeadersInit) {
   return NextResponse.json({ data: null, error: { message, code } }, { status, headers });
 }
 
+/** The client's address (see src/lib/net/client-ip.js), or null when unknown. */
 export function clientIp(request: NextRequest): string | null {
-  return request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || request.headers.get('x-real-ip') || null;
+  const ip = clientIpFromHeaders((name: string) => request.headers.get(name));
+  return ip === 'unknown' ? null : ip;
 }
 
 /**

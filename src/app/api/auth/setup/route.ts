@@ -3,7 +3,7 @@ import { internalError, ok } from '@/lib/api/response';
 import { isSetupRequired } from '@/lib/auth/setup-state';
 import { NextRequest, NextResponse } from 'next/server';
 import { rqlite } from '@/lib/db/rqlite-client';
-import { getConfig, setConfig } from '@/lib/db/migrations';
+import { setConfig } from '@/lib/db/migrations';
 import { hashPassword } from '@/lib/auth/password';
 import { createAccessToken, generateRefreshToken, hashToken } from '@/lib/auth/jwt';
 import crypto from 'crypto';
@@ -17,8 +17,11 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const setupComplete = await getConfig('app.setup_complete');
-    if (setupComplete === 'true') {
+    // Fail closed: read the flag and the user count directly (a database error throws, it never reads as "not set up").
+    const state = await rqlite.query("SELECT (SELECT value FROM app_config WHERE key = 'app.setup_complete'), (SELECT COUNT(*) FROM users)");
+    const setupComplete = state.values?.[0]?.[0];
+    const userCount = Number(state.values?.[0]?.[1] ?? NaN);
+    if (setupComplete === 'true' || !(userCount === 0)) {
       return NextResponse.json({ error: { message: 'Setup already complete', code: 'SETUP_COMPLETE' } }, { status: 400 });
     }
     // From the environment, or generated into the data volume on first use.
@@ -35,7 +38,11 @@ export async function POST(request: NextRequest) {
     const passwordHash = await hashPassword(password);
     const userId = crypto.randomUUID();
     const now = new Date().toISOString();
-    await rqlite.execute("INSERT INTO users (id, username, password_hash, email, role, created_at, updated_at) VALUES (?, ?, ?, ?, 'admin', ?, ?)", [userId, username, passwordHash, email || null, now, now]);
+    // Only while there are still no users: two setups racing cannot both create an admin.
+    const created = await rqlite.execute("INSERT INTO users (id, username, password_hash, email, role, created_at, updated_at) SELECT ?, ?, ?, ?, 'admin', ?, ? WHERE NOT EXISTS (SELECT 1 FROM users)", [userId, username, passwordHash, email || null, now, now]);
+    if (created.rows_affected !== 1) {
+      return NextResponse.json({ error: { message: 'Setup already complete', code: 'SETUP_COMPLETE' } }, { status: 400 });
+    }
     await setConfig('app.setup_complete', 'true');
     const accessToken = await createAccessToken(userId, username, 'admin');
     const refreshToken = generateRefreshToken();

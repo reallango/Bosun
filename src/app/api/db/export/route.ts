@@ -5,7 +5,7 @@
  * `includeSecrets` and `excludeLarge`. Admin-only.
  */
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth, requireRole } from '@/lib/auth/middleware';
+import { requireUserLevel } from '@/lib/auth/middleware';
 import { exportDatabase, BackupFormat } from '@/lib/db/backup';
 import { logAudit } from '@/lib/audit/logger';
 import { fail } from '@/lib/api/response';
@@ -13,10 +13,10 @@ import { fail } from '@/lib/api/response';
 const VALID_FORMATS: BackupFormat[] = ['json', 'sqlite', 'sql'];
 
 export async function GET(request: NextRequest) {
-  const auth = await requireAuth(request);
+  // A signed-in admin only, never an API key: a backup holds password hashes and secrets, and a
+  // restore can rewrite users and keys.
+  const auth = await requireUserLevel(request, 'admin');
   if (auth instanceof NextResponse) return auth;
-  const roleError = requireRole(auth, 'admin');
-  if (roleError) return roleError;
 
   try {
     const params = request.nextUrl.searchParams;

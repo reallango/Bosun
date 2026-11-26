@@ -36,6 +36,10 @@ interface AvailableItem {
   permissions: string[];
   installedVersion: string | null;
   upgradable: boolean;
+  /** Fingerprint of the reviewed manifest; the install request sends it back so nothing else gets installed. */
+  manifestHash: string;
+  /** Installing replaces a package from another source or author, so the secrets stored for it are deleted. */
+  secretsWillBeCleared?: boolean;
   review: PackageReview;
 }
 
@@ -53,8 +57,8 @@ interface PackageReview {
 
 /** What the admin confirms before a package is installed. */
 type Reviewing =
-  | { kind: 'github'; id: string; name: string; version: string; upgrade: boolean; review: PackageReview }
-  | { kind: 'zip'; file: File; name: string; version: string; installedVersion: string | null; review: PackageReview };
+  | { kind: 'github'; item: AvailableItem; name: string; version: string; upgrade: boolean; secretsWillBeCleared?: boolean; review: PackageReview }
+  | { kind: 'zip'; file: File; name: string; version: string; installedVersion: string | null; secretsWillBeCleared?: boolean; review: PackageReview };
 
 interface SourceInfo { repo: string; ref: string; refs: string[] }
 
@@ -103,8 +107,8 @@ export default function WidgetPackagesPage() {
   const [openSecrets, setOpenSecrets] = useState<string | null>(null);
 
   const askInstall = (p: AvailableItem, upgrade: boolean) => {
-    if (p.review.commandCount === 0) install(p.id, upgrade);
-    else setReviewing({ kind: 'github', id: p.id, name: p.name, version: p.version, upgrade, review: p.review });
+    if (p.review.commandCount === 0 && !p.secretsWillBeCleared) install(p, upgrade);
+    else setReviewing({ kind: 'github', item: p, name: p.name, version: p.version, upgrade, secretsWillBeCleared: p.secretsWillBeCleared, review: p.review });
   };
 
   const loadInstalled = useCallback(async () => {
@@ -155,14 +159,18 @@ export default function WidgetPackagesPage() {
     }
   };
 
-  const install = async (id: string, upgrade: boolean) => {
-    setBusy(id);
+  const install = async (p: AvailableItem, upgrade: boolean) => {
+    setBusy(p.id);
     try {
-      await api('/api/widget-packages/install', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id }) });
-      toast(upgrade ? 'Package upgraded' : 'Package installed', { variant: 'success' });
+      // The version and fingerprint of what was reviewed: the server refuses the install if the branch now holds something else.
+      const r = await api<{ secretsCleared?: boolean }>('/api/widget-packages/install', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ id: p.id, version: p.version, manifestHash: p.manifestHash }),
+      });
+      toast(upgrade ? 'Package upgraded' : 'Package installed', { variant: 'success', description: r?.secretsCleared ? 'The secrets stored for the previous package were cleared.' : undefined });
       await refreshAll();
     } catch (err) {
       toast(upgrade ? 'Upgrade failed' : 'Install failed', { variant: 'error', description: errText(err) });
+      if (err instanceof ApiError && err.code === 'CHANGED_SINCE_REVIEW') await loadAvailable(true);
     } finally {
       setBusy(null);
     }
@@ -172,11 +180,11 @@ export default function WidgetPackagesPage() {
   const previewZip = async (file: File) => {
     setBusy('import');
     try {
-      const r = await api<{ name: string; version: string; installedVersion: string | null; review: PackageReview }>('/api/widget-packages/import?dry_run=1', {
+      const r = await api<{ name: string; version: string; installedVersion: string | null; secretsWillBeCleared?: boolean; review: PackageReview }>('/api/widget-packages/import?dry_run=1', {
         method: 'POST', headers: { 'Content-Type': 'application/zip' }, body: file,
       });
-      if (r.review.commandCount === 0) { setBusy(null); await importZip(file); return; }
-      setReviewing({ kind: 'zip', file, name: r.name, version: r.version, installedVersion: r.installedVersion, review: r.review });
+      if (r.review.commandCount === 0 && !r.secretsWillBeCleared) { setBusy(null); await importZip(file); return; }
+      setReviewing({ kind: 'zip', file, name: r.name, version: r.version, installedVersion: r.installedVersion, secretsWillBeCleared: r.secretsWillBeCleared, review: r.review });
     } catch (err) {
       toast('Import failed', { variant: 'error', description: errText(err) });
     } finally {
@@ -189,17 +197,17 @@ export default function WidgetPackagesPage() {
     const r = reviewing;
     setReviewing(null);
     if (!r) return;
-    if (r.kind === 'github') await install(r.id, r.upgrade);
+    if (r.kind === 'github') await install(r.item, r.upgrade);
     else await importZip(r.file, r.installedVersion !== null);
   };
 
   const importZip = async (file: File, replace = false): Promise<void> => {
     setBusy('import');
     try {
-      const r = await api<{ id: string; version: string }>(`/api/widget-packages/import${replace ? '?replace=1' : ''}`, {
+      const r = await api<{ id: string; version: string; secretsCleared?: boolean }>(`/api/widget-packages/import${replace ? '?replace=1' : ''}`, {
         method: 'POST', headers: { 'Content-Type': 'application/zip' }, body: file,
       });
-      toast(`Imported ${r.id} ${r.version}`, { variant: 'success' });
+      toast(`Imported ${r.id} ${r.version}`, { variant: 'success', description: r.secretsCleared ? 'The secrets stored for the previous package were cleared.' : undefined });
       await refreshAll();
     } catch (err) {
       if (err instanceof ApiError && err.code === 'NOT_NEWER' && !replace && window.confirm(`${err.message}\n\nReplace the installed version with this one anyway?`)) {
@@ -328,6 +336,11 @@ export default function WidgetPackagesPage() {
                 )}
               </div>
             ))}
+            {reviewing.secretsWillBeCleared && (
+              <p className="text-xs font-medium text-amber-700 dark:text-amber-400">
+                This replaces an installed package with the same id from another source or author. The secrets stored for it will be cleared; set them again afterwards if you trust this package with them.
+              </p>
+            )}
             {reviewing.review.network.length > 0 && (
               <p className="text-xs text-muted-foreground">
                 May contact over https: {reviewing.review.network.map(h => <code key={h} className="mr-1 rounded bg-muted px-1">{h}</code>)}

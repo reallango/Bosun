@@ -5,7 +5,7 @@ import { logAudit, AuditActions } from '@/lib/audit/logger';
 import { powershellCommand } from '@/lib/collect/windows';
 import { pruneWindowsKeysScript } from '@/lib/ssh/windows-keys';
 import { linuxPruneScript, linuxRemoveScript, windowsRemoveScript, parseCandidates, keyBody } from '@/lib/ssh/key-cleanup';
-import { sshExec, stripSudo, asRootCommand, type SshAuth } from '@/lib/ssh/admin-exec';
+import { sshExec, stripSudo, asRootCommand, pinnedHostKey, type SshAuth } from '@/lib/ssh/admin-exec';
 
 const SERVICE_ACCOUNT_RE = /^[A-Za-z_][A-Za-z0-9._-]{0,19}$/;
 
@@ -52,7 +52,8 @@ export async function POST(request: NextRequest) {
     const publicKey = row.values?.[0]?.[0] as string | undefined;
     if (!publicKey || !keyBody(publicKey)) return bad('The host\'s Bosun key was not found', 404, 'NOT_FOUND');
 
-    const ssh: SshAuth = { host: hostname, port, username: adminUser, password: adminPassword };
+    // Held to the host key Bosun pinned for this address (or the first one seen in this request).
+    const ssh: SshAuth = { host: hostname, port, username: adminUser, password: adminPassword, hostKey: await pinnedHostKey({ host: hostname, port }) };
     try {
       await sshExec(ssh, platform === 'windows' ? powershellCommand('Write-Output connected') : 'echo connected');
     } catch (err) {

@@ -60,6 +60,8 @@ COPY --from=builder /app/ws-server.js ./ws-server.js
 COPY --from=builder /app/poller.js ./poller.js
 COPY --from=builder /app/src/lib/collect ./src/lib/collect
 COPY --from=builder /app/src/lib/secrets.js ./src/lib/secrets.js
+# Client address resolution (trusted proxies), shared with the web app.
+COPY --from=builder /app/src/lib/net/client-ip.js ./src/lib/net/client-ip.js
 # API terminal (ws-server.js): session handler, pure helpers and the shell-account checks.
 COPY --from=builder /app/src/lib/terminal ./src/lib/terminal
 COPY --from=builder /app/src/lib/ssh/shell-account.js /app/src/lib/ssh/windows-shell-account.js ./src/lib/ssh/

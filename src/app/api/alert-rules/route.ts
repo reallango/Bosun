@@ -6,6 +6,7 @@ import { METRIC_RE } from '@/lib/metrics/query';
 import { ok, fail, failFrom } from '@/lib/api/response';
 import { alertRecipients } from '@/lib/collect/alerts';
 import { parseRecipients } from '@/lib/collect/recipients';
+import { visibleServerIds } from '@/lib/permissions/effective';
 
 const ALERT_CONDITIONS = ['gt', 'gte', 'lt', 'lte'];
 const ALERT_SEVERITIES = ['info', 'warning', 'critical'];
@@ -32,7 +33,10 @@ export async function GET(request: NextRequest) {
     const enabledOnly = new URL(request.url).searchParams.get('enabled') === 'true';
     const r = await rqlite.query(
       `SELECT a.*, s.name AS server_name FROM alert_rules a LEFT JOIN servers s ON s.id = a.server_id ${enabledOnly ? 'WHERE a.enabled = 1' : ''} ORDER BY a.name`);
-    return ok({ rules: rowsToObjects(r).map(serializeRule) });
+    // Rules for one server are listed only to those who can see that server (fleet-wide rules, server_id NULL, to all).
+    const visible = await visibleServerIds(auth);
+    const rows = rowsToObjects(r).filter(x => !x.server_id || visible === '*' || visible.has(String(x.server_id)));
+    return ok({ rules: rows.map(serializeRule) });
   } catch (error) {
     return failFrom(error);
   }

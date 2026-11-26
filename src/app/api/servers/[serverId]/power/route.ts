@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/auth/middleware';
+import { clientIp, requireAuth } from '@/lib/auth/middleware';
 import { requirePermission } from '@/lib/permissions/authorize';
 import { rqlite } from '@/lib/db/rqlite-client';
 import { runOnServerId } from '@/lib/ssh/connection-pool';
@@ -29,7 +29,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
   if (!limit.allowed) return fail('Too many actions, slow down', 429, 'RATE_LIMITED');
 
   const started = Date.now();
-  const ip = request.headers.get('x-forwarded-for')?.split(',')[0];
+  const ip = (clientIp(request) ?? undefined);
   const audit = (status: 'success' | 'failure', extra: Record<string, unknown> = {}) => logAudit({
     userId: auth.userId, serverId, action: AuditActions.SERVER_POWER, status,
     details: JSON.stringify({ action, ...extra }), durationMs: Date.now() - started, ipAddress: ip,
