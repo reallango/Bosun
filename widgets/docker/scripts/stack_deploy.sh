@@ -286,29 +286,44 @@ found=$(printf '%s\n' "$cfg" | awk '
   function val(l,   s) { s = l; sub(/^[^:]*: */, "", s); sub(/,$/, "", s); return s }
   function unq(s) { if (s ~ /^".*"$/) s = substr(s, 2, length(s) - 2); return s }
   function item(l,   s) { s = l; sub(/^ */, "", s); sub(/,$/, "", s); return unq(s) }
+  function shared(v) { v = unq(v); return v ~ /^(container|service):/ }
   BEGIN { sec = ""; arr = "" }
   {
     line = $0; match(line, /^ */); ind = RLENGTH
     if (ind == 2 && line ~ /^  "/) { sec = key(line); arr = ""; next }
     if (sec == "volumes" && ind == 8 && key(line) == "device") { v = unq(val(line)); if (v ~ /^\//) print "PATH " v; next }
     if ((sec == "secrets" || sec == "configs") && ind == 6 && key(line) == "file") { v = unq(val(line)); if (v ~ /^\//) print "PATH " v; next }
+    if (sec != "services") next
     if (ind == 4) { arr = ""; next }
     if (ind == 6) {
       if (arr != "" && line ~ /^ *(\]|\}),?$/) { arr = ""; next }
       k = key(line); v = val(line); arr = ""
       if (k == "privileged" && v == "true") print "RISK privileged"
       else if (k == "network_mode" && v == "\"host\"") print "RISK host network"
+      else if (k == "network_mode" && shared(v)) print "RISK network of " unq(v)
       else if (k == "pid" && v == "\"host\"") print "RISK host PID namespace"
+      else if (k == "pid" && shared(v)) print "RISK PID namespace of " unq(v)
       else if (k == "ipc" && v == "\"host\"") print "RISK host IPC namespace"
+      else if (k == "ipc" && shared(v)) print "RISK IPC namespace of " unq(v)
       else if (k == "uts" && v == "\"host\"") print "RISK host UTS namespace"
       else if (k == "userns_mode" && v == "\"host\"") print "RISK host user namespace"
       else if (k == "cgroup" && v == "\"host\"") print "RISK host cgroup namespace"
+      else if (k == "cgroup_parent") print "RISK cgroup parent " unq(v)
+      else if (k == "runtime") print "RISK runtime " unq(v)
       else if ((k == "cap_add" || k == "devices" || k == "security_opt" || k == "sysctls" || k == "volumes" || k == "volumes_from" || k == "device_cgroup_rules" || k == "build") && line ~ /[\[{]$/) arr = k
       next
     }
     if (arr == "cap_add" && ind == 8) print "RISK capability " item(line)
     else if (arr == "security_opt" && ind == 8) print "RISK security option " item(line)
     else if (arr == "sysctls" && ind == 8) print "RISK sysctl " key(line)
+    else if (arr == "volumes_from" && ind == 8) print "RISK volumes of " item(line)
+    else if (arr == "device_cgroup_rules" && ind == 8) print "RISK device rule " item(line)
+    else if (arr == "build" && ind == 8) {
+      if (key(line) == "context") { v = unq(val(line)); if (v ~ /^\//) print "PATH " v }
+      else if (key(line) == "network" && unq(val(line)) == "host") print "RISK host network while building"
+      else if (key(line) == "privileged" && val(line) == "true") print "RISK privileged build"
+      else if (key(line) == "entitlements") print "RISK build entitlements"
+    }
     else if (arr == "devices") {
       if (ind == 8 && line ~ /^ *"/) print "RISK device " item(line)
       else if (ind == 10 && key(line) == "source") print "RISK device " unq(val(line))

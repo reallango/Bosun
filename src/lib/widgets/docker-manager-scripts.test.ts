@@ -871,6 +871,17 @@ exit 0`);
     expect(gitArgs()).toEqual([`-C ${repo} rev-parse HEAD`, `-C ${repo} fetch --depth 1 origin main`, `-C ${repo} reset --hard FETCH_HEAD`]);
   });
 
+  it('stack_deploy and stack_action (update) use the same risk check, word for word', () => {
+    const between = (s: string, from: string, to: string) => { const i = s.indexOf(from); return s.slice(i, s.indexOf(to, i)); };
+    const parts = (f: string) => {
+      const s = script(f).replace(/\r\n/g, '\n');
+      return [between(s, 'sensitive() {', '\n}\n'), between(s, 'host_path_risk() {', '\n}\n'), between(s, '  function key(l,', "  }')")];
+    };
+    const [d, a] = [parts('stack_deploy.sh'), parts('stack_action.sh')];
+    for (const p of d) expect(p.length).toBeGreaterThan(50);
+    expect(a).toEqual(d);
+  });
+
   it.skipIf(!hasSh)('stack_deploy also catches shared namespaces, volumes_from, build settings and host files used as secrets', () => {
     const risky: [string, string, RegExp][] = [
       ['      "volumes_from": [\n        "db"\n      ]', '', /volumes of db/],
