@@ -146,6 +146,29 @@ describe('validateWidgetSpec', () => {
     expect(bad(s => { s.view = { type: 'text' }; }).ok).toBe(false);
   });
 
+  it('sorts a table by raw column fields and opens a screen from a row', () => {
+    const good = bad(s => {
+      s.view = {
+        type: 'table',
+        columns: [{ title: 'Name', value: '{name}', sort: 'name' }, { title: 'Size', value: '{size}', sort: 'size_bytes' }],
+        defaultSort: { column: 'Size', dir: 'desc' },
+        open: 'image_detail',
+      };
+    });
+    if (!good.ok) throw new Error(good.error);
+    expect(good.value.view.columns?.[1].sort).toBe('size_bytes');
+    expect(good.value.view.defaultSort).toEqual({ column: 'Size', dir: 'desc' });
+    expect(good.value.view.open).toBe('image_detail');
+    // A list may open a row's details too.
+    expect(bad(s => { s.view = { type: 'list', row: { title: '{name}', actions: [] }, open: 'detail' }; }).ok).toBe(true);
+
+    expect(bad(s => { s.view = { type: 'table', columns: [{ title: 'Name', value: '{name}', sort: 'a b' }] }; }).ok).toBe(false);
+    expect(bad(s => { s.view = { type: 'table', columns: [{ title: 'Name', value: '{name}', sort: 'name' }], defaultSort: { column: 'Size', dir: 'desc' } }; }).ok).toBe(false);
+    expect(bad(s => { s.view = { type: 'table', columns: [{ title: 'Name', value: '{name}' }], defaultSort: { column: 'Name', dir: 'desc' } }; }).ok).toBe(false);
+    expect(bad(s => { s.view = { type: 'table', columns: [{ title: 'Name', value: '{name}', sort: 'name' }], defaultSort: { column: 'Name', dir: 'up' } }; }).ok).toBe(false);
+    expect(bad(s => { s.view = { type: 'table', columns: [{ title: 'Name', value: '{name}' }], open: 'Bad Id' }; }).ok).toBe(false);
+  });
+
   it('is validated as part of a package manifest, against the package permissions', () => {
     const perm = (id: string) => ({ id, label: id, description: 'd', group: 'Dk', defaultLevel: 'admin', risk: 'high', scope: 'server' });
     const manifest = (spec: any) => ({ schema: 1, id: 'dk', name: 'Dk', version: '0.0.1', permissions: [perm('dk.control'), perm('dk.logs'), perm('dk.view')], widgets: [{ type: 'dk_w', display_name: 'Dk', spec }] });

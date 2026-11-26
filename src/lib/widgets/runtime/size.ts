@@ -49,6 +49,16 @@ export function splitActions<T>(actions: T[], size: WidgetSize, inline?: InlineA
   return { shown: actions.slice(0, count), more: actions.slice(count) };
 }
 
+/**
+ * Split a page-size table row's actions: at most `inline` icons, the rest in the row's ⋯ menu with the destructive ones
+ * last (unlike `splitActions`, a menu with one entry is allowed here). Widget-sized tables keep showing every action.
+ */
+export function splitRowActions<T>(actions: T[], inline: number, destructive: (a: T) => boolean): { shown: T[]; more: T[] } {
+  const shown = actions.slice(0, Math.max(0, inline));
+  const rest = actions.slice(shown.length);
+  return { shown, more: [...rest.filter(a => !destructive(a)), ...rest.filter(destructive)] };
+}
+
 /** Validate an optional `hideBelow`; returns the object to spread into the validated part. */
 export function validateHideBelow(raw: unknown, where: string): Validated<{ hideBelow?: WidgetSize }> {
   if (raw === undefined) return { ok: true, value: {} };

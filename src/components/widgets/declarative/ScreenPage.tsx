@@ -18,6 +18,7 @@ import type { WidgetInstance } from '@/components/widgets/shared/screen-page';
 import type { LayoutUi } from './LayoutView';
 import { ScreenView } from './ScreenView';
 import { ScreenDialog } from './ScreenDialog';
+import { RowSheet } from './RowSheet';
 import type { Row } from './parts';
 import { useActionRunner } from './useActionRunner';
 import { usePublicSpec, V1View } from './DeclarativeWidget';
@@ -86,6 +87,8 @@ function Inner({ widget, screenId }: { widget: WidgetRow; screenId: string }) {
   const [reloadToken, setReloadToken] = useState(0);
   const [screenStatus, setScreenStatus] = useState<{ loadedAt: number; loading: boolean }>({ loadedAt: 0, loading: false });
   const [dialog, setDialog] = useState<{ id: string; row: Row | null } | null>(null);
+  // A row's details, opened by clicking a table/list row whose view names a screen with `open` (shown in a side sheet).
+  const [detail, setDetail] = useState<{ id: string; row: Row } | null>(null);
   // The widget's data carries the server; until it arrives the name from the instances list fills the screen title.
   const serverFallback = useMemo(() => (currentInstance?.server_name ? { name: currentInstance.server_name } : undefined), [currentInstance?.server_name]);
   const ctx: ViewContext = useMemo(() => ({ data, collectedAt: extra.collectedAt, state: extra.state, config: extra.config, lookups: extra.lookups, server: extra.server ? { ...serverFallback, ...extra.server } : serverFallback }), [data, extra, serverFallback]);
@@ -111,7 +114,8 @@ function Inner({ widget, screenId }: { widget: WidgetRow; screenId: string }) {
     actions: new Map((spec?.actions ?? []).map(a => [a.id, a])),
     allowed: runner.allowed, busy: runner.busy,
     onAction: (a, params) => runner.start(a, null, params),
-    renderView: (v, d) => <V1View view={v} data={d} widgetId={widget.id} serverId={widget.server_id} actions={new Map((spec?.actions ?? []).map(a => [a.id, a]))} allowed={runner.allowed} busy={runner.busy} start={runner.start} />,
+    renderView: (v, d) => <V1View view={v} data={d} widgetId={widget.id} serverId={widget.server_id} actions={new Map((spec?.actions ?? []).map(a => [a.id, a]))} allowed={runner.allowed} busy={runner.busy} start={runner.start}
+      openRow={(id, row) => { if (spec?.screens?.[id]) setDetail({ id, row }); }} />,
     onCancelJob: () => { void runner.cancelJob(); },
     submit: runner.submit,
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -158,6 +162,8 @@ function Inner({ widget, screenId }: { widget: WidgetRow; screenId: string }) {
         {runner.dialogs}
         <ScreenDialog id={dialog?.id ?? null} row={dialog?.row ?? null} screen={dialog ? spec?.screens?.[dialog.id] : undefined} ctx={full} serverId={widget.server_id} widgetType={widget.widget_type} ui={ui}
           reloadToken={reloadToken} onClose={() => setDialog(null)} onDone={refresh} />
+        <RowSheet id={detail?.id ?? null} row={detail?.row ?? null} screen={detail ? spec?.screens?.[detail.id] : undefined} ctx={full} serverId={widget.server_id} widgetType={widget.widget_type} ui={ui}
+          reloadToken={reloadToken} onClose={() => setDetail(null)} onDone={refresh} />
       </div>
     </>
   );

@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "docker",
   "name": "Docker Containers",
-  "version": "1.0.16",
+  "version": "1.0.17",
   "description": "Containers on the host with logs, a shell, start, stop and restart; edit a container, create containers and stacks (a compose file, or one from a Git repository), and a Manage page for images, volumes and networks.",
   "author": "Bosun",
   "requires": {
@@ -3931,7 +3931,8 @@
                             {
                               "title": "Name",
                               "value": "{name}",
-                              "format": "text"
+                              "format": "text",
+                              "sort": "name"
                             },
                             {
                               "title": "Image",
@@ -4025,12 +4026,14 @@
                             {
                               "title": "Size",
                               "value": "{size}",
-                              "format": "text"
+                              "format": "text",
+                              "sort": "size_bytes"
                             },
                             {
                               "title": "Created",
                               "value": "{created_text}",
-                              "format": "text"
+                              "format": "text",
+                              "sort": "created"
                             },
                             {
                               "title": "Containers",
@@ -4049,6 +4052,10 @@
                               "id"
                             ],
                             "placeholder": "Filter"
+                          },
+                          "defaultSort": {
+                            "column": "Size",
+                            "dir": "desc"
                           }
                         }
                       }
@@ -4107,7 +4114,8 @@
                             {
                               "title": "Name",
                               "value": "{name}",
-                              "format": "text"
+                              "format": "text",
+                              "sort": "name"
                             },
                             {
                               "title": "Driver",
@@ -4210,7 +4218,8 @@
                             {
                               "title": "Name",
                               "value": "{name}",
-                              "format": "text"
+                              "format": "text",
+                              "sort": "name"
                             },
                             {
                               "title": "Driver",
@@ -4272,7 +4281,8 @@
                             {
                               "title": "Name",
                               "value": "{name}",
-                              "format": "text"
+                              "format": "text",
+                              "sort": "name"
                             },
                             {
                               "title": "Status",

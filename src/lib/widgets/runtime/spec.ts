@@ -125,6 +125,9 @@ export interface ActionSpec {
 /** `hideBelow` (on any part that has it): hidden while the widget is smaller than that size class (see size.ts). */
 export interface FieldSpec { label: string; value: string; format: (typeof FORMATS)[number]; bar?: string; when?: Cond; hideBelow?: WidgetSize }
 
+/** One column of a table view. `sort` names a raw row field to sort by (the value shown may be formatted). */
+export interface TableColumn { title: string; value: string; format: (typeof FORMATS)[number]; hideBelow?: WidgetSize; sort?: string }
+
 export interface ViewSpec {
   type: 'list' | 'table' | 'text' | 'fields' | 'chart' | 'layout';
   /** A layout view (version 2): sections, forms, buttons and the other views as blocks. */
@@ -139,8 +142,12 @@ export interface ViewSpec {
   toggles?: { key: string; label: string; default: boolean; hideWhen: Cond; hideBelow?: WidgetSize }[];
   /** `inline`: how many row actions show as buttons per size class (the rest go into the row's "more" menu); `subtitleHideBelow` hides the subtitle on small widgets. */
   row?: { dot?: { field: string; colors: Record<string, (typeof DOT_COLORS)[number]> }; title: string; subtitle?: string; badge?: string; actions: string[]; fields?: FieldSpec[]; inline?: InlineActions; subtitleHideBelow?: WidgetSize };
-  columns?: { title: string; value: string; format: (typeof FORMATS)[number]; hideBelow?: WidgetSize }[];
+  columns?: TableColumn[];
   rowActions?: string[];
+  /** A table starts sorted by this column (which must have `sort`) in this direction. */
+  defaultSort?: { column: string; dir: 'asc' | 'desc' };
+  /** A table: clicking a row (or pressing Enter on it) opens this screen in a side sheet, with the row as its context. */
+  open?: string;
   text?: string;
 }
 
@@ -701,6 +708,10 @@ function validateView(raw: unknown, actionIds: ReadonlySet<string>, v2 = false):
       view.toggles.push({ key: t.key, label, default: t.default !== false, hideWhen: c.value, ...hb.value });
     }
   }
+  if (raw.open !== undefined) {
+    if (typeof raw.open !== 'string' || !ID_RE.test(raw.open)) return fail('view.open must be the id of a screen (lowercase letters, digits and underscores)');
+    view.open = raw.open;
+  }
   if (raw.type === 'list') {
     if (!isObj(raw.row)) return fail('a list view needs "row"');
     const title = text(raw.row.title, 200);
@@ -750,11 +761,24 @@ function validateView(raw: unknown, actionIds: ReadonlySet<string>, v2 = false):
       if (!(FORMATS as readonly string[]).includes(String(format))) return fail(`column format must be one of: ${FORMATS.join(', ')}`);
       const hb = validateHideBelow(c.hideBelow, `column "${title}"`);
       if (!hb.ok) return hb;
-      view.columns.push({ title, value, format: format as (typeof FORMATS)[number], ...hb.value });
+      if (c.sort !== undefined && (typeof c.sort !== 'string' || !FIELD_RE.test(c.sort))) {
+        return fail(`column "${title}": "sort" must be a row field such as "size_bytes"`);
+      }
+      view.columns.push({ title, value, format: format as (typeof FORMATS)[number], ...hb.value, ...(typeof c.sort === 'string' ? { sort: c.sort } : {}) });
     }
     const a = refActions(raw.rowActions, 'view.rowActions');
     if (!a.ok) return a;
     view.rowActions = a.value;
+    if (raw.defaultSort !== undefined) {
+      if (!isObj(raw.defaultSort)) return fail('view.defaultSort must be an object like {"column": "Size", "dir": "desc"}');
+      const column = text(raw.defaultSort.column, 40);
+      if (!column) return fail('view.defaultSort needs "column": the title of a column');
+      if (raw.defaultSort.dir !== 'asc' && raw.defaultSort.dir !== 'desc') return fail('view.defaultSort "dir" must be "asc" or "desc"');
+      const target = view.columns.find(x => x.title === column);
+      if (!target) return fail(`view.defaultSort names the unknown column "${column}"`);
+      if (!target.sort) return fail(`view.defaultSort names the column "${column}", which has no "sort"`);
+      view.defaultSort = { column, dir: raw.defaultSort.dir };
+    }
   }
   return { ok: true, value: view };
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { visible, visibleBadges, coerceParam, actionApplies, formInitial, formParams, selectParams, selectCurrent, text, jobHeadline, JOB_ACTIVE, tabCount, activeTabId, layoutRows, type PublicActionLike } from './layout';
+import { visible, visibleBadges, coerceParam, actionApplies, formInitial, formParams, selectParams, selectCurrent, text, jobHeadline, JOB_ACTIVE, tabCount, activeTabId, layoutRows, primaryToolbarEntry, type PublicActionLike } from './layout';
 import type { Block, FormField } from './spec-v2';
 
 const ctx = {
@@ -106,6 +106,19 @@ describe('tab toolbars', () => {
   it('leaves blocks alone when no view follows them, and keeps inline forms where they are', () => {
     expect(layoutRows([buttons, dialogForm])).toEqual([{ kind: 'single', block: buttons }, { kind: 'single', block: dialogForm }]);
     expect(layoutRows([inlineForm, view])).toEqual([{ kind: 'single', block: inlineForm }, { kind: 'single', block: view }]);
+  });
+});
+
+describe('primaryToolbarEntry', () => {
+  it('picks the first dialog trigger before any action', () => {
+    expect(primaryToolbarEntry([{ kind: 'action', destructive: false }, { kind: 'dialog', destructive: false }, { kind: 'dialog', destructive: false }])).toBe(1);
+  });
+  it('without a dialog trigger, picks the first action that is not destructive', () => {
+    expect(primaryToolbarEntry([{ kind: 'action', destructive: true }, { kind: 'action', destructive: false }, { kind: 'action', destructive: false }])).toBe(1);
+  });
+  it('leaves every button outlined when every action is destructive', () => {
+    expect(primaryToolbarEntry([{ kind: 'action', destructive: true }, { kind: 'action', destructive: true }])).toBe(-1);
+    expect(primaryToolbarEntry([])).toBe(-1);
   });
 });
 
