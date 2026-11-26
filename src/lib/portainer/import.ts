@@ -17,6 +17,7 @@ import { loadDataset, loadRuntimeData, loadWidgetSpec, type LoadedSpec } from '@
 import { runWidgetAction } from '@/lib/widgets/runtime/run-action';
 import { getJob } from '@/lib/widgets/jobs/store';
 import { deleteStack, getConnection, listStacks, stackFile, type PortainerStack } from './client';
+import { advanceSelfImport, beginSelfImport, cancelSelfImport } from './self-import';
 import { adaptCopiedCompose, envText, gitSourceOf, mergeComposeExports, STACK_NAME, type DeploySource } from './import-spec';
 
 export class ImportError extends Error {
@@ -100,7 +101,7 @@ export async function listCandidates(serverId: string): Promise<{ candidates: Im
     const own = isOwn(mine, s.fields.id);
     let reason: string | null = null;
     if (!STACK_NAME.test(name)) reason = 'The stack name is not one Bosun can use (lower-case letters, digits, - and _)';
-    else if (own) reason = 'This Bosun runs in this stack: import it from another node\'s Bosun, so it is never restarting itself';
+    else if (own && !(s.deployLater || s.deployPrivilegedLater)) reason = 'This Bosun runs in this stack: import it from another node\'s Bosun, or update the stack widget to a version that can start it in the background';
     else if (!from.length) reason = 'Nothing to import from (no Portainer record and no containers)';
     out.push({
       name,
@@ -119,7 +120,7 @@ export async function listCandidates(serverId: string): Promise<{ candidates: Im
     if (!p) continue;
     const mine = rows.filter(r => str(r[s.fields.project]) === name);
     const own = isOwn(mine, s.fields.id);
-    const reason = own ? 'This Bosun runs in this stack: detach it from another node\'s Bosun, so it is never stopping itself' : null;
+    const reason = null; // this node's own stack too: self-import.ts reports the outcome after the restart
     detachable.push({
       name,
       running: mine.some(r => str(r[s.fields.state]) === 'running'),
@@ -173,7 +174,7 @@ async function waitForJob(jobId: string, timeoutMs = 30 * 60_000): Promise<{ sta
  * volumes kept), so for a running stack the host waiter (`guard`) is started first: it waits until Portainer has taken the
  * stack down and starts it again from Bosun's copy. Answers a sentence for the bell; never throws.
  */
-async function detachStack(
+export async function detachStack(
   auth: TokenPayload, serverId: string, loaded: LoadedSpec, name: string,
   portainer: { id: number; endpointId: number }, running: boolean, ip?: string,
 ): Promise<string> {
@@ -205,8 +206,20 @@ export async function startDetach(auth: TokenPayload, serverId: string, name: st
   const c = detachable.find(x => x.name === name);
   if (!c) throw new ImportError('Bosun does not manage a stack of that name that Portainer still lists', 404, 'NOT_FOUND');
   if (!c.detachable) throw new ImportError(c.reason || 'This stack cannot be detached here', 409, 'NOT_DETACHABLE');
-  await logAudit({ userId: auth.userId, serverId, action: 'stack.detach', category: 'stacks', status: 'success', ipAddress: ip, details: JSON.stringify({ name, portainer: c.portainer.id }).slice(0, 900) }).catch(() => undefined);
+  if (c.own) {
+    // Portainer's delete stops this Bosun: the record lets the restarted process report the outcome (see self-import.ts).
+    const started = await beginSelfImport({
+      name, serverId, detach: true, portainer: { id: c.portainer.id, endpointId: c.portainer.endpointId }, running: c.running,
+      user: { id: String(auth.userId), username: auth.username },
+    });
+    if (!started) throw new ImportError('An import or detach of this node\'s own stack is already under way', 409, 'IMPORT_BUSY');
+  }
+  await logAudit({ userId: auth.userId, serverId, action: 'stack.detach', category: 'stacks', status: 'success', ipAddress: ip, details: JSON.stringify({ name, own: c.own, portainer: c.portainer.id }).slice(0, 900) }).catch(() => undefined);
 
+  if (c.own) {
+    void advanceSelfImport().catch(err => console.error('[detach] own stack:', err));
+    return { name };
+  }
   void (async () => {
     const outcome = await detachStack(auth, serverId, loaded, name, c.portainer, c.running, ip);
     const failed = outcome.startsWith('Detaching from Portainer failed');
@@ -235,22 +248,41 @@ export async function startImport(auth: TokenPayload, serverId: string, name: st
   if (detach && !c.portainer) throw new ImportError('There is no Portainer record to detach from', 400, 'NO_PORTAINER');
   const src = await sourceFor(serverId, loaded, c, from);
 
-  const deployId = s.deployPrivileged ?? s.deploy;
+  // This Bosun's own stack: the "later" deploy, which starts the stack after answering (re-creating it ends this process).
+  const deployId = c.own ? (s.deployPrivilegedLater ?? s.deployLater)! : (s.deployPrivileged ?? s.deploy);
   const action = loaded.spec.actions.find(a => a.id === deployId)!;
+  // This Bosun's own stack: the widget starts it after answering (re-creating it ends this process), and the record lets the
+  // restarted process finish the import (see self-import.ts).
+  if (c.own) {
+    const started = await beginSelfImport({
+      name, serverId, detach: detach && !!c.portainer, portainer: c.portainer ? { id: c.portainer.id, endpointId: c.portainer.endpointId } : null,
+      running: c.running, user: { id: String(auth.userId), username: auth.username },
+    });
+    if (!started) throw new ImportError('An import of this node\'s own stack is already under way', 409, 'IMPORT_BUSY');
+  }
   const res = await runWidgetAction(auth, serverId, loaded, action, {
     params: { name, source: src.source, yaml: src.yaml, env: src.env, repo: src.repo, branch: src.branch, file: src.file, pull: false, override: '' },
     confirm: true,
   }, { ip });
   const json = await res.json().catch(() => null) as { data?: { jobId?: string; success?: boolean; message?: string }; error?: { message?: string } } | null;
-  if (res.status >= 400) throw new ImportError(json?.error?.message || `The deployment was refused (HTTP ${res.status})`, res.status === 403 ? 403 : 502);
+  if (res.status >= 400) {
+    if (c.own) await cancelSelfImport();
+    throw new ImportError(json?.error?.message || `The deployment was refused (HTTP ${res.status})`, res.status === 403 ? 403 : 502);
+  }
   const jobId = json?.data?.jobId ?? null;
-  await logAudit({ userId: auth.userId, serverId, action: 'stack.import', category: 'stacks', status: 'success', ipAddress: ip, details: JSON.stringify({ name, from, detach, job: jobId }).slice(0, 900) }).catch(() => undefined);
+  await logAudit({ userId: auth.userId, serverId, action: 'stack.import', category: 'stacks', status: 'success', ipAddress: ip, details: JSON.stringify({ name, from, detach, own: c.own, job: jobId }).slice(0, 900) }).catch(() => undefined);
 
   // The rest waits for the deployment; its outcome goes to the bell.
   void (async () => {
     const outcome = jobId ? await waitForJob(jobId) : { status: json?.data?.success === false ? 'error' : 'success', message: json?.data?.message ?? null };
     if (outcome.status !== 'success') {
+      if (c.own) await cancelSelfImport();
       await notify({ kind: 'alert', severity: 'warning', title: `Importing ${name} failed`, message: outcome.message || 'The deployment did not finish', serverId, audience: 'admin' });
+      return;
+    }
+    if (c.own) {
+      // The stack restarts in a few seconds, normally ending this process; if it is still here, it finishes the import itself.
+      setTimeout(() => { advanceSelfImport().catch(err => console.error('[import] own stack:', err)); }, 20_000);
       return;
     }
     const detached = detach && c.portainer ? ` ${await detachStack(auth, serverId, loaded, name, c.portainer, c.running, ip)}` : '';
