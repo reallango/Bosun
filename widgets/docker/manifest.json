@@ -2,8 +2,8 @@
   "schema": 1,
   "id": "docker",
   "name": "Docker Containers",
-  "version": "1.0.9",
-  "description": "Containers on the host with logs, a shell, start, stop and restart; edit a container, create containers and stacks (a compose file, or one from a GitHub repository), and a Manage page for images, volumes and networks.",
+  "version": "1.0.10",
+  "description": "Containers on the host with logs, a shell, start, stop and restart; edit a container, create containers and stacks (a compose file, or one from a Git repository), and a Manage page for images, volumes and networks.",
   "author": "Bosun",
   "permissions": [
     {
@@ -439,7 +439,7 @@
               },
               "repo": {
                 "type": "string",
-                "pattern": "^(-|https://[A-Za-z0-9.-]+/[A-Za-z0-9._/-]+)$",
+                "pattern": "^(-|https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/[A-Za-z0-9._/-]+)$",
                 "maxLength": 300,
                 "default": "-"
               },
@@ -482,7 +482,8 @@
               }
             },
             "secrets": [
-              "git_token"
+              "git_token",
+              "git_credentials"
             ]
           },
           "stack_action": {
@@ -519,7 +520,8 @@
               }
             },
             "secrets": [
-              "git_token"
+              "git_token",
+              "git_credentials"
             ]
           },
           "stack_remove": {
@@ -598,12 +600,13 @@
             "params": {
               "repo": {
                 "type": "string",
-                "pattern": "^https://[A-Za-z0-9.-]+/[A-Za-z0-9._/-]+$",
+                "pattern": "^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/[A-Za-z0-9._/-]+$",
                 "maxLength": 300
               }
             },
             "secrets": [
-              "git_token"
+              "git_token",
+              "git_credentials"
             ]
           },
           "git_files": {
@@ -613,7 +616,7 @@
             "params": {
               "repo": {
                 "type": "string",
-                "pattern": "^https://[A-Za-z0-9.-]+/[A-Za-z0-9._/-]+$",
+                "pattern": "^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/[A-Za-z0-9._/-]+$",
                 "maxLength": 300
               },
               "branch": {
@@ -623,7 +626,8 @@
               }
             },
             "secrets": [
-              "git_token"
+              "git_token",
+              "git_credentials"
             ]
           },
           "git_services": {
@@ -633,7 +637,7 @@
             "params": {
               "repo": {
                 "type": "string",
-                "pattern": "^https://[A-Za-z0-9.-]+/[A-Za-z0-9._/-]+$",
+                "pattern": "^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/[A-Za-z0-9._/-]+$",
                 "maxLength": 300
               },
               "branch": {
@@ -648,7 +652,8 @@
               }
             },
             "secrets": [
-              "git_token"
+              "git_token",
+              "git_credentials"
             ]
           }
         },
@@ -1392,7 +1397,7 @@
               },
               "repo": {
                 "type": "string",
-                "pattern": "^(-|https://[A-Za-z0-9.-]+/[A-Za-z0-9._/-]+)$",
+                "pattern": "^(-|https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/[A-Za-z0-9._/-]+)$",
                 "maxLength": 300,
                 "default": "-"
               },
@@ -1471,7 +1476,7 @@
               },
               "repo": {
                 "type": "string",
-                "pattern": "^(-|https://[A-Za-z0-9.-]+/[A-Za-z0-9._/-]+)$",
+                "pattern": "^(-|https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/[A-Za-z0-9._/-]+)$",
                 "maxLength": 300,
                 "default": "-"
               },
@@ -3019,7 +3024,7 @@
             "kind": "dialog",
             "size": "xl",
             "title": "New stack",
-            "description": "A stack is a Docker Compose project: write the compose file here, or deploy one from a GitHub repository.",
+            "description": "A stack is a Docker Compose project: write the compose file here, or deploy one from a Git repository (GitHub, GitLab, Gitea, your own server).",
             "blocks": [
               {
                 "type": "editor",
@@ -3043,7 +3048,7 @@
                       },
                       {
                         "value": "git",
-                        "label": "A GitHub repository"
+                        "label": "A Git repository"
                       }
                     ]
                   },
@@ -3068,7 +3073,7 @@
                       "field": "values.source",
                       "equals": "git"
                     },
-                    "help": "Private repository? An admin sets a GitHub access token under Settings, Widgets, Docker Containers (key icon)."
+                    "help": "Private repository? An admin sets the GitHub access token, or Git credentials for other hosts, under Settings, Widgets, Docker Containers (key icon)."
                   },
                   {
                     "name": "branch",
@@ -3278,7 +3283,7 @@
                       },
                       {
                         "value": "git",
-                        "label": "A GitHub repository"
+                        "label": "A Git repository"
                       }
                     ]
                   },
@@ -3305,7 +3310,7 @@
                       "field": "values.source",
                       "equals": "git"
                     },
-                    "help": "Private repository? An admin sets a GitHub access token under Settings, Widgets, Docker Containers (key icon)."
+                    "help": "Private repository? An admin sets the GitHub access token, or Git credentials for other hosts, under Settings, Widgets, Docker Containers (key icon)."
                   },
                   {
                     "name": "branch",
@@ -4013,7 +4018,12 @@
     {
       "id": "git_token",
       "label": "GitHub access token",
-      "description": "Lets stacks be deployed from a private GitHub repository. Not needed for public repositories."
+      "description": "Lets stacks be deployed and updated from a private GitHub repository. Not needed for public repositories."
+    },
+    {
+      "id": "git_credentials",
+      "label": "Git credentials for other hosts",
+      "description": "For private repositories on GitLab, Gitea, Bitbucket or your own Git server: entries \"host=token\" or \"host=user:token\" separated by spaces, e.g. \"gitlab.com=glpat-xxx git.lan:3000=bosun:token\". Each is sent only to its own host."
     }
   ]
 }

@@ -7,9 +7,8 @@
 # options (privileged, host namespaces and network, extra capabilities, devices, security options, sysctls, host-path or socket
 # mounts); those need allow_risky=true, which the caller only passes with the elevated permission. For the git source a
 # refused or invalid update is rolled back (the previous commit is restored). stack_action only ever runs checked files.
-# Git over https only; with BOSUN_SECRET_git_token set (exported by Bosun) it is sent as a Basic Authorization header through the
-# environment of the git process only (GIT_CONFIG_*), never on a command line, in a URL, in a file or in the output, and only to
-# github.com.
+# Git over https only. Credentials (see "git credentials") go to the repository's own host only, as a Basic Authorization header
+# through the environment of git (never on a command line, in a URL, in a file or in the output).
 # Override (text, may be empty): lines `svc.<service>.<key>=<value>` with the key container_name (one) or port, volume, network
 # (repeatable; each list REPLACES the list of the compose file for that service; a line with an empty value replaces it by nothing).
 # They are written as compose.override.yaml (`!override` tags: Docker Compose 2.24 or newer) next to the stored compose file, passed
@@ -19,7 +18,36 @@
 # (`networks: <name>: external: true`), so it must already exist on the host (for example a shared `ainet`).
 # Progress: PROGRESS n/5 lines and plain `[step] text` lines that say what happens.
 fail() { printf 'ERROR: %s\n' "$*"; exit 0; }
-SECRET_TOKEN=$BOSUN_SECRET_git_token; unset BOSUN_SECRET_git_token   # never let docker, compose or git inherit it by accident
+# >>> git credentials (the same text in stack_deploy.sh, stack_action.sh, git_branches.sh, git_files.sh and git_services.sh; a test compares them)
+# Bosun exports the package secrets git_token (GitHub) and git_credentials (entries "host=token" or "host=user:token", host with its
+# port when it has one, separated by spaces, commas or semicolons) only to scripts that name them. They are taken out of the
+# environment at once, so git, docker and compose never inherit them. git_auth <https url> sets AUTH to the Basic Authorization header
+# for exactly that repository's host, or '' when there is no credential for it; it reaches git only through gitrun's environment.
+GIT_TOKEN=${BOSUN_SECRET_git_token-}; GIT_CREDENTIALS=${BOSUN_SECRET_git_credentials-}
+unset BOSUN_SECRET_git_token BOSUN_SECRET_git_credentials
+git_auth() {
+  AUTH=''
+  gh=${1#https://}; gh=${gh%%/*}; gh=$(printf '%s' "$gh" | tr 'A-Z' 'a-z')
+  cred=''
+  set -f
+  for c in $(printf '%s' "$GIT_CREDENTIALS" | tr ',;' '  '); do
+    case "$c" in *=*) [ "$(printf '%s' "${c%%=*}" | tr 'A-Z' 'a-z')" = "$gh" ] && cred=${c#*=} ;; esac
+  done
+  set +f
+  if [ -z "$cred" ] && [ "$gh" = github.com ]; then cred=$GIT_TOKEN; fi
+  [ -n "$cred" ] || return 0
+  case "$cred" in *[!A-Za-z0-9_.~+/=:@-]*) cred=''; fail 'a Git credential has unexpected characters' ;; esac
+  case "$cred" in
+    *:*) pair=$cred ;;
+    *) case "$gh" in github.com) u=x-access-token ;; bitbucket.org) u=x-token-auth ;; *gitlab*) u=oauth2 ;; *) u=git ;; esac; pair="$u:$cred" ;;
+  esac
+  if command -v base64 >/dev/null 2>&1; then b64=$(printf '%s' "$pair" | base64 | tr -d '\n')
+  elif command -v openssl >/dev/null 2>&1; then b64=$(printf '%s' "$pair" | openssl base64 -A)
+  else fail 'neither base64 nor openssl is available to prepare the Git credential'; fi
+  AUTH="Authorization: Basic $b64"
+  cred=''; pair=''; b64=''
+}
+# <<< git credentials
 name=$BOSUN_PARAM_name; source=$BOSUN_PARAM_source
 repo=$BOSUN_PARAM_repo; branch=$BOSUN_PARAM_branch; file=$BOSUN_PARAM_file
 [ "$repo" != - ] || repo=; [ "$branch" != - ] || branch=; [ "$file" != - ] || file=
@@ -35,13 +63,16 @@ else
   rr=${repo#https://}
   case "$rr" in */*) ;; *) fail 'repo: use https://host/owner/name' ;; esac
   rhost=${rr%%/*}; rpath=${rr#*/}
-  case "$rhost" in ''|-*|.*|*[!A-Za-z0-9.-]*|*..*) fail 'repo: invalid host' ;; esac
+  case "$rhost" in *@*) fail 'repo: invalid host' ;; esac
+rport=''; case "$rhost" in *:*) rport=${rhost##*:}; rhost=${rhost%:*}; case "$rport" in ''|*[!0-9]*) fail 'repo: invalid port' ;; esac ;; esac
+case "$rhost" in ''|-*|.*|*[!A-Za-z0-9.-]*|*..*) fail 'repo: invalid host' ;; esac
   case "$rpath" in ''|/*|*..*|*[!A-Za-z0-9._/-]*) fail 'repo: invalid path' ;; esac
   [ "${#repo}" -le 300 ] || fail 'repo: too long'
   case "$branch" in ''|-*|*..*|*[!A-Za-z0-9._/-]*) fail 'branch: use letters, digits and . _ / - only' ;; esac
   [ "${#branch}" -le 100 ] || fail 'branch: too long'
   case "$file" in ''|-*|/*|*..*|*[!A-Za-z0-9._/-]*) fail 'file: a relative path inside the repository (letters, digits and . _ / - only)' ;; esac
   [ "${#file}" -le 200 ] || fail 'file: too long'
+  git_auth "$repo"
 fi
 
 D=docker; $D ps >/dev/null 2>&1 || { command -v sudo >/dev/null 2>&1 && sudo -n docker ps >/dev/null 2>&1 && D='sudo -n docker'; }
@@ -195,20 +226,6 @@ if [ "$source" = editor ]; then
   CF="$DIR/compose.yaml.new"; PD=$DIR
 else
   command -v git >/dev/null 2>&1 || die 'git is not installed on this host'
-  AUTH=''
-  tok=$SECRET_TOKEN; SECRET_TOKEN=
-  if [ -n "$tok" ]; then
-    case "$tok" in *[!A-Za-z0-9_.~+/=-]*) die 'the Git token has unexpected characters' ;; esac
-    if [ "$rhost" = github.com ]; then
-      if command -v base64 >/dev/null 2>&1; then b64=$(printf 'x-access-token:%s' "$tok" | base64 | tr -d '\n')
-      elif command -v openssl >/dev/null 2>&1; then b64=$(printf 'x-access-token:%s' "$tok" | openssl base64 -A)
-      else die 'neither base64 nor openssl is available to prepare the Git token'; fi
-      AUTH="Authorization: Basic $b64"
-    else
-      echo 'note: the Git token is only used for github.com; this repository is fetched without it'
-    fi
-  fi
-  tok=''
   if [ -d "$DIR/repo/.git" ] && [ "$(gitrun -C "$DIR/repo" config --get remote.origin.url 2>/dev/null)" = "$repo" ]; then
     echo "[step] Fetching $branch from $repo"
     GITPREV=$(gitrun -C "$DIR/repo" rev-parse HEAD 2>/dev/null)
