@@ -167,6 +167,35 @@ as `lg`. A spec can say what to drop on small widgets; older Bosun versions igno
 - `hideBelow` (`sm`, `md` or `lg`) works on every layout block (version 2), on `fields` items, table `columns`, `summary` entries, `filter` and `toggles`.
 - `row.inline` sets how many row actions show as buttons at each size (a size it leaves out takes the nearest smaller one it names). Without it, a row shows 1 button on `xs`, 3 on `sm`, 5 on `md` and all of them on `lg`; the rest are in the row's ⋯ menu, in the order of `actions`.
 
+### Tabs, counts and create dialogs
+
+A `tabs` block can show how many rows a tab lists: give the tab a `count` path (a list in the screen's context, such as
+`datasets.images`). The chip is left out when the path is missing or does not hold a list. Tabs answer the arrow keys and
+Home/End. On a full-page screen (`kind: "page"`) the open tab is kept in the URL as `?tab=<id>`, so a reload or a shared
+link opens the same tab; an unknown id opens the first tab. Dialog screens and widgets on dashboards keep it in memory.
+
+A `form` or `editor` block can sit behind a button instead of taking the top of the tab: add `"open": "dialog"` and a
+`"label"` for that button (the label is required). Its submit buttons move to the dialog footer, and a successful submit
+closes it. Without `open`, the block renders inline exactly as before. `"open"` accepts only `"dialog"`.
+
+When a tab's `buttons` blocks and dialog forms/editors come directly before a `view`, Bosun puts them on one row above the
+view (right-aligned on wide screens) instead of stacking the blocks.
+
+```jsonc
+"blocks": [
+  { "type": "tabs", "tabs": [
+    { "id": "images", "label": "Images", "count": "datasets.images", "blocks": [
+      { "type": "form", "open": "dialog", "label": "Pull image", "title": "Pull an image", /* fields, submit */ },
+      { "type": "buttons", "actions": ["image_prune"] },
+      { "type": "view", "path": "datasets.images" /* ... */ }
+    ] }
+  ] }
+]
+```
+
+An older Bosun ignores these keys: it shows the tabs without counts and the forms inline, and a page still opens on its
+first tab.
+
 ## Managing the Ollama installation
 
 The Ollama Status widget shows how Ollama is installed and, with the `ollama.service` permission (Full access by

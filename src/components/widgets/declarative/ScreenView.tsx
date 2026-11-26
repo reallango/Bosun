@@ -89,9 +89,10 @@ export function ScreenView({ screen, context, serverId, widgetType, ui, onDone, 
   const screenUi: LayoutUi = useMemo(() => ({
     ...ui,
     large: true,
+    page: screen.kind === 'page',
     loadDataset,
     onSubmitted: ok => { if (ok) { onDone?.(); void reload(); } },
-  }), [ui, onDone, reload, loadDataset]);
+  }), [ui, onDone, reload, loadDataset, screen.kind]);
   const failed = Object.entries(errors);
   const waiting = loading && loadedAt === 0;
   return (

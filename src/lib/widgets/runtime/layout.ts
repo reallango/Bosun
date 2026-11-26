@@ -41,6 +41,46 @@ export type PublicActionLike = Omit<ActionSpec, 'command' | 'windowsCommand' | '
 
 export const visible = (b: { when?: Cond }, ctx: ViewContext): boolean => !b.when || evalCond(b.when, ctx);
 
+/** The number a tab shows after its label: the length of the list at `countPath`, or null when there is none. */
+export function tabCount(countPath: string | undefined, ctx: ViewContext): number | null {
+  if (!countPath) return null;
+  const v = getPath(ctx, countPath);
+  return Array.isArray(v) ? v.length : null;
+}
+
+/** The tab a page shows: the one named in `?tab=`, or the first when that id is missing or unknown. */
+export function activeTabId(tabs: readonly { id: string }[], requested: string | null | undefined): string | undefined {
+  if (requested && tabs.some(t => t.id === requested)) return requested;
+  return tabs[0]?.id;
+}
+
+/** A form or editor that opens in a dialog instead of showing inline (spec key `"open": "dialog"`). */
+export const opensInDialog = (b: Block): b is Extract<Block, { type: 'form' | 'editor' }> =>
+  (b.type === 'form' || b.type === 'editor') && b.open === 'dialog';
+
+export type LayoutRow = { kind: 'toolbar'; blocks: Block[] } | { kind: 'single'; block: Block };
+
+/**
+ * Groups the blocks that belong in a tab's toolbar: a run of `buttons` blocks and dialog forms/editors directly before a
+ * `view` becomes one row, so the create buttons and the actions sit above the list instead of stacking on top of it.
+ */
+export function layoutRows(blocks: Block[]): LayoutRow[] {
+  const rows: LayoutRow[] = [];
+  let i = 0;
+  while (i < blocks.length) {
+    let j = i;
+    while (j < blocks.length && (blocks[j].type === 'buttons' || opensInDialog(blocks[j]))) j++;
+    if (j > i && blocks[j]?.type === 'view') {
+      rows.push({ kind: 'toolbar', blocks: blocks.slice(i, j) });
+      i = j;
+      continue;
+    }
+    rows.push({ kind: 'single', block: blocks[i] });
+    i++;
+  }
+  return rows;
+}
+
 export const visibleBadges = (badges: Badge[], ctx: ViewContext): Badge[] => badges.filter(b => visible(b, ctx));
 
 /** The value of a parameter when nothing supplies one: its default. */

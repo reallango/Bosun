@@ -26,3 +26,17 @@ export const NOTICE_CLASS = {
   warning: 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200',
   error: 'border-destructive/30 bg-destructive/10 text-destructive',
 } as const;
+
+/** The dialog shell shared by screen dialogs and forms that open behind a button. */
+export const DIALOG_OVERLAY = 'fixed inset-0 z-50 bg-black/50';
+
+export const DIALOG_CONTENT =
+  'fixed inset-x-2 top-4 z-50 mx-auto flex max-h-[92vh] flex-col rounded-xl border border-border bg-card p-4 text-card-foreground shadow-xl';
+
+export const DIALOG_WIDTH: Record<string, string> = { md: 'sm:max-w-lg', lg: 'sm:max-w-3xl', xl: 'sm:max-w-5xl' };
+
+export const DIALOG_HEADER = 'mb-3 flex items-start justify-between gap-2';
+
+export const DIALOG_TITLE = 'min-w-0 truncate text-base font-semibold';
+
+export const DIALOG_FOOTER = 'mt-3 flex flex-wrap justify-end gap-2 border-t border-border pt-3';

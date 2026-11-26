@@ -9,7 +9,7 @@ import {
   type EditorValue, type EditorValues, type RowValue, type ViewContext,
 } from '@/lib/widgets/runtime/layout';
 import type { LayoutUi } from './LayoutView';
-import { buttonClass, dangerSubmitClass, iconButtonClass, inputClass, primarySubmitClass } from './styles';
+import { buttonClass, dangerSubmitClass, DIALOG_FOOTER, iconButtonClass, inputClass, primarySubmitClass } from './styles';
 
 type EditorBlockSpec = Extract<Block, { type: 'editor' }>;
 type Option = { value: string; label: string };
@@ -173,7 +173,7 @@ function RowsField({ f, rows, onChange, ctx, cls, values, ui }: { f: EditorField
 
 interface ToolResult { errors: string[]; notes: string[]; applied: boolean }
 
-export function EditorBlock({ block, ctx, ui }: { block: EditorBlockSpec; ctx: ViewContext; ui: LayoutUi }) {
+export function EditorBlock({ block, ctx, ui, dialog }: { block: EditorBlockSpec; ctx: ViewContext; ui: LayoutUi; dialog?: boolean }) {
   const [values, setValues] = useState<EditorValues>(() => {
     const initial = editorInitial(block.fields, ctx);
     // Reopened from a task: what was filled in then (secrets come back as placeholders).
@@ -356,8 +356,8 @@ export function EditorBlock({ block, ctx, ui }: { block: EditorBlockSpec; ctx: V
     );
   };
 
-  return (
-    <div className="space-y-3">
+  const body = (
+    <>
       {block.fields.filter(f => editorFieldVisible(f, values) && !hidden.has(f.name)).map(f => renderField(f))}
       {problem && <div role="alert" className="text-xs text-destructive">{problem}</div>}
       {warnings.length > 0 && <div role="status" className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">Elevated options are set: they can give this container control over the host.</div>}
@@ -367,19 +367,31 @@ export function EditorBlock({ block, ctx, ui }: { block: EditorBlockSpec; ctx: V
           <div className="whitespace-pre-wrap break-words text-xs">{failure}</div>
         </div>
       )}
-      <div className="flex flex-wrap gap-2 pt-1">
-        {block.submits.map(s => {
-          const action = ui.actions.get(s.action);
-          if (!action || !ui.allowed(action) || !actionApplies(action, ctx)) return null;
-          return (
-            <button key={s.action + s.label} type="button" disabled={ui.busy !== null || sending !== null}
-              className={`${s.style === 'danger' ? dangerSubmitClass : primarySubmitClass} ${big ? 'text-sm' : 'text-xs'}`}
-              onClick={() => send(s)}>
-              {sending === s.action + s.label && <Loader2 className="size-3 animate-spin motion-reduce:animate-none" aria-hidden />}{s.label}
-            </button>
-          );
-        })}
+    </>
+  );
+  const submitButtons = block.submits.map(s => {
+    const action = ui.actions.get(s.action);
+    if (!action || !ui.allowed(action) || !actionApplies(action, ctx)) return null;
+    return (
+      <button key={s.action + s.label} type="button" disabled={ui.busy !== null || sending !== null}
+        className={`${s.style === 'danger' ? dangerSubmitClass : primarySubmitClass} ${big ? 'text-sm' : 'text-xs'}`}
+        onClick={() => send(s)}>
+        {sending === s.action + s.label && <Loader2 className="size-3 animate-spin motion-reduce:animate-none" aria-hidden />}{s.label}
+      </button>
+    );
+  });
+  if (dialog) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="min-h-0 flex-1 space-y-3 overflow-auto pr-1">{body}</div>
+        <div className={DIALOG_FOOTER}>{submitButtons}</div>
       </div>
+    );
+  }
+  return (
+    <div className="space-y-3">
+      {body}
+      <div className="flex flex-wrap gap-2 pt-1">{submitButtons}</div>
     </div>
   );
 }

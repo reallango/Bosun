@@ -36,6 +36,17 @@ describe('the Docker manager package', () => {
     expect(review.widgets[0].commands.some(c => /dataset "inspect"/.test(c.what))).toBe(true);
   });
 
+  it('the Manage page counts its tabs and keeps the create forms behind buttons', () => {
+    const manage = spec.screens!.manage;
+    const tabs = manage.blocks.find(b => b.type === 'tabs') as Extract<Block, { type: 'tabs' }>;
+    const tab = (id: string) => tabs.tabs.find(t => t.id === id)!;
+    expect(tab('containers').count).toBe('data');
+    for (const id of ['images', 'volumes', 'networks', 'stacks']) expect(tab(id).count, id).toBe(`datasets.${id}`);
+    expect(tab('images').blocks[0]).toMatchObject({ type: 'form', open: 'dialog', label: 'Pull image' });
+    expect(tab('volumes').blocks[0]).toMatchObject({ type: 'editor', open: 'dialog', label: 'New volume' });
+    expect(tab('networks').blocks[0]).toMatchObject({ type: 'editor', open: 'dialog', label: 'New network' });
+  });
+
   it('keeps risky things behind their own permissions', () => {
     const perms = (id: string) => spec.actions.find(a => a.id === id)!.permission;
     for (const id of ['create_privileged', 'recreate_privileged', 'stack_deploy_privileged']) expect(perms(id), id).toBe('docker.privileged');

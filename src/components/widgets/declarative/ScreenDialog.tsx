@@ -9,8 +9,7 @@ import { IconBtn, type Row } from './parts';
 import type { LayoutUi } from './LayoutView';
 import { ScreenView } from './ScreenView';
 import { WIDGET_SIZE_DEFAULT, WidgetSizeContext } from '@/components/dashboard/widget-size';
-
-const DIALOG_WIDTH: Record<string, string> = { md: 'sm:max-w-lg', lg: 'sm:max-w-3xl', xl: 'sm:max-w-5xl' };
+import { DIALOG_CONTENT, DIALOG_HEADER, DIALOG_OVERLAY, DIALOG_TITLE, DIALOG_WIDTH } from './styles';
 
 /** A `dialog` screen of a package widget as a pop-up: opened for a row (its `context`) or from a menu entry. */
 export function ScreenDialog({ id, row, screen, ctx, serverId, widgetType, ui, reloadToken, onClose, onDone }: {
@@ -30,13 +29,13 @@ export function ScreenDialog({ id, row, screen, ctx, serverId, widgetType, ui, r
   return (
     <Dialog.Root open={!!screen && !!id} onOpenChange={o => { if (!o) onClose(); }}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
+        <Dialog.Overlay className={DIALOG_OVERLAY} />
         <Dialog.Content
-          className={`fixed inset-x-2 top-4 z-50 mx-auto flex max-h-[92vh] flex-col rounded-xl border border-border bg-card p-4 text-card-foreground shadow-xl ${DIALOG_WIDTH[screen?.size ?? 'lg']}`}
+          className={`${DIALOG_CONTENT} ${DIALOG_WIDTH[screen?.size ?? 'lg']}`}
           aria-describedby={undefined}
         >
-          <div className="mb-3 flex items-start justify-between gap-2">
-            <Dialog.Title className="min-w-0 truncate text-base font-semibold">{screen ? fillTemplate(screen.title, screenCtx) : ''}</Dialog.Title>
+          <div className={DIALOG_HEADER}>
+            <Dialog.Title className={DIALOG_TITLE}>{screen ? fillTemplate(screen.title, screenCtx) : ''}</Dialog.Title>
             <Dialog.Close asChild><IconBtn label="Close"><X /></IconBtn></Dialog.Close>
           </div>
           <div className="min-h-0 flex-1 overflow-auto pr-1">
