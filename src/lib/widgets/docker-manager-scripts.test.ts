@@ -995,6 +995,9 @@ exit 0`);
     const params = { name: 'bosun', op: 'retag', image: 'ghcr.io/o/bosun:sha-new', as: 'bosun:latest', service: 'bosun' };
     const r = out('stack_action.sh', params);
     expect(r.done).toBe('retag: bosun bosun -> ghcr.io/o/bosun:sha-new');
+    // The script answers before the re-creation and clean-up run (detached): self-update depends on getting this answer
+    // before the Bosun that asked is restarted.
+    expect(dockerCalls().some(c => c[0] === 'image' && c[1] === 'rm')).toBe(false);
     let rms: string[] = [];
     for (let i = 0; i < 40; i++) {
       rms = dockerCalls().filter(c => c[0] === 'image' && c[1] === 'rm').map(c => c[2]);
@@ -1004,13 +1007,13 @@ exit 0`);
     // kept: the new image, the one the service ran before (one rollback), the image a stopped container uses and another
     // repository; removed: the two older images of the pulled image's repository, and a failed rm is not an error
     expect(rms.sort()).toEqual(['ghcr.io/o/bosun:sha-1', 'ghcr.io/o/bosun:sha-2']);
-    expect(r.steps).toContain('Removed image ghcr.io/o/bosun:sha-1');
-    expect(r.steps.join('\n')).not.toContain('Removed image ghcr.io/o/bosun:sha-2');
     expect(r.error).toBeNull();
     // the service did not come up on the new image: nothing is removed
     fs.writeFileSync(log, '');
     images(true);
     expect(out('stack_action.sh', params).done).toBe('retag: bosun bosun -> ghcr.io/o/bosun:sha-new');
+    await new Promise(res => setTimeout(res, 3500));
+    expect(dockerCalls().some(c => c.includes(' up ') || (c[0] === 'compose' && c.includes('up')))).toBe(true);
     expect(dockerCalls().filter(c => c[0] === 'image' && c[1] === 'rm')).toEqual([]);
   }, 20000);
 

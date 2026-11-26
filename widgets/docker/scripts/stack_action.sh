@@ -236,13 +236,15 @@ if [ "$op" = retag ]; then
   cid=$(dc ps -aq "$svc" 2>/dev/null | head -n 1)
   [ -z "$cid" ] || previd=$($D inspect --type container --format '{{.Image}}' "$cid" 2>/dev/null)
   echo "[step] Re-creating $svc of $name with $img"
+  # Fully detached (no stdin, stdout or stderr kept): the SSH session, and so this action, must end now. On the node whose
+  # Bosun asked, the answer has to arrive before the re-creation restarts that Bosun (self-update records it).
   (
     trap '' HUP PIPE
     sleep 2
-    if dc up -d --no-build --no-deps "$svc" >/dev/null 2>&1; then
+    if dc up -d --no-build --no-deps "$svc"; then
       [ -z "$newid" ] || clean_images "$repo" "$newid" "$previd" "$img" "$as"
     fi
-  ) </dev/null &
+  ) </dev/null >/dev/null 2>&1 &
   echo "DONE retag: $name $svc -> $img"
   exit 0
 fi
