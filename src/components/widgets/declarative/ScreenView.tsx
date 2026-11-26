@@ -62,12 +62,17 @@ interface Props {
   onDone?: () => void;
   /** Reload the screen's datasets whenever this changes (an action changed something). */
   reloadToken?: number;
+  /** Leave out the built-in Reload button (a page frame has its own refresh control). */
+  hideReload?: boolean;
+  /** Reports when the datasets were last loaded, for a page frame's "updated N s ago". */
+  onStatus?: (status: { loadedAt: number; loading: boolean }) => void;
 }
 
 /** The body of a screen: its datasets, then its blocks. Shared by the pop-up and the full page. */
-export function ScreenView({ screen, context, serverId, widgetType, ui, onDone, reloadToken }: Props) {
+export function ScreenView({ screen, context, serverId, widgetType, ui, onDone, reloadToken, hideReload, onStatus }: Props) {
   const { datasets, errors, loading, loadedAt, reload } = useScreenDatasets(serverId, widgetType, screen, context);
   useEffect(() => { if (reloadToken) void reload(); }, [reloadToken, reload]);
+  useEffect(() => { onStatus?.({ loadedAt, loading }); }, [loadedAt, loading, onStatus]);
   const ctx: ViewContext = useMemo(() => ({ ...context, datasets }), [context, datasets]);
   const loadDataset = useCallback(async (dataset: string, args: Record<string, string>): Promise<{ ok: true; data: unknown } | { ok: false; error: string }> => {
     try {
@@ -99,7 +104,7 @@ export function ScreenView({ screen, context, serverId, widgetType, ui, onDone, 
         <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden /> Loading from the host…</div>
       ) : (
         <div>
-          {screen.kind === 'page' && Object.keys(screen.load).length > 0 && (
+          {screen.kind === 'page' && !hideReload && Object.keys(screen.load).length > 0 && (
             <div className="mb-2 flex justify-end">
               <button type="button" onClick={() => void reload()} disabled={loading}
                 className={buttonClass}>

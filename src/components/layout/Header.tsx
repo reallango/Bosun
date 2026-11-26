@@ -21,6 +21,8 @@ interface HeaderProps {
   title: string;
   /** Label to use for the last breadcrumb segment (e.g. a dashboard name instead of its id). */
   currentLabel?: string;
+  /** Leave the path-derived breadcrumb out (a page that brings its own trail). */
+  hideBreadcrumb?: boolean;
 }
 
 const iconButton =
@@ -32,7 +34,7 @@ const THEMES = [
   { id: 'system', label: 'System', icon: Monitor },
 ] as const;
 
-export default function Header({ title, currentLabel }: HeaderProps) {
+export default function Header({ title, currentLabel, hideBreadcrumb }: HeaderProps) {
   const { theme, setTheme } = useTheme();
   const { user, logout } = useAuth();
   const { setMobileOpen } = useShell();
@@ -72,7 +74,7 @@ export default function Header({ title, currentLabel }: HeaderProps) {
 
         <div className="flex min-w-0 flex-1 flex-col justify-center">
           <div className="hidden md:block">
-            <Breadcrumb currentLabel={currentLabel ?? title} />
+            {!hideBreadcrumb && <Breadcrumb currentLabel={currentLabel ?? title} />}
           </div>
           <h1 className="truncate text-base font-semibold leading-tight sm:text-lg">{title}</h1>
         </div>
