@@ -37,6 +37,9 @@ interface AvailableItem {
   permissions: string[];
   installedVersion: string | null;
   upgradable: boolean;
+  /** False when this Bosun is too old for the package; `blockedReason` says why. */
+  installable: boolean;
+  blockedReason: string | null;
   /** Fingerprint of the reviewed manifest; the install request sends it back so nothing else gets installed. */
   manifestHash: string;
   /** Installing replaces a package from another source or author, so the secrets stored for it are deleted. */
@@ -386,13 +389,16 @@ export default function WidgetPackagesPage() {
                             {p.installedVersion && !p.upgradable && <span className="rounded bg-green-500/15 px-1 text-[10px] uppercase text-green-700 dark:text-green-400">installed</span>}
                           </div>
                           {p.description && <p className="mt-0.5 text-sm text-muted-foreground">{p.description}</p>}
+                          {!p.installable && p.blockedReason && (
+                            <p className="mt-1 text-xs text-destructive" role="status">{p.blockedReason}</p>
+                          )}
                           <p className="mt-1 text-xs text-muted-foreground">
                             {p.widgetTypes.length} widget{p.widgetTypes.length === 1 ? '' : 's'}
                             {p.permissions.length > 0 && <> · adds {p.permissions.length} permission{p.permissions.length === 1 ? '' : 's'}</>}
                             {p.author && <> · {p.author}</>}
                           </p>
                         </div>
-                        {p.upgradable ? (
+                        {p.installable && (p.upgradable ? (
                           <Button size="sm" onClick={() => askInstall(p, true)} disabled={busy !== null}>
                             {busy === p.id ? 'Upgrading…' : `Upgrade from ${p.installedVersion}`}
                           </Button>
@@ -400,7 +406,7 @@ export default function WidgetPackagesPage() {
                           <Button size="sm" onClick={() => askInstall(p, false)} disabled={busy !== null}>
                             {busy === p.id ? 'Installing…' : 'Install'}
                           </Button>
-                        ) : null}
+                        ) : null)}
                       </div>
                     </li>
                   ))}

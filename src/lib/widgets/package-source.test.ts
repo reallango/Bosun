@@ -62,6 +62,23 @@ describe('listRemotePackages', () => {
     await expect(listRemotePackages('main', fakeGithub({}, { status: 500 }).f)).rejects.toBeInstanceOf(SourceError);
   });
 
+  it('lists a package that needs a newer Bosun as not installable, with the reason', async () => {
+    const { f } = fakeGithub({
+      'widgets/future/manifest.json': manifest('future', { requires: { api: 99 } }),
+      'widgets/current/manifest.json': manifest('current', { requires: { api: 3 } }),
+      'widgets/plain/manifest.json': manifest('plain'),
+    });
+    const r = await listRemotePackages('main', f);
+    // It is still listed (not skipped), so the admin sees why it cannot be installed.
+    expect(r.packages.map(p => p.id)).toEqual(['current', 'future', 'plain']);
+    expect(r.skipped).toEqual([]);
+    const future = r.packages.find(p => p.id === 'future');
+    expect(future?.installable).toBe(false);
+    expect(future?.blockedReason).toBe('This widget needs a newer Bosun (widget API level 99; this Bosun has 3). Update Bosun first.');
+    expect(r.packages.find(p => p.id === 'current')).toMatchObject({ installable: true, blockedReason: null });
+    expect(r.packages.find(p => p.id === 'plain')).toMatchObject({ installable: true, blockedReason: null });
+  });
+
   it('only talks to the fixed repository', async () => {
     const { f, calls } = fakeGithub({ 'widgets/alpha/manifest.json': manifest('alpha') });
     await listRemotePackages('dev', f);
@@ -81,6 +98,16 @@ describe('fetchRemotePackage', () => {
     const p = await fetchRemotePackage('main', 'alpha', f);
     expect(p.manifest.id).toBe('alpha');
     expect(p.files).toEqual({ 'actions/run.json': '{"run":true}', 'README.md': 'docs' });
+  });
+
+  it('refuses a package that needs a newer Bosun, and fetches one this Bosun can honour', async () => {
+    const future = fakeGithub({ 'widgets/future/manifest.json': manifest('future', { requires: { api: 99 } }) });
+    await expect(fetchRemotePackage('main', 'future', future.f)).rejects.toThrow(
+      'This widget needs a newer Bosun (widget API level 99; this Bosun has 3). Update Bosun first.',
+    );
+    const current = fakeGithub({ 'widgets/current/manifest.json': manifest('current', { requires: { api: 3 } }) });
+    const p = await fetchRemotePackage('main', 'current', current.f);
+    expect(p.manifest.requires).toEqual({ api: 3 });
   });
 
   it('refuses bad ids, invalid packages and unreadable files', async () => {

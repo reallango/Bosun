@@ -6,6 +6,7 @@
  */
 import crypto from 'crypto';
 import { validateManifest, validateFiles, manifestToJson, MAX_FILES, type PackageManifest, type PackageFiles } from '@/lib/widgets/package-manifest';
+import { apiLevelProblem } from '@/lib/widgets/api-level';
 import { reservedPackageNames } from '@/lib/widgets/system-packages';
 
 export const SOURCE_REPO = 'reallango/Bosun';
@@ -24,6 +25,10 @@ type FetchLike = (url: string, init?: { headers?: Record<string, string>; signal
 export interface RemoteEntry {
   id: string;
   manifest: PackageManifest;
+  /** False when this Bosun's widget API level is too low for the package; it is still listed so the admin sees why. */
+  installable: boolean;
+  /** The message to show when `installable` is false. */
+  blockedReason: string | null;
 }
 
 export interface RemoteListing {
@@ -108,8 +113,10 @@ export async function listRemotePackages(ref: SourceRef, f: FetchLike = fetch as
   await Promise.all(dirs.map(async d => {
     try {
       const parsed = parseManifest(await getText(f, rawUrl(ref, `widgets/${d.name}/manifest.json`)), d.name);
-      if (parsed.ok) packages.push({ id: d.name, manifest: parsed.manifest });
-      else skipped.push({ dir: d.name, error: parsed.error });
+      if (parsed.ok) {
+        const blockedReason = apiLevelProblem(parsed.manifest.requires);
+        packages.push({ id: d.name, manifest: parsed.manifest, installable: blockedReason === null, blockedReason });
+      } else skipped.push({ dir: d.name, error: parsed.error });
     } catch (err) {
       skipped.push({ dir: d.name, error: err instanceof Error ? err.message : String(err) });
     }
@@ -126,6 +133,8 @@ export async function fetchRemotePackage(
   const base = `widgets/${id}`;
   const parsed = parseManifest(await getText(f, rawUrl(ref, `${base}/manifest.json`)), id);
   if (!parsed.ok) throw new SourceError(`Package "${id}" is not valid: ${parsed.error}`, 422);
+  const problem = apiLevelProblem(parsed.manifest.requires);
+  if (problem) throw new SourceError(problem, 422);
 
   // Other files in the folder (at most two levels deep), text only.
   const found: string[] = [];

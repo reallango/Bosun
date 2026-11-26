@@ -21,6 +21,31 @@ describe('validateManifest', () => {
     }
   });
 
+  it('validates the optional requires.api and keeps it through manifestToJson', () => {
+    const r = validateManifest({ ...good(), requires: { api: 3 } });
+    expect(r.ok).toBe(true);
+    if (r.ok) {
+      expect(r.value.requires).toEqual({ api: 3 });
+      const again = validateManifest(manifestToJson(r.value));
+      expect(again.ok).toBe(true);
+      if (again.ok) expect(again.value.requires).toEqual({ api: 3 });
+    }
+    // The shape is checked here; whether this Bosun is new enough is a separate refusal (api-level.ts).
+    expect(validateManifest({ ...good(), requires: { api: 99 } }).ok).toBe(true);
+    // Without requires the package needs level 1.
+    const none = validateManifest(good());
+    expect(none.ok).toBe(true);
+    if (none.ok) {
+      expect(none.value.requires).toBeUndefined();
+      expect(manifestToJson(none.value).requires).toBeUndefined();
+    }
+
+    const bad = (requires: unknown) => validateManifest({ ...good(), requires });
+    for (const requires of [[], '3', 3, null, {}, { api: '3' }, { api: 1.5 }, { api: 0 }, { api: -1 }, { api: Number.NaN }, { api: Number.POSITIVE_INFINITY }]) {
+      expect(bad(requires).ok, JSON.stringify(requires)).toBe(false);
+    }
+  });
+
   it('rejects bad ids, versions, schema and shapes', () => {
     const bad = (mut: (m: any) => void) => { const m: any = good(); mut(m); return validateManifest(m); };
     expect(bad(m => { m.schema = 2; }).ok).toBe(false);

@@ -8,6 +8,7 @@ import fs from 'fs';
 import path from 'path';
 import { getConfig, setConfig } from '@/lib/db/migrations';
 import { validateFiles, validateManifest, type PackageManifest, type PackageFiles } from '@/lib/widgets/package-manifest';
+import { apiLevelProblem } from '@/lib/widgets/api-level';
 import { reservedPackageNames } from '@/lib/widgets/system-packages';
 
 const REMOVED_KEY = 'widgets.bundled_removed';
@@ -66,6 +67,8 @@ export function readBundledPackages(dir = widgetsDir(), only: string[] = bundled
       const m = validateManifest(raw, { reservedTypes: types, reservedIds: ids });
       if (!m.ok) { errors.push(`${id}: ${m.error}`); continue; }
       if (m.value.id !== id) { errors.push(`${id}: the manifest id is "${m.value.id}"`); continue; }
+      const apiProblem = apiLevelProblem(m.value.requires);
+      if (apiProblem) { errors.push(`${id}: ${apiProblem}`); continue; }
       const f = validateFiles(readFilesRecursive(folder));
       if (!f.ok) { errors.push(`${id}: ${f.error}`); continue; }
       packages.push({ manifest: m.value, files: f.value });
