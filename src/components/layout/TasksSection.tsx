@@ -71,9 +71,11 @@ function LogDialog({ task, onClose }: { task: Task | null; onClose: () => void }
 }
 
 /** The tasks at the top of the notification list: what is running, what finished, with its log and the way back to its screen. */
-export function TasksSection({ tasks, seen, markSeen, onNavigate, reload }: { tasks: Task[]; seen: Set<string>; markSeen: (ids: string[]) => void; onNavigate: () => void; reload: () => void }) {
+export function TasksSection({ tasks: all, seen, markSeen, onNavigate, reload, which = 'all' }: { tasks: Task[]; seen: Set<string>; markSeen: (ids: string[]) => void; onNavigate: () => void; which?: 'all' | 'running' | 'finished'; reload: () => void }) {
   const router = useRouter();
   const [logOf, setLogOf] = useState<Task | null>(null);
+  // The bell shows running tasks near the top and finished ones below the notifications.
+  const tasks = which === 'all' ? all : all.filter(t => (t.status === 'running') === (which === 'running'));
   if (!tasks.length) return null;
   const cancel = async (t: Task) => {
     await fetchWithAuth(`/api/servers/${t.serverId}/widget-jobs/${encodeURIComponent(t.widgetType)}/${t.id}/cancel`, { method: 'POST' }).catch(() => undefined);
@@ -82,7 +84,7 @@ export function TasksSection({ tasks, seen, markSeen, onNavigate, reload }: { ta
   return (
     <div className="border-b">
       <div className="flex items-center justify-between px-3 pb-1 pt-2">
-        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Tasks</span>
+        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{which === 'running' ? 'Running' : which === 'finished' ? 'Finished tasks' : 'Tasks'}</span>
         {tasks.some(t => t.status !== 'running' && !seen.has(t.id)) && (
           <button type="button" className="text-xs text-primary hover:underline" onClick={() => markSeen(tasks.filter(t => t.status !== 'running').map(t => t.id))}>Mark all seen</button>
         )}

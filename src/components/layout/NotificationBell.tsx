@@ -71,51 +71,10 @@ export function NotificationBell() {
     if (n.link) { setIsOpen(false); router.push(n.link); }
   };
 
-  return (
-    <Popover.Root open={isOpen} onOpenChange={setIsOpen}>
-      <Popover.Trigger asChild>
-        <button
-          type="button"
-          className="relative inline-flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          aria-label={badge > 0 ? `Notifications (${badge} unread)` : running > 0 ? `Notifications (${running} task${running === 1 ? '' : 's'} running)` : 'Notifications'}
-        >
-          <Bell className="size-[18px]" />
-          {badge > 0 ? (
-            <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold leading-none text-white">
-              {badge > 9 ? '9+' : badge}
-            </span>
-          ) : running > 0 ? (
-            <span className="absolute right-0.5 top-0.5 flex size-4 items-center justify-center rounded-full bg-primary text-primary-foreground" aria-hidden>
-              <Loader2 className="size-3 animate-spin motion-reduce:animate-none" />
-            </span>
-          ) : unseen > 0 ? (
-            <span className="absolute right-1.5 top-1.5 size-2 rounded-full bg-primary" aria-hidden />
-          ) : null}
-        </button>
-      </Popover.Trigger>
-      <Popover.Portal>
-        <Popover.Content
-          align="end"
-          sideOffset={6}
-          collisionPadding={8}
-          className="z-50 w-[min(22rem,calc(100vw-1rem))] overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-lg"
-        >
-          <div className="flex items-center justify-between border-b px-3 py-2">
-            <span className="text-sm font-medium">Notifications</span>
-            {unreadCount > 0 && (
-              <button type="button" onClick={markAllAsRead} className="text-xs text-primary hover:underline">
-                Mark all read
-              </button>
-            )}
-          </div>
-          <div className="max-h-[min(28rem,70dvh)] overflow-y-auto">
-            <TasksSection tasks={tasks} seen={seen} markSeen={markSeen} onNavigate={() => setIsOpen(false)} reload={reload} />
-            {loading ? (
-              <div className="p-4 text-center text-sm text-muted-foreground">Loading…</div>
-            ) : notifications.length === 0 ? (
-              <div className="p-4 text-center text-sm text-muted-foreground">No notifications</div>
-            ) : (
-              notifications.slice(0, 20).map(n => {
+  // What needs someone first: access requests waiting for a decision, then (below) running tasks; finished tasks come last.
+  const pending = notifications.filter(n => n.kind === 'access_request' && !!n.request_id);
+  const others = notifications.filter(n => !(n.kind === 'access_request' && !!n.request_id));
+  const renderItem = (n: Notification) => {
                 const t = KIND_ICON[n.kind] ?? TYPE_ICON[n.type as keyof typeof TYPE_ICON] ?? TYPE_ICON.info;
                 return (
                   <div
@@ -159,8 +118,61 @@ export function NotificationBell() {
                     )}
                   </div>
                 );
-              })
+  };
+
+  return (
+    <Popover.Root open={isOpen} onOpenChange={setIsOpen}>
+      <Popover.Trigger asChild>
+        <button
+          type="button"
+          className="relative inline-flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label={badge > 0 ? `Notifications (${badge} unread)` : running > 0 ? `Notifications (${running} task${running === 1 ? '' : 's'} running)` : 'Notifications'}
+        >
+          <Bell className="size-[18px]" />
+          {badge > 0 ? (
+            <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold leading-none text-white">
+              {badge > 9 ? '9+' : badge}
+            </span>
+          ) : running > 0 ? (
+            <span className="absolute right-0.5 top-0.5 flex size-4 items-center justify-center rounded-full bg-primary text-primary-foreground" aria-hidden>
+              <Loader2 className="size-3 animate-spin motion-reduce:animate-none" />
+            </span>
+          ) : unseen > 0 ? (
+            <span className="absolute right-1.5 top-1.5 size-2 rounded-full bg-primary" aria-hidden />
+          ) : null}
+        </button>
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content
+          align="end"
+          sideOffset={6}
+          collisionPadding={8}
+          className="z-50 w-[min(22rem,calc(100vw-1rem))] overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-lg"
+        >
+          <div className="flex items-center justify-between border-b px-3 py-2">
+            <span className="text-sm font-medium">Notifications</span>
+            {unreadCount > 0 && (
+              <button type="button" onClick={markAllAsRead} className="text-xs text-primary hover:underline">
+                Mark all read
+              </button>
             )}
+          </div>
+          <div className="max-h-[min(28rem,70dvh)] overflow-y-auto">
+            {pending.length > 0 && (
+              <div className="border-b">
+                <div className="px-3 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Waiting for a decision</div>
+                {pending.map(renderItem)}
+              </div>
+            )}
+            <TasksSection which="running" tasks={tasks} seen={seen} markSeen={markSeen} onNavigate={() => setIsOpen(false)} reload={reload} />
+            {loading ? (
+              <div className="p-4 text-center text-sm text-muted-foreground">Loading…</div>
+            ) : others.length === 0 && pending.length === 0 && tasks.length === 0 ? (
+              <div className="p-4 text-center text-sm text-muted-foreground">No notifications</div>
+            ) : (
+              others.slice(0, 20).map(renderItem)
+            )}
+            <TasksSection which="finished" tasks={tasks} seen={seen} markSeen={markSeen} onNavigate={() => setIsOpen(false)} reload={reload} />
           </div>
         </Popover.Content>
       </Popover.Portal>
