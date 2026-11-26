@@ -12,7 +12,7 @@ import { hasRole, isRole, type Role } from '@/lib/auth/levels';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { serverVisible } from '@/lib/permissions/effective';
 
-export type NotificationKind = 'alert' | 'widget_update' | 'widget_upgraded' | 'access_request' | 'bosun_update';
+export type NotificationKind = 'alert' | 'widget_update' | 'widget_upgraded' | 'access_request' | 'access_decision' | 'bosun_update';
 export type NotificationSeverity = 'info' | 'success' | 'warning' | 'critical';
 
 export interface NewNotification {
@@ -28,6 +28,8 @@ export interface NewNotification {
   audience?: Role | null;
   serverId?: string | null;
   data?: Record<string, unknown> | null;
+  /** Only this user sees it (e.g. the decision on their own access request); omitted = per `audience`. */
+  recipientUserId?: string | null;
 }
 
 /** What the bell shows. */
@@ -48,11 +50,12 @@ export interface NotificationDto {
 /** Insert a notification. Returns false when the dedupe key was already used. Never throws. */
 export async function notify(n: NewNotification): Promise<boolean> {
   try {
+    const data = n.recipientUserId ? { ...(n.data ?? {}), [RECIPIENT]: String(n.recipientUserId) } : n.data;
     const r = await rqlite.execute(
       `INSERT OR IGNORE INTO notifications (id, server_id, severity, title, message, delivered_via, kind, link, dedupe_key, audience, data)
        VALUES (?, ?, ?, ?, ?, '["in_app"]', ?, ?, ?, ?, ?)`,
       [randomUUID(), n.serverId ?? null, n.severity, n.title.slice(0, 200), n.message.slice(0, 2000), n.kind,
-        safeLink(n.link), n.dedupeKey ?? null, n.audience ?? null, n.data ? JSON.stringify(n.data) : null],
+        safeLink(n.link), n.dedupeKey ?? null, n.audience ?? null, data ? JSON.stringify(data) : null],
     );
     return Number(r.rows_affected ?? 0) > 0;
   } catch (err) {
@@ -100,6 +103,21 @@ function requestIdOf(data: unknown): string | null {
   try { const d = typeof data === 'string' ? JSON.parse(data) : data; return typeof d?.requestId === 'string' ? d.requestId : null; } catch { return null; }
 }
 
+/** Key in `data` naming the only user who may see a personal notification. */
+const RECIPIENT = 'recipientUserId';
+
+/** The user a personal notification is for, or null for a shared one (also when `data` is missing or unreadable). */
+export function recipientOf(data: unknown): string | null {
+  if (data === null || data === undefined || data === '') return null;
+  try {
+    const d = typeof data === 'string' ? JSON.parse(data) : data;
+    const v = d && typeof d === 'object' ? (d as Record<string, unknown>)[RECIPIENT] : undefined;
+    return v === undefined || v === null ? null : String(v);
+  } catch {
+    return null;
+  }
+}
+
 /** Whether `viewer` may see a row with this audience (NULL/unknown audience = everyone). */
 export function audienceAllows(viewerRole: unknown, audience: unknown): boolean {
   return !isRole(audience) || hasRole(viewerRole, audience);
@@ -117,6 +135,8 @@ export async function listForViewer(viewer: TokenPayload, opts: { unreadOnly?: b
   const visible = new Map<string, boolean>();
   for (const row of rows) {
     if (!audienceAllows(viewer.role, row.audience)) continue;
+    const recipient = recipientOf(row.data);
+    if (recipient !== null && recipient !== String(viewer.userId)) continue;
     const sid = row.server_id ? String(row.server_id) : '';
     if (sid) {
       if (!visible.has(sid)) visible.set(sid, await serverVisible(viewer, sid).catch(() => false));

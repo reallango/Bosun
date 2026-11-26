@@ -426,7 +426,12 @@ An API key or user that lacks something can ask for it instead of being given br
    themselves, and needs Full access for high-risk permissions.
 4. **Result.** An approved grant goes into a permission group "Approved requests: <name>" (with its expiry), which
    can be edited or deleted like any group. An approved one-time action runs at once, as the requester (its task
-   and audit entry name them and the approver); the requester follows it with `GET /api/access-requests/{id}`.
+   and audit entry name them and the approver).
+5. **Hearing back.** The requester reads the outcome with `GET /api/access-requests/{id}`: the status, who decided,
+   their note and (one-time actions) the action's answer. Adding `?wait=50` holds the call open until the request is
+   decided (at most 50 seconds, then it answers `pending`; ask again), so an agent need not poll. People also get the
+   decision in their own bell, and so does the person who created an API key when that key's request is decided
+   (only they see it).
 
 Requests expire after 24 hours; a requester can have at most 10 pending, and can withdraw one with
 `DELETE /api/access-requests/{id}`. Example flow for an agent: ask once to run *Deploy stack* for `test-ai`, then

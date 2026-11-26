@@ -23,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Names
         id: names
@@ -33,18 +33,18 @@ jobs:
           echo "short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           branch="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME}}"; echo "branch=${branch//\//-}" >> "$GITHUB_OUTPUT"   # a tag cannot hold "/"
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       - name: Sign in to the registry
         if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build (and publish on main/dev)
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           platforms: linux/amd64
