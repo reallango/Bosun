@@ -277,9 +277,13 @@ Settings → Cluster (admins) covers the whole lifecycle without editing `.env` 
    no join settings needed), open its setup page, choose **Join an existing cluster**
    and paste the code with that machine's address and a node name. No admin account is
    created there: the node discards its empty database, joins, and from then on uses
-   the cluster's users, servers and settings. The code contains the cluster's
-   `MASTER_KEY` and `AUTH_SECRET`, so treat it like a password. Joining is only
-   offered on a node with no users and setup not completed.
+   the cluster's users, servers and settings. The code does not contain the cluster's
+   secrets: it holds a one-time token that the new node exchanges (encrypted) at a
+   member's Bosun web address for `MASTER_KEY` and `AUTH_SECRET`, so the new node must
+   be able to reach a member on port 3042 (or the address you created the code from). A
+   code works once and for 24 hours; a used or expired code is worthless. Joining is only
+   offered on a node with no users and setup not completed. (A code from an older Bosun,
+   `BOSUN-JOIN-1.`, still works for joining such a cluster; it did carry the secrets.)
 3. **Remove a node.** The trash icon on a node row removes it from the membership
    (needs a leader). Reset that machine's data volume before reusing it.
 4. **Convert to single node.** With a majority available the other nodes are removed

@@ -9,7 +9,8 @@
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { RateLimiter } from '@/lib/utils/rate-limiter';
 import { apiKeyState, parseApiKey, verifyApiKey } from './api-keys';
-import { isRole } from './levels';
+import { isRole, minRole, type Role } from './levels';
+import { getUserStatus } from './user-status';
 import type { TokenPayload } from './jwt';
 
 const KEY_CACHE_MS = 30_000;
@@ -23,6 +24,7 @@ interface ApiKeyRow {
   role: string;
   expires_at: string | null;
   revoked_at: string | null;
+  created_by: string | null;
 }
 
 interface State {
@@ -46,7 +48,7 @@ async function findByPrefix(prefix: string): Promise<ApiKeyRow | null> {
   const cached = state.rows.get(prefix);
   if (cached && Date.now() - cached.at < KEY_CACHE_MS) return cached.row;
   const r = await rqlite.query(
-    'SELECT id, name, key_hash, role, expires_at, revoked_at FROM api_keys WHERE key_prefix = ?', [prefix]);
+    'SELECT id, name, key_hash, role, expires_at, revoked_at, created_by FROM api_keys WHERE key_prefix = ?', [prefix]);
   const row = (rowsToObjects(r)[0] as unknown as ApiKeyRow | undefined) ?? null;
   if (state.rows.size > 1000) state.rows.clear();
   state.rows.set(prefix, { row, at: Date.now() });
@@ -77,6 +79,18 @@ export async function authenticateApiKey(key: string, ip: string | null): Promis
   if (keyState === 'expired') return { ok: false, status: 401, code: 'API_KEY_EXPIRED', message: 'API key has expired' };
   if (!isRole(row.role)) return { ok: false, status: 401, code: 'INVALID_API_KEY', message: 'Invalid API key' };
 
+  // A key never holds more than the person who created it holds now: demoting them lowers the key, and a creator who
+  // was deleted or disabled takes their keys with them. (Keys without a recorded creator keep their own level.)
+  let role: Role = row.role;
+  if (row.created_by) {
+    const creator = await getUserStatus(String(row.created_by));
+    // undefined = not in the (just reloaded) user list: the key's own row was read fine, so the creator is gone. Fail closed.
+    if (!creator || creator.disabled || !isRole(creator.role)) {
+      return { ok: false, status: 401, code: 'API_KEY_OWNER_INACTIVE', message: 'The account that created this API key no longer exists or is disabled' };
+    }
+    role = minRole(role, creator.role);
+  }
+
   const limited = state.limiter.consume(row.id);
   if (!limited.allowed) {
     return { ok: false, status: 429, code: 'RATE_LIMITED', message: 'Too many requests for this API key', retryAfterMs: limited.retryAfterMs };
@@ -96,7 +110,7 @@ export async function authenticateApiKey(key: string, ip: string | null): Promis
     payload: {
       userId: `apikey:${row.id}`,
       username: row.name,
-      role: row.role,
+      role,
       authType: 'api_key',
       apiKeyId: row.id,
     },

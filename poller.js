@@ -430,7 +430,13 @@ class HostAgent {
       const fired = alerts.evaluateRules(alertRules, { id: this.id, name: this.row.name }, snap.metrics, Date.now(), alertLastFired);
       const alertMailer = fired.length ? await getAlertMailer() : null;
       stmts.push(...alerts.alertStatements(fired, { id: this.id }, Date.now(), { email: !!alertMailer }));
-      await executeBatch(stmts);
+      try {
+        await executeBatch(stmts);
+      } catch (err) {
+        // Not recorded, so not fired: let these alerts fire again on the next poll instead of being silenced.
+        for (const f of fired) alertLastFired.delete(`${f.rule.id}|${this.id}`);
+        throw err;
+      }
       if (fired.length) {
         log(`${this.row.name}: ${fired.length} alert(s) fired`);
         alerts.deliverWebhooks(fired, alertChannels).catch(err => warn('alert delivery failed:', err.message));
@@ -565,6 +571,15 @@ async function tick() {
         if (!leader) {
           for (const a of agents.values()) a.close();
           agents.clear();
+        } else {
+          // Per-host alert cooldowns as the previous poller left them (see alerts.seedLastFired).
+          try {
+            alerts.seedLastFired(await query(alerts.LAST_FIRED_SQL), alertLastFired);
+          } catch (err) {
+            warn('alert cooldown seed failed (using the rules\' last trigger time):', err.message);
+            alertLastFired.clear();
+            alertLastFired.seeded = false;
+          }
         }
       }
     }
