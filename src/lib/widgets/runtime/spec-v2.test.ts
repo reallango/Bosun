@@ -244,6 +244,20 @@ describe('layout views', () => {
     expect(layout(Array.from({ length: 31 }, () => ({ type: 'text', text: 'x' }))).ok).toBe(false);
     expect(layout([{ type: 'view', view: { type: 'layout', blocks: [{ type: 'text', text: 'x' }] } }]).ok).toBe(false);
   });
+
+  it('take a size class below which a block hides, and keep it', () => {
+    const r = layout([{ type: 'text', text: 'x', hideBelow: 'md' }, { type: 'section', title: 's', hideBelow: 'sm', blocks: [{ type: 'text', text: 'y', hideBelow: 'lg' }] }]);
+    if (!r.ok) throw new Error(r.error);
+    const blocks = r.value.view.blocks!;
+    expect(blocks[0].hideBelow).toBe('md');
+    expect(blocks[1].hideBelow).toBe('sm');
+    expect((blocks[1] as { blocks: { hideBelow?: string }[] }).blocks[0].hideBelow).toBe('lg');
+    // Blocks without it stay as they were.
+    const plain = layout([{ type: 'text', text: 'x' }]);
+    expect(plain.ok && 'hideBelow' in plain.value.view.blocks![0]).toBe(false);
+    expect(layout([{ type: 'text', text: 'x', hideBelow: 'xs' }]).ok).toBe(false);
+    expect(layout([{ type: 'text', text: 'x', hideBelow: 'huge' }]).ok).toBe(false);
+  });
 });
 
 describe('conditions', () => {

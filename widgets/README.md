@@ -117,6 +117,30 @@ its manifest, scripts and declarative screen; Bosun has no code of its own for a
 - `metrics` lists the statistics the widget tracks. A name the built-in collectors produce (`cpu.usage`, `mem.used_pct`, `net.rx_bps`, `disk.root_used_pct`, `gpu*.util`, ...) only sets how long its history is kept. A name that starts with the package id and has `from` is computed from the widget's data on every collection (`count`, `sum`, `avg`, `min`, `max` or `first`, optionally over the rows matching `where`). `rawHours` (up to 2160), `rollup5mDays` (up to 365) and `rollup1hDays` (up to 3650) override the global retention; when several widgets name one metric the longest wins. Computed metrics are recorded for the servers that have the widget on a dashboard.
 - View types: `list`, `table` (columns may use `bar`, `mb`, `duration`, `temp` formats), `fields` (labelled values, optional gauges), `text`, and `chart` (history lines of `chart.metrics`). List rows can carry `fields` too.
 
+### Widget sizes
+
+Bosun measures the room each widget has on the dashboard (its content box, not the screen) and puts it in one of four
+size classes: `xs` (under 280 px wide), `sm` (under 420), `md` (under 640) and `lg`. Dialogs and full pages always count
+as `lg`. A spec can say what to drop on small widgets; older Bosun versions ignore these keys and show everything.
+
+```jsonc
+"view": {
+  "type": "list",
+  "filter": { "fields": ["name"], "hideBelow": "sm" },          // no filter box on an xs widget
+  "toggles": [{ "key": "stopped", "label": "stopped", "hideWhen": {...}, "hideBelow": "sm" }],
+  "summary": [{ "label": "total", "hideBelow": "md" }],
+  "row": {
+    "title": "{name}", "subtitle": "{image}", "subtitleHideBelow": "sm",
+    "actions": ["logs", "shell", "restart", "stop"],
+    "inline": { "xs": 0, "sm": 2, "md": 4 },                    // buttons per size; the rest go into a ⋯ menu
+    "fields": [{ "label": "CPU", "value": "{cpu}", "hideBelow": "md" }]
+  }
+}
+```
+
+- `hideBelow` (`sm`, `md` or `lg`) works on every layout block (version 2), on `fields` items, table `columns`, `summary` entries, `filter` and `toggles`.
+- `row.inline` sets how many row actions show as buttons at each size (a size it leaves out takes the nearest smaller one it names). Without it, a row shows 1 button on `xs`, 3 on `sm`, 5 on `md` and all of them on `lg`; the rest are in the row's ⋯ menu, in the order of `actions`.
+
 ## Managing the Ollama installation
 
 The Ollama Status widget shows how Ollama is installed and, with the `ollama.service` permission (Full access by

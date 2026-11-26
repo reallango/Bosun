@@ -2,7 +2,10 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { Info, Loader2, Search, X } from 'lucide-react';
+import { Ellipsis, Info, Loader2, Search, X } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { useWidgetSize } from '@/components/dashboard/widget-size';
+import { fitsSize, splitActions } from '@/lib/widgets/runtime/size';
 import { LayoutGrid, List, Package, Plus, RefreshCw, Settings, SquareTerminal } from 'lucide-react';
 import { useWidgetData } from '@/hooks/useWidgetData';
 import { useAuth } from '@/hooks/useAuth';
@@ -83,18 +86,46 @@ export function V1View({ view, data, widgetId, serverId, actions, allowed, busy,
       return true;
     });
   }, [data, view, query, toggles]);
+  const { size } = useWidgetSize();
 
   if (view.type === 'chart') return <MetricsChartWidget widgetId={widgetId} serverId={serverId} defaultMetrics={view.chart?.metrics} />;
   if (data === null || data === undefined) return <div className="p-2 text-sm text-gray-500">Waiting for the first data from this host…</div>;
   const all: Row[] = Array.isArray(data) ? (data as Row[]) : [];
 
-  const rowButtons = (row: Row, ids: string[]) => ids.map(id => actions.get(id)).filter((a): a is PublicAction => !!a)
-    .filter(a => allowed(a) && (!a.when || evalCond(a.when, row)))
-    .map(a => {
-      const Icon = (a.icon && ICONS[a.icon]) || Info;
-      const label = `${a.label}${view.type === 'list' && view.row ? ` ${fillTemplate(view.row.title, row)}` : ''}`;
-      return <IconBtn key={a.id} label={label} onClick={() => start(a, row)} disabled={busy !== null}><Icon /></IconBtn>;
-    });
+  // The row's actions that apply: as many as the widget has room for are buttons, the rest sit in a "more" menu.
+  const rowButtons = (row: Row, ids: string[]) => {
+    const list = ids.map(id => actions.get(id)).filter((a): a is PublicAction => !!a)
+      .filter(a => allowed(a) && (!a.when || evalCond(a.when, row)));
+    const rowName = view.type === 'list' && view.row ? fillTemplate(view.row.title, row) : '';
+    const { shown, more } = splitActions(list, size, view.row?.inline);
+    const iconOf = (a: PublicAction) => (a.icon && ICONS[a.icon]) || Info;
+    return (
+      <>
+        {shown.map(a => {
+          const Icon = iconOf(a);
+          return <IconBtn key={a.id} label={rowName ? `${a.label} ${rowName}` : a.label} onClick={() => start(a, row)} disabled={busy !== null}><Icon /></IconBtn>;
+        })}
+        {more.length > 0 && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <IconBtn label={rowName ? `More actions for ${rowName}` : 'More actions'} disabled={busy !== null}><Ellipsis /></IconBtn>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent>
+              {more.map(a => {
+                const Icon = iconOf(a);
+                return <DropdownMenuItem key={a.id} onSelect={() => start(a, row)}><Icon />{a.label}</DropdownMenuItem>;
+              })}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+      </>
+    );
+  };
+  const columns = (view.columns ?? []).filter(c => fitsSize(c, size));
+  const showSubtitle = !view.row?.subtitleHideBelow || fitsSize({ hideBelow: view.row.subtitleHideBelow }, size);
+  const summary = (view.summary ?? []).filter(s => fitsSize(s, size));
+  const showFilter = !!view.filter && fitsSize(view.filter, size);
+  const toggleList = (view.toggles ?? []).filter(t => fitsSize(t, size));
 
   const content = () => {
     if (view.type === 'fields') {
@@ -119,7 +150,7 @@ export function V1View({ view, data, widgetId, serverId, actions, allowed, busy,
                   <span className="truncate font-medium">{fillTemplate(r.title, row)}</span>
                   {r.badge && fillTemplate(r.badge, row) && <span className="hidden truncate rounded bg-gray-100 px-1 text-[10px] text-gray-500 dark:bg-gray-800 sm:inline">{fillTemplate(r.badge, row)}</span>}
                 </div>
-                {r.subtitle && <div className="truncate text-xs text-gray-500" title={fillTemplate(r.subtitle, row)}>{fillTemplate(r.subtitle, row)}</div>}
+                {r.subtitle && showSubtitle && <div className="truncate text-xs text-gray-500" title={fillTemplate(r.subtitle, row)}>{fillTemplate(r.subtitle, row)}</div>}
                 {r.fields && <div className="mt-1"><Fields fields={r.fields} data={row} /></div>}
               </div>
               <div className="flex shrink-0 items-center gap-0.5">
@@ -131,7 +162,7 @@ export function V1View({ view, data, widgetId, serverId, actions, allowed, busy,
         </ul>
       );
     }
-    const cols = view.columns ?? [];
+    const cols = columns;
     return (
       <div className="min-h-0 flex-1 overflow-auto">
         <table className="w-full text-left text-xs">
@@ -157,21 +188,21 @@ export function V1View({ view, data, widgetId, serverId, actions, allowed, busy,
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2">
-      {(view.summary?.length || view.filter || view.toggles?.length) ? (
+      {(summary.length || showFilter || toggleList.length) ? (
         <div className="flex flex-wrap items-center gap-2">
-          {view.summary?.map(s => (
+          {summary.map(s => (
             <span key={s.label} className="text-xs text-gray-500">
               <span className="font-semibold text-gray-900 dark:text-gray-100">{s.where ? all.filter(r => evalCond(s.where!, r)).length : all.length}</span> {s.label}
             </span>
           ))}
-          {view.filter && (
+          {showFilter && view.filter && (
             <div className="relative ml-auto min-w-0 flex-1 basis-32 sm:max-w-[220px]">
               <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-gray-400" aria-hidden />
               <input value={query} onChange={e => setQuery(e.target.value)} placeholder={view.filter.placeholder || 'Filter'} aria-label="Filter"
                 className="w-full rounded-md border border-gray-200 bg-transparent py-1 pl-7 pr-2 text-xs outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-700" />
             </div>
           )}
-          {view.toggles?.map(t => (
+          {toggleList.map(t => (
             <label key={t.key} className="flex items-center gap-1 text-xs text-gray-500">
               <input type="checkbox" checked={!!toggles[t.key]} onChange={e => setToggles(s => ({ ...s, [t.key]: e.target.checked }))} /> {t.label}
             </label>

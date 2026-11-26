@@ -11,6 +11,7 @@ import { ErrorState } from '@/components/shared/ErrorState';
 import { useDashboard } from '@/hooks/useDashboard';
 import { DashboardGrid } from './DashboardGrid';
 import { DashboardToolbar } from './DashboardToolbar';
+import { LayoutEditBar } from './LayoutEditBar';
 import { AddWidgetModal } from './AddWidgetModal';
 import { DashboardNameDialog } from './DashboardNameDialog';
 import { DeleteConfirmDialog } from '@/components/dialogs/DeleteConfirmDialog';
@@ -30,7 +31,7 @@ interface DashboardViewProps {
 
 /** Toolbar + responsive grid + add-widget dialog for one dashboard. */
 export function DashboardView({ dashboardId, name, type, serverId, serverName, onDashboardLoaded }: DashboardViewProps) {
-  const { dashboard, widgets, isLoading, error, layoutError, clearLayoutError, addWidget, updateLayout, refresh } = useDashboard(dashboardId);
+  const { dashboard, widgets, isLoading, error, layoutError, clearLayoutError, addWidget, updateLayout, applyLayoutMode, refresh } = useDashboard(dashboardId);
   const [modal, setModal] = useState(false);
   const [editing, setEditing] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -95,12 +96,16 @@ export function DashboardView({ dashboardId, name, type, serverId, serverName, o
           </button>
         </div>
       )}
-      {editing && (
-        <p className="mb-2 text-xs text-muted-foreground">
-          Drag widgets by their title bar and resize from the bottom-right corner. Changes are saved for the current screen size.
-        </p>
-      )}
       <DashboardGrid
+        editBar={(bp, currentLayout) => (
+          <LayoutEditBar
+            breakpoint={bp}
+            widgets={widgets}
+            currentLayout={currentLayout}
+            onReset={() => { void applyLayoutMode(bp, 'reset'); }}
+            onUseEverywhere={layout => { void applyLayoutMode(bp, 'everywhere', layout); }}
+          />
+        )}
         dashboardId={dashboardId}
         widgets={widgets}
         onLayoutChange={updateLayout}
