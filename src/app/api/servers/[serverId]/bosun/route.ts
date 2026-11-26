@@ -1,14 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { clientIp, requireUserLevel } from '@/lib/auth/middleware';
 import { ok, fail, failFrom } from '@/lib/api/response';
-import { DeployError, getDeploy, nodeNameFrom, startBosunDeploy } from '@/lib/servers/deploy-bosun';
+import { DeployError, detectBosunRunning, getDeploy, nodeNameFrom, startBosunDeploy } from '@/lib/servers/deploy-bosun';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import * as clusterConfig from '@/lib/cluster/config';
 
 export const dynamic = 'force-dynamic';
 type Ctx = { params: Promise<{ serverId: string }> };
 
-/** The last (or current) deployment of Bosun to this server, and the defaults for a new one. Signed-in Full access only. */
+/**
+ * The last (or current) deployment of Bosun to this server, whether Bosun already runs there (`running`), and the defaults
+ * for a new one. Signed-in Full access only.
+ */
 export async function GET(request: NextRequest, { params }: Ctx) {
   const auth = await requireUserLevel(request, 'admin');
   if (auth instanceof NextResponse) return auth;
@@ -16,8 +19,11 @@ export async function GET(request: NextRequest, { params }: Ctx) {
   try {
     const srv = rowsToObjects(await rqlite.query('SELECT name FROM servers WHERE id = ?', [serverId]))[0];
     if (!srv) return fail('Server not found', 404, 'NOT_FOUND');
+    const { running, check_error } = await detectBosunRunning(serverId);
     return ok({
       deploy: await getDeploy(serverId),
+      running,
+      check_error,
       defaults: { node_name: nodeNameFrom(String(srv.name)), cluster: clusterConfig.effectiveClusterConfig().cluster_ready },
     }, { headers: { 'Cache-Control': 'no-store' } });
   } catch (error) {

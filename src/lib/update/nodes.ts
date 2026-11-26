@@ -35,7 +35,8 @@ export async function recordSelf(): Promise<NodeRecord> {
   return rec;
 }
 
-async function records(): Promise<Map<string, NodeRecord>> {
+/** Every node's recorded server and container, keyed by node id (as stored, which is the id with unsafe characters replaced). */
+export async function records(): Promise<Map<string, NodeRecord>> {
   const r = await rqlite.query("SELECT key, value FROM app_config WHERE substr(key, 1, 12) = 'update.node.'");
   const out = new Map<string, NodeRecord>();
   for (const row of rowsToObjects(r)) {
