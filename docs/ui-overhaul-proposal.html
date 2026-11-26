@@ -100,6 +100,7 @@ figcaption { font-size: .8rem; color: var(--muted); margin-top: 6px; }
   <li><b>Fix layouts first.</b> Today, arranging a dashboard on one screen size does nothing for the others. Make one base layout that follows your last edit, with per-size overrides on top and a "Use on all sizes" button. <span class="tag done">prototyped</span></li>
   <li><b>Give every widget a size class</b> (<code>xs/sm/md/lg</code>, measured on the widget, not the screen). Add generic spec keys (<code>hideBelow</code>, <code>row.inline</code>) so a package decides what drops out on small tiles. Row actions that do not fit go into a ⋯ menu. <span class="tag done">prototyped</span></li>
   <li><b>One look for the widget system.</b> Move the declarative renderer, its dialogs and its menus onto the theme tokens and <code>ui/*</code> primitives the shell already uses. Today the two halves look like different apps.</li>
+  <li><b>Make full-page screens (Docker's Manage) a real management page:</b> breadcrumb and server switcher, tabs with counts, create forms behind buttons, sortable tables with row details and bulk actions. Each piece is an optional, generic spec key.</li>
   <li><b>Navigation.</b> Turn the settings accordion into a real settings area with its own grouped sub-navigation. Polish the server list (status, hostname, tooltips, a proper mobile sheet).</li>
 </ol>
 </div>
@@ -107,6 +108,7 @@ figcaption { font-size: .8rem; color: var(--muted); margin-top: 6px; }
 <ul class="toc">
   <li><a href="#nav">1. Sidebar and settings menu</a></li>
   <li><a href="#menus">2. The widget screen and menu system</a></li>
+  <li><a href="#manage">2b. The Manage screen</a></li>
   <li><a href="#content">3. Widget content that scales</a></li>
   <li><a href="#layouts">4. Responsive dashboard layouts</a></li>
   <li><a href="#compat">5. Keeping widgets self-contained</a></li>
@@ -311,6 +313,155 @@ figcaption { font-size: .8rem; color: var(--muted); margin-top: 6px; }
 </div>
 
 <!-- ============================================================ -->
+<h2 id="manage">2b. The Manage screen (full-page widget screens)</h2>
+<p>Docker's <b>Manage</b> entry opens a full-page screen (<code>screens.manage</code>, <code>kind: "page"</code>), rendered by <code>ScreenPage.tsx</code> and <code>LayoutView.tsx</code>. It is where most real Docker work happens, and it shows the problems of section&nbsp;2 at their largest. Everything below is generic: any widget's page screen gets it, and Docker only adds keys to its own manifest.</p>
+
+<h3>What is wrong today</h3>
+<ul>
+  <li><b>The page shell is bare.</b> It has a "Back to the dashboard" text link, a title ("Docker on nas") and nothing else.
+    <ul>
+      <li>There is no breadcrumb, no way to switch to the same screen for another server, no refresh, and no "updated 5 s ago".</li>
+      <li>Job progress and results are a blue notice strip at the top (<code>ScreenPage.tsx</code> line 99), not toasts.</li>
+    </ul>
+  </li>
+  <li><b>Tabs are plain buttons</b> (<code>LayoutView.tsx</code> line 101): Overview, Containers, Images, Volumes, Networks, Stacks.
+    <ul>
+      <li>There are no counts ("Images 14"), no arrow-key support, and no URL state, so a reload or the back button always lands on Overview.</li>
+      <li>On a phone the six tabs overflow.</li>
+    </ul>
+  </li>
+  <li><b>Create forms sit open above every table.</b> "Pull an image" (a <code>form</code>), "new volume" and "new network" (<code>editor</code> blocks, four fields for networks) always take the top of their tab, so the list you came for starts half-way down the page.</li>
+  <li><b>Tables are the widget table, stretched.</b> <code>DeclarativeWidget.tsx</code> line 168 renders <code>text-xs</code> with a hard-coded <code>bg-white</code> header.
+    <ul>
+      <li>There is no sorting (by size, by created), no row click, no selection or bulk actions (remove five dangling images means five confirms), and no column priority. On a narrow window the table scrolls sideways.</li>
+      <li>Containers has seven row actions (edit, logs, shell, restart, stop, start, remove) as 14 px icons.</li>
+    </ul>
+  </li>
+  <li><b>Overview is a key/value list</b> of Docker version, counts and disk use. Nothing links to the tab it describes, and nothing stands out: "3 stopped" and "12 GB of build cache" look the same as the version number.</li>
+  <li><b>Details have nowhere to go.</b> Inspecting a container, image or network either opens the edit dialog or nothing. There is no read-only detail view (labels, mounts, networks, which containers use this image).</li>
+</ul>
+
+<h3>Options</h3>
+<div class="scroll"><table>
+<tr><th>Option</th><th>What</th><th>Trade-offs</th></tr>
+<tr><td><b>A. Re-skin</b></td><td>Section 2 option B applied to the page: tokens, <code>ui/*</code> tabs and table styles, toasts.</td><td>Looks consistent, but the layout problems (forms on top, no sorting or details) stay.</td></tr>
+<tr><td><b>B. A real "manage" page pattern</b> (recommended)</td><td>Core renders page screens as a proper app page, with a few optional spec keys (below) for what core cannot guess. Old specs render with the new shell and defaults.</td><td>About 1–1.5 weeks after section 2. Each new key is small and optional; a widget that does not use them still improves.</td></tr>
+<tr><td><b>C. A dedicated Docker page in core</b></td><td>Hand-write a Docker management page in React.</td><td>Fastest to make pretty, but it breaks the one-file, self-contained widget rule and makes core name Docker. Rejected.</td></tr>
+</table></div>
+
+<div class="card rec"><strong>Recommendation:</strong> B. Core changes, each usable by any widget:
+  <ul>
+    <li><b>Page shell.</b> A breadcrumb (Dashboard › Docker on nas) and a server switcher (the other servers where this widget type is placed) instead of the back link. Refresh with "updated 5 s ago". Running jobs as a thin progress bar under the header; results as toasts.</li>
+    <li><b>Tabs.</b> <code>ui/Tabs</code> with arrow keys, the active tab in the URL (<code>?tab=images</code>), and a select on phones. New optional tab key <code>count</code> (a data path, for example <code>"datasets.images"</code>) shows the number of rows as a chip.</li>
+    <li><b>Create behind a button.</b> New optional key on <code>form</code> and <code>editor</code> blocks: <code>"open": "dialog"</code> with a <code>label</code>. The block renders as a primary button in the tab's toolbar ("Pull image", "New volume") and opens in a dialog with a footer. Default: inline, as today.</li>
+    <li><b>One toolbar per list:</b> filter and toggles on the left, the tab's <code>buttons</code> and dialog-forms on the right, instead of stacked blocks.</li>
+    <li><b>Tables for pages.</b> At page size: comfortable rows, a sticky token header, and the row-action split of section 3 (two inline, the rest in ⋯, destructive last). Optional column keys:
+      <ul>
+        <li><code>sort</code>: a raw field to sort by, such as <code>size_bytes</code> for a "1.2 GB" column</li>
+        <li><code>defaultSort</code> on the view</li>
+        <li><code>hideBelow</code> (section 3) for column priority, so a phone shows name, state and ⋯ instead of scrolling sideways</li>
+      </ul>
+    </li>
+    <li><b>Row details.</b> Optional view key <code>open</code> naming a screen. Clicking a row opens that screen in a side sheet with the row as its context: details, logs, and the row's actions in its footer. Without it, a row click runs the first non-destructive row action, as long as it opens a screen.</li>
+    <li><b>Bulk actions.</b> Optional view key <code>bulk: ["remove", "stop"]</code>, naming row actions with a <code>target</code>. Selected rows get one confirm that lists them, then the action runs once per row as separate jobs, each audited and permission-checked like a single click.</li>
+    <li><b>Stat tiles for overviews.</b> The <code>stat</code> block from phase 5, pulled forward: a number, a label, an optional tone (warning when stopped &gt; 0) and an optional <code>tab</code> it links to.</li>
+  </ul>
+</div>
+
+<div class="ba">
+<figure>
+  <div class="mock" style="padding:10px">
+    <div class="s" style="color:var(--muted)">← Back to the dashboard</div>
+    <div style="font-weight:600;font-size:14px;margin:4px 0 6px">Docker on nas</div>
+    <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:8px">
+      <span class="btn o">Overview</span><span class="btn o">Containers</span><span class="btn o" style="border-color:var(--primary);color:var(--primary)">Images</span><span class="btn o">Volumes</span><span class="btn o">Networks</span><span class="btn o">Stacks</span>
+    </div>
+    <div class="wf" style="padding:8px;margin-bottom:6px">
+      <div class="t" style="font-size:11px">Pull an image</div>
+      <div style="display:flex;gap:6px;margin-top:4px"><div class="ph" style="flex:1;height:20px"></div><span class="btn p">Pull</span></div>
+    </div>
+    <div style="display:flex;gap:4px;margin-bottom:6px"><span class="btn o">Prune dangling</span><span class="btn o">Prune unused</span></div>
+    <div class="wf">
+      <div class="row s" style="font-size:10px"><span style="width:28%">Repository</span><span style="width:12%">Tag</span><span style="width:16%">Id</span><span style="width:14%">Size</span><span class="grow">Created</span></div>
+      <div class="row"><span style="width:28%" class="t">nginx</span><span style="width:12%" class="s">latest</span><span style="width:16%" class="s">a1b2c3</span><span style="width:14%" class="s">187MB</span><span class="grow s">3 days ago</span><span class="btn">⟳</span><span class="btn">✕</span></div>
+      <div class="row"><span style="width:28%" class="t">postgres</span><span style="width:12%" class="s">16</span><span style="width:16%" class="s">d4e5f6</span><span style="width:14%" class="s">432MB</span><span class="grow s">2 weeks ago</span><span class="btn">⟳</span><span class="btn">✕</span></div>
+      <div class="row"><span style="width:28%" class="t">&lt;none&gt;</span><span style="width:12%" class="s">&lt;none&gt;</span><span style="width:16%" class="s">0a9b8c</span><span style="width:14%" class="s">1.1GB</span><span class="grow s">1 month ago</span><span class="btn">⟳</span><span class="btn">✕</span></div>
+    </div>
+  </div>
+  <figcaption>Today: a back link, plain tab buttons, the create form and prune buttons always on top, a small table without sorting or selection.</figcaption>
+</figure>
+<figure>
+  <div class="mock" style="padding:10px">
+    <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+      <span class="s">Home ›</span><span style="font-weight:600;font-size:14px">Docker</span><span class="pill">nas ▾</span>
+      <span class="grow"></span><span class="s">updated 4 s ago</span><span class="btn o">↻</span>
+    </div>
+    <div style="display:flex;gap:12px;border-bottom:1px solid var(--border);margin:8px 0;font-size:11px;overflow-x:auto;white-space:nowrap">
+      <span style="padding:4px 0">Overview</span><span style="padding:4px 0">Containers <span class="pill">12</span></span>
+      <span style="padding:4px 0;border-bottom:2px solid var(--primary);color:var(--primary);font-weight:600">Images <span class="pill">14</span></span>
+      <span style="padding:4px 0">Volumes <span class="pill">6</span></span><span style="padding:4px 0">Networks</span><span style="padding:4px 0">Stacks <span class="pill">3</span></span>
+    </div>
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+      <div class="ph" style="width:120px;height:20px"></div><span class="pill">☑ dangling</span><span class="grow"></span><span class="btn o">Prune ▾</span><span class="btn p">Pull image</span>
+    </div>
+    <div style="display:flex;gap:6px;align-items:center;background:var(--primary-soft);color:var(--primary);border-radius:6px;padding:4px 8px;margin-bottom:6px;font-size:11px">2 selected <span class="grow"></span><span class="btn o" style="color:var(--bad)">Remove 2</span></div>
+    <div class="wf">
+      <div class="row s" style="font-size:10px"><span style="width:16px"></span><span style="width:34%">Repository ▴</span><span style="width:14%">Tag</span><span style="width:18%">Size ▾</span><span class="grow">Created</span></div>
+      <div class="row"><span>☐</span><span style="width:34%" class="t">postgres</span><span style="width:14%" class="s">16</span><span style="width:18%" class="s">432 MB</span><span class="grow s">2 weeks</span><span class="btn o">⋯</span></div>
+      <div class="row" style="background:var(--surface-2)"><span>☑</span><span style="width:34%" class="t">&lt;none&gt;</span><span style="width:14%" class="s">—</span><span style="width:18%" class="s">1.1 GB</span><span class="grow s">1 month</span><span class="btn o">⋯</span></div>
+      <div class="row" style="background:var(--surface-2)"><span>☑</span><span style="width:34%" class="t">&lt;none&gt;</span><span style="width:14%" class="s">—</span><span style="width:18%" class="s">640 MB</span><span class="grow s">5 weeks</span><span class="btn o">⋯</span></div>
+    </div>
+  </div>
+  <figcaption>Proposed: breadcrumb and server switcher, tabs with counts (in the URL), one toolbar with "Pull image" opening a dialog, sortable columns, selection with one bulk confirm.</figcaption>
+</figure>
+</div>
+
+<div class="ba">
+<figure>
+  <div class="mock" style="padding:10px">
+    <div class="grid" style="grid-template-columns:repeat(4,minmax(0,1fr));padding:0">
+      <div class="wf" style="padding:8px"><div class="s">Running</div><div style="font-size:18px;font-weight:700">9</div></div>
+      <div class="wf" style="padding:8px;border-color:var(--warn)"><div class="s">Stopped</div><div style="font-size:18px;font-weight:700;color:var(--warn)">3</div></div>
+      <div class="wf" style="padding:8px"><div class="s">Images</div><div style="font-size:18px;font-weight:700">14</div><div class="s">4.2 GB</div></div>
+      <div class="wf" style="padding:8px"><div class="s">Build cache</div><div style="font-size:18px;font-weight:700">12 GB</div><div class="s" style="color:var(--primary)">Prune…</div></div>
+    </div>
+    <div class="s" style="margin-top:6px">Docker 29.1 · Compose 5.8 · overlay2</div>
+  </div>
+  <figcaption>Overview as <code>stat</code> tiles. Each links to its tab; a tone draws the eye to what needs attention.</figcaption>
+</figure>
+<figure>
+  <div class="mock" style="display:grid;grid-template-columns:minmax(0,1fr) 170px">
+    <div style="padding:10px;opacity:.55">
+      <div class="row"><span class="dot"></span><span class="t grow">home-assistant</span></div>
+      <div class="row" style="background:var(--surface-2)"><span class="dot"></span><span class="t grow">jellyfin</span></div>
+      <div class="row"><span class="dot g"></span><span class="t grow">old-test</span></div>
+    </div>
+    <div style="border-left:1px solid var(--border);background:var(--surface);padding:8px">
+      <div style="font-weight:600">jellyfin <span class="pill">running</span></div>
+      <div class="s" style="white-space:normal">jellyfin/jellyfin:10.10 · up 3 days</div>
+      <div style="display:flex;gap:8px;font-size:10px;margin:6px 0;border-bottom:1px solid var(--border)"><span style="color:var(--primary);border-bottom:2px solid var(--primary)">Details</span><span>Logs</span><span>Mounts</span></div>
+      <div class="s">Ports 8096→8096</div><div class="s">Network ainet</div><div class="s">Stack media</div>
+      <div style="display:flex;gap:4px;margin-top:8px"><span class="btn o">Restart</span><span class="btn o">Edit</span><span class="btn o">⋯</span></div>
+    </div>
+  </div>
+  <figcaption>Row details in a side sheet (<code>"open": "&lt;screen&gt;"</code>), with the row's actions in its footer. On a phone it covers the page.</figcaption>
+</figure>
+</div>
+
+<h3>How Docker would use it (its own manifest only)</h3>
+<pre><code>"tabs": [
+  { "id": "images", "label": "Images", "count": "datasets.images", "blocks": [
+    { "type": "form", "open": "dialog", "label": "Pull image", "title": "Pull an image", … },
+    { "type": "buttons", "actions": ["image_prune", "image_prune_all"] },
+    { "type": "view", "path": "datasets.images", "view": {
+        "type": "table", "defaultSort": { "column": "Size", "dir": "desc" },
+        "columns": [ { "title": "Repository", "value": "{repo}" },
+                     { "title": "Size", "value": "{size}", "sort": "size_bytes", "hideBelow": "sm" }, … ],
+        "rowActions": ["image_pull_again", "image_remove"],
+        "bulk": ["image_remove"], "open": "image_detail" } } ] } ]</code></pre>
+<p>A server that does not know these keys ignores them and shows the screen as today, so the package still installs everywhere. With <code>requires.bosun</code> (section 5) it can also say which version shows it at its best.</p>
+
+<!-- ============================================================ -->
 <h2 id="content">3. Widget content that scales with widget size</h2>
 
 <h3>What is wrong today</h3>
@@ -505,6 +656,15 @@ figcaption { font-size: .8rem; color: var(--muted); margin-top: 6px; }
     <li><code>ScreenDialog</code> on <code>ui/dialog</code> with a footer</li>
     <li>grouped frame menu, toasts for results, a density setting</li>
   </ul></td><td>About 1 week</td><td>Visual regressions in the large Docker editor screens. Screenshot them before and after.</td></tr>
+<tr><td><b>2b</b></td><td>The Manage page pattern (section 2b):
+  <ul>
+    <li>page shell with breadcrumb, server switcher, refresh and a progress bar</li>
+    <li>tabs in the URL with <code>count</code></li>
+    <li><code>"open": "dialog"</code> forms and one toolbar per list</li>
+    <li>page tables with <code>sort</code> and <code>defaultSort</code>, the ⋯ split and column priority</li>
+    <li>row details in a side sheet (<code>open</code>), <code>bulk</code> actions, <code>stat</code> tiles</li>
+    <li>Docker adopts them in its own manifest</li>
+  </ul></td><td>1–1.5 weeks</td><td>Bulk actions must stay one permission-checked, audited job per row. Sorting needs raw values the scripts already send or can add (for example <code>size_bytes</code>).</td></tr>
 <tr><td><b>3</b></td><td>Settings area: <code>settings/layout.tsx</code> with grouped sub-navigation, <code>PageHeader</code> and <code>SettingsSection</code>, one width, consistent titles, no <code>window.confirm</code>.</td><td>3–5 days</td><td>Low. URLs are unchanged. Many files, so keep it to one PR per settings group.</td></tr>
 <tr><td><b>4</b></td><td>Sidebar polish: server list with status, hostname and sorting, hover card, Tooltip on the collapsed rail, <code>Sheet</code> for mobile, drag reorder of dashboards.</td><td>2–3 days</td><td>Polling cost of the hover details. Reuse the existing 15 s server poll.</td></tr>
 <tr><td><b>5</b></td><td>Richer content:
