@@ -631,6 +631,35 @@ const V16_RESOURCE_GRANTS: string[] = [
     `CREATE INDEX IF NOT EXISTS idx_permission_grants_group ON permission_grants(group_id)`,
 ];
 
+// V17: access requests. An API key or user asks for a permission (a grant, permanent or for some hours, optionally
+// limited to one server and stack/container) or for one widget action to be run once; someone who holds that
+// permission approves or denies it from the bell or Settings > Access requests.
+const V17_ACCESS_REQUESTS: string[] = [
+    `CREATE TABLE IF NOT EXISTS access_requests (
+        id TEXT PRIMARY KEY,
+        requester_type TEXT NOT NULL CHECK (requester_type IN ('user', 'api_key')),
+        requester_id TEXT NOT NULL,
+        requester_name TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('grant', 'one_time')),
+        permission TEXT NOT NULL,
+        server_id TEXT,
+        resource_kind TEXT NOT NULL DEFAULT '',
+        resource_name TEXT NOT NULL DEFAULT '',
+        duration_hours INTEGER,
+        action TEXT,
+        reason TEXT,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'denied', 'expired', 'cancelled', 'failed')),
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        decided_by TEXT,
+        decided_by_name TEXT,
+        decided_at TEXT,
+        decision_note TEXT,
+        result TEXT
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_access_requests_status ON access_requests(status, created_at)`,
+    `CREATE INDEX IF NOT EXISTS idx_access_requests_requester ON access_requests(requester_type, requester_id)`,
+];
 export const MIGRATIONS: Migration[] = [
     {
         version: 1,
@@ -656,6 +685,7 @@ export const MIGRATIONS: Migration[] = [
     { version: 14, name: 'job_tasks', statements: V14_JOB_TASKS },
     { version: 15, name: 'notification_kinds', statements: V15_NOTIFICATION_KINDS },
     { version: 16, name: 'resource_grants', statements: V16_RESOURCE_GRANTS },
+    { version: 17, name: 'access_requests', statements: V17_ACCESS_REQUESTS },
 ];
 
 /** The schema version this build expects. */

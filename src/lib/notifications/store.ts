@@ -12,7 +12,7 @@ import { hasRole, isRole, type Role } from '@/lib/auth/levels';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { serverVisible } from '@/lib/permissions/effective';
 
-export type NotificationKind = 'alert' | 'widget_update' | 'widget_upgraded';
+export type NotificationKind = 'alert' | 'widget_update' | 'widget_upgraded' | 'access_request';
 export type NotificationSeverity = 'info' | 'success' | 'warning' | 'critical';
 
 export interface NewNotification {
@@ -41,6 +41,8 @@ export interface NotificationDto {
   read: boolean;
   server_id: string | null;
   created_at: string;
+  /** access_request notices: the request to approve or deny. */
+  request_id?: string | null;
 }
 
 /** Insert a notification. Returns false when the dedupe key was already used. Never throws. */
@@ -90,7 +92,12 @@ export function toDto(row: Record<string, unknown>): NotificationDto {
     read: Number(row.is_read) === 1,
     server_id: row.server_id ? String(row.server_id) : null,
     created_at: String(row.created_at ?? ''),
+    ...(row.kind === 'access_request' ? { request_id: requestIdOf(row.data) } : {}),
   };
+}
+
+function requestIdOf(data: unknown): string | null {
+  try { const d = typeof data === 'string' ? JSON.parse(data) : data; return typeof d?.requestId === 'string' ? d.requestId : null; } catch { return null; }
 }
 
 /** Whether `viewer` may see a row with this audience (NULL/unknown audience = everyone). */
@@ -102,7 +109,7 @@ export function audienceAllows(viewerRole: unknown, audience: unknown): boolean 
 export async function listForViewer(viewer: TokenPayload, opts: { unreadOnly?: boolean; limit?: number } = {}): Promise<NotificationDto[]> {
   const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
   const rows = rowsToObjects(await rqlite.query(
-    `SELECT id, kind, severity, title, message, link, is_read, server_id, audience, created_at FROM notifications
+    `SELECT id, kind, severity, title, message, link, is_read, server_id, audience, data, created_at FROM notifications
      WHERE is_dismissed = 0${opts.unreadOnly ? ' AND is_read = 0' : ''} ORDER BY created_at DESC LIMIT ?`,
     [limit * 2],
   ));

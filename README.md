@@ -385,6 +385,30 @@ exactly as described above when no group is involved.
   `test-ai` on one server, and it can deploy, update and restart that stack and nothing else.
 - **Expiry.** Any grant can have an end time; after it, the grant no longer counts (and it is
   deleted a week later).
+### Access requests (for agents and people)
+
+An API key or user that lacks something can ask for it instead of being given broad access up front:
+
+1. **Discover.** `GET /api/access` lists what the caller holds (including stack/container limits and expiries),
+   every permission with its risk and whether it can be limited to a stack or container, the servers it can see,
+   its own requests, and examples of both kinds of request. Every 403 for a missing permission also includes the
+   exact body to send.
+2. **Ask.** `POST /api/access-requests` with either
+   - `{ "kind": "grant", "permission": "...", "server_id": "...", "resource": { "kind": "stack", "name": "test-ai" }, "duration_hours": 8, "reason": "..." }`
+     (leave out `server_id` for all servers, `resource` for the whole server, `duration_hours` for a permanent grant), or
+   - `{ "kind": "one_time", "server_id": "...", "widget_type": "...", "action_id": "...", "params": { ... }, "reason": "..." }`:
+     one widget action, run once, exactly with these parameters.
+3. **Decide.** The request appears in the bell with **Approve** and **Deny** (and under Settings → Access requests).
+   Whoever decides must be signed in (never an API key), must not be the requester, must hold the permission there
+   themselves, and needs Full access for high-risk permissions.
+4. **Result.** An approved grant goes into a permission group "Approved requests: <name>" (with its expiry), which
+   can be edited or deleted like any group. An approved one-time action runs at once, as the requester (its task
+   and audit entry name them and the approver); the requester follows it with `GET /api/access-requests/{id}`.
+
+Requests expire after 24 hours; a requester can have at most 10 pending, and can withdraw one with
+`DELETE /api/access-requests/{id}`. Example flow for an agent: ask once to run *Deploy stack* for `test-ai`, then
+ask for *Docker: manage* limited to the stack `test-ai` to keep working on it, without ever holding Docker access
+for the whole host.
   Server groups are optional named sets of servers (a server can be in several); create
   them on the same page, or skip them and grant per server.
 - **Who holds a group.** Assign groups to a user (Settings → Users) or to an API key

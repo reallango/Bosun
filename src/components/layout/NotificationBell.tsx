@@ -3,7 +3,9 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Popover } from 'radix-ui';
-import { Bell, CircleAlert, CircleCheck, Info, Loader2, PackageCheck, PackagePlus, TriangleAlert, X } from 'lucide-react';
+import { Bell, CircleAlert, CircleCheck, Info, KeyRound, Loader2, PackageCheck, PackagePlus, TriangleAlert, X } from 'lucide-react';
+import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
+import { readJson } from '@/lib/api/readJson';
 import { useTasks } from '@/hooks/useTasks';
 import { TasksSection } from './TasksSection';
 import { useNotifications, type Notification } from '@/providers/NotificationProvider';
@@ -23,6 +25,7 @@ const TYPE_ICON = {
 const KIND_ICON: Record<string, { icon: typeof Info; className: string }> = {
   widget_update: { icon: PackagePlus, className: 'text-primary' },
   widget_upgraded: { icon: PackageCheck, className: 'text-success' },
+  access_request: { icon: KeyRound, className: 'text-warning' },
 };
 
 export function NotificationBell() {
@@ -33,6 +36,25 @@ export function NotificationBell() {
   const router = useRouter();
   const canDismiss = hasRole(user?.role, 'operator');
   const badge = unreadCount + failedUnseen;
+  // Access requests: approve or deny right here (the server checks the approver holds the permission).
+  const [deciding, setDeciding] = useState<string | null>(null);
+  const [decisionError, setDecisionError] = useState<{ id: string; message: string } | null>(null);
+  const decide = async (n: Notification, decision: 'approve' | 'deny') => {
+    if (!n.request_id) return;
+    setDeciding(n.id); setDecisionError(null);
+    try {
+      const res = await fetchWithAuth(`/api/access-requests/${encodeURIComponent(n.request_id)}/decision`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decision }),
+      });
+      const json = await readJson<{ error?: { message?: string } }>(res);
+      if (!res.ok) setDecisionError({ id: n.id, message: json.error?.message || `HTTP ${res.status}` });
+      else await fetchNotifications();
+    } catch (e) {
+      setDecisionError({ id: n.id, message: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setDeciding(null);
+    }
+  };
 
   useEffect(() => {
     fetchNotifications();
@@ -98,7 +120,7 @@ export function NotificationBell() {
                 return (
                   <div
                     key={n.id}
-                    className={cn('group relative flex border-b last:border-b-0 hover:bg-accent/60', !n.read && 'bg-primary/5')}
+                    className={cn('group relative flex flex-col border-b last:border-b-0 hover:bg-accent/60', !n.read && 'bg-primary/5')}
                   >
                     <button
                       type="button"
@@ -114,6 +136,17 @@ export function NotificationBell() {
                         </div>
                       </div>
                     </button>
+                    {n.kind === 'access_request' && n.request_id && canDismiss && (
+                      <div className="-mt-1 flex flex-wrap items-center gap-2 px-3 pb-2 pl-9 text-xs">
+                        <button type="button" disabled={deciding === n.id} onClick={() => decide(n, 'approve')}
+                          className="rounded-md bg-primary px-2 py-1 font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">Approve</button>
+                        <button type="button" disabled={deciding === n.id} onClick={() => decide(n, 'deny')}
+                          className="rounded-md border px-2 py-1 hover:bg-accent disabled:opacity-50">Deny</button>
+                        <button type="button" className="text-primary hover:underline" onClick={() => open(n)}>Details</button>
+                        {deciding === n.id && <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" aria-label="Working" />}
+                        {decisionError?.id === n.id && <span role="alert" className="w-full text-destructive">{decisionError.message}</span>}
+                      </div>
+                    )}
                     {canDismiss && (
                       <button
                         type="button"

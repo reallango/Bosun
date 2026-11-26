@@ -13,6 +13,8 @@ export interface Notification {
   type: 'info' | 'warning' | 'error' | 'success';
   /** In-app page to open when clicked. */
   link: string | null;
+  /** access_request notices: the request to approve or deny. */
+  request_id?: string | null;
   read: boolean;
   created_at: string;
 }
