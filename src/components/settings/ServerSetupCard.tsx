@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import Link from 'next/link';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -20,6 +21,7 @@ interface Deploy {
   mode: 'join' | 'standalone'; node_name: string; image: string; web: string;
   status: 'running' | 'done' | 'failed'; step: string; message: string | null; started_by: string; started_at: string;
 }
+type Running = { kind: 'node'; node: string; self: boolean; web: string | null } | { kind: 'stack'; name: string };
 type Pending = { title: string; body: React.ReactNode; label: string; run: () => Promise<void> };
 
 async function call<T>(url: string, init?: RequestInit): Promise<{ ok: boolean; data?: T; error?: string }> {
@@ -40,6 +42,8 @@ export function ServerSetupCard({ serverId }: { serverId: string }) {
   const [installing, setInstalling] = useState<string | null>(null);
   const [progress, setProgress] = useState<string | null>(null);
   const [deploy, setDeploy] = useState<Deploy | null>(null);
+  const [running, setRunning] = useState<Running | null>(null);
+  const [checkError, setCheckError] = useState<string | null>(null);
   const [defaults, setDefaults] = useState<{ node_name: string; cluster: boolean } | null>(null);
   const [mode, setMode] = useState<'join' | 'standalone'>('join');
   const [nodeName, setNodeName] = useState('');
@@ -52,9 +56,11 @@ export function ServerSetupCard({ serverId }: { serverId: string }) {
   }, [serverId]);
 
   const loadDeploy = useCallback(async () => {
-    const r = await call<{ deploy: Deploy | null; defaults: { node_name: string; cluster: boolean } }>(`/api/servers/${serverId}/bosun`);
+    const r = await call<{ deploy: Deploy | null; running: Running | null; check_error: string | null; defaults: { node_name: string; cluster: boolean } }>(`/api/servers/${serverId}/bosun`);
     if (!r.ok) return;
     setDeploy(r.data!.deploy);
+    setRunning(r.data!.running);
+    setCheckError(r.data!.check_error);
     setDefaults(d => d ?? r.data!.defaults);
     if (!r.data!.defaults.cluster) setMode('standalone');
     if (r.data!.deploy?.status === 'running') timer.current = setTimeout(loadDeploy, 5000);
@@ -157,7 +163,26 @@ export function ServerSetupCard({ serverId }: { serverId: string }) {
               {deploy.status === 'done' && deploy.mode === 'standalone' && <> <a className="underline" href={deploy.web} target="_blank" rel="noreferrer">Open it</a></>}
             </p>
           )}
-          {deploy?.status !== 'running' && deploy?.status !== 'done' && (
+          {running && (
+            <div className="rounded-md bg-muted px-2 py-1.5 text-xs text-muted-foreground">
+              {running.kind === 'node' ? (
+                <>
+                  <p>This server runs Bosun node <code>{running.node}</code> of this cluster{running.self ? ' (this one)' : ''}.</p>
+                  <p className="mt-1">
+                    <Link className="underline" href="/settings/cluster">Settings → Cluster</Link>
+                    {' · '}
+                    <Link className="underline" href="/settings/updates">Settings → Updates</Link>
+                  </p>
+                </>
+              ) : (
+                <p>
+                  Bosun already runs here (stack <code>{running.name}</code>).
+                  {deploy?.web && <> <a className="underline" href={deploy.web} target="_blank" rel="noreferrer">Open it</a></>}
+                </p>
+              )}
+            </div>
+          )}
+          {!running && deploy?.status !== 'running' && deploy?.status !== 'done' && (
             <>
               {!docker && <p className="text-xs text-muted-foreground">Needs Docker on this server first (above).</p>}
               <div className="flex flex-wrap items-end gap-3">
@@ -178,6 +203,9 @@ export function ServerSetupCard({ serverId }: { serverId: string }) {
               </div>
               {defaults?.cluster === false && <p className="text-xs text-muted-foreground">Joining needs clustering enabled on this Bosun (Settings &gt; Cluster).</p>}
             </>
+          )}
+          {!running && checkError && (
+            <p className="text-xs text-muted-foreground">Could not check whether Bosun already runs here: {checkError}</p>
           )}
         </div>
       </CardContent>

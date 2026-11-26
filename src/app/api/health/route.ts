@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { ensureDatabase } from '@/lib/db/initialize';
 import { rqlite } from '@/lib/db/rqlite-client';
 import { bosunVersion } from '@/lib/update/version';
+import { WIDGET_API_LEVEL } from '@/lib/widgets/api-level';
 
 /**
  * Liveness/readiness probe used by the container healthcheck. A node cut off
@@ -15,7 +16,7 @@ export async function GET() {
   try {
     await ensureDatabase();
     const leader = await rqlite.isReady();
-    return NextResponse.json({ status: leader ? 'ok' : 'degraded', leader, timestamp: new Date().toISOString(), version: bosunVersion() });
+    return NextResponse.json({ status: leader ? 'ok' : 'degraded', leader, timestamp: new Date().toISOString(), version: bosunVersion(), widget_api_level: WIDGET_API_LEVEL });
   } catch (error) {
     return NextResponse.json({ status: 'error', error: (error as Error).message }, { status: 503 });
   }

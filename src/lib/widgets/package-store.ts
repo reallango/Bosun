@@ -10,6 +10,7 @@ import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { invalidatePermissionCache } from '@/lib/permissions/store';
 import { invalidateRuntimeCache } from '@/lib/widgets/runtime/execute';
 import { compareVersions, validateManifest, validateScriptFiles, manifestToJson, type PackageManifest, type PackageFiles } from '@/lib/widgets/package-manifest';
+import { apiLevelProblem } from '@/lib/widgets/api-level';
 import { reservedPackageNames } from '@/lib/widgets/system-packages';
 import { contentHashOf } from '@/lib/widgets/materialize';
 import { materializeNow } from '@/lib/widgets/materialize-db';
@@ -146,6 +147,8 @@ export function sectionRowsOf(types: string[]): { where: string; params: unknown
 /** Install a validated package, or upgrade the installed one. */
 export async function installPackage(opts: InstallOptions): Promise<InstallResult> {
   const { manifest, files } = opts;
+  const apiProblem = apiLevelProblem(manifest.requires);
+  if (apiProblem) throw new PackageError(apiProblem, 422, 'NEWER_BOSUN_REQUIRED');
   const scriptCheck = validateScriptFiles(manifest, files);
   if (!scriptCheck.ok) throw new PackageError(scriptCheck.error, 400, 'MISSING_SCRIPT');
   const { ids, types } = reservedPackageNames();

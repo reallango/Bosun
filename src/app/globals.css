@@ -158,4 +158,8 @@
   .react-grid-layout {
     transition: none !important;
   }
+  [data-slot="sheet-content"],
+  [data-slot="sheet-overlay"] {
+    animation: none !important;
+  }
 }

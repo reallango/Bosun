@@ -9,6 +9,7 @@ import { sanitizeCustomWidget, type CustomWidgetColumns } from '@/lib/widgets/cu
 import { CATALOG } from '@/lib/permissions/catalog';
 import { validateWidgetSpec, type WidgetSpec } from '@/lib/widgets/runtime/spec';
 import { lookupHosts } from '@/lib/widgets/runtime/spec-v2';
+import type { WidgetApiRequires } from '@/lib/widgets/api-level';
 
 export const MANIFEST_SCHEMA = 1;
 export const PACKAGE_ID_RE = /^[a-z][a-z0-9_]{1,39}$/;
@@ -53,6 +54,8 @@ export interface PackageManifest {
   network: string[];
   /** Secrets an admin sets for the package (a token); only scripts that name them receive them. */
   secrets: PackageSecret[];
+  /** The widget API level this package needs (`requires.api`); absent means level 1. */
+  requires?: WidgetApiRequires;
 }
 
 export interface PackageSecret { id: string; label: string; description: string }
@@ -101,6 +104,16 @@ export function validateManifest(
   if (description === null) return fail('manifest "description" must be text (max 500 characters)');
   const author = m.author === undefined ? '' : (typeof m.author === 'string' && m.author.length <= 120 ? m.author : null);
   if (author === null) return fail('manifest "author" must be text (max 120 characters)');
+
+  let requires: WidgetApiRequires | undefined;
+  if (m.requires !== undefined) {
+    if (!m.requires || typeof m.requires !== 'object' || Array.isArray(m.requires)) return fail('manifest "requires" must be an object like { "api": 3 }');
+    const api = (m.requires as Record<string, unknown>).api;
+    if (typeof api !== 'number' || !Number.isInteger(api) || api < 1 || api > 1_000_000) {
+      return fail('manifest "requires.api" must be a whole number (the widget API level the package needs)');
+    }
+    requires = { api };
+  }
 
   const permissions: PackagePermission[] = [];
   if (m.permissions !== undefined) {
@@ -195,7 +208,7 @@ export function validateManifest(
     widgets.push({ type, columns: v.values, spec });
   }
 
-  return { ok: true, value: { schema: MANIFEST_SCHEMA, id, name, version, description, author, widgets, permissions, network, secrets } };
+  return { ok: true, value: { schema: MANIFEST_SCHEMA, id, name, version, description, author, widgets, permissions, network, secrets, ...(requires ? { requires } : {}) } };
 }
 
 /** Validate the extra files of a package: text only, sane names, bounded size. */
@@ -226,6 +239,7 @@ export function validateFiles(files: Record<string, Uint8Array | string>): Valid
 export function manifestToJson(m: PackageManifest): Record<string, unknown> {
   return {
     schema: m.schema, id: m.id, name: m.name, version: m.version, description: m.description, author: m.author,
+    ...(m.requires ? { requires: m.requires } : {}),
     permissions: m.permissions,
     ...(m.network.length ? { network: m.network } : {}),
     ...(m.secrets.length ? { secrets: m.secrets } : {}),

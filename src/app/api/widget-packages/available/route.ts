@@ -35,6 +35,7 @@ export async function GET(request: NextRequest) {
         id: p.id, name: p.manifest.name, version: p.manifest.version, description: p.manifest.description, author: p.manifest.author,
         widgetTypes: p.manifest.widgets.map(w => w.type), permissions: p.manifest.permissions.map(x => x.id),
         installedVersion: have, upgradable: have !== null && compareVersions(p.manifest.version, have) > 0,
+        installable: p.installable, blockedReason: p.blockedReason,
         review: reviewPackage(p.manifest),
       };
     });

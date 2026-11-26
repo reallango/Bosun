@@ -19,10 +19,36 @@ Rules the manifest is checked against (a package that fails is listed as "skippe
 - `permissions` lists the permissions the package adds. Ids must start with `<package id>.`, and a package may
   not imply a built-in high-risk permission. `defaultLevel` is `viewer` (everybody, including Read only), `operator` or `admin`.
 - A package cannot use the id or widget type of a System widget (only the SSH Terminal is one now).
+- `requires` (optional) names the widget API level the package needs: `{ "api": 3 }`. See
+  [Widget API level](#widget-api-level).
 - Folders starting with `_` are ignored (templates).
 
 A package can also be exported from Settings → Widgets as a zip and imported on another Bosun
 (`manifest.json` at the top of the zip, or inside one folder).
+
+## Widget API level
+
+Bosun has no semantic version number: an image is a git commit. A package that uses a newer spec key therefore says
+which widget API level it needs:
+
+```jsonc
+"requires": { "api": 3 }
+```
+
+`requires` is optional; a package without it needs level 1. Bosun refuses a package whose level is higher than its
+own on install, on upgrade from GitHub, on import from a file, and in the list of available packages, with
+"This widget needs a newer Bosun (widget API level N; this Bosun has M). Update Bosun first." A package that needs a
+newer Bosun is still listed under Available (so the reason is visible) but cannot be installed or upgraded.
+`GET /api/health` reports the level as `widget_api_level`.
+
+| Level | What it added |
+| --- | --- |
+| 1 | The original spec: `data` (snapshot and command sources), `view` (list, table, fields, text), `actions` (command and terminal), `metrics`, data filters, the unavailable notice, fields and gauges, and the formats. |
+| 2 | Spec version 2 as it was before the additions below: `scripts` and package secrets, `state`, `lookups`, script actions with variants and jobs, `layout` views and editor blocks, screens, datasets, menu entries, multi-line text parameters, and stack import (`stacks` without its later keys); also `resources` on data and `target` on actions. |
+| 3 | `stacks.retag`, `stacks.deployLater` and `stacks.deployPrivilegedLater` (which replaced the earlier `stacks.startLater`), `setup`, and the widget-size keys `hideBelow`, `row.inline` and `row.subtitleHideBelow`. |
+
+New spec keys that an older Bosun cannot honour raise the level in `src/lib/widgets/api-level.ts`; keys an older
+Bosun can safely ignore (because it renders the widget sensibly without them) do not.
 
 ## Widget specs
 
