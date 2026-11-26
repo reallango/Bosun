@@ -67,6 +67,40 @@ const config: Config = {
         "safe-l": "env(safe-area-inset-left)",
         "safe-r": "env(safe-area-inset-right)",
       },
+      keyframes: {
+        "sheet-in-left": {
+          from: { transform: "translateX(-100%)" },
+          to: { transform: "translateX(0)" },
+        },
+        "sheet-out-left": {
+          from: { transform: "translateX(0)" },
+          to: { transform: "translateX(-100%)" },
+        },
+        "sheet-in-right": {
+          from: { transform: "translateX(100%)" },
+          to: { transform: "translateX(0)" },
+        },
+        "sheet-out-right": {
+          from: { transform: "translateX(0)" },
+          to: { transform: "translateX(100%)" },
+        },
+        "sheet-overlay-in": {
+          from: { opacity: "0" },
+          to: { opacity: "1" },
+        },
+        "sheet-overlay-out": {
+          from: { opacity: "1" },
+          to: { opacity: "0" },
+        },
+      },
+      animation: {
+        "sheet-in-left": "sheet-in-left 250ms cubic-bezier(0.32, 0.72, 0, 1)",
+        "sheet-out-left": "sheet-out-left 200ms ease-in",
+        "sheet-in-right": "sheet-in-right 250ms cubic-bezier(0.32, 0.72, 0, 1)",
+        "sheet-out-right": "sheet-out-right 200ms ease-in",
+        "sheet-overlay-in": "sheet-overlay-in 200ms ease-out",
+        "sheet-overlay-out": "sheet-overlay-out 150ms ease-in",
+      },
     },
   },
   plugins: [containerQueries],
