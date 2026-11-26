@@ -84,8 +84,8 @@ export async function authenticateApiKey(key: string, ip: string | null): Promis
   let role: Role = row.role;
   if (row.created_by) {
     const creator = await getUserStatus(String(row.created_by));
-    if (creator === undefined) return { ok: false, status: 503, code: 'AUTH_UNAVAILABLE', message: 'Could not verify the API key right now' };
-    if (creator === null || creator.disabled || !isRole(creator.role)) {
+    // undefined = not in the (just reloaded) user list: the key's own row was read fine, so the creator is gone. Fail closed.
+    if (!creator || creator.disabled || !isRole(creator.role)) {
       return { ok: false, status: 401, code: 'API_KEY_OWNER_INACTIVE', message: 'The account that created this API key no longer exists or is disabled' };
     }
     role = minRole(role, creator.role);
