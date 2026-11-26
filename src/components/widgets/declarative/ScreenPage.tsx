@@ -1,9 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { ArrowLeft, X } from 'lucide-react';
 import Header from '@/components/layout/Header';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import { useWidgetData } from '@/hooks/useWidgetData';
@@ -11,6 +9,12 @@ import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { readJson } from '@/lib/api/readJson';
 import { fillTemplate } from '@/lib/widgets/runtime/spec';
 import type { ViewContext } from '@/lib/widgets/runtime/layout';
+import { ActionRunnerToasts } from '@/components/widgets/shared/ActionRunnerToasts';
+import { JobProgressBar } from '@/components/widgets/shared/JobProgressBar';
+import { PageBreadcrumb } from '@/components/widgets/shared/PageBreadcrumb';
+import { RefreshAge } from '@/components/widgets/shared/RefreshAge';
+import { WidgetInstanceSwitcher } from '@/components/widgets/shared/WidgetInstanceSwitcher';
+import type { WidgetInstance } from '@/components/widgets/shared/screen-page';
 import type { LayoutUi } from './LayoutView';
 import { ScreenView } from './ScreenView';
 import { ScreenDialog } from './ScreenDialog';
@@ -37,9 +41,9 @@ export function ScreenPage({ widgetId, screenId }: { widgetId: string; screenId:
     return () => { live = false; };
   }, [widgetId]);
 
-  if (problem) return <><Header title="Widget" /><div className="page"><p className="text-sm text-muted-foreground">{problem}</p></div></>;
-  if (!widget) return <><Header title="Widget" /><div className="page"><LoadingSpinner /></div></>;
-  return <Inner widget={widget} screenId={screenId} />;
+  if (problem) return <><Header title="Widget" hideBreadcrumb /><div className="page"><p className="text-sm text-muted-foreground">{problem}</p></div></>;
+  if (!widget) return <><Header title="Widget" hideBreadcrumb /><div className="page"><LoadingSpinner /></div></>;
+  return <Inner key={`${widget.id}:${screenId}`} widget={widget} screenId={screenId} />;
 }
 
 function Inner({ widget, screenId }: { widget: WidgetRow; screenId: string }) {
@@ -47,6 +51,22 @@ function Inner({ widget, screenId }: { widget: WidgetRow; screenId: string }) {
   const { spec, error } = usePublicSpec(widget.widget_type);
   const { data, refresh, extra } = useWidgetData(widget.id, 15);
   const jobId = useSearchParams().get('job');
+
+  // Every placement of this widget type the person may open, for the server switcher and the dashboard's name.
+  const [instances, setInstances] = useState<WidgetInstance[]>([]);
+  useEffect(() => {
+    let live = true;
+    (async () => {
+      try {
+        const res = await fetchWithAuth(`/api/widgets/instances?type=${encodeURIComponent(widget.widget_type)}`);
+        const json = await readJson<{ data?: { instances?: WidgetInstance[] } }>(res);
+        if (live && res.ok && json.data) setInstances(Array.isArray(json.data.instances) ? json.data.instances : []);
+      } catch { /* the switcher is an extra: the screen works without it */ }
+    })();
+    return () => { live = false; };
+  }, [widget.widget_type]);
+  const currentInstance = instances.find(i => i.id === widget.id) ?? null;
+
   // Reopened from a task (the notification area): what was filled in, with secrets as placeholders the server resolves.
   const [restore, setRestore] = useState<{ values: Record<string, unknown>; context: Row | null; savedFrom: string } | null>(null);
   const [restoreError, setRestoreError] = useState<string | null>(null);
@@ -64,11 +84,21 @@ function Inner({ widget, screenId }: { widget: WidgetRow; screenId: string }) {
     return () => { live = false; };
   }, [jobId]);
   const [reloadToken, setReloadToken] = useState(0);
+  const [screenStatus, setScreenStatus] = useState<{ loadedAt: number; loading: boolean }>({ loadedAt: 0, loading: false });
   const [dialog, setDialog] = useState<{ id: string; row: Row | null } | null>(null);
-  const ctx: ViewContext = useMemo(() => ({ data, collectedAt: extra.collectedAt, state: extra.state, config: extra.config, lookups: extra.lookups, server: extra.server }), [data, extra]);
+  // The widget's data carries the server; until it arrives the name from the instances list fills the screen title.
+  const serverFallback = useMemo(() => (currentInstance?.server_name ? { name: currentInstance.server_name } : undefined), [currentInstance?.server_name]);
+  const ctx: ViewContext = useMemo(() => ({ data, collectedAt: extra.collectedAt, state: extra.state, config: extra.config, lookups: extra.lookups, server: extra.server ? { ...serverFallback, ...extra.server } : serverFallback }), [data, extra, serverFallback]);
+
+  /** Reload the widget's data and the screen's datasets, the same way an action that changed the host does. */
+  const reloadScreen = useCallback(() => {
+    void refresh();
+    setReloadToken(n => n + 1);
+  }, [refresh]);
+
   const runner = useActionRunner({
     actions: spec?.actions ?? [], version: spec?.version ?? 1, serverId: widget.server_id, widgetType: widget.widget_type, widgetId: widget.id, templateContext: ctx,
-    changed: () => { refresh(); setReloadToken(n => n + 1); },
+    changed: reloadScreen,
     openScreen: (id, row) => {
       const s = spec?.screens?.[id];
       if (!s) return;
@@ -88,19 +118,33 @@ function Inner({ widget, screenId }: { widget: WidgetRow; screenId: string }) {
   }), [spec, runner.allowed, runner.busy, runner.start, runner.submit, runner.cancelJob]);
 
   const title = screen ? fillTemplate(screen.title, full) : 'Widget';
+  const dashboardName = currentInstance?.dashboard_name ?? 'Dashboard';
+  const setNotice = runner.setNotice;
+  const clearNotice = useCallback(() => setNotice(null), [setNotice]);
+  const onScreenStatus = useCallback((s: { loadedAt: number; loading: boolean }) => {
+    setScreenStatus(prev => (prev.loadedAt === s.loadedAt && prev.loading === s.loading ? prev : s));
+  }, []);
+  const openInstance = useCallback((id: string) => {
+    if (id === widget.id) return;
+    router.push(`/widgets/${encodeURIComponent(id)}/${encodeURIComponent(screenId)}`);
+  }, [router, widget.id, screenId]);
+
   return (
     <>
-      <Header title={title} />
+      <Header title={title} hideBreadcrumb />
+      <JobProgressBar job={runner.job} label={title} />
       <div className="page max-w-7xl space-y-4">
-        <Link href={`/dashboards/${encodeURIComponent(widget.dashboard_id)}`} className="inline-flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="size-4" aria-hidden /> Back to the dashboard
-        </Link>
-        {runner.notice && (
-          <div className="flex items-center justify-between rounded bg-blue-50 px-3 py-2 text-sm text-blue-800 dark:bg-blue-950/50 dark:text-blue-200">
-            <span className="truncate">{runner.notice}</span>
-            <button onClick={() => runner.setNotice(null)} aria-label="Dismiss"><X className="size-4" /></button>
+        <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2">
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+            <PageBreadcrumb items={[
+              { label: dashboardName, href: `/dashboards/${encodeURIComponent(widget.dashboard_id)}` },
+              { label: title },
+            ]} />
+            <WidgetInstanceSwitcher instances={instances} currentId={widget.id} onOpen={openInstance} />
           </div>
-        )}
+          <RefreshAge loadedAt={screenStatus.loadedAt} loading={screenStatus.loading} onRefresh={reloadScreen} />
+        </div>
+        <ActionRunnerToasts notice={runner.notice} onShown={clearNotice} />
         {error ? <p className="text-sm text-muted-foreground">{error}</p>
           : !spec ? <LoadingSpinner />
           : !screen ? <p className="text-sm text-muted-foreground">This widget has no screen called “{screenId}”.</p>
@@ -108,7 +152,7 @@ function Inner({ widget, screenId }: { widget: WidgetRow; screenId: string }) {
           : <>
             {restoreError && <p role="alert" className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">{restoreError}. The screen is empty: fill it in again.</p>}
             {restore && <p className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">This is the screen of an earlier task, with what you filled in then. Passwords and tokens you entered are kept safely on the server: leave them as they are to use them again, or type new ones.</p>}
-            <ScreenView screen={screen} context={full} serverId={widget.server_id} widgetType={widget.widget_type} ui={ui} reloadToken={reloadToken}
+            <ScreenView screen={screen} context={full} serverId={widget.server_id} widgetType={widget.widget_type} ui={ui} reloadToken={reloadToken} hideReload onStatus={onScreenStatus}
               onDone={screen.kind === 'dialog' ? () => router.push(`/dashboards/${encodeURIComponent(widget.dashboard_id)}`) : undefined} />
           </>}
         {runner.dialogs}
