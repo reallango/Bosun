@@ -1,41 +1,110 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Popover } from 'radix-ui';
-import { Bell, CircleAlert, CircleCheck, Info, KeyRound, Loader2, PackageCheck, PackagePlus, TriangleAlert, X } from 'lucide-react';
+import { Bell, Loader2, X } from 'lucide-react';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { readJson } from '@/lib/api/readJson';
 import { useTasks } from '@/hooks/useTasks';
-import { TasksSection } from './TasksSection';
+import { TaskItem } from './TasksSection';
 import { useNotifications, type Notification } from '@/providers/NotificationProvider';
 import { useAuth } from '@/hooks/useAuth';
 import { hasRole } from '@/lib/auth/levels';
 import { formatDistanceToNow } from '@/lib/utils/date';
 import { cn } from '@/lib/utils';
+import { bellItemKey, groupBell, notificationTime, type BellItem } from '@/lib/notifications/bell';
+import { notificationIcon } from './notificationIcon';
 
-const TYPE_ICON = {
-  error: { icon: CircleAlert, className: 'text-destructive' },
-  warning: { icon: TriangleAlert, className: 'text-warning' },
-  success: { icon: CircleCheck, className: 'text-success' },
-  info: { icon: Info, className: 'text-primary' },
-} as const;
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="border-b last:border-b-0">
+      <h2 className="px-3 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{title}</h2>
+      {children}
+    </section>
+  );
+}
 
-/** Kinds with their own icon; everything else uses the severity icon. */
-const KIND_ICON: Record<string, { icon: typeof Info; className: string }> = {
-  widget_update: { icon: PackagePlus, className: 'text-primary' },
-  widget_upgraded: { icon: PackageCheck, className: 'text-success' },
-  access_request: { icon: KeyRound, className: 'text-warning' },
-};
+function NotificationRow({
+  n,
+  quiet = false,
+  canDecide,
+  deciding,
+  decisionError,
+  onOpen,
+  onDismiss,
+  onDecide,
+}: {
+  n: Notification;
+  quiet?: boolean;
+  canDecide: boolean;
+  deciding: boolean;
+  decisionError: string | null;
+  onOpen: () => void;
+  onDismiss: () => void;
+  onDecide: (decision: 'approve' | 'deny') => void;
+}) {
+  const t = notificationIcon(n.kind, n.type);
+  const at = notificationTime(n.created_at);
+  return (
+    <div className={cn('group relative flex flex-col border-b last:border-b-0 hover:bg-accent/60', !n.read && !quiet && 'bg-primary/5', quiet && 'opacity-75')}>
+      <button
+        type="button"
+        className="flex min-w-0 flex-1 items-start gap-2 p-3 pr-9 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+        onClick={onOpen}
+      >
+        <t.icon className={cn('mt-0.5 size-4 shrink-0', t.className)} aria-hidden />
+        <div className="min-w-0 flex-1">
+          <div className={cn('truncate text-sm', quiet ? 'font-normal' : 'font-medium')}>{n.title}</div>
+          <div className="line-clamp-3 text-xs text-muted-foreground">{n.message}</div>
+          <div className="mt-1 text-xs text-muted-foreground/80">
+            {formatDistanceToNow(new Date(at))}
+          </div>
+        </div>
+      </button>
+      {canDecide && n.kind === 'access_request' && n.request_id && (
+        <div className="-mt-1 flex flex-wrap items-center gap-2 px-3 pb-2 pl-9 text-xs">
+          <button type="button" disabled={deciding} onClick={() => onDecide('approve')}
+            className="rounded-md bg-primary px-2 py-1 font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">Approve</button>
+          <button type="button" disabled={deciding} onClick={() => onDecide('deny')}
+            className="rounded-md border px-2 py-1 hover:bg-accent disabled:opacity-50">Deny</button>
+          <button type="button" className="text-primary hover:underline" onClick={onOpen}>Details</button>
+          {deciding && <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" aria-label="Working" />}
+          {decisionError && <span role="alert" className="w-full text-destructive">{decisionError}</span>}
+        </div>
+      )}
+      {canDecide && (
+        <button
+          type="button"
+          onClick={onDismiss}
+          aria-label={`Dismiss: ${n.title}`}
+          className="absolute right-1.5 top-2 inline-flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-60 hover:bg-accent hover:text-foreground hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <X className="size-3.5" />
+        </button>
+      )}
+    </div>
+  );
+}
 
+/**
+ * The bell: one panel with what needs attention, what is running, what is new and what was read
+ * recently. One action marks every notification read and every finished task seen; dismissed items
+ * leave the bell and stay on the Activity page.
+ */
 export function NotificationBell() {
-  const { notifications, unreadCount, loading, fetchNotifications, markAsRead, markAllAsRead, dismiss } = useNotifications();
+  const { notifications, loading, fetchNotifications, markAsRead, markAllAsRead, dismiss } = useNotifications();
   const [isOpen, setIsOpen] = useState(false);
-  const { tasks, running, unseen, failedUnseen, seen, markSeen, reload } = useTasks(isOpen);
+  const { tasks, running, unseen, seen, markSeen, dismissTask, reload } = useTasks(isOpen);
   const { user } = useAuth();
   const router = useRouter();
   const canDismiss = hasRole(user?.role, 'operator');
-  const badge = unreadCount + failedUnseen;
+  const groups = useMemo(() => groupBell({ notifications, tasks, seen }), [notifications, tasks, seen]);
+  const badge = groups.counts.badge;
+  const hasAnything = groups.attention.length + groups.running.length + groups.newItems.length + groups.earlier.length > 0;
+  const showMarkAll = groups.counts.unread > 0 || groups.counts.unseen > 0;
+
   // Access requests: approve or deny right here (the server checks the approver holds the permission).
   const [deciding, setDeciding] = useState<string | null>(null);
   const [decisionError, setDecisionError] = useState<{ id: string; message: string } | null>(null);
@@ -71,53 +140,43 @@ export function NotificationBell() {
     if (n.link) { setIsOpen(false); router.push(n.link); }
   };
 
-  // What needs someone first: access requests waiting for a decision, then (below) running tasks; finished tasks come last.
-  const pending = notifications.filter(n => n.kind === 'access_request' && !!n.request_id);
-  const others = notifications.filter(n => !(n.kind === 'access_request' && !!n.request_id));
-  const renderItem = (n: Notification) => {
-                const t = KIND_ICON[n.kind] ?? TYPE_ICON[n.type as keyof typeof TYPE_ICON] ?? TYPE_ICON.info;
-                return (
-                  <div
-                    key={n.id}
-                    className={cn('group relative flex flex-col border-b last:border-b-0 hover:bg-accent/60', !n.read && 'bg-primary/5')}
-                  >
-                    <button
-                      type="button"
-                      className="flex min-w-0 flex-1 items-start gap-2 p-3 pr-9 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
-                      onClick={() => open(n)}
-                    >
-                      <t.icon className={cn('mt-0.5 size-4 shrink-0', t.className)} aria-hidden />
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-medium">{n.title}</div>
-                        <div className="line-clamp-3 text-xs text-muted-foreground">{n.message}</div>
-                        <div className="mt-1 text-xs text-muted-foreground/80">
-                          {formatDistanceToNow(new Date(n.created_at))}
-                        </div>
-                      </div>
-                    </button>
-                    {n.kind === 'access_request' && n.request_id && canDismiss && (
-                      <div className="-mt-1 flex flex-wrap items-center gap-2 px-3 pb-2 pl-9 text-xs">
-                        <button type="button" disabled={deciding === n.id} onClick={() => decide(n, 'approve')}
-                          className="rounded-md bg-primary px-2 py-1 font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50">Approve</button>
-                        <button type="button" disabled={deciding === n.id} onClick={() => decide(n, 'deny')}
-                          className="rounded-md border px-2 py-1 hover:bg-accent disabled:opacity-50">Deny</button>
-                        <button type="button" className="text-primary hover:underline" onClick={() => open(n)}>Details</button>
-                        {deciding === n.id && <Loader2 className="size-3.5 animate-spin motion-reduce:animate-none" aria-label="Working" />}
-                        {decisionError?.id === n.id && <span role="alert" className="w-full text-destructive">{decisionError.message}</span>}
-                      </div>
-                    )}
-                    {canDismiss && (
-                      <button
-                        type="button"
-                        onClick={() => dismiss(n.id)}
-                        aria-label={`Dismiss: ${n.title}`}
-                        className="absolute right-1.5 top-2 inline-flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-60 hover:bg-accent hover:text-foreground hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      >
-                        <X className="size-3.5" />
-                      </button>
-                    )}
-                  </div>
-                );
+  const markEverythingRead = async () => {
+    await markAllAsRead();
+    markSeen(tasks.filter(t => t.status !== 'running' && !t.dismissed).map(t => t.id));
+  };
+
+  const renderItem = (item: BellItem, quiet = false) => {
+    if (item.type === 'task') {
+      const task = tasks.find(t => t.id === item.task.id);
+      if (!task) return null;
+      return (
+        <TaskItem
+          key={bellItemKey(item)}
+          task={task}
+          seen={seen.has(task.id)}
+          onSeen={markSeen}
+          onNavigate={() => setIsOpen(false)}
+          onDismiss={dismissTask}
+          onChanged={reload}
+          quiet={quiet}
+        />
+      );
+    }
+    const n = notifications.find(x => x.id === item.notification.id);
+    if (!n) return null;
+    return (
+      <NotificationRow
+        key={bellItemKey(item)}
+        n={n}
+        quiet={quiet}
+        canDecide={canDismiss}
+        deciding={deciding === n.id}
+        decisionError={decisionError?.id === n.id ? decisionError.message : null}
+        onOpen={() => open(n)}
+        onDismiss={() => { if (canDismiss) void dismiss(n.id); }}
+        onDecide={decision => decide(n, decision)}
+      />
+    );
   };
 
   return (
@@ -126,11 +185,11 @@ export function NotificationBell() {
         <button
           type="button"
           className="relative inline-flex size-9 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          aria-label={badge > 0 ? `Notifications (${badge} unread)` : running > 0 ? `Notifications (${running} task${running === 1 ? '' : 's'} running)` : 'Notifications'}
+          aria-label={badge > 0 ? `Activity (${badge} unread)` : running > 0 ? `Activity (${running} task${running === 1 ? '' : 's'} running)` : 'Activity'}
         >
           <Bell className="size-[18px]" />
           {badge > 0 ? (
-            <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[10px] font-semibold leading-none text-white">
+            <span className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-destructive px-1 text-[10px] font-semibold leading-none text-destructive-foreground">
               {badge > 9 ? '9+' : badge}
             </span>
           ) : running > 0 ? (
@@ -147,32 +206,50 @@ export function NotificationBell() {
           align="end"
           sideOffset={6}
           collisionPadding={8}
-          className="z-50 w-[min(22rem,calc(100vw-1rem))] overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-lg"
+          className="z-50 w-[min(24rem,calc(100vw-1rem))] overflow-hidden rounded-lg border bg-popover text-popover-foreground shadow-lg"
         >
-          <div className="flex items-center justify-between border-b px-3 py-2">
-            <span className="text-sm font-medium">Notifications</span>
-            {unreadCount > 0 && (
-              <button type="button" onClick={markAllAsRead} className="text-xs text-primary hover:underline">
-                Mark all read
-              </button>
-            )}
+          <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
+            <span className="text-sm font-semibold">Activity</span>
+            <div className="flex items-center gap-3">
+              {showMarkAll && (
+                <button type="button" onClick={markEverythingRead} className="text-xs text-primary hover:underline">
+                  Mark all as read
+                </button>
+              )}
+              <Link href="/activity" onClick={() => setIsOpen(false)} className="text-xs text-primary hover:underline">
+                View all
+              </Link>
+            </div>
           </div>
-          <div className="max-h-[min(28rem,70dvh)] overflow-y-auto">
-            {pending.length > 0 && (
-              <div className="border-b">
-                <div className="px-3 pb-1 pt-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Waiting for a decision</div>
-                {pending.map(renderItem)}
-              </div>
-            )}
-            <TasksSection which="running" tasks={tasks} seen={seen} markSeen={markSeen} onNavigate={() => setIsOpen(false)} reload={reload} />
-            {loading ? (
+          <div className="max-h-[min(32rem,70dvh)] overflow-y-auto">
+            {loading && notifications.length === 0 && tasks.length === 0 ? (
               <div className="p-4 text-center text-sm text-muted-foreground">Loading…</div>
-            ) : others.length === 0 && pending.length === 0 && tasks.length === 0 ? (
-              <div className="p-4 text-center text-sm text-muted-foreground">No notifications</div>
+            ) : !hasAnything ? (
+              <div className="p-4 text-center text-sm text-muted-foreground">No activity</div>
             ) : (
-              others.slice(0, 20).map(renderItem)
+              <>
+                {groups.attention.length > 0 && (
+                  <Section title="Needs your attention">
+                    {groups.attention.map(item => renderItem(item))}
+                  </Section>
+                )}
+                {groups.running.length > 0 && (
+                  <Section title="Running">
+                    {groups.running.map(item => renderItem(item))}
+                  </Section>
+                )}
+                {groups.newItems.length > 0 && (
+                  <Section title="New">
+                    {groups.newItems.map(item => renderItem(item))}
+                  </Section>
+                )}
+                {groups.earlier.length > 0 && (
+                  <Section title="Earlier">
+                    {groups.earlier.map(item => renderItem(item, true))}
+                  </Section>
+                )}
+              </>
             )}
-            <TasksSection which="finished" tasks={tasks} seen={seen} markSeen={markSeen} onNavigate={() => setIsOpen(false)} reload={reload} />
           </div>
         </Popover.Content>
       </Popover.Portal>

@@ -1,15 +1,34 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireRole } from '@/lib/auth/middleware';
 import { ok, fail, internalError } from '@/lib/api/response';
-import { listForViewer, markRead, notify } from '@/lib/notifications/store';
+import { kindsForFilter, listForViewer, listHistory, markRead, notify } from '@/lib/notifications/store';
 
-/** The notifications the caller may see (newest first). `?unread=true` for unread only. */
+/**
+ * The notifications the caller may see (newest first). `?unread=true` for unread only.
+ * `?history=1` returns the Activity history instead: dismissed rows included, with
+ * `before=<cursor>`, `kind=` (alerts / update / access / tasks or a comma list),
+ * `server=<id>`, `q=<text>` and `limit=`.
+ */
 export async function GET(request: NextRequest) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
   try {
-    const unreadOnly = new URL(request.url).searchParams.get('unread') === 'true';
-    return ok({ notifications: await listForViewer(auth, { unreadOnly }) });
+    const params = new URL(request.url).searchParams;
+    const unreadOnly = params.get('unread') === 'true';
+    if (params.get('history') !== '1' && params.get('history') !== 'true') {
+      return ok({ notifications: await listForViewer(auth, { unreadOnly }) });
+    }
+    const rawLimit = Number.parseInt(params.get('limit') ?? '', 10);
+    const limit = Number.isFinite(rawLimit) ? Math.min(Math.max(rawLimit, 1), 100) : 25;
+    const kinds = kindsForFilter(params.get('kind'));
+    return ok(await listHistory(auth, {
+      before: params.get('before'),
+      kinds,
+      serverId: params.get('server'),
+      q: params.get('q'),
+      unreadOnly,
+      limit,
+    }));
   } catch (error) {
     return internalError(error);
   }

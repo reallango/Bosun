@@ -16,6 +16,8 @@ export interface Notification {
   /** access_request notices: the request to approve or deny. */
   request_id?: string | null;
   read: boolean;
+  /** Hidden from the bell; the Activity page still lists it. */
+  dismissed?: boolean;
   created_at: string;
 }
 

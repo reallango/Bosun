@@ -8,6 +8,9 @@ import { buildScriptInvocation, parseStateOutput, parseScriptOutput } from './ru
 // These run the package's Linux scripts against fake `curl`, `docker`, `systemctl` and `sudo` programs placed first on the
 // PATH. That needs a real POSIX shell (Linux, as in the Docker build), not Git Bash on Windows.
 const hasSh = process.platform !== 'win32' && spawnSync('sh', ['-c', 'exit 0']).status === 0;
+// The systemd case expects Docker to be absent. A developer machine with Docker would report it as
+// available; the Docker builder (Alpine) has neither Docker nor systemd.
+const hasDocker = hasSh && spawnSync('sh', ['-c', 'command -v docker >/dev/null 2>&1']).status === 0;
 const dir = path.join(process.cwd(), 'widgets', 'ollama', 'scripts');
 const script = (name: string) => fs.readFileSync(path.join(dir, name), 'utf8');
 
@@ -101,7 +104,7 @@ esac`);
     expect(s.env.ollama_max_loaded_models ?? '').toBe('');
   });
 
-  it.skipIf(!hasSh)('a systemd service', () => {
+  it.skipIf(!hasSh || hasDocker)('a systemd service', () => {
     fake('curl', 'echo \'{"version":"0.5.1"}\'');
     fake('systemctl', `case "$*" in
 *LoadState*) echo loaded ;;

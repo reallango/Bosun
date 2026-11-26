@@ -23,6 +23,8 @@ export interface Task {
   cancelRequested: boolean;
   /** Who started it (a person's name or "<key> (API key)"); null when Bosun did. */
   startedBy: string | null;
+  /** Hidden from this person's bell; the Activity page still lists it. */
+  dismissed: boolean;
 }
 
 const SEEN_KEY = 'bosun.tasks.seen';
@@ -75,8 +77,35 @@ export function useTasks(open: boolean) {
     });
   }, []);
 
+  const setDismissed = useCallback(async (id: string, dismissed: boolean) => {
+    setTasks(prev => prev.map(t => (t.id === id ? { ...t, dismissed } : t)));
+    try {
+      const res = await fetchWithAuth(`/api/widget-jobs/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dismissed }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    } catch (err) {
+      console.error('Failed to save task dismissal:', err);
+      await load();
+    }
+  }, [load]);
+
+  const dismissTask = useCallback((id: string) => setDismissed(id, true), [setDismissed]);
+  const restoreTask = useCallback((id: string) => {
+    // Restoring also makes it new again, so it is visible in the bell even when it is older than a day.
+    setSeen(prev => {
+      const next = new Set(prev);
+      next.delete(id);
+      try { localStorage.setItem(SEEN_KEY, JSON.stringify(Array.from(next).slice(-100))); } catch { /* no storage */ }
+      return next;
+    });
+    return setDismissed(id, false);
+  }, [setDismissed]);
+
   const running = tasks.filter(t => t.status === 'running').length;
-  const unseen = tasks.filter(t => t.status !== 'running' && !seen.has(t.id)).length;
-  const failedUnseen = tasks.filter(t => (t.status === 'error' || t.status === 'lost') && !seen.has(t.id)).length;
-  return { tasks, running, unseen, failedUnseen, seen, markSeen, reload: load };
+  const unseen = tasks.filter(t => t.status !== 'running' && !t.dismissed && !seen.has(t.id)).length;
+  const failedUnseen = tasks.filter(t => (t.status === 'error' || t.status === 'lost') && !t.dismissed && !seen.has(t.id)).length;
+  return { tasks, running, unseen, failedUnseen, seen, markSeen, dismissTask, restoreTask, reload: load };
 }
