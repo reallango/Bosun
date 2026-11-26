@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import { ChevronDown, ChevronUp, Ellipsis, Info, Loader2, Search, X } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useWidgetSize } from '@/components/dashboard/widget-size';
-import { fitsSize, splitActions, splitTableActions } from '@/lib/widgets/runtime/size';
+import { fitsSize, splitActions, splitRowActions } from '@/lib/widgets/runtime/size';
 import { nextSortDir, sortRows, type SortState } from '@/lib/widgets/runtime/sort';
 import { LayoutGrid, List, Package, Plus, RefreshCw, Settings, SquareTerminal } from 'lucide-react';
 import { useWidgetData } from '@/hooks/useWidgetData';
@@ -112,7 +112,7 @@ export function V1View({ view, data, widgetId, serverId, actions, allowed, busy,
       .filter(a => allowed(a) && (!a.when || evalCond(a.when, row)));
     const rowName = view.type === 'list' && view.row ? fillTemplate(view.row.title, row) : '';
     const { shown, more } = mode === 'table'
-      ? splitTableActions(list, 2, a => !!a.confirm?.destructive)
+      ? splitRowActions(list, 2, a => !!a.confirm?.destructive)
       : mode === 'all' ? { shown: list, more: [] as PublicAction[] }
       : splitActions(list, size, view.row?.inline);
     const iconOf = (a: PublicAction) => (a.icon && ICONS[a.icon]) || Info;

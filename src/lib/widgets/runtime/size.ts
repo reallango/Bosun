@@ -53,7 +53,7 @@ export function splitActions<T>(actions: T[], size: WidgetSize, inline?: InlineA
  * Split a page-size table row's actions: at most `inline` icons, the rest in the row's ⋯ menu with the destructive ones
  * last (unlike `splitActions`, a menu with one entry is allowed here). Widget-sized tables keep showing every action.
  */
-export function splitTableActions<T>(actions: T[], inline: number, destructive: (a: T) => boolean): { shown: T[]; more: T[] } {
+export function splitRowActions<T>(actions: T[], inline: number, destructive: (a: T) => boolean): { shown: T[]; more: T[] } {
   const shown = actions.slice(0, Math.max(0, inline));
   const rest = actions.slice(shown.length);
   return { shown, more: [...rest.filter(a => !destructive(a)), ...rest.filter(destructive)] };
