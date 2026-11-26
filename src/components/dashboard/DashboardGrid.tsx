@@ -34,6 +34,8 @@ interface DashboardGridProps {
   onWidgetRemoved?: () => void;
   onRefresh?: () => void;
   emptyAction?: React.ReactNode;
+  /** Rendered above the grid (edit mode): gets the size being shown and a reader of its current arrangement. */
+  editBar?: (breakpoint: GridBreakpoint, currentLayout: () => LayoutItem[]) => React.ReactNode;
 }
 
 const BREAKPOINTS_DESC = (Object.entries(GRID_BREAKPOINTS) as [GridBreakpoint, number][]).sort((a, b) => b[1] - a[1]);
@@ -86,6 +88,7 @@ export function DashboardGrid({
   onWidgetRemoved,
   onRefresh,
   emptyAction,
+  editBar,
 }: DashboardGridProps) {
   const safeWidgets = useMemo(() => ensureArray<Widget>(widgets), [widgets]);
   const names = useWidgetNames();
@@ -133,6 +136,14 @@ export function DashboardGrid({
     [onLayoutChange, safeWidgets]
   );
 
+  // The arrangement on screen right now (after the grid compacted it), for the editor's layout actions.
+  const currentLayout = useCallback((): LayoutItem[] => {
+    const ids = new Set(safeWidgets.map(w => w.id));
+    return (layoutsRef.current[breakpointRef.current] ?? [])
+      .filter(l => ids.has(l.i))
+      .map(l => ({ widgetId: l.i, x: l.x, y: l.y, w: l.w, h: l.h }));
+  }, [safeWidgets]);
+
   if (safeWidgets.length === 0) {
     return (
       <EmptyState
@@ -146,6 +157,7 @@ export function DashboardGrid({
 
   return (
     <div ref={containerRef} className="-mx-1 min-w-0" data-dashboard-id={dashboardId} data-breakpoint={breakpoint}>
+      {editable && width > 0 && editBar?.(breakpoint, currentLayout)}
       {width > 0 && (
       <Responsive
         width={width}

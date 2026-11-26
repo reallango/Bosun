@@ -17,6 +17,7 @@ import { useToast } from '@/components/ui/toast';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { cn } from '@/lib/utils';
 import { FrameMenuItem, RefreshHandler, WidgetFrameContext } from './widget-context';
+import { WidgetSizeContext, useMeasuredSize } from './widget-size';
 import { DeclarativeWidget } from '@/components/widgets/declarative/DeclarativeWidget';
 import { WidgetLoading } from '@/components/widgets/WidgetLoading';
 import { useAuth } from '@/hooks/useAuth';
@@ -83,6 +84,8 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName,
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const { can } = useAuth();
+  // The room the widget has (size class xs-lg), measured on the content box and shared with whatever renders inside.
+  const { ref: bodyRef, info: size } = useMeasuredSize<HTMLDivElement>();
   // Settings and removal edit the dashboard.
   const canEdit = can('dashboards.edit');
 
@@ -214,15 +217,19 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName,
         </DropdownMenu>
       </header>
       <div
+        ref={bodyRef}
+        data-widget-size={size.size}
         className={cn(
           '@container relative min-h-0 flex-1',
           FULL_BLEED.has(widgetType) ? 'overflow-hidden' : 'overflow-auto overscroll-contain p-3'
         )}
       >
         <WidgetFrameContext.Provider value={frameContext}>
-          <WidgetErrorBoundary widgetId={widgetId}>
-            <WidgetContent widgetId={widgetId} widgetType={widgetType} serverId={serverId} serverName={serverName} />
-          </WidgetErrorBoundary>
+          <WidgetSizeContext.Provider value={size}>
+            <WidgetErrorBoundary widgetId={widgetId}>
+              <WidgetContent widgetId={widgetId} widgetType={widgetType} serverId={serverId} serverName={serverName} />
+            </WidgetErrorBoundary>
+          </WidgetSizeContext.Provider>
         </WidgetFrameContext.Provider>
       </div>
       <WidgetSettingsDialog widgetId={widgetId} open={settingsOpen} onOpenChange={setSettingsOpen} onSave={onRefresh} />

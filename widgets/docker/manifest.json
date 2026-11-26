@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "docker",
   "name": "Docker Containers",
-  "version": "1.0.12",
+  "version": "1.0.13",
   "description": "Containers on the host with logs, a shell, start, stop and restart; edit a container, create containers and stacks (a compose file, or one from a Git repository), and a Manage page for images, volumes and networks.",
   "author": "Bosun",
   "permissions": [
@@ -733,7 +733,8 @@
               "name",
               "image"
             ],
-            "placeholder": "Filter"
+            "placeholder": "Filter",
+            "hideBelow": "sm"
           },
           "toggles": [
             {
@@ -743,7 +744,8 @@
               "hideWhen": {
                 "field": "state",
                 "notEquals": "running"
-              }
+              },
+              "hideBelow": "sm"
             }
           ],
           "row": {
@@ -767,7 +769,12 @@
               "restart",
               "stop",
               "start"
-            ]
+            ],
+            "inline": {
+              "xs": 0,
+              "sm": 2,
+              "md": 4
+            }
           }
         },
         "actions": [

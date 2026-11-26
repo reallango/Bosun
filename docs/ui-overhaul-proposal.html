@@ -1,0 +1,536 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bosun UI overhaul</title>
+<style>
+:root {
+  --bg: #f8fafc; --surface: #ffffff; --surface-2: #f1f5f9; --text: #0f172a; --muted: #64748b; --border: #e2e8f0;
+  --primary: #2563eb; --primary-soft: #dbeafe; --ok: #16a34a; --warn: #d97706; --bad: #dc2626; --side: #0f172a; --side-text: #cbd5e1;
+  --side-active: #1e293b; --code: #f1f5f9; --shadow: 0 1px 2px rgb(0 0 0 / .06), 0 4px 12px rgb(0 0 0 / .05);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0b0f17; --surface: #111827; --surface-2: #1f2937; --text: #e5e7eb; --muted: #9ca3af; --border: #263041;
+    --primary: #60a5fa; --primary-soft: #1e3a5f; --ok: #4ade80; --warn: #fbbf24; --bad: #f87171; --side: #070a10; --side-text: #9ca3af;
+    --side-active: #1f2937; --code: #1f2937; --shadow: 0 1px 2px rgb(0 0 0 / .4);
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0b0f17; --surface: #111827; --surface-2: #1f2937; --text: #e5e7eb; --muted: #9ca3af; --border: #263041;
+  --primary: #60a5fa; --primary-soft: #1e3a5f; --ok: #4ade80; --warn: #fbbf24; --bad: #f87171; --side: #070a10; --side-text: #9ca3af;
+  --side-active: #1f2937; --code: #1f2937; --shadow: 0 1px 2px rgb(0 0 0 / .4);
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+main { max-width: 980px; margin: 0 auto; padding: 32px 16px 80px; }
+h1 { font-size: 1.9rem; line-height: 1.2; margin: 0 0 6px; letter-spacing: -.01em; }
+h2 { font-size: 1.35rem; margin: 56px 0 8px; padding-top: 12px; border-top: 1px solid var(--border); }
+h3 { font-size: 1.05rem; margin: 28px 0 6px; }
+p, li { max-width: 72ch; }
+a { color: var(--primary); }
+code { font: .86em/1.4 ui-monospace, SFMono-Regular, Consolas, monospace; background: var(--code); padding: .1em .35em; border-radius: 4px; overflow-wrap: anywhere; }
+pre { background: var(--code); padding: 12px 14px; border-radius: 8px; overflow-x: auto; font: 12.5px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; }
+pre code { background: none; padding: 0; }
+.lede { color: var(--muted); font-size: 1.05rem; margin: 0 0 20px; }
+.meta { color: var(--muted); font-size: .85rem; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; box-shadow: var(--shadow); margin: 14px 0; }
+.rec { border-left: 4px solid var(--primary); }
+.rec > strong:first-child { color: var(--primary); }
+.tag { display: inline-block; font-size: .72rem; font-weight: 600; padding: 1px 8px; border-radius: 999px; background: var(--primary-soft); color: var(--primary); vertical-align: middle; }
+.tag.done { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--border); vertical-align: top; }
+th { color: var(--muted); font-weight: 600; font-size: .8rem; text-transform: uppercase; letter-spacing: .03em; }
+.scroll { overflow-x: auto; }
+.toc { columns: 2 240px; padding-left: 18px; }
+.ba { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 14px; margin: 14px 0; }
+.ba > figure { margin: 0; min-width: 0; }
+figcaption { font-size: .8rem; color: var(--muted); margin-top: 6px; }
+@media (max-width: 720px) { .ba { grid-template-columns: minmax(0, 1fr); } }
+
+/* ---- mockup primitives ---- */
+.mock { border: 1px solid var(--border); border-radius: 10px; overflow-x: auto; background: var(--bg); font-size: 12px; line-height: 1.35; }
+.side { background: var(--side); color: var(--side-text); padding: 10px 8px; display: flex; flex-direction: column; gap: 2px; min-height: 300px; }
+.side .h { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; opacity: .6; padding: 10px 8px 4px; }
+.side .i { padding: 5px 8px; border-radius: 6px; display: flex; gap: 8px; align-items: center; white-space: nowrap; overflow: hidden; }
+.side .i.on { background: var(--side-active); color: #fff; }
+.side .i .sub { margin-left: auto; font-size: 10px; opacity: .6; }
+.dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--ok); }
+.dot.w { background: var(--warn); } .dot.b { background: var(--bad); } .dot.g { background: #6b7280; }
+.ico { width: 12px; height: 12px; border-radius: 3px; background: currentColor; opacity: .55; flex: none; }
+.row { display: flex; align-items: center; gap: 8px; padding: 6px 8px; border-bottom: 1px solid var(--border); }
+.row:last-child { border-bottom: 0; }
+.grow { flex: 1; min-width: 0; }
+.t { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.s { color: var(--muted); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.btn { display: inline-flex; align-items: center; justify-content: center; min-width: 20px; height: 20px; padding: 0 4px; border-radius: 4px; color: var(--muted); border: 1px solid transparent; font-size: 11px; }
+.btn.o { border-color: var(--border); }
+.btn.p { background: var(--primary); color: #fff; padding: 0 10px; }
+.wf { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; min-width: 0; }
+.wf .hd { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-bottom: 1px solid var(--border); font-weight: 600; }
+.wf .hd .chip { margin-left: auto; font-weight: 400; font-size: 10px; background: var(--surface-2); color: var(--muted); padding: 1px 6px; border-radius: 999px; }
+.wf .bd { padding: 6px; }
+.bar { height: 5px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+.bar > i { display: block; height: 100%; background: var(--ok); }
+.pill { font-size: 10px; padding: 1px 6px; border-radius: 999px; background: var(--surface-2); color: var(--muted); }
+.menu { position: relative; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; box-shadow: var(--shadow); padding: 4px; width: 170px; }
+.menu .mi { padding: 4px 8px; border-radius: 5px; display: flex; gap: 8px; align-items: center; }
+.menu .mi.f { background: var(--surface-2); }
+.menu .lab { font-size: 10px; color: var(--muted); padding: 4px 8px 2px; text-transform: uppercase; letter-spacing: .05em; }
+.menu .sep { height: 1px; background: var(--border); margin: 4px -4px; }
+.menu .kb { margin-left: auto; font-size: 10px; color: var(--muted); }
+.red { color: var(--bad); }
+.grid { display: grid; gap: 6px; padding: 8px; }
+.ph { height: 28px; border-radius: 6px; background: var(--surface-2); }
+</style>
+</head>
+<body>
+<main>
+
+<h1>Bosun UI overhaul</h1>
+<p class="lede">What feels unpolished today, the options, a recommendation for each, and a phased plan. The prototype on branch <code>prototype/ui-overhaul</code> already does the recommended widget-size and layout work (sections&nbsp;3 and&nbsp;4).</p>
+<p class="meta">Written against <code>dev</code> at <code>ff86bdd</code>. Every file path below is relative to the repo root.</p>
+
+<div class="card rec">
+<strong>The short version</strong>
+<ol>
+  <li><b>Fix layouts first.</b> Today, arranging a dashboard on one screen size does nothing for the others. Make one base layout that follows your last edit, with per-size overrides on top and a "Use on all sizes" button. <span class="tag done">prototyped</span></li>
+  <li><b>Give every widget a size class</b> (<code>xs/sm/md/lg</code>, measured on the widget, not the screen). Add generic spec keys (<code>hideBelow</code>, <code>row.inline</code>) so a package decides what drops out on small tiles. Row actions that do not fit go into a ⋯ menu. <span class="tag done">prototyped</span></li>
+  <li><b>One look for the widget system.</b> Move the declarative renderer, its dialogs and its menus onto the theme tokens and <code>ui/*</code> primitives the shell already uses. Today the two halves look like different apps.</li>
+  <li><b>Navigation.</b> Turn the settings accordion into a real settings area with its own grouped sub-navigation. Polish the server list (status, hostname, tooltips, a proper mobile sheet).</li>
+</ol>
+</div>
+
+<ul class="toc">
+  <li><a href="#nav">1. Sidebar and settings menu</a></li>
+  <li><a href="#menus">2. The widget screen and menu system</a></li>
+  <li><a href="#content">3. Widget content that scales</a></li>
+  <li><a href="#layouts">4. Responsive dashboard layouts</a></li>
+  <li><a href="#compat">5. Keeping widgets self-contained</a></li>
+  <li><a href="#plan">6. Phased plan</a></li>
+  <li><a href="#proto">7. What the prototype changes</a></li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="nav">1. Sidebar and settings menu</h2>
+
+<h3>What is wrong today</h3>
+<ul>
+  <li><b>Settings is an accordion inside the sidebar.</b> <code>src/components/layout/Sidebar.tsx</code> (around line 372) expands 14 links <em>upward</em> above the Settings button, capped at <code>max-h-[50vh]</code>.
+    <ul>
+      <li>There is no <code>settings/layout.tsx</code>, so there is no in-page navigation.</li>
+      <li>The accordion is closed on every page load, even while you are on a settings page.</li>
+      <li>The active state there is just white text, not the <code>bg-sidebar-accent</code> every other item uses.</li>
+      <li>The chevron is inverted.</li>
+    </ul>
+  </li>
+  <li><b>Inconsistent settings pages.</b> Widths alternate between <code>max-w-4xl/5xl/6xl</code>. Titles mix cases ("Access requests" vs "Alert Rules"; the sidebar says "Alerts").
+    <ul>
+      <li>Section headings are sometimes a <code>Card</code> and sometimes a bare <code>&lt;h2&gt;</code> (Permissions, Widgets).</li>
+      <li>Save buttons and "Saving…" states are hand-written per form.</li>
+      <li><code>widgets/page.tsx</code> uses <code>window.confirm</code>.</li>
+    </ul>
+  </li>
+  <li><b>The server list is thin.</b> It has a name and a dot with hard-coded <code>bg-green-500/yellow-500/gray-500</code>, although <code>success</code>/<code>warning</code> tokens exist.
+    <ul>
+      <li>There is no hostname, no hover detail, no grouping or sorting, and no empty state.</li>
+      <li>When the rail is collapsed, servers become two-letter initials, and labels rely on the native <code>title=</code> attribute (there is no Tooltip primitive).</li>
+    </ul>
+  </li>
+  <li><b>The mobile drawer</b> is a raw radix <code>Dialog</code> with no slide animation, and it repeats the settings accordion.</li>
+  <li><b>Small things.</b>
+    <ul>
+      <li>"SSH Keys" and "Access Requests" share the <code>KeyRound</code> icon.</li>
+      <li>The collapse toggle jumps between the header and its own bar.</li>
+      <li>Dashboards can only be reordered with up/down chevrons, in a separate edit mode.</li>
+    </ul>
+  </li>
+</ul>
+
+<h3>Options</h3>
+<div class="scroll"><table>
+<tr><th>Option</th><th>What</th><th>Trade-offs</th></tr>
+<tr><td><b>A. Polish in place</b></td><td>Keep the accordion. Fix the active state, the chevrons and the tokens, add tooltips, and make the drawer animate.</td><td>Small (1–2 days). Still crams 14 links into the sidebar, and settings still has no structure.</td></tr>
+<tr><td><b>B. Settings becomes its own area</b> (recommended)</td><td>The sidebar keeps one "Settings" link. <code>settings/layout.tsx</code> adds grouped sub-navigation:
+  <ul>
+    <li><b>You</b>: Account, SSH keys</li>
+    <li><b>Servers</b>: Servers, Cluster, Alerts</li>
+    <li><b>Access</b>: Users, Groups/Permissions, API access, Access requests</li>
+    <li><b>System</b>: General, Widgets, Updates, Database, Audit log</li>
+  </ul>
+  The sub-navigation is a left column on desktop and a horizontal scroller or select on phones. It adds a shared <code>PageHeader</code> and <code>SettingsSection</code> (title, description, body, footer with the save button).</td><td>Medium (3–5 days, mostly mechanical). Every settings page gets the same width and header. Deep links keep working because the URLs do not change.</td></tr>
+<tr><td><b>C. Command palette on top</b></td><td>⌘K / Ctrl+K to jump to any server, dashboard or setting.</td><td>Additive; a good follow-up to B rather than a replacement. Needs a <code>cmdk</code>-style dependency or about 200 lines of our own.</td></tr>
+</table></div>
+
+<div class="card rec"><strong>Recommendation:</strong> B, then C.
+  <ul>
+    <li>In the same pass, polish the server list:
+      <ul>
+        <li>status dot from tokens with a real <code>role="img"</code> label</li>
+        <li>hostname as a second line in the expanded rail</li>
+        <li>a hover card with CPU, memory and last seen</li>
+        <li>sorted with offline servers first, and an "Add server" empty state</li>
+      </ul>
+    </li>
+    <li>Add a <code>Tooltip</code> primitive (radix is already installed) for the collapsed rail.</li>
+    <li>Add a <code>Sheet</code> primitive for the mobile drawer.</li>
+  </ul>
+</div>
+
+<div class="ba">
+<figure>
+  <div class="mock" style="display:grid;grid-template-columns:150px 1fr">
+    <div class="side">
+      <div class="i on"><span class="ico"></span>Home</div>
+      <div class="i"><span class="ico"></span>Statistics</div>
+      <div class="h">Servers</div>
+      <div class="i"><span class="dot"></span>nas</div>
+      <div class="i"><span class="dot w"></span>pve-01</div>
+      <div class="i"><span class="dot g"></span>pi-hole</div>
+      <div class="i" style="opacity:.6">+ Add Server</div>
+      <div style="flex:1"></div>
+      <div class="i" style="font-size:11px">General</div><div class="i" style="font-size:11px">Account</div><div class="i" style="font-size:11px">Users</div><div class="i" style="font-size:11px">SSH Keys</div><div class="i" style="font-size:11px">Access Requests</div><div class="i" style="font-size:11px">… 9 more</div>
+      <div class="i" style="color:#fff"><span class="ico"></span>Settings <span class="sub">▲</span></div>
+    </div>
+    <div style="padding:12px"><div class="ph" style="width:40%"></div><div class="ph" style="margin-top:8px;height:120px"></div></div>
+  </div>
+  <figcaption>Today: settings expands upward inside the sidebar; servers are a name and a dot.</figcaption>
+</figure>
+<figure>
+  <div class="mock" style="display:grid;grid-template-columns:150px 1fr">
+    <div class="side">
+      <div class="i"><span class="ico"></span>Home</div>
+      <div class="i"><span class="ico"></span>Statistics</div>
+      <div class="h">Servers · 3</div>
+      <div class="i"><span class="dot b"></span><span class="grow"><span class="t" style="display:block">pi-hole</span><span class="s" style="display:block;color:inherit;opacity:.6">offline 4 min</span></span></div>
+      <div class="i"><span class="dot w"></span><span class="grow"><span class="t" style="display:block">pve-01</span><span class="s" style="display:block;color:inherit;opacity:.6">CPU 91%</span></span></div>
+      <div class="i"><span class="dot"></span><span class="grow"><span class="t" style="display:block">nas</span><span class="s" style="display:block;color:inherit;opacity:.6">10.0.0.5</span></span></div>
+      <div style="flex:1"></div>
+      <div class="i on"><span class="ico"></span>Settings</div>
+    </div>
+    <div style="display:grid;grid-template-columns:110px 1fr;gap:10px;padding:10px">
+      <div style="font-size:11px">
+        <div class="s" style="text-transform:uppercase;font-size:9px">You</div><div>Account</div><div>SSH keys</div>
+        <div class="s" style="text-transform:uppercase;font-size:9px;margin-top:6px">Access</div><div style="background:var(--primary-soft);color:var(--primary);border-radius:4px;padding:0 4px">Users</div><div>API access</div>
+        <div class="s" style="text-transform:uppercase;font-size:9px;margin-top:6px">System</div><div>Widgets</div><div>Updates</div>
+      </div>
+      <div><div style="font-weight:600;font-size:13px">Users</div><div class="s">Who can sign in and what they may do</div><div class="ph" style="margin-top:8px;height:90px;background:var(--surface);border:1px solid var(--border)"></div><div style="text-align:right;margin-top:6px"><span class="btn p">Save</span></div></div>
+    </div>
+  </div>
+  <figcaption>Proposed: one Settings entry opens an area with grouped sub-navigation and one page pattern. Servers show what needs attention first.</figcaption>
+</figure>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="menus">2. The widget screen and menu system</h2>
+
+<h3>What is wrong today</h3>
+<p>The shell (sidebar, header, <code>src/components/ui/*</code>) uses theme tokens. The declarative widget system does not, so it looks like a second app.</p>
+<ul>
+  <li><b>Hard-coded colours.</b> <code>LayoutView.tsx</code> has about 76 hard-coded <code>gray-*/blue-*</code> classes, <code>EditorBlock.tsx</code> about 70 and <code>DeclarativeWidget.tsx</code> about 33. In light mode the theme is slate, so these grays visibly clash. <code>inputClass</code> and <code>buttonClass</code> are copy-pasted between <code>LayoutView.tsx</code> and <code>EditorBlock.tsx</code>.</li>
+  <li><b>Three dialog styles.</b>
+    <ul>
+      <li><code>ScreenDialog.tsx</code> and <code>widgets/shared/ConfirmActionDialog.tsx</code> are raw radix with their own sizes (<code>max-w-lg/3xl/5xl</code>).</li>
+      <li><code>ui/dialog.tsx</code> uses a different scale.</li>
+      <li><code>dialogs/DeleteConfirmDialog.tsx</code> is a third style, so the app has two confirm dialogs.</li>
+      <li>Screens have no footer slot, so submit buttons float inside the blocks.</li>
+    </ul>
+  </li>
+  <li><b>Row actions are a strip of tiny gray icons</b> (<code>IconBtn</code> in <code>parts.tsx</code>: <code>p-1</code>, 14 px).
+    <ul>
+      <li>The Docker list shows up to six per row, and on a narrow tile they push the container name down to an ellipsis.</li>
+      <li>There is no overflow menu.</li>
+      <li>Every button greys out while any action runs.</li>
+    </ul>
+  </li>
+  <li><b>The frame ⋮ menu</b> (<code>WidgetFrame.tsx</code>) mixes the package's entries (New container, New stack, Manage) with Refresh, Settings and Remove. Only a separator tells them apart.</li>
+  <li><b>Hand-rolled tabs and sections</b> in <code>LayoutView.tsx</code>. Tabs have <code>role="tab"</code> but no arrow-key support, and the active tab is blue-500 rather than <code>primary</code>.</li>
+  <li><b>Feedback is a dismissible notice string</b> inside the widget (<code>useActionRunner.tsx</code>), although <code>ui/toast</code> exists.</li>
+  <li><b>Full-page screens</b> (<code>ScreenPage.tsx</code>) have a "Back to the dashboard" text link, and the breadcrumb shows a raw <code>/widgets/&lt;id&gt;</code>.</li>
+</ul>
+
+<h3>Options</h3>
+<div class="scroll"><table>
+<tr><th>Option</th><th>What</th><th>Trade-offs</th></tr>
+<tr><td><b>A. Re-skin only</b></td><td>Search and replace <code>gray-*</code> with tokens (<code>text-muted-foreground</code>, <code>border-border</code>, <code>bg-muted</code>). Share <code>inputClass</code> and <code>buttonClass</code>.</td><td>1–2 days. It fixes the clash but not the structure (dialog sizes, footers, overflow).</td></tr>
+<tr><td><b>B. Renderer on <code>ui/*</code> primitives</b> (recommended)</td><td>
+  <ul>
+    <li>Add the missing primitives: <code>Tabs</code>, <code>Select</code>, <code>Badge</code>, <code>Tooltip</code>, <code>Callout</code>, <code>Collapsible</code>, <code>Skeleton</code>.</li>
+    <li>Make <code>ScreenDialog</code> a <code>ui/dialog</code> with one size scale and a sticky footer, where an editor's <code>submits</code> render.</li>
+    <li>Merge <code>ConfirmActionDialog</code> into one <code>ConfirmDialog</code>.</li>
+    <li>Group the frame ⋮ menu by label: the package entries under the widget name, then "Widget" (Refresh, Settings, Remove).</li>
+    <li>Row actions: as many as fit, the rest in a ⋯ menu (already in the prototype).</li>
+    <li>Results go to toasts.</li>
+  </ul></td><td>About 1 week. Every package gets it for free with no spec change, and the look matches the shell. The risk is visual regressions in the Docker editor screens, which need a manual pass.</td></tr>
+<tr><td><b>C. Spec-level "menus"</b></td><td>Let a spec declare grouped menus (<code>menu: [{group, items}]</code>), primary or secondary actions, and keyboard shortcuts.</td><td>More power for authors, but more spec surface to support forever. Do it only when a second package needs it.</td></tr>
+</table></div>
+
+<div class="card rec"><strong>Recommendation:</strong> B.
+  <ul>
+    <li>It is core-only and generic, and old specs render with the new look unchanged.</li>
+    <li>Keep C in reserve.</li>
+    <li>Today's spec already has the information needed: <code>actions</code> order gives priority, and <code>confirm.destructive</code> marks danger. Destructive actions can therefore be sorted to the bottom of a ⋯ menu and shown in red without new keys.</li>
+  </ul>
+</div>
+
+<div class="ba">
+<figure>
+  <div class="mock" style="padding:10px">
+    <div class="wf" style="max-width:300px">
+      <div class="hd">Docker Containers <span class="chip">nas</span> <span class="btn">⋮</span></div>
+      <div class="bd">
+        <div class="row"><span class="dot"></span><div class="grow"><div class="t">home-assi…</div><div class="s">ghcr.io/home-assistant…</div></div><span class="btn">▤</span><span class="btn">›_</span><span class="btn">✎</span><span class="btn">↻</span><span class="btn">■</span></div>
+        <div class="row"><span class="dot g"></span><div class="grow"><div class="t">jelly…</div><div class="s">jellyfin/jellyfin · Exi…</div></div><span class="btn">▤</span><span class="btn">›_</span><span class="btn">✎</span><span class="btn">▶</span></div>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:10px;align-items:flex-start">
+      <div class="menu"><div class="mi">+ New container</div><div class="mi">New stack</div><div class="mi">Manage</div><div class="sep"></div><div class="mi">Refresh</div><div class="mi">Settings</div><div class="sep"></div><div class="mi red">Remove</div></div>
+    </div>
+  </div>
+  <figcaption>Today: five or six 14 px icons per row eat the name. The ⋮ menu mixes package and frame entries.</figcaption>
+</figure>
+<figure>
+  <div class="mock" style="padding:10px">
+    <div class="wf" style="max-width:300px">
+      <div class="hd">Docker Containers <span class="chip">nas</span> <span class="btn">⋮</span></div>
+      <div class="bd">
+        <div class="row"><span class="dot"></span><div class="grow"><div class="t">home-assistant</div><div class="s">ghcr.io/home-assistant · Up 3 days</div></div><span class="btn o">▤</span><span class="btn o">›_</span><span class="btn o">⋯</span></div>
+        <div class="row"><span class="dot g"></span><div class="grow"><div class="t">jellyfin</div><div class="s">jellyfin/jellyfin · Exited (0)</div></div><span class="btn o">▤</span><span class="btn o">›_</span><span class="btn o">⋯</span></div>
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;margin-top:10px;align-items:flex-start;flex-wrap:wrap">
+      <div class="menu"><div class="mi f">✎ Edit</div><div class="mi">↻ Restart</div><div class="sep"></div><div class="mi red">■ Stop</div></div>
+      <div class="menu"><div class="lab">Docker Containers</div><div class="mi">+ New container</div><div class="mi">New stack</div><div class="mi">Manage…</div><div class="sep"></div><div class="lab">Widget</div><div class="mi">Refresh <span class="kb">R</span></div><div class="mi">Settings</div><div class="mi red">Remove</div></div>
+    </div>
+  </div>
+  <figcaption>Proposed: the first actions as buttons, the rest in a per-row ⋯ menu (destructive last, red). The frame menu is grouped by label.</figcaption>
+</figure>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="content">3. Widget content that scales with widget size</h2>
+
+<h3>What is wrong today</h3>
+<ul>
+  <li><b>Widgets do not know how big they are.</b>
+    <ul>
+      <li><code>WidgetFrame.tsx</code> sets <code>@container</code>, but only the header uses it (the server chip at <code>@[16rem]</code>).</li>
+      <li>The declarative renderer (<code>DeclarativeWidget.tsx</code>, <code>LayoutView.tsx</code>, <code>parts.tsx</code>) renders the same blocks at 3 columns and at 24.</li>
+      <li>A few rules use the <em>screen</em> breakpoint (<code>sm:inline</code> for list badges, <code>sm:max-w-[220px]</code> for the filter). That is wrong inside a grid: a small tile on a big screen gets the big-screen treatment.</li>
+    </ul>
+  </li>
+  <li><b>No way for a spec to say what matters.</b>
+    <ul>
+      <li>A package cannot say "this column is optional", "the filter is not needed on a tiny tile" or "show two buttons, the rest in a menu".</li>
+      <li><code>when</code> conditions only see data, never size.</li>
+    </ul>
+  </li>
+  <li><b>Everything is <code>text-xs</code> and plain.</b> There is no density step, no headline number for small tiles, and no skeleton loading.</li>
+</ul>
+
+<h3>Options</h3>
+<div class="scroll"><table>
+<tr><th>Option</th><th>What</th><th>Trade-offs</th></tr>
+<tr><td><b>A. Automatic only</b></td><td>The renderer adapts on its own: actions overflow into a menu, padding tightens, and badges hide on narrow tiles.</td><td>No spec change, and old packages improve. But the renderer must guess what is important.</td></tr>
+<tr><td><b>B. Size classes and <code>hideBelow</code> hints</b> (recommended, prototyped)</td><td>The frame measures its content box and assigns <code>xs &lt;280px</code>, <code>sm &lt;420</code>, <code>md &lt;640</code> or <code>lg</code>. Specs opt in with:
+  <ul>
+    <li><code>hideBelow</code> on any v2 block, fields item, table column, summary entry, filter and toggle</li>
+    <li><code>row.inline</code> (buttons per size)</li>
+    <li><code>row.subtitleHideBelow</code></li>
+  </ul>
+  Sensible defaults (A) apply when a spec says nothing.</td><td>Small, declarative and generic, and dialogs and pages always count as <code>lg</code>. Older servers ignore the unknown keys, because validators copy known keys only, so a package that uses them still installs there and shows everything.</td></tr>
+<tr><td><b>C. Size variants</b></td><td><code>view.variants: { xs: {…view…}, md: {…} }</code>: a whole alternative view per size, for example a single headline number on <code>xs</code> and a full table on <code>md</code>.</td><td>The most expressive option. Specs get longer, and two views must be kept in sync. Worth adding later for "stat tile" widgets, on top of B.</td></tr>
+<tr><td><b>D. Density levels</b></td><td>A frame-level <code>density: compact|comfortable</code>, chosen per widget in its settings, that switches type scale and padding.</td><td>Orthogonal to B. Cheap once the renderer uses tokens (section 2), so do it there.</td></tr>
+</table></div>
+
+<div class="card rec"><strong>Recommendation:</strong> B now, built on A's defaults; D with the re-skin; C when a "stat" widget needs it.
+  <ul>
+    <li>Size is measured on the widget, never the screen, so a 4-column tile behaves the same on a phone and on a 4K monitor.</li>
+    <li>The size context is a core React context (<code>useWidgetSize()</code>), so even a non-declarative widget can use it.</li>
+  </ul>
+</div>
+
+<h3>How the Docker widget uses it</h3>
+<p>The package only adds keys to its own <code>manifest.json</code>. Core code never names it. The prototype ships exactly this, bumping the package to 1.0.13:</p>
+<pre><code>"view": {
+  "type": "list",
+  "filter":  { "fields": ["name", "image"], "placeholder": "Filter", "hideBelow": "sm" },
+  "toggles": [{ "key": "stopped", "label": "stopped", "default": true, "hideWhen": {…}, "hideBelow": "sm" }],
+  "row": {
+    "title": "{name}", "subtitle": "{image} · {status}",
+    "actions": ["logs", "shell", "edit", "restart", "stop", "start"],
+    "inline": { "xs": 0, "sm": 2, "md": 4 }
+  }
+}</code></pre>
+
+<div class="mock" style="padding:10px;display:grid;grid-template-columns:150px 230px minmax(0,1fr);gap:10px;align-items:start;overflow-x:auto">
+  <div class="wf"><div class="hd">Docker</div><div class="bd">
+    <div class="s" style="padding:2px 4px"><b style="color:var(--text)">7</b> running <b style="color:var(--text)">9</b> total</div>
+    <div class="row"><span class="dot"></span><div class="grow"><div class="t">homeassist…</div><div class="s">ghcr.io/h…</div></div><span class="btn o">⋯</span></div>
+    <div class="row"><span class="dot g"></span><div class="grow"><div class="t">jellyfin</div><div class="s">Exited</div></div><span class="btn o">⋯</span></div>
+  </div><div class="s" style="padding:4px 6px">xs: no filter or toggle, every action in ⋯</div></div>
+  <div class="wf"><div class="hd">Docker <span class="chip">nas</span></div><div class="bd">
+    <div class="s" style="padding:2px 4px"><b style="color:var(--text)">7</b> running · <b style="color:var(--text)">9</b> total <span class="pill" style="float:right">Filter</span></div>
+    <div class="row"><span class="dot"></span><div class="grow"><div class="t">home-assistant</div><div class="s">ghcr.io/home-assistant · Up</div></div><span class="btn">▤</span><span class="btn">›_</span><span class="btn o">⋯</span></div>
+    <div class="row"><span class="dot g"></span><div class="grow"><div class="t">jellyfin</div><div class="s">jellyfin/jellyfin · Exited</div></div><span class="btn">▤</span><span class="btn">›_</span><span class="btn o">⋯</span></div>
+  </div><div class="s" style="padding:4px 6px">sm: 2 buttons + ⋯</div></div>
+  <div class="wf" style="min-width:320px"><div class="hd">Docker Containers <span class="chip">nas</span></div><div class="bd">
+    <div class="s" style="padding:2px 4px"><b style="color:var(--text)">7</b> running · <b style="color:var(--text)">9</b> total <span class="pill" style="float:right">Filter … ☑ stopped</span></div>
+    <div class="row"><span class="dot"></span><div class="grow"><div class="t">home-assistant</div><div class="s">ghcr.io/home-assistant/home-assistant · Up 3 days</div></div><span class="btn">▤</span><span class="btn">›_</span><span class="btn">✎</span><span class="btn">↻</span><span class="btn">■</span></div>
+    <div class="row"><span class="dot g"></span><div class="grow"><div class="t">jellyfin</div><div class="s">jellyfin/jellyfin · Exited (0) 2 hours ago</div></div><span class="btn">▤</span><span class="btn">›_</span><span class="btn">✎</span><span class="btn">▶</span></div>
+  </div><div class="s" style="padding:4px 6px">md/lg: as today (lg shows every button)</div></div>
+</div>
+
+<h3>Rules for the spec keys</h3>
+<ul>
+  <li><b>Small set.</b> <code>hideBelow</code> accepts <code>sm|md|lg</code> only (<code>xs</code> would mean "never hidden", so it is rejected to catch typos). <code>row.inline</code> accepts 0–10 per size; a size that is left out takes the nearest smaller one. A ⋯ menu with a single entry is never made.</li>
+  <li><b>Validated like everything else</b> (<code>src/lib/widgets/runtime/size.ts</code>, called from <code>spec.ts</code> and <code>spec-v2.ts</code>). A malformed hint fails the install with a message, as any other spec error would.</li>
+  <li><b>Still to add later:</b>
+    <ul>
+      <li>a height class (<code>short</code>, for 2-row tiles, to drop summaries)</li>
+      <li><code>view.variants</code> (option C)</li>
+      <li>a <code>stat</code> block (big number, label, trend, sparkline) so small tiles stop looking "basic"</li>
+    </ul>
+  </li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="layouts">4. Responsive dashboard layouts</h2>
+
+<h3>What is wrong today</h3>
+<p>The grid (<code>src/components/dashboard/DashboardGrid.tsx</code>, react-grid-layout <code>Responsive</code>) has seven breakpoints, from <code>xxl</code> with 36 columns down to <code>xxs</code> with 2, measured on the container (<code>src/lib/widget-sizes.ts</code>). Storage is:</p>
+<ul>
+  <li><code>widgets.grid_*</code>: the lg (24-column) layout.</li>
+  <li><code>widgets.layouts</code> (JSON): per-breakpoint overrides.</li>
+</ul>
+<p>Sizes that are not saved derive from lg: scaled sideways, and stacked on phones.</p>
+<p>The flaw: <b>an edit only touches the breakpoint you are on</b>.</p>
+<ul>
+  <li>Arrange the dashboard on a big monitor (xl, 1600 px and wider) and only <code>layouts.xl</code> changes.</li>
+  <li>The laptop (lg), small laptop (md) and tablet (sm) keep deriving from the <em>old</em> lg layout, so they look unrelated to what you built.</li>
+  <li>Every screen size has to be arranged separately, and a widget added later lands in a different place on each.</li>
+</ul>
+<p>That is exactly the "I can make it look decent for one layout, but when I change screens it doesn't lay out the same" report.</p>
+
+<h3>Options</h3>
+<div class="scroll"><table>
+<tr><th>Option</th><th>How it works</th><th>Trade-offs</th></tr>
+<tr><td><b>A. Independent layout per breakpoint</b> (today)</td><td>Each size is arranged on its own.</td><td>Maximum control, but you arrange up to six times, and nothing carries over.</td></tr>
+<tr><td><b>B. One ordered layout that reflows</b></td><td>Store only an order and a preferred size per widget. Pack them row by row (masonry or flow) for each column count.</td><td>Zero per-size work, and phones are trivially correct. But you lose free 2-D placement (side columns, a tall widget next to two short ones), which people building home-lab walls do use. It also needs a new packer and a data migration.</td></tr>
+<tr><td><b>C. One base layout that follows your last edit, plus overrides</b> (recommended, prototyped)</td><td>
+  <ul>
+    <li><code>grid_*</code> becomes the <em>base</em>, in 24-column units.</li>
+    <li>An edit on any multi-column size saves that size's arrangement (<code>layouts[bp]</code>; <code>layouts.lg</code> for lg) <em>and</em> becomes the base, scaled to 24 columns.</li>
+    <li>Sizes you never arranged follow the base. Sizes you did arrange keep their own arrangement until you press <b>Reset this size</b>.</li>
+    <li><b>Use on all sizes</b> makes the current arrangement the only one.</li>
+  </ul></td><td>Keeps 2-D placement, needs no migration, and old data renders exactly as before. One subtlety: a laptop layout arranged before this change is not marked as its own, so it follows a later edit on another size. "Use on all sizes" and "Reset this size" make this explicit and recoverable.</td></tr>
+</table></div>
+
+<div class="card rec"><strong>Recommendation:</strong> C.
+  <ul>
+    <li>It matches how people actually work: arrange once on the main screen, and tweak the odd size if needed.</li>
+    <li>The edit bar says which size you are arranging and whether it follows the base or has its own arrangement.</li>
+  </ul>
+</div>
+
+<div class="mock" style="padding:10px">
+  <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;border:1px solid color-mix(in srgb,var(--primary) 35%,transparent);background:color-mix(in srgb,var(--primary) 7%,transparent);border-radius:8px;padding:8px 10px;margin-bottom:8px">
+    <span class="ico" style="color:var(--primary)"></span>
+    <div class="grow"><div style="font-weight:600">Arranging for large screens <span class="s" style="display:inline">(1600px and wider, 30 columns)</span></div><div class="s" style="white-space:normal">This size has its own arrangement. Your changes here also become the base that sizes you have not arranged follow.</div></div>
+    <span class="btn o" style="padding:0 8px">↺ Reset this size</span><span class="btn o" style="padding:0 8px">⧉ Use on all sizes</span>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(30,1fr);gap:4px">
+    <div class="wf" style="grid-column:span 10;height:70px"><div class="hd">CPU / Memory</div></div>
+    <div class="wf" style="grid-column:span 10;height:70px"><div class="hd">Disks</div></div>
+    <div class="wf" style="grid-column:span 10;grid-row:span 2;height:144px"><div class="hd">Docker</div></div>
+    <div class="wf" style="grid-column:span 20;height:70px"><div class="hd">Network</div></div>
+  </div>
+  <figcaption>The edit bar in the prototype (<code>LayoutEditBar.tsx</code>), above the grid in edit mode.</figcaption>
+</div>
+
+<h3>The concrete questions</h3>
+<div class="scroll"><table>
+<tr><th>Question</th><th>Answer in the prototype</th></tr>
+<tr><td>Per-breakpoint layouts or one that reflows?</td><td>Both, layered. One base (reflows by scaling to each column count), with optional per-breakpoint overrides on top.</td></tr>
+<tr><td>How do existing saved layouts migrate?</td><td>No migration.
+  <ul>
+    <li>Without <code>layouts.lg</code>, lg shows <code>grid_*</code> as before.</li>
+    <li>Existing <code>layouts.xl</code> etc. stay as overrides.</li>
+    <li>The first edit on any size moves the base, and from then on the other sizes follow.</li>
+    <li>For a dashboard that was tuned on a big screen only, one click on <b>Use on all sizes</b> makes the laptop and tablet match.</li>
+  </ul>
+  The PATCH API stays backward compatible: a body without <code>mode</code> is an edit, and a body without <code>breakpoint</code> is lg.</td></tr>
+<tr><td>What happens on a phone?</td><td>Below 768 px of container width, widgets stack in one column, in the reading order of the base (top-to-bottom, then left-to-right). Height is clamped to 3–12 rows.
+  <ul>
+    <li>Drag and resize are off on touch phones, because they fight with scrolling.</li>
+    <li>Reordering for phones on a desktop browser (narrow window) is saved as a phone-only override and never moves the base.</li>
+    <li>Next step: a "Move up / Move down" item in the ⋮ menu so phones can reorder without dragging.</li>
+  </ul></td></tr>
+<tr><td>How does a widget declare min/preferred sizes?</td><td>Already in the manifest: <code>default_size</code> (preferred, in base columns and rows) and <code>min_size</code>. They are copied to <code>grid_min_w/h</code> when the widget is added and scaled per breakpoint (<code>scaleMin</code>). Proposed additions:
+  <ul>
+    <li><code>max_size</code></li>
+    <li><code>phone_height</code> (rows when stacked), so a terminal or chart is not clamped to 12 rows and a stat tile is not inflated to 3</li>
+  </ul>
+  The size classes of section 3 make content cope with whatever size results.</td></tr>
+</table></div>
+
+<!-- ============================================================ -->
+<h2 id="compat">5. Keeping widgets self-contained</h2>
+<ul>
+  <li><b>Generic only.</b> Everything above is in generic core components: the frame, the renderer, the grid and the validators. No core file names a bundled widget, and <code>guard-rails.test.ts</code> still passes.</li>
+  <li><b>The package carries its own hints.</b> They live in its <code>manifest.json</code>, so a widget is still imported from one file through the database transfer and update path.</li>
+  <li><b>Proposed: <code>requires.bosun</code> in the manifest.</b> The manifest has a package <code>version</code> but no minimum server version today.
+    <ul>
+      <li>Add <code>"requires": { "bosun": "&gt;=1.4.0" }</code>.</li>
+      <li>The installer refuses with "needs Bosun 1.4.0 or newer" instead of failing on a validator message.</li>
+      <li>Size hints do not strictly need it, because old servers ignore them. Features that change meaning (variants, new block types) do.</li>
+      <li>The check is about 30 lines in <code>package-manifest.ts</code> plus a test.</li>
+    </ul>
+  </li>
+  <li><b>One house style.</b> New spec keys follow the existing pattern: optional, validated, documented in <code>widgets/README.md</code> ("Widget sizes" section added in the prototype).</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2 id="plan">6. Phased plan</h2>
+<div class="scroll"><table>
+<tr><th>Phase</th><th>What</th><th>Size</th><th>Risks</th></tr>
+<tr><td><b>1</b> <span class="tag done">prototype</span></td><td>Base layout and overrides, edit bar (reset / use on all sizes), widget size classes, <code>hideBelow</code> and <code>row.inline</code>, row ⋯ menus, Docker hints.</td><td>Done on the branch (review: about 1 day)</td><td>The legacy lg subtlety (section 4). Needs a manual check on a real multi-monitor setup. Widgets re-render on size class changes, but only on class changes, not on every pixel.</td></tr>
+<tr><td><b>2</b></td><td>Widget renderer on tokens and <code>ui/*</code>:
+  <ul>
+    <li><code>Tabs</code>, <code>Select</code>, <code>Badge</code>, <code>Callout</code>, <code>Skeleton</code>, <code>Tooltip</code></li>
+    <li>a single <code>ConfirmDialog</code></li>
+    <li><code>ScreenDialog</code> on <code>ui/dialog</code> with a footer</li>
+    <li>grouped frame menu, toasts for results, a density setting</li>
+  </ul></td><td>About 1 week</td><td>Visual regressions in the large Docker editor screens. Screenshot them before and after.</td></tr>
+<tr><td><b>3</b></td><td>Settings area: <code>settings/layout.tsx</code> with grouped sub-navigation, <code>PageHeader</code> and <code>SettingsSection</code>, one width, consistent titles, no <code>window.confirm</code>.</td><td>3–5 days</td><td>Low. URLs are unchanged. Many files, so keep it to one PR per settings group.</td></tr>
+<tr><td><b>4</b></td><td>Sidebar polish: server list with status, hostname and sorting, hover card, Tooltip on the collapsed rail, <code>Sheet</code> for mobile, drag reorder of dashboards.</td><td>2–3 days</td><td>Polling cost of the hover details. Reuse the existing 15 s server poll.</td></tr>
+<tr><td><b>5</b></td><td>Richer content:
+  <ul>
+    <li>a <code>stat</code> block (number, trend, sparkline)</li>
+    <li><code>view.variants</code> per size</li>
+    <li>a height class</li>
+    <li><code>max_size</code> and <code>phone_height</code></li>
+    <li><code>requires.bosun</code></li>
+    <li>⌘K palette</li>
+  </ul></td><td>1–2 weeks, can be split</td><td>Every new spec key is forever. Add one only when a bundled package uses it.</td></tr>
+</table></div>
+
+<!-- ============================================================ -->
+<h2 id="proto">7. What the prototype changes</h2>
+<p>Branch <code>prototype/ui-overhaul</code>, off <code>dev</code>. There are no flags. Old dashboards and old specs keep working.</p>
+<ul>
+  <li><code>src/lib/widget-sizes.ts</code>: the edit model (<code>applyLayoutEdit</code>, <code>applyLayoutEverywhere</code>, <code>resetLayoutAt</code>, <code>toBaseRect</code>). lg honours <code>layouts.lg</code>. Tests are in <code>widget-sizes.test.ts</code>.</li>
+  <li><code>src/app/api/dashboards/[dashboardId]/layout/route.ts</code>: <code>mode: edit | everywhere | reset</code>, using the same pure functions. The legacy body is unchanged.</li>
+  <li><code>src/hooks/useDashboard.ts</code>, <code>DashboardGrid.tsx</code>, <code>DashboardView.tsx</code>, and the new <code>LayoutEditBar.tsx</code>: the edit bar.</li>
+  <li><code>src/lib/widgets/runtime/size.ts</code> (new, with tests): size classes, <code>splitActions</code>, and validators. <code>spec.ts</code> and <code>spec-v2.ts</code> accept <code>hideBelow</code>, <code>row.inline</code> and <code>row.subtitleHideBelow</code>.</li>
+  <li><code>src/components/dashboard/widget-size.ts</code> (new): <code>useWidgetSize()</code> context. <code>WidgetFrame.tsx</code> measures the body and provides it, and <code>ScreenDialog.tsx</code> resets it to <code>lg</code>.</li>
+  <li><code>DeclarativeWidget.tsx</code>, <code>LayoutView.tsx</code>, <code>parts.tsx</code>: honour the hints, and add the per-row ⋯ menu.</li>
+  <li><code>widgets/docker/manifest.json</code> (1.0.13) and <code>widgets/README.md</code>: the hints and their documentation.</li>
+</ul>
+
+</main>
+</body>
+</html>

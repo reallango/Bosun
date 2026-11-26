@@ -8,6 +8,7 @@ import type { ViewContext } from '@/lib/widgets/runtime/layout';
 import { IconBtn, type Row } from './parts';
 import type { LayoutUi } from './LayoutView';
 import { ScreenView } from './ScreenView';
+import { WIDGET_SIZE_DEFAULT, WidgetSizeContext } from '@/components/dashboard/widget-size';
 
 const DIALOG_WIDTH: Record<string, string> = { md: 'sm:max-w-lg', lg: 'sm:max-w-3xl', xl: 'sm:max-w-5xl' };
 
@@ -39,10 +40,13 @@ export function ScreenDialog({ id, row, screen, ctx, serverId, widgetType, ui, r
             <Dialog.Close asChild><IconBtn label="Close"><X /></IconBtn></Dialog.Close>
           </div>
           <div className="min-h-0 flex-1 overflow-auto pr-1">
-            {screen && id && (
-              <ScreenView key={id + JSON.stringify(row ?? {})} screen={screen} context={screenCtx} serverId={serverId} widgetType={widgetType}
-                ui={ui} reloadToken={reloadToken} onDone={() => { if (!screen.keepOpenAfterSubmit) onClose(); onDone(); }} />
-            )}
+            {/* A dialog has the room of the largest size, whatever the size of the widget that opened it. */}
+            <WidgetSizeContext.Provider value={WIDGET_SIZE_DEFAULT}>
+              {screen && id && (
+                <ScreenView key={id + JSON.stringify(row ?? {})} screen={screen} context={screenCtx} serverId={serverId} widgetType={widgetType}
+                  ui={ui} reloadToken={reloadToken} onDone={() => { if (!screen.keepOpenAfterSubmit) onClose(); onDone(); }} />
+              )}
+            </WidgetSizeContext.Provider>
           </div>
         </Dialog.Content>
       </Dialog.Portal>

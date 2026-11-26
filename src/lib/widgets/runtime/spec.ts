@@ -18,6 +18,8 @@ import { cond, fail, FIELD_RE, ID_RE, PARAM_RE, intIn, isObj, scalar, text, vali
 export type { Validated } from './spec-util';
 import { validateDatasets, validateMenu, validateScreens, type DatasetSpec, type MenuEntry, type ScreenSpec } from './spec-screens';
 import { validateResourceFields, validateTarget, type ResourceFields, type ResourceTarget } from './resources';
+import { validateHideBelow, validateInline, type InlineActions, type WidgetSize } from './size';
+export type { WidgetSize } from './size';
 import { validateLayout, validateLookups, validateScripts, validateState, validateVariants, type ActionVariant, type Block, type LookupSpec, type ScriptSpec, type StateSpec } from './spec-v2';
 export type { ActionVariant, Block, LookupSpec, ScriptSpec, StateSpec } from './spec-v2';
 
@@ -120,7 +122,8 @@ export interface ActionSpec {
 }
 
 /** One labelled value. `bar` (a template that gives 0-100) draws a gauge under it; `when` hides it for data it does not match. */
-export interface FieldSpec { label: string; value: string; format: (typeof FORMATS)[number]; bar?: string; when?: Cond }
+/** `hideBelow` (on any part that has it): hidden while the widget is smaller than that size class (see size.ts). */
+export interface FieldSpec { label: string; value: string; format: (typeof FORMATS)[number]; bar?: string; when?: Cond; hideBelow?: WidgetSize }
 
 export interface ViewSpec {
   type: 'list' | 'table' | 'text' | 'fields' | 'chart' | 'layout';
@@ -131,11 +134,12 @@ export interface ViewSpec {
   /** A fields view: the labelled values (gauges, key and value pairs) of one data object. */
   fields?: FieldSpec[];
   empty?: string;
-  summary?: { label: string; where?: Cond }[];
-  filter?: { fields: string[]; placeholder?: string };
-  toggles?: { key: string; label: string; default: boolean; hideWhen: Cond }[];
-  row?: { dot?: { field: string; colors: Record<string, (typeof DOT_COLORS)[number]> }; title: string; subtitle?: string; badge?: string; actions: string[]; fields?: FieldSpec[] };
-  columns?: { title: string; value: string; format: (typeof FORMATS)[number] }[];
+  summary?: { label: string; where?: Cond; hideBelow?: WidgetSize }[];
+  filter?: { fields: string[]; placeholder?: string; hideBelow?: WidgetSize };
+  toggles?: { key: string; label: string; default: boolean; hideWhen: Cond; hideBelow?: WidgetSize }[];
+  /** `inline`: how many row actions show as buttons per size class (the rest go into the row's "more" menu); `subtitleHideBelow` hides the subtitle on small widgets. */
+  row?: { dot?: { field: string; colors: Record<string, (typeof DOT_COLORS)[number]> }; title: string; subtitle?: string; badge?: string; actions: string[]; fields?: FieldSpec[]; inline?: InlineActions; subtitleHideBelow?: WidgetSize };
+  columns?: { title: string; value: string; format: (typeof FORMATS)[number]; hideBelow?: WidgetSize }[];
   rowActions?: string[];
   text?: string;
 }
@@ -606,6 +610,9 @@ function validateFields(raw: unknown, where: string): Validated<FieldSpec[]> {
       if (!c.ok) return c;
       item.when = c.value;
     }
+    const hb = validateHideBelow(f.hideBelow, where);
+    if (!hb.ok) return hb;
+    Object.assign(item, hb.value);
     out.push(item);
   }
   return { ok: true, value: out };
@@ -662,8 +669,10 @@ function validateView(raw: unknown, actionIds: ReadonlySet<string>, v2 = false):
       if (!isObj(s)) return fail('view.summary entries must be objects');
       const label = text(s.label, 40);
       if (!label) return fail('each view.summary entry needs a label');
-      if (s.where === undefined) view.summary.push({ label });
-      else { const c = cond(s.where, 'view.summary "where"'); if (!c.ok) return c; view.summary.push({ label, where: c.value }); }
+      const hb = validateHideBelow(s.hideBelow, 'view.summary');
+      if (!hb.ok) return hb;
+      if (s.where === undefined) view.summary.push({ label, ...hb.value });
+      else { const c = cond(s.where, 'view.summary "where"'); if (!c.ok) return c; view.summary.push({ label, where: c.value, ...hb.value }); }
     }
   }
   if (raw.filter !== undefined) {
@@ -672,7 +681,9 @@ function validateView(raw: unknown, actionIds: ReadonlySet<string>, v2 = false):
     }
     const placeholder = raw.filter.placeholder === undefined ? undefined : text(raw.filter.placeholder, 40);
     if (placeholder === null) return fail('view.filter.placeholder is too long');
-    view.filter = { fields: raw.filter.fields as string[], ...(placeholder ? { placeholder } : {}) };
+    const hb = validateHideBelow(raw.filter.hideBelow, 'view.filter');
+    if (!hb.ok) return hb;
+    view.filter = { fields: raw.filter.fields as string[], ...(placeholder ? { placeholder } : {}), ...hb.value };
   }
   if (raw.toggles !== undefined) {
     if (!Array.isArray(raw.toggles) || raw.toggles.length > 4) return fail('view.toggles must be a list of up to 4 entries');
@@ -683,7 +694,9 @@ function validateView(raw: unknown, actionIds: ReadonlySet<string>, v2 = false):
       if (!label) return fail('each view.toggles entry needs a label');
       const c = cond(t.hideWhen, 'view.toggles "hideWhen"');
       if (!c.ok) return c;
-      view.toggles.push({ key: t.key, label, default: t.default !== false, hideWhen: c.value });
+      const hb = validateHideBelow(t.hideBelow, 'view.toggles');
+      if (!hb.ok) return hb;
+      view.toggles.push({ key: t.key, label, default: t.default !== false, hideWhen: c.value, ...hb.value });
     }
   }
   if (raw.type === 'list') {
@@ -716,6 +729,12 @@ function validateView(raw: unknown, actionIds: ReadonlySet<string>, v2 = false):
     const a = refActions(raw.row.actions, 'view.row.actions');
     if (!a.ok) return a;
     row.actions = a.value;
+    const inline = validateInline(raw.row.inline, 'view.row.inline');
+    if (!inline.ok) return inline;
+    if (inline.value) row.inline = inline.value;
+    const shb = validateHideBelow(raw.row.subtitleHideBelow, 'view.row.subtitleHideBelow');
+    if (!shb.ok) return shb;
+    if (shb.value.hideBelow) row.subtitleHideBelow = shb.value.hideBelow;
     view.row = row;
   } else {
     if (!Array.isArray(raw.columns) || raw.columns.length < 1 || raw.columns.length > 12) return fail('a table view needs 1-12 "columns"');
@@ -727,7 +746,9 @@ function validateView(raw: unknown, actionIds: ReadonlySet<string>, v2 = false):
       if (!title || !value) return fail('each column needs a title and a value');
       const format = c.format === undefined ? 'text' : c.format;
       if (!(FORMATS as readonly string[]).includes(String(format))) return fail(`column format must be one of: ${FORMATS.join(', ')}`);
-      view.columns.push({ title, value, format: format as (typeof FORMATS)[number] });
+      const hb = validateHideBelow(c.hideBelow, `column "${title}"`);
+      if (!hb.ok) return hb;
+      view.columns.push({ title, value, format: format as (typeof FORMATS)[number], ...hb.value });
     }
     const a = refActions(raw.rowActions, 'view.rowActions');
     if (!a.ok) return a;

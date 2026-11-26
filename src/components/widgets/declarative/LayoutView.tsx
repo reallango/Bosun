@@ -9,6 +9,8 @@ import {
   type JobState, type PublicActionLike, type ViewContext,
 } from '@/lib/widgets/runtime/layout';
 import { Bar, Fields } from './parts';
+import { fitsSize } from '@/lib/widgets/runtime/size';
+import { useWidgetSize } from '@/components/dashboard/widget-size';
 import { CodeBlock, EditorBlock } from './EditorBlock';
 
 const BADGE: Record<string, string> = {
@@ -50,9 +52,11 @@ const inputClass = 'w-full rounded-md border border-gray-200 bg-transparent px-2
 const buttonClass = 'inline-flex items-center gap-1 rounded-md border border-gray-200 px-2 py-1 text-xs font-medium hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:hover:bg-gray-800';
 
 export function LayoutBlocks({ blocks, ctx, ui }: { blocks: Block[]; ctx: ViewContext; ui: LayoutUi }) {
+  // Blocks with `hideBelow` drop out while the widget is smaller (dialogs and pages count as the largest size).
+  const { size } = useWidgetSize();
   return (
     <div className="space-y-2">
-      {blocks.filter(b => visible(b, ctx)).map((b, i) => <BlockView key={i} block={b} ctx={ctx} ui={ui} />)}
+      {blocks.filter(b => fitsSize(b, size) && visible(b, ctx)).map((b, i) => <BlockView key={i} block={b} ctx={ctx} ui={ui} />)}
     </div>
   );
 }

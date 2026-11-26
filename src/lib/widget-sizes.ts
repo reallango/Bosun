@@ -149,7 +149,8 @@ export function layoutForBreakpoint(widgets: LayoutSource[], bp: GridBreakpoint)
   const cols = GRID_COLS[bp];
 
   if (bp === 'lg') {
-    return widgets.map(w => ({ i: w.id, ...fitRect(lgRect(w), cols), minW: scaleMin(w.grid_min_w, cols), minH: w.grid_min_h || undefined }));
+    // An lg layout someone arranged on an lg screen (`layouts.lg`) wins over the base layout, which follows the last edit.
+    return widgets.map(w => ({ i: w.id, ...fitRect(w.layouts?.lg ?? lgRect(w), cols), minW: scaleMin(w.grid_min_w, cols), minH: w.grid_min_h || undefined }));
   }
 
   if (STACKED_BREAKPOINTS.includes(bp)) {
@@ -187,6 +188,72 @@ export function layoutForBreakpoint(widgets: LayoutSource[], bp: GridBreakpoint)
     return { i: w.id, x, y: r.y, w: width, h: r.h, minW, minH };
   });
 }
+
+// ---------------------------------------------------------------------------
+// Editing: one base layout that follows the last edit, plus per-size overrides
+//
+// widgets.grid_* is the *base* layout in 24-column units. Every screen size
+// without its own arrangement is derived from it (scaled, or stacked on
+// phones). An edit on a multi-column size saves that size's arrangement as an
+// override (`layouts[bp]`, `layouts.lg` for lg) AND becomes the new base, so
+// arranging a dashboard once on any screen carries over to the other sizes the
+// person never arranged. Sizes that were arranged keep their override until
+// they are reset. Phone (stacked) edits only save the phone override.
+//
+// Old data stays valid: without `layouts.lg`, lg shows the base exactly as before.
+// ---------------------------------------------------------------------------
+
+/** Scale a rect from `cols` columns to the 24-column base (both edges, so neighbours keep touching). */
+export function toBaseRect(r: GridRect, cols: number): GridRect {
+  if (cols === BASE_COLS) return { ...r };
+  const f = BASE_COLS / cols;
+  const left = clamp(Math.round(r.x * f), 0, BASE_COLS - 1);
+  const right = clamp(Math.round((r.x + r.w) * f), left + 1, BASE_COLS);
+  return { x: left, y: r.y, w: right - left, h: r.h };
+}
+
+export interface LayoutEditResult {
+  /** New base rect (widgets.grid_*), when the edit moves the base. */
+  grid?: GridRect;
+  /** The widget's complete new per-size overrides. */
+  layouts: WidgetLayouts;
+}
+
+/** What an edit of one widget's rect at breakpoint `bp` stores. */
+export function applyLayoutEdit(current: WidgetLayouts | null | undefined, bp: GridBreakpoint, rect: GridRect): LayoutEditResult {
+  const layouts: WidgetLayouts = { ...(current ?? {}), [bp]: { x: rect.x, y: rect.y, w: rect.w, h: rect.h } };
+  if (STACKED_BREAKPOINTS.includes(bp)) return { layouts };
+  return { layouts, grid: toBaseRect(rect, GRID_COLS[bp]) };
+}
+
+/** "Use this arrangement on every screen size": the base becomes this layout and every other override is dropped. */
+export function applyLayoutEverywhere(bp: GridBreakpoint, rect: GridRect): LayoutEditResult {
+  const own = { x: rect.x, y: rect.y, w: rect.w, h: rect.h };
+  return { grid: toBaseRect(own, GRID_COLS[bp]), layouts: bp === 'lg' ? {} : { [bp]: own } };
+}
+
+/** "Reset this screen size": drop the override so the size follows the base layout again. */
+export function resetLayoutAt(current: WidgetLayouts | null | undefined, bp: GridBreakpoint): WidgetLayouts {
+  const next: WidgetLayouts = { ...(current ?? {}) };
+  delete next[bp];
+  return next;
+}
+
+/** Does any widget have its own arrangement at `bp`? (lg counts only with `layouts.lg`, since grid_* is the base.) */
+export function hasOwnLayout(widgets: LayoutSource[], bp: GridBreakpoint): boolean {
+  return widgets.some(w => !!w.layouts?.[bp]);
+}
+
+/** Human name of a breakpoint for the editor ("Large screens (1600 px and up)"). */
+export const BREAKPOINT_LABELS: Record<GridBreakpoint, string> = {
+  xxl: 'Extra-wide screens',
+  xl: 'Large screens',
+  lg: 'Laptops',
+  md: 'Small laptops',
+  sm: 'Tablets',
+  xs: 'Phones (landscape)',
+  xxs: 'Phones',
+};
 
 export function buildResponsiveLayouts(widgets: LayoutSource[]): Record<GridBreakpoint, GridItem[]> {
   const out = {} as Record<GridBreakpoint, GridItem[]>;

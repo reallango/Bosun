@@ -3,6 +3,8 @@
 import { forwardRef } from 'react';
 import { Copy, Download, ExternalLink, Info, Layers, Pause, Pencil, Play, Plus, Power, RefreshCw, RotateCw, ScrollText, Settings, Square, TerminalSquare, Trash2, Upload } from 'lucide-react';
 import { evalCond, fillTemplate, type FieldSpec } from '@/lib/widgets/runtime/spec';
+import { fitsSize } from '@/lib/widgets/runtime/size';
+import { useWidgetSize } from '@/components/dashboard/widget-size';
 
 /** Small pieces shared by the version 1 views and the layout blocks of the declarative widget. */
 
@@ -74,7 +76,8 @@ export function Bar({ value, color }: { value: number; color?: string }) {
 
 /** Labelled values of one object: gauges for the ones with a `bar`, plain pairs for the rest. */
 export function Fields({ fields, data }: { fields: FieldSpec[]; data: unknown }) {
-  const shown = fields.filter(f => !f.when || evalCond(f.when, data));
+  const { size } = useWidgetSize();
+  const shown = fields.filter(f => fitsSize(f, size) && (!f.when || evalCond(f.when, data)));
   return (
     <div className="space-y-1.5">
       {shown.map(f => {

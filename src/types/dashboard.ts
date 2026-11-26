@@ -36,15 +36,25 @@ export interface GridRect {
   h: number;
 }
 
-/** Per-breakpoint overrides stored in widgets.layouts (JSON). Never contains `lg`. */
+/**
+ * Per-breakpoint overrides stored in widgets.layouts (JSON). widgets.grid_* is the base layout every size without an
+ * override derives from; `lg` appears here only once someone arranged the dashboard on an lg screen (see widget-sizes.ts).
+ */
 export type WidgetLayouts = Partial<Record<GridBreakpoint, GridRect>>;
 
 export interface LayoutItem extends GridRect {
   widgetId: string;
 }
 
-/** Body of PATCH /api/dashboards/[dashboardId]/layout. Missing breakpoint = `lg`. */
+/**
+ * Body of PATCH /api/dashboards/[dashboardId]/layout. Missing breakpoint = `lg`.
+ * `mode`: `edit` (default) saves the size's arrangement and makes it the base; `everywhere` makes it the only arrangement
+ * (other sizes' overrides are dropped); `reset` drops this size's overrides (no `layout` needed).
+ */
 export interface LayoutUpdateRequest {
   breakpoint?: GridBreakpoint;
-  layout: LayoutItem[];
+  layout?: LayoutItem[];
+  mode?: LayoutUpdateMode;
 }
+
+export type LayoutUpdateMode = 'edit' | 'everywhere' | 'reset';

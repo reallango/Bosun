@@ -14,6 +14,7 @@
  * reviewed scripts. Pure (no I/O).
  */
 import type { ActionSpec, Cond, FieldSpec, ParamSpec, RunAs, ViewSpec } from './spec';
+import { validateHideBelow, type WidgetSize } from './size';
 import { cond, fail, FIELD_RE, ID_RE, intIn, isObj, PARAM_RE, text, validateParam, type Obj, type Validated } from './spec-util';
 
 export const SCRIPT_FILE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*(\/[A-Za-z0-9][A-Za-z0-9._-]*)*$/;
@@ -162,7 +163,8 @@ export interface EditorSubmit {
   params: Record<string, string>;
 }
 
-export type Block =
+/** Every block may carry `hideBelow`: hidden while the widget is smaller than that size class (see size.ts). */
+export type Block = (
   | { type: 'code'; title?: string; value: string; filename?: string; when?: Cond }
   | { type: 'tabs'; tabs: { id: string; label: string; blocks: Block[] }[]; when?: Cond }
   | { type: 'editor'; fields: EditorField[]; /** The text parameter of the submit actions that receives the settings blob (none: the fields are mapped one by one in each submit's params). */ param?: string; submits: EditorSubmit[]; when?: Cond }
@@ -175,7 +177,8 @@ export type Block =
   | { type: 'select'; label: string; value: string; options: { value: string; label: string }[]; action: string; param: string; when?: Cond }
   | { type: 'jobProgress'; when?: Cond }
   /** `path`: the part of the widget's data the inner view shows (default: all of it). */
-  | { type: 'view'; view: ViewSpec; path?: string; when?: Cond };
+  | { type: 'view'; view: ViewSpec; path?: string; when?: Cond }
+) & { hideBelow?: WidgetSize };
 
 /** What the validators of version 1 give version 2 to work with. */
 export interface V2Context {
@@ -501,7 +504,9 @@ export function validateLayout(
       const w = `${where} ${b.type} block`;
       const when = whenOf(b, w);
       if (!when.ok) return when;
-      const base = when.value ? { when: when.value } : {};
+      const hb = validateHideBelow(b.hideBelow, w);
+      if (!hb.ok) return hb;
+      const base = { ...(when.value ? { when: when.value } : {}), ...hb.value };
       const actionRef = (id: unknown): string | null => (typeof id === "string" && actionIds.has(id) ? id : null);
       switch (b.type) {
         case 'section': {
