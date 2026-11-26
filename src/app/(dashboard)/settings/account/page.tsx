@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import Header from '@/components/layout/Header';
+import { PageHeader } from '@/components/settings/PageHeader';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import { useToast } from '@/components/ui/toast';
 import { accountApi, type Account } from '@/components/account/api';
@@ -25,8 +25,8 @@ export default function AccountPage() {
 
   return (
     <>
-      <Header title="My Account" />
-      <div className="page max-w-4xl space-y-4 sm:space-y-6">
+      <PageHeader title="Account" description="Your profile, password and two-step verification." />
+      <div className="space-y-4 sm:space-y-6">
         {!account ? (
           <LoadingSpinner />
         ) : (

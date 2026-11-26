@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Download, KeyRound, Lock, Package, RefreshCw, Settings as Cog, Trash2, Upload } from 'lucide-react';
-import Header from '@/components/layout/Header';
+import { PageHeader } from '@/components/settings/PageHeader';
 import { Button } from '@/components/ui/button';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import { useToast } from '@/components/ui/toast';
@@ -11,6 +11,7 @@ import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { readJson } from '@/lib/api/readJson';
 import WidgetTypeSettings, { WidgetTypeRow } from '@/components/settings/WidgetTypeSettings';
 import PackageSecrets from '@/components/settings/PackageSecrets';
+import { ConfirmActionDialog } from '@/components/widgets/shared/ConfirmActionDialog';
 
 interface InstalledItem {
   id: string;
@@ -102,6 +103,8 @@ export default function WidgetPackagesPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [confirmRemove, setConfirmRemove] = useState<string | null>(null);
   const [reviewing, setReviewing] = useState<Reviewing | null>(null);
+  // A zip that is older than the installed version, held until the admin confirms replacing it.
+  const [replacePrompt, setReplacePrompt] = useState<{ file: File; message: string } | null>(null);
   const [rows, setRows] = useState<Record<string, WidgetTypeRow>>({});
   const [openCog, setOpenCog] = useState<string | null>(null);
   const [openSecrets, setOpenSecrets] = useState<string | null>(null);
@@ -210,11 +213,11 @@ export default function WidgetPackagesPage() {
       toast(`Imported ${r.id} ${r.version}`, { variant: 'success', description: r.secretsCleared ? 'The secrets stored for the previous package were cleared.' : undefined });
       await refreshAll();
     } catch (err) {
-      if (err instanceof ApiError && err.code === 'NOT_NEWER' && !replace && window.confirm(`${err.message}\n\nReplace the installed version with this one anyway?`)) {
-        setBusy(null);
-        return importZip(file, true);
+      if (err instanceof ApiError && err.code === 'NOT_NEWER' && !replace) {
+        setReplacePrompt({ file, message: err.message });
+      } else {
+        toast('Import failed', { variant: 'error', description: errText(err) });
       }
-      toast('Import failed', { variant: 'error', description: errText(err) });
     } finally {
       setBusy(null);
       if (fileRef.current) fileRef.current.value = '';
@@ -241,16 +244,16 @@ export default function WidgetPackagesPage() {
   if (!isAdmin && !loading) {
     return (
       <>
-        <Header title="Widgets" />
-        <div className="page max-w-5xl"><p className="text-sm text-muted-foreground">Managing widget packages needs Full access.</p></div>
+        <PageHeader title="Widgets" />
+        <div><p className="text-sm text-muted-foreground">Managing widget packages needs Full access.</p></div>
       </>
     );
   }
 
   return (
     <>
-      <Header title="Widgets" />
-      <div className="page max-w-6xl space-y-4">
+      <PageHeader title="Widgets" description="Install, update and configure widget packages." />
+      <div className="space-y-4">
         <p className="text-sm text-muted-foreground">
           Widget packages add widgets and the permissions they need. Available packages come from the <code className="rounded bg-muted px-1">widgets/</code> folder
           of the Bosun repository; you can also import a package zip. System widgets are built in to Bosun. Optional widgets come from that repository; custom ones were imported from a zip. Use the cog of an installed widget to change its sizes, refresh interval and platforms.
@@ -510,6 +513,25 @@ export default function WidgetPackagesPage() {
           </div>
         )}
       </div>
+
+      <ConfirmActionDialog
+        open={!!replacePrompt}
+        onOpenChange={open => !open && setReplacePrompt(null)}
+        title="Replace the installed version?"
+        description={
+          <>
+            {replacePrompt?.message}
+            <br />
+            Replace the installed version with this one anyway?
+          </>
+        }
+        confirmLabel="Replace"
+        onConfirm={async () => {
+          const prompt = replacePrompt;
+          setReplacePrompt(null);
+          if (prompt) await importZip(prompt.file, true);
+        }}
+      />
     </>
   );
 }

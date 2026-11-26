@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Ban, Check, Copy, KeySquare, Plus, ShieldCheck, Trash2, TriangleAlert } from 'lucide-react';
-import Header from '@/components/layout/Header';
+import { PageHeader } from '@/components/settings/PageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -247,8 +247,8 @@ export default function ApiAccessPage() {
 
   return (
     <>
-      <Header title="API Access" />
-      <div className="page max-w-6xl space-y-4">
+      <PageHeader title="API access" description="Keys for scripts and integrations." />
+      <div className="space-y-4">
         {!loading && !isAdmin ? (
           <AdminOnlyNotice />
         ) : (

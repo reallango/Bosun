@@ -5,30 +5,18 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { Dialog as DialogPrimitive } from 'radix-ui';
 import {
-  Bell,
-  Package,
-  Database,
-  FileClock,
   House,
-  KeyRound,
-  KeySquare,
-  ShieldCheck,
   LayoutDashboard,
   LineChart,
-  Network,
-  ChevronDown,
-  ChevronUp,
   ChevronsLeft,
   ChevronsRight,
   Plus,
   Check,
   Pencil,
-  Server as ServerIcon,
   Settings,
-  UserCog,
-  Users,
   X,
-  type LucideIcon, Download } from 'lucide-react';
+  type LucideIcon,
+} from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { readJson } from '@/lib/api/readJson';
@@ -65,23 +53,6 @@ interface NavItem {
 const MAIN_NAV: NavItem[] = [
   { href: '/', label: 'Home', icon: House, exact: true },
   { href: '/stats', label: 'Statistics', icon: LineChart },
-];
-
-const SETTINGS_NAV: NavItem[] = [
-  { href: '/settings', label: 'General', icon: Settings, exact: true },
-  { href: '/settings/servers', label: 'Servers', icon: ServerIcon },
-  { href: '/settings/ssh-keys', label: 'SSH Keys', icon: KeyRound },
-  { href: '/settings/users', label: 'Users', icon: Users },
-  { href: '/settings/permissions', label: 'Permissions', icon: ShieldCheck },
-  { href: '/settings/api-access', label: 'API Access', icon: KeySquare },
-  { href: '/settings/access-requests', label: 'Access Requests', icon: KeyRound },
-  { href: '/settings/cluster', label: 'Cluster', icon: Network },
-  { href: '/settings/database', label: 'Database', icon: Database },
-  { href: '/settings/alerts', label: 'Alerts', icon: Bell },
-  { href: '/settings/widgets', label: 'Widgets', icon: Package },
-  { href: '/settings/updates', label: 'Updates', icon: Download },
-  { href: '/settings/audit-log', label: 'Audit Log', icon: FileClock },
-  { href: '/settings/account', label: 'My Account', icon: UserCog },
 ];
 
 function isActive(pathname: string, href: string, exact?: boolean) {
@@ -356,10 +327,9 @@ function SidebarNav({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?
   );
 }
 
-/** Settings pinned to the bottom of the sidebar; the full menu opens upward on click. */
-function SettingsMenu({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: () => void }) {
+/** Single entry pinned to the bottom of the sidebar; the settings area has its own sub-navigation. */
+function SettingsLink({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: () => void }) {
   const pathname = usePathname() || '/';
-  const [open, setOpen] = useState(false);
   const inSettings = pathname === '/settings' || pathname.startsWith('/settings/');
 
   return (
@@ -369,43 +339,7 @@ function SettingsMenu({ collapsed, onNavigate }: { collapsed: boolean; onNavigat
         if (onNavigate && (e.target as HTMLElement).closest('a')) onNavigate();
       }}
     >
-      {open && (
-        <div id="settings-menu" className="mb-0.5 max-h-[50vh] space-y-0.5 overflow-y-auto overflow-x-hidden">
-          {SETTINGS_NAV.map(item => (
-            <NavLink
-              key={item.href}
-              href={item.href}
-              label={item.label}
-              icon={item.icon}
-              active={isActive(pathname, item.href, item.exact) && !(item.href === '/settings/servers' && pathname === '/settings/servers/new')}
-              collapsed={collapsed}
-            />
-          ))}
-        </div>
-      )}
-      <button
-        type="button"
-        onClick={() => setOpen(o => !o)}
-        aria-expanded={open}
-        aria-controls="settings-menu"
-        aria-label={collapsed ? 'Settings' : undefined}
-        title={collapsed ? 'Settings' : undefined}
-        className={cn(
-          'flex min-h-9 w-full items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary',
-          collapsed && 'justify-center px-0',
-          inSettings && !open ? 'text-white' : 'text-sidebar-muted',
-          'hover:bg-sidebar-accent/60 hover:text-white'
-        )}
-      >
-        <Settings className="size-4 shrink-0" aria-hidden />
-        {!collapsed && (
-          <>
-            <span className="flex-1 truncate text-left">Settings</span>
-            {open ? <ChevronDown className="size-4 shrink-0" aria-hidden /> : <ChevronUp className="size-4 shrink-0" aria-hidden />}
-          </>
-        )}
-      </button>
+      <NavLink href="/settings" label="Settings" icon={Settings} active={inSettings} collapsed={collapsed} />
     </div>
   );
 }
@@ -472,7 +406,7 @@ export default function Sidebar() {
           </div>
         )}
         <SidebarNav collapsed={collapsed} />
-        <SettingsMenu collapsed={collapsed} />
+        <SettingsLink collapsed={collapsed} />
       </aside>
 
       {/* Phone: off-canvas drawer */}
@@ -497,7 +431,7 @@ export default function Sidebar() {
               </DialogPrimitive.Close>
             </div>
             <SidebarNav collapsed={false} onNavigate={() => setMobileOpen(false)} />
-            <SettingsMenu collapsed={false} onNavigate={() => setMobileOpen(false)} />
+            <SettingsLink collapsed={false} onNavigate={() => setMobileOpen(false)} />
           </DialogPrimitive.Content>
         </DialogPrimitive.Portal>
       </DialogPrimitive.Root>
