@@ -388,7 +388,8 @@ exactly as described above when no group is involved.
 ### Importing stacks from Portainer
 
 Stacks that another tool started (for example Portainer) can become Bosun stacks: **Settings → Servers → a server →
-Import stacks**. Each is stored under the same project name, so its containers and volumes are kept.
+Import stacks**. Each is stored under the same project name, so its volumes (data) are kept; Docker Compose re-creates the
+containers once from Bosun's copy, so importing is a short restart of the stack.
 
 - **From Portainer** (needs Portainer's address and an API key from *My account → Access tokens*; tick *Accept a
   self-signed certificate* for Portainer's default HTTPS): the exact compose file and variables, or, for a stack Portainer
@@ -397,7 +398,7 @@ Import stacks**. Each is stored under the same project name, so its containers a
   written out literally.
 - **Detach from Portainer** is chosen per stack. Portainer cannot forget a stack without stopping it (its delete runs
   `docker compose down`, volumes kept), so Bosun first starts a small waiter on the host that brings the stack straight back
-  from Bosun's copy, then deletes it in Portainer: a short restart. Without detaching, Portainer keeps listing it, and it
+  from Bosun's copy, then deletes it in Portainer: one more short restart. Without detaching, Portainer keeps listing it, and it
   must not be redeployed or deleted there.
 - A node's own Bosun stack is imported from **another node's** Bosun (open that node's address), so no Bosun ever restarts
   itself in the middle of the import.

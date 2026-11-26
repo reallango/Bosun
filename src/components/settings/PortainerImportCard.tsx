@@ -92,8 +92,8 @@ export function PortainerImportCard({ serverId }: { serverId: string }) {
       <CardHeader><CardTitle>Import stacks (Portainer)</CardTitle></CardHeader>
       <CardContent className="space-y-4">
         <p className="text-xs text-muted-foreground">
-          Stacks that another tool started on this server can become Bosun stacks under the same name, so their containers and volumes
-          are kept. With Portainer&apos;s address and an API key (Portainer: My account &gt; Access tokens) Bosun copies the exact compose file,
+          Stacks that another tool started on this server can become Bosun stacks under the same name, so their volumes (data) are kept.
+          Importing restarts the stack once (its containers are re-created from Bosun's copy). With Portainer&apos;s address and an API key (Portainer: My account &gt; Access tokens) Bosun copies the exact compose file,
           variables and git settings; otherwise it rebuilds the compose file from the running containers.
         </p>
         <div className="grid gap-3 sm:grid-cols-2">
@@ -151,7 +151,7 @@ export function PortainerImportCard({ serverId }: { serverId: string }) {
                     {c.portainer && (
                       <label className="flex items-center gap-1.5 text-xs">
                         <input type="checkbox" checked={ch.detach} onChange={e => setChoice(p => ({ ...p, [c.name]: { ...ch, detach: e.target.checked } }))} />
-                        Detach from Portainer {c.running && <span className="text-muted-foreground">(stops and restarts it once: Portainer cannot let go otherwise)</span>}
+                        Detach from Portainer {c.running && <span className="text-muted-foreground">(one more short restart: Portainer cannot let go otherwise)</span>}
                       </label>
                     )}
                     <Button size="sm" onClick={() => runImport(c)} disabled={busy !== null}>{busy === c.name ? 'Starting…' : 'Import'}</Button>
