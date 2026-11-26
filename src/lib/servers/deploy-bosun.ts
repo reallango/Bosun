@@ -20,9 +20,11 @@ import * as clusterConfig from '@/lib/cluster/config';
 import { createJoinCode } from '@/lib/cluster/control';
 import { getUpdateConfig } from '@/lib/update/rollout';
 import { getJob } from '@/lib/widgets/jobs/store';
-import { loadDataset } from '@/lib/widgets/runtime/execute';
+import { loadDataset, loadRuntimeData } from '@/lib/widgets/runtime/execute';
 import { runWidgetAction } from '@/lib/widgets/runtime/run-action';
 import { stackManager } from '@/lib/portainer/import';
+import { nodeName } from '@/lib/network/node-host';
+import { records, webAddress } from '@/lib/update/nodes';
 
 export type DeployMode = 'join' | 'standalone';
 
@@ -83,6 +85,87 @@ export async function getDeploy(serverId: string): Promise<BosunDeploy | null> {
   try { return JSON.parse(v) as BosunDeploy; } catch { return null; }
 }
 
+/** Whether, and how, Bosun already runs on a server. */
+export type BosunRunning =
+  | { kind: 'node'; node: string; self: boolean; web: string | null }
+  | { kind: 'stack'; name: string };
+
+export interface BosunRunningCheck {
+  running: BosunRunning | null;
+  /** Set when the server could not be asked (no Docker, offline, ...): there is no answer either way. */
+  check_error: string | null;
+}
+
+type Row = Record<string, unknown>;
+const str = (v: unknown) => (typeof v === 'string' ? v : v == null ? '' : String(v));
+const short = (e: unknown) => (e instanceof Error ? e.message : String(e)).slice(0, 300);
+/** The key node records use in app_config. */
+const nodeKey = (node: string) => node.replace(/[^A-Za-z0-9_.-]/g, '_');
+
+/** Is this container image the configured update image (any tag) or the local image `bosun:*`? */
+export function isBosunImage(image: string, configured: string): boolean {
+  const ref = image.trim().split('@')[0];
+  if (!ref) return false;
+  const slash = ref.lastIndexOf('/');
+  const colon = ref.lastIndexOf(':');
+  const repo = colon > slash ? ref.slice(0, colon) : ref;
+  return repo === 'bosun' || (!!configured && repo === configured.replace(/\/+$/, ''));
+}
+
+/** The node of this cluster that records this server, with its web address when it can be worked out. */
+async function nodeOnServer(serverId: string): Promise<{ node: string; self: boolean; web: string | null } | null> {
+  const recs = await records();
+  const me = nodeKey(nodeName());
+  for (const [node, rec] of Array.from(recs)) {
+    if (rec.server_id !== serverId) continue;
+    let web: string | null = null;
+    try {
+      const cfg = await getUpdateConfig();
+      const n = (await rqlite.getNodes()).find(x => x.id === node || nodeKey(x.id) === node);
+      web = webAddress(n?.api_addr ?? n?.addr, cfg.webPort);
+    } catch { /* the address is optional */ }
+    return { node, self: node === me, web };
+  }
+  return null;
+}
+
+/**
+ * Does Bosun already run on this server? A node of this cluster wins (it records its server in `update.node.<node>`);
+ * otherwise a stack called "bosun" or a container running a Bosun image (the stack-managing widget's data). When the
+ * server cannot be asked, `running` is null and `check_error` says why.
+ */
+export async function detectBosunRunning(serverId: string): Promise<BosunRunningCheck> {
+  let node: Awaited<ReturnType<typeof nodeOnServer>>;
+  try { node = await nodeOnServer(serverId); } catch (e) { return { running: null, check_error: short(e) }; }
+  if (node) return { running: { kind: 'node', ...node }, check_error: null };
+
+  let loaded: Awaited<ReturnType<typeof stackManager>>;
+  try { loaded = await stackManager(); } catch (e) { return { running: null, check_error: short(e) }; }
+  if (!loaded?.spec.stacks) return { running: null, check_error: 'No installed widget manages Compose stacks (install one under Settings > Widgets)' };
+  const s = loaded.spec.stacks;
+
+  let stacks: Row[];
+  try {
+    const r = await loadDataset(serverId, loaded, s.list, {});
+    stacks = Array.isArray(r.data) ? r.data as Row[] : [];
+  } catch (e) {
+    return { running: null, check_error: short(e) };
+  }
+  if (stacks.some(x => str(x.name) === STACK)) return { running: { kind: 'stack', name: STACK }, check_error: null };
+
+  let rows: Row[];
+  try {
+    const rt = await loadRuntimeData(serverId, loaded, true);
+    rows = Array.isArray(rt?.data) ? rt.data as Row[] : [];
+  } catch (e) {
+    return { running: null, check_error: short(e) };
+  }
+  const cfg = await getUpdateConfig().catch(() => ({ image: '', webPort: 3042 }));
+  const c = rows.find(r => isBosunImage(str(r.image), cfg.image));
+  if (c) return { running: { kind: 'stack', name: str(c[s.fields.project]) || str(c[s.fields.name]) || STACK }, check_error: null };
+  return { running: null, check_error: null };
+}
+
 async function save(d: BosunDeploy): Promise<void> {
   await rqlite.execute(
     `INSERT INTO app_config (key, value, description, updated_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)
@@ -118,6 +201,8 @@ export async function startBosunDeploy(auth: TokenPayload, serverId: string, opt
   if (!clusterConfig.isValidHost(host) || host === 'localhost' || host.startsWith('127.')) throw new DeployError('The server\'s address must be one the other machines reach (LAN IP or DNS name)', 400, 'VALIDATION');
   const prev = await getDeploy(serverId);
   if (prev?.status === 'running' && Date.now() - Date.parse(prev.started_at) < 60 * 60_000) throw new DeployError('Bosun is already being deployed to this server');
+  const node = await nodeOnServer(serverId);
+  if (node) throw new DeployError(`This server already runs Bosun: it is node ${node.node} of this cluster`);
 
   const loaded = await stackManager();
   if (!loaded?.spec.stacks) throw new DeployError('No installed widget manages Compose stacks (install one that does, under Settings > Widgets)');
@@ -130,7 +215,12 @@ export async function startBosunDeploy(auth: TokenPayload, serverId: string, opt
   } catch (e) {
     throw new DeployError(`Docker is not ready on this server (install it under "Set up this server"): ${e instanceof Error ? e.message : e}`.slice(0, 400));
   }
-  if (stacks.some(x => x.name === STACK)) throw new DeployError('This server already has a stack called "bosun"');
+  if (stacks.some(x => x.name === STACK)) throw new DeployError(`This server already runs Bosun: stack ${STACK}`);
+
+  const cfg = await getUpdateConfig();
+  const containers = await loadRuntimeData(serverId, loaded, true).catch(() => null);
+  const onImage = (Array.isArray(containers?.data) ? containers!.data as Row[] : []).find(r => isBosunImage(str(r.image), cfg.image));
+  if (onImage) throw new DeployError(`This server already runs Bosun: stack ${str(onImage[loaded.spec.stacks.fields.project]) || str(onImage[loaded.spec.stacks.fields.name]) || STACK}`);
 
   const mode: DeployMode = opts.mode === 'standalone' ? 'standalone' : 'join';
   const nodeName = (opts.nodeName?.trim() || nodeNameFrom(String(srv.name))).toLowerCase();
@@ -142,7 +232,6 @@ export async function startBosunDeploy(auth: TokenPayload, serverId: string, opt
     if (nodes.some(n => (n.addr ?? '').split(':')[0] === host)) throw new DeployError('That server is already a member of this cluster');
   }
 
-  const cfg = await getUpdateConfig();
   const d: BosunDeploy = {
     server_id: serverId, mode, node_name: nodeName, image: `${cfg.image}:${cfg.channel}`,
     web: `http://${host.includes(':') ? `[${host}]` : host}:${cfg.webPort}`,
