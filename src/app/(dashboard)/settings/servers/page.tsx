@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Pencil, Plus } from 'lucide-react';
-import Header from '@/components/layout/Header';
+import { PageHeader } from '@/components/settings/PageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -83,8 +83,8 @@ export default function ServersPage() {
 
   return (
     <>
-      <Header title="Servers" />
-      <div className="page max-w-6xl">
+      <PageHeader title="Servers" description="Machines Bosun connects to." />
+      <div>
         <Card>
           <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
             <CardTitle>Managed servers</CardTitle>

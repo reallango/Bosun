@@ -6,7 +6,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import Header from '@/components/layout/Header';
+import { PageHeader } from '@/components/settings/PageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -79,8 +79,8 @@ export default function DatabaseSettingsPage() {
 
   return (
     <>
-      <Header title="Database" />
-      <div className="page max-w-4xl space-y-4 sm:space-y-6">
+      <PageHeader title="Database" description="Health, migrations and backups." />
+      <div className="space-y-4 sm:space-y-6">
         {error && (
           <div className="rounded-md bg-destructive/10 p-3 text-sm text-destructive">
             {error}

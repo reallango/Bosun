@@ -1,6 +1,6 @@
 'use client';
 
-import Header from '@/components/layout/Header';
+import { PageHeader } from '@/components/settings/PageHeader';
 import { useAuth } from '@/hooks/useAuth';
 import { roleLabel } from '@/lib/auth/levels';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -21,11 +21,11 @@ export default function SettingsPage() {
 
   return (
     <>
-      <Header title="Settings" />
-      <div className="page max-w-4xl space-y-4 sm:space-y-6">
+      <PageHeader title="General" description="Application-wide settings and integrations." />
+      <div className="space-y-4 sm:space-y-6">
         <Card>
           <CardHeader>
-            <CardTitle>General</CardTitle>
+            <CardTitle>Overview</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">

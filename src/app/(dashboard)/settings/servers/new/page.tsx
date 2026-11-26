@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import Header from '@/components/layout/Header';
+import { PageHeader } from '@/components/settings/PageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -181,8 +181,8 @@ export default function NewServerPage() {
 
   return (
     <>
-      <Header title="Add Server" />
-      <div className="page max-w-2xl">
+      <PageHeader title="Add server" />
+      <div>
         <Card>
           <CardHeader>
             <CardTitle>Add Server</CardTitle>

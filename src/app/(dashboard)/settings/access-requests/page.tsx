@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import { Check, KeyRound, X } from 'lucide-react';
-import Header from '@/components/layout/Header';
+import { PageHeader } from '@/components/settings/PageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -141,8 +141,8 @@ export default function AccessRequestsPage() {
 
   return (
     <>
-      <Header title="Access requests" />
-      <div className="page max-w-5xl space-y-4">
+      <PageHeader title="Access requests" description="Requests from users and API keys that need approval." />
+      <div className="space-y-4">
         <p className="text-sm text-muted-foreground">
           API keys and users can ask for a permission (for a while or permanently, possibly for one stack or container) or for one
           action to be run once. You can approve what you hold yourself; high-risk permissions need Full access. Approved grants go

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { KeyRound, Mail, Pencil, Plus, Power, Trash2, UserRound } from 'lucide-react';
-import Header from '@/components/layout/Header';
+import { PageHeader } from '@/components/settings/PageHeader';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -311,8 +311,8 @@ export default function UsersPage() {
 
   return (
     <>
-      <Header title="Users" />
-      <div className="page max-w-6xl space-y-4">
+      <PageHeader title="Users" />
+      <div className="space-y-4">
         {!loading && !isAdmin ? (
           <AdminOnlyNotice />
         ) : (
