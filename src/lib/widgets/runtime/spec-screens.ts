@@ -14,7 +14,8 @@
 import type { ActionSpec, ParamSpec, ViewSpec } from './spec';
 import { fail, FIELD_RE, ID_RE, intIn, isObj, text, type Validated } from './spec-util';
 import { validateLayout, type Block, type ScriptSpec } from './spec-v2';
-import type { FieldSpec } from './spec';
+import type { FieldSpec } from './spec';
+import { validateResourceFields, validateTarget, type ResourceFields, type ResourceTarget } from './resources';
 
 export const MAX_DATASETS = 20;
 export const MAX_SCREENS = 12;
@@ -29,6 +30,10 @@ export interface DatasetSpec {
   cacheSec: number;
   /** The permission needed to load it (one the package declares). */
   permission: string;
+  /** The script parameter naming the one stack or container it reads (checked against limited grants). */
+  target?: ResourceTarget;
+  /** For a list: the row fields naming each row's container/stack (rows are filtered for limited grants). */
+  resources?: ResourceFields;
 }
 
 export interface ScreenLoad {
@@ -74,7 +79,11 @@ export function validateDatasets(raw: unknown, scripts: Record<string, ScriptSpe
     const cacheSec = intIn(d.cacheSec, 0, 3600, 10);
     if (cacheSec === null) return fail(`${where}: cacheSec must be 0-3600`);
     if (typeof d.permission !== 'string' || !own.has(d.permission)) return fail(`${where}: "permission" must be one of the permissions this package declares`);
-    out[id] = { script: d.script, cacheSec, permission: d.permission };
+    const target = validateTarget(d.target, where, Object.keys(scripts[d.script].params));
+    if (!target.ok) return fail(target.error);
+    const resources = validateResourceFields(d.resources, where);
+    if (!resources.ok) return fail(resources.error);
+    out[id] = { script: d.script, cacheSec, permission: d.permission, ...(target.value ? { target: target.value } : {}), ...(resources.value ? { resources: resources.value } : {}) };
   }
   return { ok: true, value: out };
 }

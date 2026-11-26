@@ -21,8 +21,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const loaded = await loadWidgetSpec(widgetType);
     const action = loaded?.spec.actions.find(a => a.id === job.actionId);
     if (!loaded || !action) return fail('Job not found', 404, 'NOT_FOUND');
-    const denied = await requirePermission(auth, action.permission, serverId);
-    if (denied) return denied;
+    // Whoever started a job may cancel it (their grant may be limited to the stack it works on); others need the
+    // action's permission for the whole server.
+    if (job.userId !== auth.userId) {
+      const denied = await requirePermission(auth, action.permission, serverId);
+      if (denied) return denied;
+    }
     const accepted = await cancelJob(jobId);
     await logAudit({
       userId: auth.userId, serverId, action: AuditActions.WIDGET_ACTION, status: accepted ? 'success' : 'failure',

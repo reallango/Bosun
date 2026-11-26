@@ -608,6 +608,29 @@ const V15_NOTIFICATION_KINDS: string[] = [
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_notifications_dedupe ON notifications(dedupe_key) WHERE dedupe_key IS NOT NULL`,
 ];
 
+// V16: a grant can be limited to one stack or container (resource_kind/resource_name, a name or a prefix ending in *)
+// and can expire (expires_at, ISO time; NULL = never). The unique key now includes the resource, so the table is
+// rebuilt (SQLite cannot change a constraint); existing grants keep their ids and become unlimited, never-expiring.
+const V16_RESOURCE_GRANTS: string[] = [
+    `CREATE TABLE permission_grants_v16 (
+        id TEXT PRIMARY KEY,
+        group_id TEXT NOT NULL REFERENCES permission_groups(id) ON DELETE CASCADE,
+        permission TEXT NOT NULL,
+        scope_type TEXT NOT NULL DEFAULT 'all' CHECK (scope_type IN ('all', 'server', 'server_group')),
+        scope_id TEXT NOT NULL DEFAULT '',
+        effect TEXT NOT NULL DEFAULT 'allow',
+        resource_kind TEXT NOT NULL DEFAULT '' CHECK (resource_kind IN ('', 'stack', 'container')),
+        resource_name TEXT NOT NULL DEFAULT '',
+        expires_at TEXT,
+        UNIQUE (group_id, permission, scope_type, scope_id, resource_kind, resource_name)
+    )`,
+    `INSERT INTO permission_grants_v16 (id, group_id, permission, scope_type, scope_id, effect)
+        SELECT id, group_id, permission, scope_type, scope_id, effect FROM permission_grants`,
+    `DROP TABLE permission_grants`,
+    `ALTER TABLE permission_grants_v16 RENAME TO permission_grants`,
+    `CREATE INDEX IF NOT EXISTS idx_permission_grants_group ON permission_grants(group_id)`,
+];
+
 export const MIGRATIONS: Migration[] = [
     {
         version: 1,
@@ -632,6 +655,7 @@ export const MIGRATIONS: Migration[] = [
     { version: 13, name: 'exec_permission', statements: V13_EXEC_PERMISSION },
     { version: 14, name: 'job_tasks', statements: V14_JOB_TASKS },
     { version: 15, name: 'notification_kinds', statements: V15_NOTIFICATION_KINDS },
+    { version: 16, name: 'resource_grants', statements: V16_RESOURCE_GRANTS },
 ];
 
 /** The schema version this build expects. */

@@ -17,7 +17,15 @@ export interface PermissionDef {
 }
 
 export type GrantScope = { type: 'all' } | { type: 'server'; id: string } | { type: 'server_group'; id: string };
-export interface Grant { permission: string; scope: GrantScope; effect?: 'allow' | 'deny' }
+/** A limit inside a server: one stack or container, or a name prefix ending in *. */
+export interface GrantResource { kind: 'stack' | 'container'; name: string }
+export interface Grant { permission: string; scope: GrantScope; effect?: 'allow' | 'deny'; resource?: GrantResource; expiresAt?: string }
+
+/** Can a grant of this permission be limited to stacks/containers? (Package permissions that act on one server.) */
+export const allowsResourceLimit = (def: PermissionDef) => def.scope === 'server' && def.source.startsWith('package:');
+
+/** A stack/container name or a prefix ending in * (as the server validates it). */
+export const RESOURCE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\*?$|^\*$/;
 
 export interface PermissionGroup {
   id: string;

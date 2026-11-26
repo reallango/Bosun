@@ -17,6 +17,7 @@
 import { cond, fail, FIELD_RE, ID_RE, PARAM_RE, intIn, isObj, scalar, text, validateParam, type Obj, type Validated } from './spec-util';
 export type { Validated } from './spec-util';
 import { validateDatasets, validateMenu, validateScreens, type DatasetSpec, type MenuEntry, type ScreenSpec } from './spec-screens';
+import { validateResourceFields, validateTarget, type ResourceFields, type ResourceTarget } from './resources';
 import { validateLayout, validateLookups, validateScripts, validateState, validateVariants, type ActionVariant, type Block, type LookupSpec, type ScriptSpec, type StateSpec } from './spec-v2';
 export type { ActionVariant, Block, LookupSpec, ScriptSpec, StateSpec } from './spec-v2';
 
@@ -57,7 +58,11 @@ export interface ConfigFilter { field: string; config: string; all?: string; def
 /** When the collected data matches `when`, the widget shows `message` (a `{field}` template over that data) instead of rows. */
 export interface Unavailable { when: Cond; message: string }
 
-interface DataCommon { filter?: ConfigFilter[]; unavailable?: Unavailable }
+interface DataCommon {
+  filter?: ConfigFilter[]; unavailable?: Unavailable;
+  /** Row fields naming each row's container/stack: someone holding the data permission only for some stacks or containers sees only those rows. */
+  resources?: ResourceFields;
+}
 
 export type DataSpec =
   | ({ source: 'snapshot'; section: string; also?: string[]; server?: boolean; path?: string; map?: Record<string, string>; permission: string } & DataCommon)
@@ -110,6 +115,8 @@ export interface ActionSpec {
   confirm?: { title: string; text?: string; destructive: boolean; requireText?: string };
   result: 'toast' | 'text' | 'none';
   after: 'refresh' | 'none';
+  /** The parameter that names the stack or container this action acts on (grants limited to one are checked against it). */
+  target?: ResourceTarget;
 }
 
 /** One labelled value. `bar` (a template that gives 0-100) draws a gauge under it; `when` hides it for data it does not match. */
@@ -334,7 +341,9 @@ function validateData(raw: unknown, ownPerms: ReadonlySet<string>, v2?: { script
   if (!map.ok) return map;
   const extras = dataExtras(raw);
   if (!extras.ok) return extras;
-  const base = { ...(path.value ? { path: path.value } : {}), ...(map.value ? { map: map.value } : {}), permission: perm, ...extras.value };
+  const res = validateResourceFields(raw.resources, 'data');
+  if (!res.ok) return fail(res.error);
+  const base = { ...(path.value ? { path: path.value } : {}), ...(map.value ? { map: map.value } : {}), permission: perm, ...extras.value, ...(res.value ? { resources: res.value } : {}) };
   if (raw.source === 'snapshot') {
     if (typeof raw.section !== 'string' || !(SNAPSHOT_SECTIONS as readonly string[]).includes(raw.section)) {
       return fail(`data.section must be one of: ${SNAPSHOT_SECTIONS.join(', ')}`);
@@ -489,10 +498,13 @@ function validateAction(raw: unknown, ownPerms: ReadonlySet<string>, v2?: { scri
       if (!c.ok) return c;
       when = c.value;
     }
+    const ttarget = validateTarget(raw.target, where, ['ref']);
+    if (!ttarget.ok) return fail(ttarget.error);
     return {
       ok: true,
       value: {
         id, label, ...(description ? { description } : {}), ...(raw.icon ? { icon: raw.icon as ActionSpec['icon'] } : {}), permission: raw.permission,
+        ...(ttarget.value ? { target: ttarget.value } : {}),
         kind: 'terminal', terminal: { ref: t.ref, refPattern: t.refPattern, command: t.command, ...(check ? { check } : {}) }, as: 'service', command: '', params: {}, timeoutSec: 30,
         ...(when ? { when } : {}), result: 'none', after: 'none',
       },
@@ -529,12 +541,15 @@ function validateAction(raw: unknown, ownPerms: ReadonlySet<string>, v2?: { scri
     if (!stail.ok) return stail;
     if (raw.job !== undefined && typeof raw.job !== 'boolean') return fail(`${where}: "job" must be true or false`);
     if (raw.stores !== undefined && raw.stores !== 'data') return fail(`${where}: "stores" must be "data" or left out`);
+    const starget = validateTarget(raw.target, where, Object.keys(sparams.value));
+    if (!starget.ok) return fail(starget.error);
     return {
       ok: true,
       value: {
         id, label, ...(description ? { description } : {}), ...(raw.icon ? { icon: raw.icon as ActionSpec['icon'] } : {}), permission: raw.permission,
         kind: 'script', as: v2.scripts[variants.value[0].script].as, command: '', params: sparams.value, timeoutSec: 30,
         variants: variants.value, ...(raw.job === true ? { job: true } : {}), ...(raw.stores === 'data' ? { stores: 'data' as const } : {}), ...stail.value,
+        ...(starget.value ? { target: starget.value } : {}),
       },
     };
   }
@@ -556,11 +571,14 @@ function validateAction(raw: unknown, ownPerms: ReadonlySet<string>, v2?: { scri
   if (timeoutSec === null) return fail(`${where}: timeoutSec must be 1-300`);
   const tail = actionTail(raw, where);
   if (!tail.ok) return tail;
+  const ctarget = validateTarget(raw.target, where, Object.keys(params.value));
+  if (!ctarget.ok) return fail(ctarget.error);
   return {
     ok: true,
     value: {
       id, label, ...(description ? { description } : {}), ...(raw.icon ? { icon: raw.icon as ActionSpec['icon'] } : {}), permission: raw.permission, kind: 'command', as: raw.as,
       command: command.value, ...(windowsCommand ? { windowsCommand } : {}), params: params.value, timeoutSec, ...tail.value,
+      ...(ctarget.value ? { target: ctarget.value } : {}),
     },
   };
 }

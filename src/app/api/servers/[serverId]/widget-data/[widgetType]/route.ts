@@ -3,6 +3,7 @@ import { requireAuth } from '@/lib/auth/middleware';
 import { hasPermission, requirePermission } from '@/lib/permissions/authorize';
 import { ok, fail, failFrom } from '@/lib/api/response';
 import { loadRuntimeData, loadWidgetSpec, RuntimeError } from '@/lib/widgets/runtime/execute';
+import { filterRows, viewFilter } from '@/lib/widgets/runtime/resource-check';
 
 /**
  * The data a package widget shows, for one server: GET /api/servers/:serverId/widget-data/:widgetType.
@@ -16,12 +17,12 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   try {
     const loaded = await loadWidgetSpec(widgetType);
     if (!loaded) return fail('Unknown widget type', 404, 'NOT_FOUND');
-    if (loaded.spec.data.permission) {
-      const denied = await requirePermission(auth, loaded.spec.data.permission, serverId);
-      if (denied) return denied;
-    }
+    // A view limited to some stacks/containers gets only their rows (data.resources); no view at all is a 403.
+    const view = await viewFilter(auth, loaded.spec.data.permission, serverId, loaded.spec.data.resources);
+    if (!view) return (await requirePermission(auth, loaded.spec.data.permission, serverId))!;
     const force = new URL(request.url).searchParams.get('force') === '1' && await hasPermission(auth, 'servers.refresh', serverId);
-    return ok(await loadRuntimeData(serverId, loaded, force));
+    const rt = await loadRuntimeData(serverId, loaded, force);
+    return ok(view === 'all' ? rt : { ...rt, data: filterRows(rt.data, loaded.spec.data.resources!, view) });
   } catch (error) {
     if (error instanceof RuntimeError) return fail(error.message, error.status, error.code);
     return failFrom(error);
