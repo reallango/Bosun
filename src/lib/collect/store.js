@@ -186,6 +186,10 @@ function cleanupStatements(cfg) {
   if (cfg.sessionDays > 0) stmts.push({ sql: "DELETE FROM sessions WHERE julianday(expires_at) < julianday('now', ?)", params: [days(cfg.sessionDays)] });
   // Permission grants that expired more than a week ago (they stopped counting when they expired).
   stmts.push({ sql: "DELETE FROM permission_grants WHERE expires_at IS NOT NULL AND julianday(expires_at) < julianday('now', '-7 days')", params: [] });
+  // Access requests nobody decided within their time expire and leave the bell; decided ones are kept 90 days.
+  stmts.push({ sql: "UPDATE access_requests SET status = 'expired' WHERE status = 'pending' AND expires_at < strftime('%Y-%m-%dT%H:%M:%fZ', 'now')", params: [] });
+  stmts.push({ sql: "UPDATE notifications SET is_read = 1, is_dismissed = 1 WHERE kind = 'access_request' AND is_dismissed = 0 AND dedupe_key IN (SELECT 'access-request:' || id FROM access_requests WHERE status <> 'pending')", params: [] });
+  stmts.push({ sql: "DELETE FROM access_requests WHERE status <> 'pending' AND julianday(created_at) < julianday('now', '-90 days')", params: [] });
   return stmts;
 }
 

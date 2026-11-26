@@ -59,6 +59,7 @@ export const BACKUP_TABLES: string[] = [
   'permission_definitions',
   'widget_packages',
   'metric_definitions',
+  'access_requests',
 ];
 
 // Tables excluded by default because they can grow very large.

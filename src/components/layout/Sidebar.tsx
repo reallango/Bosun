@@ -75,6 +75,7 @@ const SETTINGS_NAV: NavItem[] = [
   { href: '/settings/users', label: 'Users', icon: Users },
   { href: '/settings/permissions', label: 'Permissions', icon: ShieldCheck },
   { href: '/settings/api-access', label: 'API Access', icon: KeySquare },
+  { href: '/settings/access-requests', label: 'Access Requests', icon: KeyRound },
   { href: '/settings/cluster', label: 'Cluster', icon: Network },
   { href: '/settings/database', label: 'Database', icon: Database },
   { href: '/settings/alerts', label: 'Alerts', icon: Bell },

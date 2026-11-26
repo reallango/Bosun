@@ -55,7 +55,7 @@ describe('cleanup of the audit log, notifications and sessions', () => {
     ]);
     expect(cfg).toEqual({ auditDays: 0, notificationDays: 14, sessionDays: 7 });
     const s = cleanupStatements(cfg);
-    expect(s.map(x => x.sql.split(' WHERE')[0])).toEqual(['DELETE FROM notifications', 'DELETE FROM sessions', 'DELETE FROM permission_grants']);
+    expect(s.map(x => x.sql.split(' WHERE')[0])).toEqual(['DELETE FROM notifications', 'DELETE FROM sessions', 'DELETE FROM permission_grants', "UPDATE access_requests SET status = 'expired'", 'UPDATE notifications SET is_read = 1, is_dismissed = 1', 'DELETE FROM access_requests']);
     expect(s[0].params).toEqual(['-14 days']);
     expect(s[1].sql).toContain('expires_at');
   });
