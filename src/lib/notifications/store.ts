@@ -12,7 +12,7 @@ import { hasRole, isRole, type Role } from '@/lib/auth/levels';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { serverVisible } from '@/lib/permissions/effective';
 
-export type NotificationKind = 'alert' | 'widget_update' | 'widget_upgraded' | 'access_request';
+export type NotificationKind = 'alert' | 'widget_update' | 'widget_upgraded' | 'access_request' | 'bosun_update';
 export type NotificationSeverity = 'info' | 'success' | 'warning' | 'critical';
 
 export interface NewNotification {

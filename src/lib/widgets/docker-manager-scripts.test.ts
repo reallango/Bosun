@@ -920,7 +920,37 @@ exit 0`);
     expect(dockerCalls().filter(c => c.includes('-q')).length).toBeGreaterThanOrEqual(3);
     // an external stack (no stored files) cannot be guarded
     expect(out('stack_action.sh', { name: 'ext', op: 'guard_up' }).error).toMatch(/not created by Bosun/);
-  });
+  }, 20000);
+
+  it.skipIf(!hasSh)('stack_action retag pulls, tags, and re-creates only that service in the background; a failed pull changes nothing', async () => {
+    seed('bosun', { 'compose.yaml': 'x', 'bosun.meta': 'source=editor\n' });
+    fake('exit 0');
+    const params = { name: 'bosun', op: 'retag', image: 'ghcr.io/reallango/bosun:sha-abcdef0', as: 'bosun:latest', service: 'bosun' };
+    expect(out('stack_action.sh', params).done).toBe('retag: bosun bosun -> ghcr.io/reallango/bosun:sha-abcdef0');
+    const d = shDir('bosun');
+    let calls: string[] = [];
+    for (let i = 0; i < 40; i++) {
+      await new Promise(r => setTimeout(r, 250));
+      calls = dockerCalls().map(c => c.join(' ')).filter(c => c !== 'compose version');
+      if (calls.some(c => c.includes(' up '))) break;
+    }
+    expect(calls).toEqual([
+      'pull ghcr.io/reallango/bosun:sha-abcdef0',
+      'tag ghcr.io/reallango/bosun:sha-abcdef0 bosun:latest',
+      `compose -p bosun --project-directory ${d} -f ${d}/compose.yaml up -d --no-build --no-deps bosun`,
+    ]);
+    // a pull that fails: no tag, no restart
+    fs.writeFileSync(log, '');
+    fake('case "$1" in pull) echo "denied: not found" >&2; exit 1 ;; esac; exit 0');
+    expect(out('stack_action.sh', params).error).toMatch(/pulling .* failed: denied: not found/);
+    await new Promise(r => setTimeout(r, 2500));
+    expect(dockerCalls().filter(c => c.join(' ') !== 'compose version').map(c => c[0])).toEqual(['pull']);
+    // odd values are refused before anything runs
+    fs.writeFileSync(log, '');
+    expect(out('stack_action.sh', { ...params, image: 'x;reboot' }).error).toMatch(/image:/);
+    expect(out('stack_action.sh', { ...params, service: '-x' }).error).toMatch(/service:/);
+    expect(dockerCalls().filter(c => c.join(' ') !== 'compose version')).toEqual([]);
+  }, 20000);
 
   it.skipIf(!hasSh)('stack_deploy also catches shared namespaces, volumes_from, build settings and host files used as secrets', () => {
     const risky: [string, string, RegExp][] = [

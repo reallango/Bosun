@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "docker",
   "name": "Docker Containers",
-  "version": "1.0.11",
+  "version": "1.0.12",
   "description": "Containers on the host with logs, a shell, start, stop and restart; edit a container, create containers and stacks (a compose file, or one from a Git repository), and a Manage page for images, volumes and networks.",
   "author": "Bosun",
   "permissions": [
@@ -506,7 +506,8 @@
                   "update",
                   "stop",
                   "start",
-                  "guard_up"
+                  "guard_up",
+                  "retag"
                 ],
                 "maxLength": 20
               },
@@ -518,6 +519,24 @@
                 ],
                 "maxLength": 20,
                 "default": "false"
+              },
+              "image": {
+                "type": "string",
+                "pattern": "^(-|[a-z0-9][a-z0-9._/:@-]{0,254})$",
+                "maxLength": 255,
+                "default": "-"
+              },
+              "as": {
+                "type": "string",
+                "pattern": "^(-|[a-z0-9][a-z0-9._/:@-]{0,254})$",
+                "maxLength": 255,
+                "default": "-"
+              },
+              "service": {
+                "type": "string",
+                "pattern": "^(-|[A-Za-z0-9][A-Za-z0-9_.-]{0,62})$",
+                "maxLength": 63,
+                "default": "-"
               }
             },
             "secrets": [
@@ -1740,6 +1759,51 @@
               }
             ],
             "icon": "refresh-cw"
+          },
+          {
+            "id": "stack_retag",
+            "label": "Move a service to a new image",
+            "description": "Pulls an image, tags it as the image the service runs and re-creates that service (self-update of Bosun). The compose file is not changed.",
+            "permission": "docker.privileged",
+            "target": {
+              "kind": "stack",
+              "param": "name"
+            },
+            "kind": "script",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
+                "maxLength": 63
+              },
+              "service": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,62}$",
+                "maxLength": 63
+              },
+              "image": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9._/:@-]{0,254}$",
+                "maxLength": 255
+              },
+              "as": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9._/:@-]{0,254}$",
+                "maxLength": 255
+              }
+            },
+            "variants": [
+              {
+                "script": "stack_action",
+                "args": {
+                  "op": "literal:retag",
+                  "image": "param.image",
+                  "as": "param.as",
+                  "service": "param.service"
+                }
+              }
+            ],
+            "icon": "download"
           },
           {
             "id": "stack_remove",
@@ -4053,7 +4117,8 @@
             "state": "state",
             "project": "compose",
             "service": "service"
-          }
+          },
+          "retag": "stack_retag"
         }
       }
     }

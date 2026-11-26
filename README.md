@@ -537,6 +537,24 @@ npm run typecheck && npm run lint
 Shared collector code lives in `src/lib/collect/` as dependency-free CommonJS so
 `poller.js`, `ws-server.js` and the Next.js server use the same implementation.
 
+## Self-update
+
+Settings → **Updates** keeps every node on the newest published image of a branch:
+
+- **Images.** The repository's image workflow (`.github/workflows/image.yml`) builds every push to `main` and `dev` (the
+  build runs the tests, lint and the production build) and publishes `ghcr.io/<owner>/bosun:<branch>` and
+  `:sha-<commit>`. Pull requests are built but not published. The first time, make the package public on GitHub
+  (your profile → Packages → bosun → Package settings → Change visibility), so nodes can pull it without a login.
+- **What runs where.** Each image knows its commit and branch (`/api/health` → `version`). The cluster leader checks the
+  registry every 6 hours and posts *Bosun update available* in the bell when a node runs something else.
+- **Requirements.** Each node's Bosun stack must be a Bosun stack: import it first (*Importing stacks from Portainer*,
+  from another node's address), and each node must know its server (it finds it by itself, or set it under
+  Settings → Wake-on-LAN). The page lists anything missing.
+- **Update all nodes.** The database is backed up into the data volume (`backups/`, the last 3 are kept), then the nodes
+  are updated one at a time: on its host the new image is pulled, tagged as the image the Bosun service runs (for
+  example `bosun:latest`, so the compose file stays as it is) and that service is re-created. Bosun waits until the node
+  answers on the new version and is back in the cluster before the next one; the node you started from goes last and
+  reports the result in the bell when it is back. If a node does not come back within 10 minutes the update stops there.
 ## Upgrading and rolling back
 
 - Back up first: Settings → Database → Export, or copy the `bosun-data` volume.

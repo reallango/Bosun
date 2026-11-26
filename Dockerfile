@@ -100,6 +100,14 @@ ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     S6_KILL_GRACETIME=10000
 
+# The commit and branch this image was built from (set by the image workflow; "local" for a build on the host).
+# Shown by /api/health and used by self-update to tell which version each node runs.
+ARG BOSUN_COMMIT=unknown
+ARG BOSUN_CHANNEL=local
+ENV BOSUN_COMMIT=${BOSUN_COMMIT} BOSUN_CHANNEL=${BOSUN_CHANNEL}
+LABEL org.opencontainers.image.source="https://github.com/reallango/Bosun" \
+      org.opencontainers.image.revision="${BOSUN_COMMIT}"
+
 EXPOSE 3042 4001 4002
 
 VOLUME ["/data/rqlite"]

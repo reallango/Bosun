@@ -50,7 +50,8 @@ case "$op" in
   stop) set -- stop ;;
   start) set -- start ;;
   guard_up) set -- up -d --remove-orphans ;;
-  *) fail 'op must be up, down, restart, pull, update, stop, start or guard_up' ;;
+  retag) ;;
+  *) fail 'op must be up, down, restart, pull, update, stop, start, guard_up or retag' ;;
 esac
 case "$HOME" in /*) ;; *) fail 'HOME is not set' ;; esac
 D=docker; $D ps >/dev/null 2>&1 || { command -v sudo >/dev/null 2>&1 && sudo -n docker ps >/dev/null 2>&1 && D='sudo -n docker'; }
@@ -69,7 +70,7 @@ if [ -d "$DIR" ]; then
   PD=$(dirname "$CF")
   [ ! -f "$DIR/.env" ] || EF="$DIR/.env"
 else
-  case "$op" in up|pull|update|guard_up) fail "the stack $name was not created by Bosun (no stored compose file), so $op is not possible" ;; esac
+  case "$op" in up|pull|update|guard_up|retag) fail "the stack $name was not created by Bosun (no stored compose file), so $op is not possible" ;; esac
 fi
 errf=$(mktemp) || fail 'cannot create a temporary file'
 # One operation per stack at a time: deploy, update, remove and the compose operations all take this lock, so two of them
@@ -189,6 +190,28 @@ EOF
 # guard_up: hand a stack over from another manager (Portainer) without leaving it stopped. Started in the background on the host,
 # it waits (up to 5 minutes) until none of the stack's containers is running (the other manager took it down), then starts it again
 # from the stored files. It outlives this SSH session (and the Bosun that asked for it, when the stack is that Bosun itself).
+# retag: move one service of a stack to a new image without rewriting its compose file (self-update of Bosun). Pull `image`, tag
+# it as `as` (the image name the service runs, e.g. bosun:latest) and re-create only that service in the background, so it
+# completes even when the stack is the Bosun that asked. Nothing changes when the pull fails.
+if [ "$op" = retag ]; then
+  img=${BOSUN_PARAM_image-}; as=${BOSUN_PARAM_as-}; svc=${BOSUN_PARAM_service-}
+  for v in "$img" "$as"; do
+    case "$v" in ''|-*|*[!a-z0-9._/:@-]*) fail 'image: a lower-case image reference (registry/name:tag)' ;; esac
+  done
+  [ "${#img}" -le 255 ] && [ "${#as}" -le 255 ] || fail 'image: too long'
+  case "$svc" in ''|[!A-Za-z0-9]*|*[!A-Za-z0-9_.-]*) fail 'service: invalid name' ;; esac
+  echo "[step] Pulling $img"
+  $D pull "$img" >/dev/null 2>"$errf" || fail "pulling $img failed: $(lastline)"
+  $D tag "$img" "$as" 2>"$errf" || fail "tagging failed: $(lastline)"
+  echo "[step] Re-creating $svc of $name with $img"
+  (
+    trap '' HUP
+    sleep 2
+    dc up -d --no-build --no-deps "$svc"
+  ) </dev/null >/dev/null 2>&1 &
+  echo "DONE retag: $name $svc -> $img"
+  exit 0
+fi
 if [ "$op" = guard_up ]; then
   (
     trap '' HUP
