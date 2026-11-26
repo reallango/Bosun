@@ -9,7 +9,9 @@ import { DeleteConfirmDialog } from '@/components/dialogs/DeleteConfirmDialog';
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
@@ -17,6 +19,7 @@ import { useToast } from '@/components/ui/toast';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { cn } from '@/lib/utils';
 import { FrameMenuItem, RefreshHandler, WidgetFrameContext } from './widget-context';
+import { buildWidgetMenu, type FrameMenuAction } from './widget-menu';
 import { WidgetSizeContext, useMeasuredSize } from './widget-size';
 import { DeclarativeWidget } from '@/components/widgets/declarative/DeclarativeWidget';
 import { WidgetLoading } from '@/components/widgets/WidgetLoading';
@@ -71,6 +74,13 @@ function WidgetContent({ widgetId, widgetType, serverId, serverName }: { widgetI
 /** Widgets that manage their own scrolling/padding (edge-to-edge content). */
 const FULL_BLEED = new Set(['ssh_terminal']);
 
+/** Icon of each entry the frame adds to the ⋮ menu. */
+const FRAME_MENU_ICONS: Record<FrameMenuAction, typeof RefreshCw> = {
+  refresh: RefreshCw,
+  settings: Settings2,
+  remove: Trash2,
+};
+
 /** Human title for a raw widget type ("my_widget" -> "My widget") when no name is set. */
 function prettyType(type: string) {
   const s = type.replace(/[_-]+/g, ' ').trim();
@@ -111,6 +121,7 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName,
 
   // The grid passes the saved title (or the definition's name), so no per-widget fetch is needed.
   const displayTitle = title === widgetType ? prettyType(widgetType) : title;
+  const menu = useMemo(() => buildWidgetMenu(displayTitle, menuItems, { canEdit }), [displayTitle, menuItems, canEdit]);
 
   const doRemove = async () => {
     setRemoving(true);
@@ -189,30 +200,48 @@ export function WidgetFrame({ widgetId, widgetType, title, serverId, serverName,
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent>
-            {menuItems.map(m => (
-              <DropdownMenuItem key={m.id} onSelect={() => m.onSelect()}>
-                {m.icon && <m.icon />}
-                {m.label}
-              </DropdownMenuItem>
-            ))}
-            {menuItems.length > 0 && <DropdownMenuSeparator />}
-            <DropdownMenuItem onSelect={() => handleRefresh()} disabled={refreshing}>
-              <RefreshCw />
-              Refresh
-            </DropdownMenuItem>
-            {canEdit && (
+            {menu.widget && (
               <>
-            <DropdownMenuItem onSelect={() => setSettingsOpen(true)}>
-              <Settings2 />
-              Settings
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem variant="destructive" disabled={removing} onSelect={() => setDeleteOpen(true)}>
-              <Trash2 />
-              {removing ? 'Removing…' : 'Remove'}
-            </DropdownMenuItem>
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>{menu.widget.label}</DropdownMenuLabel>
+                  {menu.widget.items.map(m => (
+                    <DropdownMenuItem key={m.id} onSelect={() => m.onSelect()}>
+                      {m.icon && <m.icon />}
+                      {m.label}
+                    </DropdownMenuItem>
+                  ))}
+                </DropdownMenuGroup>
+                <DropdownMenuSeparator />
               </>
             )}
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>{menu.frame.label}</DropdownMenuLabel>
+              {menu.frame.items.map(item => {
+                const Icon = FRAME_MENU_ICONS[item.id];
+                if (item.id === 'refresh') {
+                  return (
+                    <DropdownMenuItem key={item.id} onSelect={() => handleRefresh()} disabled={refreshing}>
+                      <Icon />
+                      {item.label}
+                    </DropdownMenuItem>
+                  );
+                }
+                if (item.id === 'settings') {
+                  return (
+                    <DropdownMenuItem key={item.id} onSelect={() => setSettingsOpen(true)}>
+                      <Icon />
+                      {item.label}
+                    </DropdownMenuItem>
+                  );
+                }
+                return (
+                  <DropdownMenuItem key={item.id} variant={item.destructive ? 'destructive' : 'default'} disabled={removing} onSelect={() => setDeleteOpen(true)}>
+                    <Icon />
+                    {removing ? 'Removing…' : item.label}
+                  </DropdownMenuItem>
+                );
+              })}
+            </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>
       </header>

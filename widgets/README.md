@@ -178,6 +178,10 @@ A `form` or `editor` block can sit behind a button instead of taking the top of 
 `"label"` for that button (the label is required). Its submit buttons move to the dialog footer, and a successful submit
 closes it. Without `open`, the block renders inline exactly as before. `"open"` accepts only `"dialog"`.
 
+A dialog screen (`kind: "dialog"`) shows its `editor` blocks' submit buttons in the dialog's sticky footer, so the fields
+can scroll while the buttons stay in reach. On a page screen, or in a widget on a dashboard, the same editor keeps its
+buttons inline. The footer appears only when the screen has an editor with a usable submit.
+
 When a tab's `buttons` blocks and dialog forms/editors come directly before a `view`, Bosun puts them on one row above the
 view (right-aligned on wide screens) instead of stacking the blocks.
 

@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { AlertTriangle, ChevronDown, ChevronRight, Copy, Download, Loader2, Plus, Upload, X } from 'lucide-react';
 import type { Block, EditorField, RowColumn } from '@/lib/widgets/runtime/spec-v2';
 import {
@@ -9,6 +10,7 @@ import {
   type EditorValue, type EditorValues, type RowValue, type ViewContext,
 } from '@/lib/widgets/runtime/layout';
 import type { LayoutUi } from './LayoutView';
+import { useDialogFooterSlot } from './dialog-footer-slot';
 import { buttonClass, dangerSubmitClass, DIALOG_FOOTER, iconButtonClass, inputClass, primarySubmitClass } from './styles';
 
 type EditorBlockSpec = Extract<Block, { type: 'editor' }>;
@@ -193,6 +195,8 @@ export function EditorBlock({ block, ctx, ui, dialog }: { block: EditorBlockSpec
   const warnings = editorWarnings(block.fields, values);
   const hidden = useMemo(() => hiddenByHeading(block.fields, open), [block.fields, open]);
   const errorRef = useRef<HTMLDivElement>(null);
+  const footerSlot = useDialogFooterSlot();
+  const footerClaimId = useId();
 
   const send = async (s: (typeof block.submits)[number]) => {
     const action = ui.actions.get(s.action);
@@ -380,12 +384,26 @@ export function EditorBlock({ block, ctx, ui, dialog }: { block: EditorBlockSpec
       </button>
     );
   });
+  const submitCount = submitButtons.filter(Boolean).length;
+  const portalToFooter = !dialog && !!footerSlot?.target && submitCount > 0;
+  useEffect(() => {
+    if (dialog || !footerSlot?.target || submitCount === 0) return;
+    return footerSlot.claim(footerClaimId);
+  }, [dialog, footerSlot, submitCount, footerClaimId]);
   if (dialog) {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="min-h-0 flex-1 space-y-3 overflow-auto pr-1">{body}</div>
         <div className={DIALOG_FOOTER}>{submitButtons}</div>
       </div>
+    );
+  }
+  if (portalToFooter && footerSlot?.target) {
+    return (
+      <>
+        <div className="space-y-3">{body}</div>
+        {createPortal(<>{submitButtons}</>, footerSlot.target)}
+      </>
     );
   }
   return (

@@ -1,9 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { Dialog } from 'radix-ui';
 import { AlertTriangle, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Dialog, DialogBody, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 
 interface ConfirmActionDialogProps {
   open: boolean;
@@ -15,29 +16,33 @@ interface ConfirmActionDialogProps {
   destructive?: boolean;
   /** When set, the user must type this exact text to enable the button. */
   requireText?: string;
+  /** The caller is already running the action (for example a delete from a list). */
+  busy?: boolean;
   onConfirm: () => Promise<void> | void;
 }
 
 /**
- * Confirmation for actions with side effects on a monitored host (container
- * stop/restart, model deletion). Stays open while the action runs and shows
- * its error inline instead of an alert().
+ * The one confirmation dialog: actions with side effects on a monitored host
+ * (container stop/restart, model deletion), and the Remove/Delete actions
+ * around the app. It stays open while the action runs and shows its error
+ * inline instead of an alert().
  */
 export function ConfirmActionDialog({
-  open, onOpenChange, title, description, confirmLabel, destructive, requireText, onConfirm,
+  open, onOpenChange, title, description, confirmLabel, destructive, requireText, busy, onConfirm,
 }: ConfirmActionDialogProps) {
   const [typed, setTyped] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [running, setRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const working = !!busy || running;
 
   useEffect(() => {
-    if (open) { setTyped(''); setError(null); setBusy(false); }
+    if (open) { setTyped(''); setError(null); setRunning(false); }
   }, [open]);
 
   const allowed = !requireText || typed.trim() === requireText;
 
   const run = async () => {
-    setBusy(true);
+    setRunning(true);
     setError(null);
     try {
       await onConfirm();
@@ -45,55 +50,63 @@ export function ConfirmActionDialog({
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
-      setBusy(false);
+      setRunning(false);
     }
   };
 
   return (
-    <Dialog.Root open={open} onOpenChange={v => { if (!busy) onOpenChange(v); }}>
-      <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
-        <Dialog.Content
-          className="fixed inset-x-3 bottom-3 z-50 rounded-xl border border-gray-200 bg-white p-5 shadow-xl outline-none dark:border-gray-700 dark:bg-gray-900 sm:inset-x-auto sm:bottom-auto sm:left-1/2 sm:top-1/2 sm:w-full sm:max-w-md sm:-translate-x-1/2 sm:-translate-y-1/2"
-          onEscapeKeyDown={e => { if (busy) e.preventDefault(); }}
-        >
-          <div className="flex gap-3">
-            {destructive && <AlertTriangle className="mt-0.5 size-5 shrink-0 text-red-500" aria-hidden />}
-            <div className="min-w-0 flex-1">
-              <Dialog.Title className="text-base font-semibold">{title}</Dialog.Title>
-              <Dialog.Description asChild>
-                <div className="mt-1 break-words text-sm text-gray-600 dark:text-gray-400">{description}</div>
-              </Dialog.Description>
-            </div>
-          </div>
-          {requireText && (
-            <label className="mt-4 block text-sm">
-              <span className="text-gray-600 dark:text-gray-400">Type <code className="rounded bg-gray-100 px-1 font-mono dark:bg-gray-800">{requireText}</code> to confirm</span>
-              <input
-                autoFocus
-                value={typed}
-                onChange={e => setTyped(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter' && allowed && !busy) run(); }}
-                className="mt-1 w-full rounded-md border border-gray-300 bg-transparent px-2 py-1.5 font-mono text-sm outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-600"
-                aria-label="Confirmation text"
-              />
-            </label>
-          )}
-          {error && <p role="alert" className="mt-3 rounded-md bg-red-50 px-2 py-1.5 text-sm text-red-700 dark:bg-red-950/50 dark:text-red-300">{error}</p>}
-          <div className="mt-5 flex justify-end gap-2">
-            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>Cancel</Button>
-            <Button
-              variant={destructive ? 'destructive' : 'default'}
-              onClick={run}
-              disabled={!allowed || busy}
-            >
-              {busy && <Loader2 className="animate-spin" aria-hidden />}
-              {confirmLabel}
-            </Button>
-          </div>
-        </Dialog.Content>
-      </Dialog.Portal>
-    </Dialog.Root>
+    <Dialog open={open} onOpenChange={value => { if (!working) onOpenChange(value); }}>
+      <DialogContent
+        size="md"
+        role="alertdialog"
+        onEscapeKeyDown={event => { if (working) event.preventDefault(); }}
+      >
+        <DialogHeader>
+          <DialogTitle className="flex items-start gap-2">
+            {destructive && <AlertTriangle className="mt-0.5 size-5 shrink-0 text-destructive" aria-hidden />}
+            <span className="min-w-0">{title}</span>
+          </DialogTitle>
+          <DialogDescription asChild>
+            <div className="break-words">{description}</div>
+          </DialogDescription>
+        </DialogHeader>
+        {(requireText || error) && (
+          <DialogBody className="space-y-3">
+            {requireText && (
+              <label className="block space-y-1 text-sm">
+                <span className="text-muted-foreground">
+                  Type <code className="rounded bg-muted px-1 font-mono text-foreground">{requireText}</code> to confirm
+                </span>
+                <Input
+                  autoFocus
+                  value={typed}
+                  onChange={event => setTyped(event.target.value)}
+                  onKeyDown={event => { if (event.key === 'Enter' && allowed && !working) void run(); }}
+                  className="font-mono"
+                  aria-label="Confirmation text"
+                />
+              </label>
+            )}
+            {error && (
+              <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-sm text-destructive">
+                {error}
+              </p>
+            )}
+          </DialogBody>
+        )}
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={working}>Cancel</Button>
+          <Button
+            variant={destructive ? 'destructive' : 'default'}
+            onClick={run}
+            disabled={!allowed || working}
+          >
+            {working && <Loader2 className="animate-spin motion-reduce:animate-none" aria-hidden />}
+            {confirmLabel}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 

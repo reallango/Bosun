@@ -21,9 +21,18 @@ function DialogOverlay({ className, ...props }: React.ComponentProps<typeof Dial
   )
 }
 
+/** The one size scale every dialog uses. Below `sm` a dialog fills the screen. */
+const DIALOG_SIZES = {
+  sm: "sm:max-w-sm",
+  md: "sm:max-w-lg",
+  lg: "sm:max-w-3xl",
+  xl: "sm:max-w-5xl",
+} as const
+
 /**
- * Responsive dialog: a bottom sheet that fills most of the screen on phones,
- * a centered card from `sm` up. The body scrolls; header/footer stay visible.
+ * Responsive dialog: full screen on phones, a centered card from `sm` up.
+ * Put the scrolling content in `DialogBody` and the actions in `DialogFooter`;
+ * the body scrolls while the header and footer stay in view.
  */
 function DialogContent({
   className,
@@ -33,26 +42,20 @@ function DialogContent({
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   hideClose?: boolean
-  size?: "sm" | "md" | "lg" | "xl"
+  size?: keyof typeof DIALOG_SIZES
 }) {
-  const sizes = {
-    sm: "sm:max-w-sm",
-    md: "sm:max-w-md",
-    lg: "sm:max-w-lg",
-    xl: "sm:max-w-2xl",
-  }
   return (
     <DialogPortal>
       <DialogOverlay />
       <DialogPrimitive.Content
         data-slot="dialog-content"
         className={cn(
-          "fixed z-50 flex flex-col gap-4 border bg-popover text-popover-foreground shadow-xl outline-none",
-          // phone: bottom sheet
-          "inset-x-0 bottom-0 max-h-[92dvh] rounded-t-2xl p-4 pb-[max(1rem,env(safe-area-inset-bottom))]",
+          "fixed z-50 flex flex-col gap-4 overflow-hidden border bg-popover text-popover-foreground shadow-xl outline-none",
+          // phone: full screen
+          "inset-0 h-[100dvh] max-h-none rounded-none p-4 pb-[max(1rem,env(safe-area-inset-bottom))]",
           // sm+: centered card
-          "sm:inset-auto sm:left-1/2 sm:top-1/2 sm:w-[calc(100%-2rem)] sm:max-h-[85dvh] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-xl sm:p-6",
-          sizes[size],
+          "sm:inset-auto sm:left-1/2 sm:top-1/2 sm:h-auto sm:w-[calc(100%-2rem)] sm:max-h-[85dvh] sm:-translate-x-1/2 sm:-translate-y-1/2 sm:rounded-xl sm:p-6",
+          DIALOG_SIZES[size],
           className
         )}
         {...props}
@@ -76,25 +79,38 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
 }
 
 /** Scrollable middle section of a dialog. */
-function DialogBody({ className, ...props }: React.ComponentProps<"div">) {
-  return (
-    <div
-      data-slot="dialog-body"
-      className={cn("-mx-4 min-h-0 flex-1 overflow-y-auto px-4 sm:-mx-6 sm:px-6", className)}
-      {...props}
-    />
-  )
-}
+const DialogBody = React.forwardRef<HTMLDivElement, React.ComponentProps<"div">>(
+  function DialogBody({ className, ...props }, ref) {
+    return (
+      <div
+        ref={ref}
+        data-slot="dialog-body"
+        className={cn("-mx-4 min-h-0 flex-1 overflow-y-auto px-4 sm:-mx-6 sm:px-6", className)}
+        {...props}
+      />
+    )
+  }
+)
 
-function DialogFooter({ className, ...props }: React.ComponentProps<"div">) {
-  return (
-    <div
-      data-slot="dialog-footer"
-      className={cn("flex flex-col-reverse gap-2 sm:flex-row sm:justify-end [&>*]:w-full sm:[&>*]:w-auto", className)}
-      {...props}
-    />
-  )
-}
+/**
+ * Sticky action row. It stays at the bottom while `DialogBody` scrolls, and a
+ * dialog screen can portal an editor's submit buttons into it.
+ */
+const DialogFooter = React.forwardRef<HTMLDivElement, React.ComponentProps<"div">>(
+  function DialogFooter({ className, ...props }, ref) {
+    return (
+      <div
+        ref={ref}
+        data-slot="dialog-footer"
+        className={cn(
+          "sticky bottom-0 z-10 -mx-4 -mb-4 mt-auto flex flex-col-reverse gap-2 border-t bg-popover px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:-mx-6 sm:-mb-6 sm:flex-row sm:justify-end sm:px-6 sm:py-4 [&>*]:w-full sm:[&>*]:w-auto",
+          className
+        )}
+        {...props}
+      />
+    )
+  }
+)
 
 function DialogTitle({ className, ...props }: React.ComponentProps<typeof DialogPrimitive.Title>) {
   return (
