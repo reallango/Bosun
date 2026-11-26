@@ -14,6 +14,7 @@ import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import { WakeButton } from '@/components/servers/WakeButton';
 import { MacAddressFields, MacValue } from '@/components/servers/MacAddressFields';
 import { ReprovisionDialog } from '@/components/settings/ReprovisionDialog';
+import { PortainerImportCard } from '@/components/settings/PortainerImportCard';
 
 export default function EditServerPage() {
     const { serverId } = useParams<{ serverId: string }>();
@@ -296,6 +297,7 @@ RAM: ${d.data.total_ram_mb} MB`,
                         </div>
                     </CardContent>
                 </Card>
+                <PortainerImportCard serverId={serverId} />
             </div>
             <ReprovisionDialog
                 server={{

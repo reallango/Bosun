@@ -49,7 +49,8 @@ case "$op" in
   update) set -- up -d --build --remove-orphans ;;
   stop) set -- stop ;;
   start) set -- start ;;
-  *) fail 'op must be up, down, restart, pull, update, stop or start' ;;
+  guard_up) set -- up -d --remove-orphans ;;
+  *) fail 'op must be up, down, restart, pull, update, stop, start or guard_up' ;;
 esac
 case "$HOME" in /*) ;; *) fail 'HOME is not set' ;; esac
 D=docker; $D ps >/dev/null 2>&1 || { command -v sudo >/dev/null 2>&1 && sudo -n docker ps >/dev/null 2>&1 && D='sudo -n docker'; }
@@ -68,7 +69,7 @@ if [ -d "$DIR" ]; then
   PD=$(dirname "$CF")
   [ ! -f "$DIR/.env" ] || EF="$DIR/.env"
 else
-  case "$op" in up|pull|update) fail "the stack $name was not created by Bosun (no stored compose file), so $op is not possible" ;; esac
+  case "$op" in up|pull|update|guard_up) fail "the stack $name was not created by Bosun (no stored compose file), so $op is not possible" ;; esac
 fi
 errf=$(mktemp) || fail 'cannot create a temporary file'
 # One operation per stack at a time: deploy, update, remove and the compose operations all take this lock, so two of them
@@ -185,6 +186,23 @@ $found
 EOF
 }
 
+# guard_up: hand a stack over from another manager (Portainer) without leaving it stopped. Started in the background on the host,
+# it waits (up to 5 minutes) until none of the stack's containers is running (the other manager took it down), then starts it again
+# from the stored files. It outlives this SSH session (and the Bosun that asked for it, when the stack is that Bosun itself).
+if [ "$op" = guard_up ]; then
+  (
+    trap '' HUP
+    i=0
+    while [ "$i" -lt 300 ]; do
+      [ -z "$($D ps -q --filter "label=com.docker.compose.project=$name" --filter status=running 2>/dev/null)" ] && break
+      sleep 1; i=$((i + 1))
+    done
+    sleep 2
+    dc "$@"
+  ) </dev/null >/dev/null 2>&1 &
+  echo "DONE guard_up: $name"
+  exit 0
+fi
 prev=''
 echo 'PROGRESS 0/1'; echo "[step] Running docker compose $op for the stack $name"
 # update: fetch the stored branch of a git stack (with the stored credential for its host, if any), then rebuild and start with the

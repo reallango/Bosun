@@ -385,6 +385,25 @@ exactly as described above when no group is involved.
   `test-ai` on one server, and it can deploy, update and restart that stack and nothing else.
 - **Expiry.** Any grant can have an end time; after it, the grant no longer counts (and it is
   deleted a week later).
+### Importing stacks from Portainer
+
+Stacks that another tool started (for example Portainer) can become Bosun stacks: **Settings → Servers → a server →
+Import stacks**. Each is stored under the same project name, so its volumes (data) are kept; Docker Compose re-creates the
+containers once from Bosun's copy, so importing is a short restart of the stack.
+
+- **From Portainer** (needs Portainer's address and an API key from *My account → Access tokens*; tick *Accept a
+  self-signed certificate* for Portainer's default HTTPS): the exact compose file and variables, or, for a stack Portainer
+  deploys from git, the same repository, branch and file (private repositories use the Git credentials of the Docker widget).
+- **Rebuilt from the containers** (no Portainer needed): a compose file written from the running containers, with values
+  written out literally.
+- **Detach from Portainer** is chosen per stack. Portainer cannot forget a stack without stopping it (its delete runs
+  `docker compose down`, volumes kept), so Bosun first starts a small waiter on the host that brings the stack straight back
+  from Bosun's copy, then deletes it in Portainer: one more short restart. Without detaching, Portainer keeps listing it, and it
+  must not be redeployed or deleted there.
+- A node's own Bosun stack is imported from **another node's** Bosun (open that node's address), so no Bosun ever restarts
+  itself in the middle of the import.
+
+The outcome of each import appears in the bell.
 ### Access requests (for agents and people)
 
 An API key or user that lacks something can ask for it instead of being given broad access up front:

@@ -49,8 +49,8 @@ describe('Docker package scripts', () => {
     expect(fields.length).toBeGreaterThan(0);
     for (const f of fields) expect(['ID', 'Names', 'Image', 'State', 'Status', 'Ports', 'CreatedAt', 'RunningFor']).toContain(f);
     expect(fmt).not.toMatch(/Command|Labels|Mounts|Networks/);
-    // Only the compose project label, by name.
-    expect(Array.from(fmt.matchAll(/\.Label "([^"]+)"/g), m => m[1])).toEqual(['com.docker.compose.project']);
+    // Only the compose project and service labels, by name.
+    expect(Array.from(fmt.matchAll(/\.Label "([^"]+)"/g), m => m[1])).toEqual(['com.docker.compose.project', 'com.docker.compose.service']);
   });
 
   it.skipIf(!hasSh)('logs asks for the number of lines of the named container', () => {
