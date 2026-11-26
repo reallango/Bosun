@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { CircleAlert, CircleCheck, Loader2, RefreshCw, Download } from 'lucide-react';
+import { CircleAlert, CircleCheck, Loader2, RefreshCw, Download, RotateCcw } from 'lucide-react';
 import { PageHeader } from '@/components/settings/PageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -10,6 +10,7 @@ import { Label } from '@/components/ui/label';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import { ErrorState } from '@/components/shared/ErrorState';
 import { AdminOnlyNotice } from '@/components/settings/access-ui';
+import { ConfirmActionDialog } from '@/components/widgets/shared/ConfirmActionDialog';
 import { useToast } from '@/components/ui/toast';
 import { useAuth } from '@/hooks/useAuth';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
@@ -25,8 +26,10 @@ interface Status {
   nodes: { id: string; leader: boolean; reachable: boolean; healthy: boolean; web: string | null; commit: string | null; channel: string | null; self: boolean; record: { server_id: string | null } | null }[];
   plan: { node: string; server_id: string | null; project: string | null; service: string | null; as: string | null }[];
   problems: string[];
+  previous: string | null;
   rollout: {
-    target: string; image: string; started_by: string; started_at: string; finished_at: string | null; status: string; backup: string | null;
+    kind: 'update' | 'rollback'; target: string; from: string | null; image: string; started_by: string; started_at: string;
+    finished_at: string | null; status: string; backup: string | null;
     steps: { node: string; self: boolean; status: string; message: string | null }[];
   } | null;
 }
@@ -43,6 +46,7 @@ export default function UpdatesPage() {
   const [busy, setBusy] = useState<string | null>(null);
   const [form, setForm] = useState({ channel: '', image: '', webPort: '' });
   const [confirm, setConfirm] = useState(false);
+  const [confirmRollback, setConfirmRollback] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -62,12 +66,16 @@ export default function UpdatesPage() {
     return () => clearInterval(t);
   }, [s?.rollout?.status, load]);
 
-  const post = async (body: unknown, label: string) => {
+  const post = async (body: unknown, label: string, rethrow = false) => {
     setBusy(label);
     try {
       const res = await fetchWithAuth('/api/system/update', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
       const json = await readJson<{ error?: { message?: string } }>(res);
-      if (!res.ok) toast(json.error?.message || `HTTP ${res.status}`, { variant: 'error' });
+      if (!res.ok) {
+        const message = json.error?.message || `HTTP ${res.status}`;
+        toast(message, { variant: 'error' });
+        if (rethrow) throw new Error(message);
+      }
       await load();
     } finally { setBusy(null); }
   };
@@ -86,6 +94,8 @@ export default function UpdatesPage() {
   const latest = s?.latest?.commit ?? null;
   const behind = s ? s.nodes.filter(n => latest && !same(n.commit, latest)) : [];
   const running = s?.rollout?.status === 'running';
+  const previous = s?.previous ?? null;
+  const rollback = s?.rollout?.kind === 'rollback';
 
   return (
     <>
@@ -138,16 +148,34 @@ export default function UpdatesPage() {
                       <Button size="sm" variant="outline" onClick={() => setConfirm(false)}>Cancel</Button>
                     </span>
                   )}
+                  {previous && !running && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                      onClick={() => setConfirmRollback(true)}
+                      disabled={busy !== null || s.problems.length > 0}
+                    >
+                      <RotateCcw />Roll back to {short(previous)}
+                    </Button>
+                  )}
                 </div>
               </CardContent>
             </Card>
 
             {s.rollout && (
               <Card>
-                <CardHeader><CardTitle>{running ? 'Updating' : s.rollout.status === 'done' ? 'Last update' : 'Last update (stopped)'}</CardTitle></CardHeader>
+                <CardHeader>
+                  <CardTitle>
+                    {rollback
+                      ? running ? `Rolling back to ${short(s.rollout.target)}` : s.rollout.status === 'done' ? `Rolled back to ${short(s.rollout.target)}` : `Rollback to ${short(s.rollout.target)} stopped`
+                      : running ? 'Updating' : s.rollout.status === 'done' ? 'Last update' : 'Last update (stopped)'}
+                  </CardTitle>
+                </CardHeader>
                 <CardContent className="space-y-2 text-sm">
                   <p className="text-xs text-muted-foreground">
-                    To <span className="font-mono">{s.rollout.image}</span>, started by {s.rollout.started_by} {formatDistanceToNow(new Date(s.rollout.started_at))}
+                    {s.rollout.from ? <>From <span className="font-mono">{short(s.rollout.from)}</span> to </> : <>To </>}
+                    <span className="font-mono">{s.rollout.image}</span>, started by {s.rollout.started_by} {formatDistanceToNow(new Date(s.rollout.started_at))}
                     {s.rollout.backup && <> · database backup: <span className="font-mono">{s.rollout.backup}</span></>}
                   </p>
                   <ul className="space-y-1">
@@ -178,6 +206,23 @@ export default function UpdatesPage() {
           </>
         )}
       </div>
+
+      <ConfirmActionDialog
+        open={confirmRollback && !!previous}
+        onOpenChange={setConfirmRollback}
+        title={`Roll back to ${short(previous)}?`}
+        description={
+          <>
+            Every node goes back to <span className="font-mono">{short(previous)}</span> one at a time (this node last).
+            The database is backed up first but is <strong>not</strong> restored: schema changes made by the newer version
+            stay. Bosun&apos;s migrations only add, so the older version keeps working, but a rollback across a release
+            that changed data may need the backup.
+          </>
+        }
+        confirmLabel={`Roll back to ${short(previous)}`}
+        destructive
+        onConfirm={async () => { await post({ action: 'rollback', confirm: true }, 'rollback', true); }}
+      />
     </>
   );
 }
