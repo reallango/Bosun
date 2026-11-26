@@ -495,8 +495,7 @@
                   "now",
                   "later"
                 ],
-                "maxLength": 10,
-                "default": "now"
+                "maxLength": 10
               }
             },
             "secrets": [
@@ -1474,15 +1473,6 @@
                 "maxLines": 100,
                 "linePattern": "^(#.*|svc\\.[A-Za-z0-9_.-]+\\.(container_name|port|volume|network)=.+)$",
                 "default": ""
-              },
-              "start": {
-                "type": "string",
-                "values": [
-                  "now",
-                  "later"
-                ],
-                "maxLength": 10,
-                "default": "now"
               }
             },
             "variants": [
@@ -1490,7 +1480,8 @@
                 "script": "stack_deploy",
                 "args": {
                   "allow_risky": "literal:false",
-                  "pull": "param.pull"
+                  "pull": "param.pull",
+                  "start": "literal:now"
                 }
               }
             ],
@@ -1562,15 +1553,6 @@
                 "maxLines": 100,
                 "linePattern": "^(#.*|svc\\.[A-Za-z0-9_.-]+\\.(container_name|port|volume|network)=.+)$",
                 "default": ""
-              },
-              "start": {
-                "type": "string",
-                "values": [
-                  "now",
-                  "later"
-                ],
-                "maxLength": 10,
-                "default": "now"
               }
             },
             "variants": [
@@ -1578,13 +1560,177 @@
                 "script": "stack_deploy",
                 "args": {
                   "allow_risky": "literal:true",
-                  "pull": "param.pull"
+                  "pull": "param.pull",
+                  "start": "literal:now"
                 }
               }
             ],
             "icon": "upload",
             "job": true,
             "after": "refresh",
+            "confirm": {
+              "title": "Deploy with elevated options?",
+              "text": "The stack may use privileged mode, the host network, devices, the Docker socket or host folders.",
+              "destructive": true
+            }
+          },
+          {
+            "id": "stack_deploy_later",
+            "label": "Deploy stack (start in the background)",
+            "permission": "docker.manage",
+            "target": {
+              "kind": "stack",
+              "param": "name"
+            },
+            "kind": "script",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
+                "maxLength": 63
+              },
+              "source": {
+                "type": "string",
+                "values": [
+                  "editor",
+                  "git"
+                ],
+                "maxLength": 20
+              },
+              "yaml": {
+                "type": "text",
+                "maxLength": 65536,
+                "maxLines": 2000,
+                "default": ""
+              },
+              "env": {
+                "type": "text",
+                "maxLength": 8000,
+                "maxLines": 200,
+                "linePattern": "^(#.*|[A-Za-z_][A-Za-z0-9_]*=.*)$",
+                "default": ""
+              },
+              "repo": {
+                "type": "string",
+                "pattern": "^(-|https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/[A-Za-z0-9._/-]+)$",
+                "maxLength": 300,
+                "default": "-"
+              },
+              "branch": {
+                "type": "string",
+                "pattern": "^(-|[A-Za-z0-9._/-]{1,100})$",
+                "maxLength": 100,
+                "default": "-"
+              },
+              "file": {
+                "type": "string",
+                "pattern": "^(-|[A-Za-z0-9._/-]{1,200})$",
+                "maxLength": 200,
+                "default": "-"
+              },
+              "pull": {
+                "type": "boolean",
+                "default": false
+              },
+              "override": {
+                "type": "text",
+                "maxLength": 8000,
+                "maxLines": 100,
+                "linePattern": "^(#.*|svc\\.[A-Za-z0-9_.-]+\\.(container_name|port|volume|network)=.+)$",
+                "default": ""
+              }
+            },
+            "variants": [
+              {
+                "script": "stack_deploy",
+                "args": {
+                  "allow_risky": "literal:false",
+                  "pull": "param.pull",
+                  "start": "literal:later"
+                }
+              }
+            ],
+            "icon": "upload",
+            "job": true
+          },
+          {
+            "id": "stack_deploy_privileged_later",
+            "label": "Deploy with elevated options (start in the background)",
+            "permission": "docker.privileged",
+            "target": {
+              "kind": "stack",
+              "param": "name"
+            },
+            "kind": "script",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
+                "maxLength": 63
+              },
+              "source": {
+                "type": "string",
+                "values": [
+                  "editor",
+                  "git"
+                ],
+                "maxLength": 20
+              },
+              "yaml": {
+                "type": "text",
+                "maxLength": 65536,
+                "maxLines": 2000,
+                "default": ""
+              },
+              "env": {
+                "type": "text",
+                "maxLength": 8000,
+                "maxLines": 200,
+                "linePattern": "^(#.*|[A-Za-z_][A-Za-z0-9_]*=.*)$",
+                "default": ""
+              },
+              "repo": {
+                "type": "string",
+                "pattern": "^(-|https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/[A-Za-z0-9._/-]+)$",
+                "maxLength": 300,
+                "default": "-"
+              },
+              "branch": {
+                "type": "string",
+                "pattern": "^(-|[A-Za-z0-9._/-]{1,100})$",
+                "maxLength": 100,
+                "default": "-"
+              },
+              "file": {
+                "type": "string",
+                "pattern": "^(-|[A-Za-z0-9._/-]{1,200})$",
+                "maxLength": 200,
+                "default": "-"
+              },
+              "pull": {
+                "type": "boolean",
+                "default": false
+              },
+              "override": {
+                "type": "text",
+                "maxLength": 8000,
+                "maxLines": 100,
+                "linePattern": "^(#.*|svc\\.[A-Za-z0-9_.-]+\\.(container_name|port|volume|network)=.+)$",
+                "default": ""
+              }
+            },
+            "variants": [
+              {
+                "script": "stack_deploy",
+                "args": {
+                  "allow_risky": "literal:true",
+                  "pull": "param.pull",
+                  "start": "literal:later"
+                }
+              }
+            ],
+            "icon": "upload",
+            "job": true,
             "confirm": {
               "title": "Deploy with elevated options?",
               "text": "The stack may use privileged mode, the host network, devices, the Docker socket or host folders.",
@@ -4189,7 +4335,8 @@
             "service": "service"
           },
           "retag": "stack_retag",
-          "startLater": "start"
+          "deployLater": "stack_deploy_later",
+          "deployPrivilegedLater": "stack_deploy_privileged_later"
         },
         "setup": {
           "label": "Docker Engine",

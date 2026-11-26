@@ -437,19 +437,30 @@ describe('the stacks declaration (import from other tools)', () => {
     }
   });
 
-  it('startLater must be a parameter of both deploy actions that accepts "later"', async () => {
+  it('deployLater and deployPrivilegedLater name runnable actions; without them nothing changes', async () => {
     const fs = await import('fs');
     const m = JSON.parse(fs.readFileSync('widgets/docker/manifest.json', 'utf8'));
     const own = m.permissions.map((p: { id: string }) => p.id);
     const spec = m.widgets[0].spec;
     const ok = validateWidgetSpec(spec, own, m.id);
-    expect(ok.ok && ok.value.stacks?.startLater).toBe('start');
-    for (const v of ['nope', 'pull', 3]) {
-      expect(validateWidgetSpec({ ...spec, stacks: { ...spec.stacks, startLater: v } }, own, m.id).ok, String(v)).toBe(false);
+    expect(ok.ok && ok.value.stacks).toMatchObject({ deployLater: 'stack_deploy_later', deployPrivilegedLater: 'stack_deploy_privileged_later' });
+    for (const v of ['nope', 3]) {
+      expect(validateWidgetSpec({ ...spec, stacks: { ...spec.stacks, deployLater: v } }, own, m.id).ok, String(v)).toBe(false);
     }
-    // a widget without it: own stacks are imported from another node, as before
-    const { startLater: _drop, ...without } = spec.stacks;
+    // a widget without them: own stacks are imported from another node, as before
+    const { deployLater: _a, deployPrivilegedLater: _b, ...without } = spec.stacks;
     const old = validateWidgetSpec({ ...spec, stacks: without }, own, m.id);
-    expect(old.ok && old.value.stacks?.startLater).toBeUndefined();
+    expect(old.ok && old.value.stacks?.deployLater).toBeUndefined();
+  });
+
+  it('every caller of the deploy script gets start from the action itself (Bosun does not fill in defaults)', async () => {
+    const fs = await import('fs');
+    const m = JSON.parse(fs.readFileSync('widgets/docker/manifest.json', 'utf8'));
+    const users = m.widgets[0].spec.actions.filter((a: { variants?: { script: string }[] }) => a.variants?.some(v => v.script === 'stack_deploy'));
+    expect(users.map((a: { id: string }) => a.id).sort()).toEqual(['stack_deploy', 'stack_deploy_later', 'stack_deploy_privileged', 'stack_deploy_privileged_later']);
+    for (const a of users) {
+      expect(a.params.start, a.id).toBeUndefined();
+      expect(a.variants[0].args.start, a.id).toBe(a.id.endsWith('_later') ? 'literal:later' : 'literal:now');
+    }
   });
 });
