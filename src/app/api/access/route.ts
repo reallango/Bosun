@@ -46,7 +46,8 @@ export async function GET(request: NextRequest) {
       requests,
       how_to_request: {
         endpoint: 'POST /api/access-requests',
-        status: 'GET /api/access-requests/{id} (pending, approved, denied, expired, cancelled or failed; a one-time action\'s answer is in result)',
+        status: 'GET /api/access-requests/{id} (pending, approved, denied, expired, cancelled or failed; decided_by and decision_note say who decided and why; a one-time action\'s answer is in result)',
+        wait: 'GET /api/access-requests/{id}?wait=50 holds the call open (up to 50 seconds) until the request is decided, instead of polling; repeat while it is still pending',
         cancel: 'DELETE /api/access-requests/{id}',
         grant: {
           kind: 'grant', permission: '<permission id from catalog>', server_id: servers[0]?.id ?? '<server id>', resource: { kind: 'stack', name: 'test-ai' },

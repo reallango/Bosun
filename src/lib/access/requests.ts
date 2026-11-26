@@ -262,6 +262,49 @@ async function approvedGroupFor(type: 'user' | 'api_key', id: string, name: stri
   return groupId;
 }
 
+/**
+ * The decision in the bell of the person behind the request: the requester, or for an API key the person who made the key
+ * (keys have no bell; they read the request with GET /api/access-requests/:id?wait=…). Never throws.
+ */
+async function tellRequester(row: Record<string, unknown>, status: string, outcome: unknown, approverName: string, note: string | null, serverId: string | null, defs: readonly PermissionDef[]): Promise<void> {
+  try {
+    const isKey = row.requester_type === 'api_key';
+    let recipient: string | null = isKey ? null : String(row.requester_id);
+    if (isKey) {
+      const k = await rqlite.query('SELECT created_by FROM api_keys WHERE id = ?', [String(row.requester_id)]);
+      recipient = k.values?.[0]?.[0] ? String(k.values[0][0]) : null;
+    }
+    if (!recipient) return;
+    const dto = await toDto(row, defs, await serverNames());
+    const whose = isKey ? `Your API key ${String(row.requester_name)}'s request` : 'Your request';
+    const what = status === 'approved' ? 'was approved' : status === 'denied' ? 'was denied' : 'was approved, but could not be carried out';
+    const err = status === 'failed' && outcome && typeof outcome === 'object' ? (outcome as { error?: unknown }).error : undefined;
+    const result = err ? ` ${typeof err === 'string' ? err : JSON.stringify(err)}`.slice(0, 400) : '';
+    await notify({
+      kind: 'access_decision', severity: status === 'approved' ? 'success' : status === 'denied' ? 'warning' : 'critical',
+      title: `${whose} ${what}`.slice(0, 200),
+      message: `${dto.summary}: decided by ${approverName}.${note ? ` Note: ${note}` : ''}${result}`,
+      link: `/settings/access-requests?id=${String(row.id)}`, dedupeKey: `access-decision:${String(row.id)}`,
+      serverId, recipientUserId: recipient,
+    });
+  } catch (err) {
+    console.warn(`[access] could not tell the requester about ${String(row.id)}: ${err instanceof Error ? err.message : err}`);
+  }
+}
+
+/** Wait (up to `seconds`) until a request is no longer pending, so a requester can hold one call open instead of polling. */
+export async function waitForDecision(viewer: TokenPayload, id: string, seconds: number, stepMs = 2000): Promise<AccessRequestDto | null> {
+  const until = Date.now() + Math.min(Math.max(seconds, 0), MAX_WAIT_SECONDS) * 1000;
+  for (;;) {
+    const r = await getRequest(viewer, id);
+    if (!r || r.status !== 'pending' || Date.now() + stepMs > until) return r;
+    await new Promise(res => setTimeout(res, stepMs));
+  }
+}
+
+/** Longest ?wait= (seconds): below the 60 s proxy read timeouts of nginx and most tunnels. */
+export const MAX_WAIT_SECONDS = 50;
+
 export async function decideRequest(approver: TokenPayload, id: string, decision: 'approve' | 'deny', note: string | null, ip?: string): Promise<AccessRequestDto> {
   await expireStale();
   if (approver.authType === 'api_key') throw new RequestError('Requests are decided by a signed-in person, not an API key', 403, 'FORBIDDEN');
@@ -343,6 +386,7 @@ export async function decideRequest(approver: TokenPayload, id: string, decision
     }
   }
   await rqlite.execute('UPDATE access_requests SET status = ?, result = ? WHERE id = ?', [finalStatus, result === null ? null : JSON.stringify(result).slice(0, 20000), id]);
+  await tellRequester(row, finalStatus, result, approver.username, note, serverId, defs);
   await logAudit({
     userId: approver.userId, serverId: serverId ?? undefined, action: decision === 'approve' ? 'access.approve' : 'access.deny', category: 'access',
     status: finalStatus === 'failed' ? 'failure' : 'success', ipAddress: ip,

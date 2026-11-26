@@ -19,8 +19,9 @@ export async function GET(request: NextRequest) {
       const loaded = await loadWidgetSpec(String(r.type));
       if (loaded) widgets.push({ type: loaded.type, packageId: loaded.packageId, displayName: String(r.display_name), spec: loaded.spec, permissionLabels: labels });
     }
-    const origin = new URL(request.url).origin;
-    return NextResponse.json(buildOpenApi(widgets, origin), { headers: { 'Cache-Control': 'private, no-store' } });
+    // Relative server URL ("/"): request.url is Next's internal address (http://localhost:3000) behind the container's
+    // nginx, so clients resolve the API against the address they fetched this document from.
+    return NextResponse.json(buildOpenApi(widgets), { headers: { 'Cache-Control': 'private, no-store' } });
   } catch (error) {
     return failFrom(error);
   }
