@@ -3,7 +3,7 @@
  * there is no other node to do it from.
  *
  * Re-creating the stack ends this process, so the work cannot simply be awaited. The stack widget stores the stack and
- * starts it from a job on the host after its action has answered (`stacks.startLater`), and Portainer's delete is preceded
+ * starts it from a job on the host after its action has answered (`stacks.deployLater` / `deployPrivilegedLater`), and Portainer's delete is preceded
  * by the host waiter (`stacks.guard`) as usual. What was asked is kept in app_config (`import.self.<node>`) and moved on by
  * `advanceSelfImport`: in this process a little after the deployment, and again by the restarted process (the update tasks
  * call it every 30 minutes, the first time a minute after start). Each step is claimed with a compare-and-set on the

@@ -101,7 +101,7 @@ export async function listCandidates(serverId: string): Promise<{ candidates: Im
     const own = isOwn(mine, s.fields.id);
     let reason: string | null = null;
     if (!STACK_NAME.test(name)) reason = 'The stack name is not one Bosun can use (lower-case letters, digits, - and _)';
-    else if (own && !s.startLater) reason = 'This Bosun runs in this stack: import it from another node\'s Bosun, or update the stack widget to a version that can start it in the background';
+    else if (own && !(s.deployLater || s.deployPrivilegedLater)) reason = 'This Bosun runs in this stack: import it from another node\'s Bosun, or update the stack widget to a version that can start it in the background';
     else if (!from.length) reason = 'Nothing to import from (no Portainer record and no containers)';
     out.push({
       name,
@@ -248,7 +248,8 @@ export async function startImport(auth: TokenPayload, serverId: string, name: st
   if (detach && !c.portainer) throw new ImportError('There is no Portainer record to detach from', 400, 'NO_PORTAINER');
   const src = await sourceFor(serverId, loaded, c, from);
 
-  const deployId = s.deployPrivileged ?? s.deploy;
+  // This Bosun's own stack: the "later" deploy, which starts the stack after answering (re-creating it ends this process).
+  const deployId = c.own ? (s.deployPrivilegedLater ?? s.deployLater)! : (s.deployPrivileged ?? s.deploy);
   const action = loaded.spec.actions.find(a => a.id === deployId)!;
   // This Bosun's own stack: the widget starts it after answering (re-creating it ends this process), and the record lets the
   // restarted process finish the import (see self-import.ts).
@@ -260,7 +261,7 @@ export async function startImport(auth: TokenPayload, serverId: string, name: st
     if (!started) throw new ImportError('An import of this node\'s own stack is already under way', 409, 'IMPORT_BUSY');
   }
   const res = await runWidgetAction(auth, serverId, loaded, action, {
-    params: { name, source: src.source, yaml: src.yaml, env: src.env, repo: src.repo, branch: src.branch, file: src.file, pull: false, override: '', ...(c.own && s.startLater ? { [s.startLater]: 'later' } : {}) },
+    params: { name, source: src.source, yaml: src.yaml, env: src.env, repo: src.repo, branch: src.branch, file: src.file, pull: false, override: '' },
     confirm: true,
   }, { ip });
   const json = await res.json().catch(() => null) as { data?: { jobId?: string; success?: boolean; message?: string }; error?: { message?: string } } | null;
