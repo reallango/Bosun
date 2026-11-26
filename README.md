@@ -400,10 +400,14 @@ containers once from Bosun's copy, so importing is a short restart of the stack.
   `docker compose down`, volumes kept), so Bosun first starts a small waiter on the host that brings the stack straight back
   from Bosun's copy, then deletes it in Portainer: one more short restart. Without detaching, Portainer keeps listing it, and it
   must not be redeployed or deleted there.
-- A node's own Bosun stack is imported from **another node's** Bosun (open that node's address), so no Bosun ever restarts
-  itself in the middle of the import.
+- **Detach later:** a stack imported without detaching is listed under *Bosun stacks Portainer still lists* (once Portainer
+  is connected for that server), with **Detach from Portainer**: the same waiter, then Portainer's delete.
+- Before anything starts, a confirmation says what the chosen options cost (for example: values written into the compose
+  file when rebuilt from the containers, no git source to update from, two tools managing a stack that is not detached).
+- A node's own Bosun stack is imported (and detached) from **another node's** Bosun (open that node's address), so no Bosun
+  ever restarts itself in the middle of it.
 
-The outcome of each import appears in the bell.
+The outcome of each import and detach appears in the bell.
 ### Access requests (for agents and people)
 
 An API key or user that lacks something can ask for it instead of being given broad access up front:
