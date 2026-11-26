@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
@@ -11,27 +11,8 @@ const hasSh = process.platform !== 'win32' && spawnSync('sh', ['-c', 'exit 0']).
 const dir = path.join(process.cwd(), 'widgets', 'ollama', 'scripts');
 const script = (name: string) => fs.readFileSync(path.join(dir, name), 'utf8');
 
-const HOST_MANAGERS = new Set(['apt', 'apt-get', 'docker', 'systemctl', 'yum', 'dnf', 'zypper', 'apk', 'sudo']);
-
-/** A PATH with the usual tools but without the host's package managers, so only the fakes in `bin` are found. */
-function makeShim(): string {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bosun-shim-'));
-  for (const source of ['/usr/bin', '/usr/local/bin']) {
-    let names: string[] = [];
-    try { names = fs.readdirSync(source); } catch { continue; }
-    for (const name of names) {
-      if (HOST_MANAGERS.has(name)) continue;
-      try { fs.symlinkSync(path.join(source, name), path.join(dir, name)); } catch { /* already linked */ }
-    }
-  }
-  return dir;
-}
-
 let bin = '';
-let shim = '';
 let log = '';
-beforeAll(() => { shim = makeShim(); });
-afterAll(() => { fs.rmSync(shim, { recursive: true, force: true }); });
 beforeEach(() => { bin = fs.mkdtempSync(path.join(os.tmpdir(), 'bosun-fake-')); log = path.join(bin, 'calls.log'); fs.writeFileSync(log, ''); });
 afterEach(() => { fs.rmSync(bin, { recursive: true, force: true }); });
 
@@ -39,7 +20,7 @@ const fake = (name: string, body: string) => fs.writeFileSync(path.join(bin, nam
 const calls = () => fs.readFileSync(log, 'utf8').split('\n').filter(Boolean);
 const run = (file: string, params: Record<string, string> = {}, extraEnv: Record<string, string> = {}) => {
   const inv = buildScriptInvocation('linux', script(file), params);
-  return spawnSync('sh', ['-c', inv.command], { input: inv.stdin, encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${shim}`, LOG: log, ...extraEnv } });
+  return spawnSync('sh', ['-c', inv.command], { input: inv.stdin, encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, LOG: log, ...extraEnv } });
 };
 const lastLine = (out: string) => out.split('\n').filter(Boolean).at(-1);
 
