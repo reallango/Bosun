@@ -3,6 +3,7 @@ import { ok, fail, failFrom } from '@/lib/api/response';
 import { logAudit, AuditActions } from '@/lib/audit/logger';
 import { readZip, ZipError } from '@/lib/widgets/zip';
 import { validateManifest, validateFiles } from '@/lib/widgets/package-manifest';
+import { apiLevelProblem } from '@/lib/widgets/api-level';
 import { reservedPackageNames } from '@/lib/widgets/system-packages';
 import { installPackage, getInstalledPackage, secretsWouldBeCleared } from '@/lib/widgets/package-store';
 import { reviewPackage } from '@/lib/widgets/runtime/review';
@@ -46,6 +47,8 @@ export async function POST(request: NextRequest) {
     const { types, ids } = reservedPackageNames();
     const manifest = validateManifest(raw, { reservedTypes: types, reservedIds: ids });
     if (!manifest.ok) return fail(manifest.error, 422, 'INVALID_MANIFEST');
+    const blockedReason = apiLevelProblem(manifest.value.requires);
+    if (blockedReason) return fail(blockedReason, 422, 'NEWER_BOSUN_REQUIRED');
     const rest = { ...entries };
     delete rest['manifest.json'];
     const files = validateFiles(rest);
