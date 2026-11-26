@@ -17,7 +17,8 @@ const submitButtonClass = 'inline-flex items-center gap-1 rounded-md px-3 py-1.5
 
 /** Solid submit button of an editor. */
 export const primarySubmitClass = `${submitButtonClass} bg-primary text-primary-foreground hover:bg-primary/90`;
-export const dangerSubmitClass = `${submitButtonClass} bg-destructive text-destructive-foreground hover:bg-destructive/90`;
+// A fixed red-600 rather than the destructive token: in dark mode that token (#ef4444) under white text is ~3.8:1, below WCAG AA.
+export const dangerSubmitClass = `${submitButtonClass} bg-red-600 text-white hover:bg-red-700`;
 
 /** Notice boxes, by level. Green and amber keep their fixed status colours. */
 export const NOTICE_CLASS = {
