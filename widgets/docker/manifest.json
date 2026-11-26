@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "docker",
   "name": "Docker Containers",
-  "version": "1.0.17",
+  "version": "1.0.18",
   "description": "Containers on the host with logs, a shell, start, stop and restart; edit a container, create containers and stacks (a compose file, or one from a Git repository), and a Manage page for images, volumes and networks.",
   "author": "Bosun",
   "requires": {
@@ -1844,7 +1844,7 @@
           },
           {
             "id": "stack_pull",
-            "label": "Pull and redeploy",
+            "label": "Pull newer images and redeploy",
             "permission": "docker.manage",
             "target": {
               "kind": "stack",
@@ -1927,7 +1927,7 @@
                 }
               }
             ],
-            "icon": "refresh-cw",
+            "icon": "power",
             "job": true,
             "after": "refresh",
             "confirm": {

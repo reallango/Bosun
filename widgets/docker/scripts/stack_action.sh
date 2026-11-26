@@ -192,7 +192,34 @@ EOF
 # from the stored files. It outlives this SSH session (and the Bosun that asked for it, when the stack is that Bosun itself).
 # retag: move one service of a stack to a new image without rewriting its compose file (self-update of Bosun). Pull `image`, tag
 # it as `as` (the image name the service runs, e.g. bosun:latest) and re-create only that service in the background, so it
-# completes even when the stack is the Bosun that asked. Nothing changes when the pull fails.
+# completes even when the stack is the Bosun that asked. Nothing changes when the pull fails. Once the service runs again on the
+# new image, the other images of the pulled image's repository are removed except that image and the one the service ran before
+# (one rollback); see clean_images.
+clean_images() { # $1: repository of the pulled image, $2: its id, $3: the image the service ran before (may be empty),
+                 # $4 and $5: the pulled reference and the name it was tagged as (never removed)
+  used=''
+  ids=$($D ps -aq --no-trunc 2>/dev/null)
+  if [ -n "$ids" ]; then
+    used=$(set -f; set -- $ids; set +f; $D inspect --type container --format '{{.Image}}' "$@" 2>/dev/null | tr '\n' ' ')
+  fi
+  list=$($D image ls --no-trunc --format '{{json .ID}}{{"\t"}}{{json .Repository}}{{"\t"}}{{json .Tag}}' 2>/dev/null)
+  [ -n "$list" ] || return 0
+  printf '%s\n' "$list" | awk -F '\t' -v repo="$1" -v new="$2" -v prev="$3" -v refs="$4 $5" -v used="$used" '
+    function unq(s) { return (s ~ /^".*"$/) ? substr(s, 2, length(s) - 2) : s }
+    BEGIN {
+      n = split(used, u, " "); for (i = 1; i <= n; i++) keep[u[i]] = 1
+      if (new != "") keep[new] = 1; if (prev != "") keep[prev] = 1
+      n = split(refs, a, " "); for (i = 1; i <= n; i++) if (a[i] != "") keepref[a[i]] = 1
+    }
+    NF >= 3 {
+      id = unq($1); r = unq($2); t = unq($3)
+      if (r != repo || t == "<none>" || keep[id] || keepref[r ":" t]) next
+      print r ":" t
+    }' | while IFS= read -r ref; do
+      [ -n "$ref" ] || continue
+      $D image rm "$ref" >/dev/null 2>&1 && echo "[step] Removed image $ref"
+    done
+}
 if [ "$op" = retag ]; then
   img=${BOSUN_PARAM_image-}; as=${BOSUN_PARAM_as-}; svc=${BOSUN_PARAM_service-}
   for v in "$img" "$as"; do
@@ -203,11 +230,20 @@ if [ "$op" = retag ]; then
   echo "[step] Pulling $img"
   $D pull "$img" >/dev/null 2>"$errf" || fail "pulling $img failed: $(lastline)"
   $D tag "$img" "$as" 2>"$errf" || fail "tagging failed: $(lastline)"
+  repo=${img%%@*}; case "${repo##*/}" in *:*) repo=${repo%:*} ;; esac
+  newid=$($D image inspect --format '{{.Id}}' "$img" 2>/dev/null)
+  previd=''
+  cid=$(dc ps -aq "$svc" 2>/dev/null | head -n 1)
+  [ -z "$cid" ] || previd=$($D inspect --type container --format '{{.Image}}' "$cid" 2>/dev/null)
   echo "[step] Re-creating $svc of $name with $img"
+  # Fully detached (no stdin, stdout or stderr kept): the SSH session, and so this action, must end now. On the node whose
+  # Bosun asked, the answer has to arrive before the re-creation restarts that Bosun (self-update records it).
   (
-    trap '' HUP
+    trap '' HUP PIPE
     sleep 2
-    dc up -d --no-build --no-deps "$svc"
+    if dc up -d --no-build --no-deps "$svc"; then
+      [ -z "$newid" ] || clean_images "$repo" "$newid" "$previd" "$img" "$as"
+    fi
   ) </dev/null >/dev/null 2>&1 &
   echo "DONE retag: $name $svc -> $img"
   exit 0

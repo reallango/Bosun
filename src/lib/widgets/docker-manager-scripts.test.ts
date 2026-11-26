@@ -450,16 +450,16 @@ esac`);
     expect(JSON.parse(run('images.sh').stdout)).toEqual([]);
   });
 
-  it.skipIf(!hasSh)('volumes: sizes from df, containers from the mounts of all containers', () => {
+  it.skipIf(!hasSh)('volumes: sizes from df, containers from the mounts of all containers, created in local time like images', () => {
     fake(`case "$1" in
-  volume) if [ "$2" = ls ]; then echo v1; echo v2; else printf '%s\\n' '"v1"${T}"local"${T}"/var/lib/docker/volumes/v1/_data"${T}"2025-01-01T00:00:00Z"' '"v2"${T}"local"${T}"/m/v2"${T}"2025-01-02T00:00:00Z"'; fi ;;
+  volume) if [ "$2" = ls ]; then echo v1; echo v2; else printf '%s\\n' '"v1"${T}"local"${T}"/var/lib/docker/volumes/v1/_data"${T}"2025-01-01T00:00:00Z"' '"v2"${T}"local"${T}"/m/v2"${T}"2025-01-02T23:45:00Z"'; fi ;;
   system) printf 'v1${T}1.5MB\\n' ;;
   ps) echo 'v1,/host/path'; echo 'v1'; echo '' ;;
 esac`);
-    const r = run('volumes.sh');
+    const r = run('volumes.sh', {}, { TZ: 'UTC' });
     expect(JSON.parse(r.stdout)).toEqual([
-      { name: 'v1', driver: 'local', mountpoint: '/var/lib/docker/volumes/v1/_data', size: '1.5MB', containers: 2, created: '2025-01-01T00:00:00Z' },
-      { name: 'v2', driver: 'local', mountpoint: '/m/v2', size: '', containers: 0, created: '2025-01-02T00:00:00Z' },
+      { name: 'v1', driver: 'local', mountpoint: '/var/lib/docker/volumes/v1/_data', size: '1.5MB', containers: 2, created: '2025-01-01 00:00', created_iso: '2025-01-01T00:00:00Z' },
+      { name: 'v2', driver: 'local', mountpoint: '/m/v2', size: '', containers: 0, created: '2025-01-02 23:45', created_iso: '2025-01-02T23:45:00Z' },
     ]);
     fake('case "$1 $2" in "volume ls") exit 0 ;; esac');
     expect(JSON.parse(run('volumes.sh').stdout)).toEqual([]);
@@ -952,9 +952,12 @@ exit 0`);
       calls = dockerCalls().map(c => c.join(' ')).filter(c => c !== 'compose version');
       if (calls.some(c => c.includes(' up '))) break;
     }
+    // no image id from `docker image inspect` means no clean-up (nothing is removed on a guess)
     expect(calls).toEqual([
       'pull ghcr.io/reallango/bosun:sha-abcdef0',
       'tag ghcr.io/reallango/bosun:sha-abcdef0 bosun:latest',
+      'image inspect --format {{.Id}} ghcr.io/reallango/bosun:sha-abcdef0',
+      `compose -p bosun --project-directory ${d} -f ${d}/compose.yaml ps -aq bosun`,
       `compose -p bosun --project-directory ${d} -f ${d}/compose.yaml up -d --no-build --no-deps bosun`,
     ]);
     // a pull that fails: no tag, no restart
@@ -968,6 +971,50 @@ exit 0`);
     expect(out('stack_action.sh', { ...params, image: 'x;reboot' }).error).toMatch(/image:/);
     expect(out('stack_action.sh', { ...params, service: '-x' }).error).toMatch(/service:/);
     expect(dockerCalls().filter(c => c.join(' ') !== 'compose version')).toEqual([]);
+  }, 20000);
+
+  it.skipIf(!hasSh)('stack_action retag keeps the new and the previous image and removes only the older ones of that one repository', async () => {
+    seed('bosun', { 'compose.yaml': 'x', 'bosun.meta': 'source=editor\n' });
+    const T = '\t';
+    const img = (id: string, repo: string, tag: string) => `'"sha256:${id}"${T}"${repo}"${T}"${tag}"'`;
+    const images = (upFails = false) => fake(`case "$1 $2" in
+  "image inspect") echo sha256:new ;;
+  "image ls") printf '%s\\n' ${[
+    img('new', 'ghcr.io/o/bosun', 'sha-new'), img('prev', 'ghcr.io/o/bosun', 'sha-old'), img('one', 'ghcr.io/o/bosun', 'sha-1'),
+    img('two', 'ghcr.io/o/bosun', 'sha-2'), img('other', 'docker.io/library/nginx', 'latest'), img('busy', 'ghcr.io/o/bosun', 'sha-inuse'),
+  ].join(' ')} ;;
+  "image rm") case "$3" in *sha-2) echo "conflict: image is being used by stopped container c1" >&2; exit 1 ;; esac; exit 0 ;;
+esac
+case "$1" in
+  compose) case "$*" in *" ps -aq "*) echo c0 ;; *" up "*) ${upFails ? 'echo "no such image" >&2; exit 1' : 'exit 0'} ;; esac ;;
+  inspect) case "$*" in *c0*) echo sha256:prev ;; *c1*) echo sha256:busy ;; esac ;;
+  ps) echo c1 ;;
+esac
+exit 0`);
+    images();
+    const params = { name: 'bosun', op: 'retag', image: 'ghcr.io/o/bosun:sha-new', as: 'bosun:latest', service: 'bosun' };
+    const r = out('stack_action.sh', params);
+    expect(r.done).toBe('retag: bosun bosun -> ghcr.io/o/bosun:sha-new');
+    // The script answers before the re-creation and clean-up run (detached): self-update depends on getting this answer
+    // before the Bosun that asked is restarted.
+    expect(dockerCalls().some(c => c[0] === 'image' && c[1] === 'rm')).toBe(false);
+    let rms: string[] = [];
+    for (let i = 0; i < 40; i++) {
+      rms = dockerCalls().filter(c => c[0] === 'image' && c[1] === 'rm').map(c => c[2]);
+      if (rms.length >= 2) break;
+      await new Promise(res => setTimeout(res, 250));
+    }
+    // kept: the new image, the one the service ran before (one rollback), the image a stopped container uses and another
+    // repository; removed: the two older images of the pulled image's repository, and a failed rm is not an error
+    expect(rms.sort()).toEqual(['ghcr.io/o/bosun:sha-1', 'ghcr.io/o/bosun:sha-2']);
+    expect(r.error).toBeNull();
+    // the service did not come up on the new image: nothing is removed
+    fs.writeFileSync(log, '');
+    images(true);
+    expect(out('stack_action.sh', params).done).toBe('retag: bosun bosun -> ghcr.io/o/bosun:sha-new');
+    await new Promise(res => setTimeout(res, 3500));
+    expect(dockerCalls().some(c => c.includes(' up ') || (c[0] === 'compose' && c.includes('up')))).toBe(true);
+    expect(dockerCalls().filter(c => c[0] === 'image' && c[1] === 'rm')).toEqual([]);
   }, 20000);
 
   it.skipIf(!hasSh)('stack_deploy also catches shared namespaces, volumes_from, build settings and host files used as secrets', () => {
