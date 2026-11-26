@@ -39,9 +39,19 @@ function writeFile(data, { exclusive = false } = {}) {
   fs.mkdirSync(path.dirname(FILE), { recursive: true, mode: 0o700 });
   const tmp = `${FILE}.${process.pid}.tmp`;
   fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { mode: 0o600 });
-  if (exclusive && fs.existsSync(FILE)) {
+  if (exclusive) {
+    // link() fails if the file exists, atomically: two processes generating at the same time cannot both win
+    // (an exists-then-rename check could let the second overwrite keys the first already used).
+    try {
+      fs.linkSync(tmp, FILE);
+    } catch (err) {
+      fs.unlinkSync(tmp);
+      if (err && err.code === 'EEXIST') return false;
+      throw err;
+    }
     fs.unlinkSync(tmp);
-    return false;
+    cache = null;
+    return true;
   }
   fs.renameSync(tmp, FILE);
   cache = null;

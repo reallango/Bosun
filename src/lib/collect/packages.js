@@ -16,6 +16,8 @@ const scripts = require('./package-state');
 
 const SECTION_PREFIX = 'pkg:';
 const MIN_INTERVAL_SEC = 5;
+/** The longest interval a widget's settings may ask for (the largest data.cacheSec a spec may declare). */
+const MAX_INTERVAL_SEC = 86400;
 
 /** Snapshot section name for a widget type. */
 const sectionFor = (type, instanceId) => (instanceId ? `${SECTION_PREFIX}${type}#${instanceId}` : `${SECTION_PREFIX}${type}`);
@@ -45,7 +47,7 @@ function collectorsFrom(rows) {
       let sec = Number(d.cacheSec) || 10;
       if (d.cacheSecFrom) {
         const n = Number(config[String(d.cacheSecFrom).replace(/^config./, '')]);
-        if (Number.isFinite(n) && n > 0) sec = n;
+        if (Number.isFinite(n) && n > 0) sec = Math.min(MAX_INTERVAL_SEC, Math.max(MIN_INTERVAL_SEC, n));
       }
       const k = perInstance ? `${row.type}#${row.widget_id}` : String(row.type);
       if (have.has(k)) continue;

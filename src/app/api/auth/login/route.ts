@@ -10,7 +10,7 @@ import { isNoQuorumError } from '@/lib/db/rqlite-client';
 import crypto from 'crypto';
 import { hashPassword, verifyPassword } from '@/lib/auth/password';
 import { logAudit, AuditActions } from '@/lib/audit/logger';
-import { checkLoginRateLimit, recordLoginAttempt } from '@/lib/utils/rate-limiter';
+import { checkLoginRateLimit, recordLoginAttempt, unrecordLoginAttempt } from '@/lib/utils/rate-limiter';
 import { clientIp, findUserByUsername, startSession } from '@/lib/auth/session';
 import { createChallenge, startEmailChallenge } from '@/lib/auth/mfa';
 
@@ -25,7 +25,7 @@ export async function POST(request: NextRequest) {
     const password = typeof body?.password === 'string' ? body.password : '';
     const ip = clientIp(request);
 
-    const rateLimit = checkLoginRateLimit(ip);
+    const rateLimit = checkLoginRateLimit(ip, username || undefined);
     if (!rateLimit.allowed) {
       const retryAfterSec = Math.ceil((rateLimit.retryAfterMs ?? 60_000) / 1000);
       return NextResponse.json(
@@ -34,26 +34,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Counted before the slow password check, so a parallel burst cannot get past the limit; taken back on success.
+    recordLoginAttempt(ip, username || undefined);
     const user = username ? await findUserByUsername(username) : null;
     if (!user) {
       // Spend the same scrypt time as for a real account (no user enumeration by timing).
       dummyHash ??= hashPassword(crypto.randomUUID());
       await verifyPassword(password || 'x', await dummyHash).catch(() => false);
-      recordLoginAttempt(ip);
       await logAudit({ action: AuditActions.LOGIN_FAILED, details: `Unknown user: ${username.slice(0, 100)}`, status: 'failure', ipAddress: ip });
       return NextResponse.json(INVALID, { status: 401 });
     }
     const valid = password ? await verifyPassword(password, user.password_hash) : false;
     if (!valid) {
-      recordLoginAttempt(ip);
       await logAudit({ userId: user.id, action: AuditActions.LOGIN_FAILED, status: 'failure', ipAddress: ip });
       return NextResponse.json(INVALID, { status: 401 });
     }
     if (user.disabled) {
-      recordLoginAttempt(ip);
       await logAudit({ userId: user.id, action: AuditActions.LOGIN_FAILED, details: 'Account disabled', status: 'failure', ipAddress: ip });
       return NextResponse.json({ error: { message: 'This account cannot sign in. Contact an administrator.', code: 'ACCOUNT_DISABLED' } }, { status: 403 });
     }
+    unrecordLoginAttempt(ip, username || undefined);
 
     if (user.mfa_method === 'totp' || user.mfa_method === 'email') {
       if (user.mfa_method === 'totp') {

@@ -193,17 +193,94 @@ export function placeholders(command: string): string[] {
   return Array.from(command.matchAll(PLACEHOLDER_RE)).map(m => m[1]);
 }
 
-function validateCommand(command: unknown, params: Record<string, ParamSpec> | null, where: string): Validated<string> {
+/** Programs that run their arguments (or the argument of a command flag) as code again. */
+const SHELLS = new Set(['sh', 'bash', 'dash', 'zsh', 'ksh', 'ash', 'mksh', 'busybox', 'powershell', 'pwsh', 'cmd']);
+/** Words that make everything after them code again, whatever flags follow. */
+const REPARSERS = new Set(['eval', 'invoke-expression', 'iex', 'ssh', 'watch', 'su', 'runuser', 'start-process']);
+/** A flag whose argument is a command string: `-c` (sh, su), `-Command` / `-EncodedCommand` (PowerShell), `/c` (cmd). */
+const COMMAND_FLAG_RE = /^(-c|-command|-encodedcommand|\/c|\/k)$/i;
+/** The command flags a shell may be given, including combined short flags (`-lc`, `-ec`) and PowerShell's abbreviations. */
+const SHELL_FLAG_RE = /^(-[a-z]*c|-com\w*|-e|-ec|-en\w*|\/c|\/k)$/i;
+
+/**
+ * Why the `{{name}}` placeholders of a command template are not safely placed, or null when they are. The template is
+ * read with shell quoting rules (POSIX: '...', "...", backslash; PowerShell: '...', "...", backtick, typographic quotes):
+ * a value is inserted as one quoted word, which is only safe where a word starts unquoted and where nothing runs the
+ * text again as code (`sh -c`, `bash -c`, `eval`, `powershell -Command`, `ssh`, ...).
+ */
+export function placeholderPlacementProblem(command: string, platform: 'linux' | 'windows', opts: { allowQuoted?: boolean } = {}): string | null {
+  const ps = platform === 'windows';
+  const starts = new Map<number, string>();
+  for (const m of Array.from(command.matchAll(PLACEHOLDER_RE))) starts.set(m.index ?? 0, m[0]);
+  if (starts.size === 0) return null;
+  const isSingle = (c: string) => c === "'" || (ps && '‘’‚‛'.includes(c));
+  const isDouble = (c: string) => c === '"' || (ps && '“”„'.includes(c));
+  const escape = ps ? '`' : '\\';
+
+  let quote: 'single' | 'double' | null = null;
+  let word = '';            // the literal text of the current word, quotes removed (for spotting flags and programs)
+  let inWord = false;       // the current word has started (it may be empty text, such as '')
+  let prevWord = '';
+  let reparse = false;      // everything from here on is run as code again
+  let shellSeen = false;    // the current simple command runs a shell
+  const endWord = () => {
+    if (inWord) {
+      const lower = word.toLowerCase();
+      const base = lower.replace(/^.*[\\/]/, '').replace(/\.exe$/, '');
+      if (REPARSERS.has(base)) reparse = true;
+      if (SHELLS.has(base)) shellSeen = true;
+      else if (shellSeen && SHELL_FLAG_RE.test(lower)) reparse = true;
+      prevWord = lower;
+    }
+    word = '';
+    inWord = false;
+  };
+
+  for (let i = 0; i < command.length; i++) {
+    const ph = starts.get(i);
+    if (ph) {
+      const name = ph.slice(2, -2);
+      const before = command[i - 1];
+      if (before === '\\' || before === '`' || before === '$') return `{{${name}}} must not follow "${before}"; put it on its own as a word`;
+      if (quote && !opts.allowQuoted) return `do not put {{${name}}} inside quotes; Bosun quotes parameter values itself`;
+      if (reparse) return `{{${name}}} is part of a command that is run again as code (sh -c, eval, powershell -Command, ssh, ...); a parameter cannot be used there`;
+      if (COMMAND_FLAG_RE.test(prevWord)) return `{{${name}}} must not be the argument of ${prevWord}`;
+      inWord = true;
+      word += '\u0000'; // a value: never a flag or program name the author wrote
+      i += ph.length - 1;
+      continue;
+    }
+    const c = command[i];
+    // An escape in front of a placeholder would swallow the opening quote of the value.
+    if (c === escape && quote !== 'single' && starts.has(i + 1)) return `{{${(starts.get(i + 1) as string).slice(2, -2)}}} must not follow "${c}"; put it on its own as a word`;
+    if (quote === 'single') {
+      if (isSingle(c)) quote = null; else word += c;
+      continue;
+    }
+    if (quote === 'double') {
+      if (c === escape) { word += command[i + 1] ?? ''; i++; continue; }
+      if (isDouble(c)) quote = null; else word += c;
+      continue;
+    }
+    if (c === escape) { inWord = true; word += command[i + 1] ?? ''; i++; continue; }
+    if (isSingle(c)) { quote = 'single'; inWord = true; continue; }
+    if (isDouble(c)) { quote = 'double'; inWord = true; continue; }
+    if (/\s/.test(c)) { endWord(); continue; }
+    if (';&|()<>'.includes(c)) { endWord(); prevWord = ''; shellSeen = false; continue; }
+    inWord = true;
+    word += c;
+  }
+  return null;
+}
+
+function validateCommand(command: unknown, params: Record<string, ParamSpec> | null, where: string, platform: 'linux' | 'windows' = 'linux'): Validated<string> {
   if (typeof command !== 'string' || !command.trim() || command.length > MAX_COMMAND_LENGTH) return fail(`${where}: a command is required (max ${MAX_COMMAND_LENGTH} characters)`);
   if (params === null) return { ok: true, value: command };
-  for (const m of command.matchAll(PLACEHOLDER_RE)) {
+  for (const m of Array.from(command.matchAll(PLACEHOLDER_RE))) {
     if (!(m[1] in params)) return fail(`${where}: the command uses {{${m[1]}}} but no parameter "${m[1]}" is declared`);
-    const before = command[(m.index ?? 0) - 1];
-    const after = command[(m.index ?? 0) + m[0].length];
-    if (before === "'" || before === '"' || after === "'" || after === '"') {
-      return fail(`${where}: do not put quotes around {{${m[1]}}}; Bosun quotes parameter values itself`);
-    }
   }
+  const problem = placeholderPlacementProblem(command, platform);
+  if (problem) return fail(`${where}: ${problem}`);
   return { ok: true, value: command };
 }
 
@@ -298,7 +375,8 @@ function validateData(raw: unknown, ownPerms: ReadonlySet<string>, v2?: { script
     if (cacheSec === null || timeoutSec === null || initialDelaySec === null) return fail('data.cacheSec must be 5-86400, data.timeoutSec 1-900 and data.initialDelaySec 0-3600');
     let cacheSecFrom: string | undefined;
     if (raw.cacheSecFrom !== undefined) {
-      // The interval can be an instance setting (seconds), clamped to 5..cacheSec.
+      // The interval can be an instance setting (seconds), clamped by the poller to 5..86400 (the range of cacheSec);
+      // cacheSec is the interval when the setting is missing or not a positive number.
       if (typeof raw.cacheSecFrom !== 'string' || !raw.cacheSecFrom.startsWith('config.') || !FIELD_RE.test(raw.cacheSecFrom)) return fail('data.cacheSecFrom must be an instance setting such as "config.interval"');
       cacheSecFrom = raw.cacheSecFrom;
     }
@@ -316,7 +394,7 @@ function validateData(raw: unknown, ownPerms: ReadonlySet<string>, v2?: { script
     if (!command.ok) return command;
     let windowsCommand: string | undefined;
     if (raw.windowsCommand !== undefined) {
-      const w = validateCommand(raw.windowsCommand, null, 'data.windowsCommand');
+      const w = validateCommand(raw.windowsCommand, null, 'data.windowsCommand', 'windows');
       if (!w.ok) return w;
       windowsCommand = w.value;
     }
@@ -393,6 +471,8 @@ function validateAction(raw: unknown, ownPerms: ReadonlySet<string>, v2?: { scri
     try { new RegExp(t.refPattern); } catch { return fail(`${where}: "terminal.refPattern" is not a valid regular expression`); }
     if (typeof t.command !== 'string' || t.command.length < 1 || t.command.length > 500 || /[\u0000-\u001f]/.test(t.command)) return fail(`${where}: "terminal.command" must be one line of up to 500 characters`);
     if ((t.command.match(/\{\{ref\}\}/g) ?? []).length !== 1 || t.command.replace('{{ref}}', '').includes('{{')) return fail(`${where}: "terminal.command" must contain {{ref}} exactly once and no other placeholder`);
+    const tp = placeholderPlacementProblem(t.command, 'linux', { allowQuoted: true });
+    if (tp) return fail(`${where}: "terminal.command": ${tp}`);
     let check: string | undefined;
     if (t.check !== undefined) {
       if (!v2) return fail(`${where}: "terminal.check" needs spec version 2`);
@@ -468,7 +548,7 @@ function validateAction(raw: unknown, ownPerms: ReadonlySet<string>, v2?: { scri
   if (!command.ok) return command;
   let windowsCommand: string | undefined;
   if (raw.windowsCommand !== undefined) {
-    const w = validateCommand(raw.windowsCommand, params.value, `${where} windowsCommand`);
+    const w = validateCommand(raw.windowsCommand, params.value, `${where} windowsCommand`, 'windows');
     if (!w.ok) return w;
     windowsCommand = w.value;
   }

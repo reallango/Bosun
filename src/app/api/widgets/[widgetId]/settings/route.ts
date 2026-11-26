@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth } from '@/lib/auth/middleware';
 import { requirePermission } from '@/lib/permissions/authorize';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
+import { widgetVisible } from '@/lib/widgets/visibility';
 import { resolveWidgetDefinition } from '@/components/widgets/registry-loader';
 import { denyGuardedConfigChange } from '@/lib/widgets/config-guard-http';
 
@@ -16,6 +17,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
   const { widgetId } = await params;
+  // A widget of a server this caller may not see does not exist for them.
+  if (!(await widgetVisible(auth, widgetId))) return NextResponse.json({ error: { message: 'Widget not found' } }, { status: 404 });
   try {
     const r = await rqlite.query(
       'SELECT w.*, s.poll_interval_sec, s.poll_enabled, s.name AS server_name FROM widgets w LEFT JOIN servers s ON s.id = w.server_id WHERE w.id = ?',
@@ -48,6 +51,8 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
   const roleError = await requirePermission(auth, 'dashboards.edit');
   if (roleError) return roleError;
   const { widgetId } = await params;
+  // A widget of a server this caller may not see does not exist for them.
+  if (!(await widgetVisible(auth, widgetId))) return NextResponse.json({ error: { message: 'Widget not found' } }, { status: 404 });
 
   try {
     const r = await rqlite.query('SELECT id, server_id, widget_type, config FROM widgets WHERE id = ?', [widgetId]);

@@ -35,7 +35,7 @@ export async function effectiveGrants(payload: TokenPayload, defs?: readonly Per
 export async function serverVisible(payload: TokenPayload, serverId: string): Promise<boolean> {
   if (payload.role === 'admin') return true;
   const extra = await registeredPermissionDefs();
-  const server = await serverContext(serverId).catch(() => ({ id: serverId, groupIds: [] as string[] }));
+  const server = await serverContext(serverId) /* no catch: fail closed */;
   return grantsAllow(await effectiveGrants(payload, extra, true), 'servers.view', server, extra);
 }
 

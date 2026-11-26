@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { requireAuth } from '@/lib/auth/middleware';
+import { clientIp, requireAuth } from '@/lib/auth/middleware';
 import { requirePermission } from '@/lib/permissions/authorize';
 import { logAudit, AuditActions } from '@/lib/audit/logger';
 import { ok, fail, failFrom } from '@/lib/api/response';
@@ -26,7 +26,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const accepted = await cancelJob(jobId);
     await logAudit({
       userId: auth.userId, serverId, action: AuditActions.WIDGET_ACTION, status: accepted ? 'success' : 'failure',
-      details: JSON.stringify({ widget: widgetType, action: job.actionId, job: jobId, cancel: true }).slice(0, 900), ipAddress: request.headers.get('x-forwarded-for')?.split(',')[0],
+      details: JSON.stringify({ widget: widgetType, action: job.actionId, job: jobId, cancel: true }).slice(0, 900), ipAddress: (clientIp(request) ?? undefined),
     });
     if (!accepted) return fail('The job is not running', 409, 'NOT_RUNNING');
     return ok({ cancelRequested: true });

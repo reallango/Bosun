@@ -28,16 +28,21 @@ export interface TokenPayload extends JWTPayload {
 }
 
 export async function createAccessToken(userId: string, username: string, role: string): Promise<string> {
-  return new SignJWT({ userId, username, role })
+  return new SignJWT({ userId, username, role, type: ACCESS_TOKEN_TYPE })
     .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime('15m')
     .sign(authSecret());
 }
 
+/** The `type` claim of session access tokens. Other tokens signed with the same key (terminal `ws`, `ws-cmd`, API terminal) carry their own. */
+export const ACCESS_TOKEN_TYPE = 'access';
+
 export async function verifyAccessToken(token: string): Promise<TokenPayload | null> {
   try {
-    const { payload } = await jwtVerify(token, authSecret());
+    const { payload } = await jwtVerify(token, authSecret(), { algorithms: ['HS256'] });
+    // A terminal or command token must never work as a session. Tokens minted before the type claim existed have none.
+    if (payload.type !== undefined && payload.type !== ACCESS_TOKEN_TYPE) return null;
     return payload as TokenPayload;
   } catch {
     return null;

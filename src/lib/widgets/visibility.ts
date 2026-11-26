@@ -35,3 +35,13 @@ export async function visibleDashboards<T extends { type?: unknown; server_id?: 
   if (servers === '*') return rows;
   return rows.filter(r => r.type !== 'server' || (r.server_id != null && servers.has(String(r.server_id))));
 }
+
+/**
+ * Whether one widget (by id) exists for this caller: its server is visible and, for a package widget, the caller holds its data
+ * permission. Routes that read or change a widget by id answer 404 otherwise, as if it did not exist.
+ */
+export async function widgetVisible(auth: TokenPayload, widgetId: string): Promise<boolean> {
+  const { rqlite, rowsToObjects } = await import('@/lib/db/rqlite-client');
+  const rows = rowsToObjects(await rqlite.query('SELECT widget_type, server_id FROM widgets WHERE id = ?', [widgetId])) as unknown as { widget_type: string; server_id: string }[];
+  return rows.length > 0 && (await visibleWidgets(auth, rows)).length > 0;
+}

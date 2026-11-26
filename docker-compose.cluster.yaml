@@ -25,6 +25,8 @@ services:
       - RQLITE_JOIN=${RQLITE_JOIN:-}
       - RQLITE_BOOTSTRAP_EXPECT=${RQLITE_BOOTSTRAP_EXPECT:-3}
       - COOKIE_SECURE=${COOKIE_SECURE:-false}
+      # Reverse proxies allowed to name the client (X-Forwarded-For), e.g. the cloudflared container's network.
+      - TRUSTED_PROXIES=${TRUSTED_PROXIES:-}
       # Optional: if unset, Bosun generates both and keeps them in the data volume.
       - MASTER_KEY=${MASTER_KEY:-}
       - AUTH_SECRET=${AUTH_SECRET:-}

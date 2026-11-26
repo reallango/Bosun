@@ -3,7 +3,6 @@ import { getMasterKey } from '@/lib/secrets';
 import { NextRequest, NextResponse } from 'next/server';
 import { requireAuth, requireRole } from '@/lib/auth/middleware';
 import { rqlite } from '@/lib/db/rqlite-client';
-import { Client } from 'ssh2';
 import { encrypt } from '@/lib/crypto/keys';
 import { generateSSHKeyPair } from '@/lib/ssh/keygen';
 import { powershellCommand } from '@/lib/collect/windows';
@@ -13,7 +12,7 @@ import { windowsShellAccountScript, WINDOWS_SHELL_VERIFY_COMMAND, parseWindowsSh
 import {
     DEFAULT_SHELL_ACCOUNT, SHELL_ACCOUNT_RE, SHELL_VERIFY_COMMAND, parseShellVerification, shellAccountScript,
 } from '@/lib/ssh/shell-account';
-import { sshExec, stripSudo, shq, asRootCommand, type SshAuth } from '@/lib/ssh/admin-exec';
+import { sshExec, sshExecWithKey, pinnedHostKey, stripSudo, shq, asRootCommand, type SshAuth } from '@/lib/ssh/admin-exec';
 import crypto from 'crypto';
 
 // SAM account names on Windows are capped at 20 characters; the same bound is
@@ -224,29 +223,6 @@ Restart-Service sshd -ErrorAction SilentlyContinue
     return { steps };
 }
 
-/** Run one command over SSH with a private key (used to log in as the shell account and check it). */
-function sshExecWithKey(
-    target: { host: string; port: number; username: string; privateKey: string },
-    command: string
-): Promise<{ stdout: string; stderr: string; exitCode: number }> {
-    return new Promise((resolve, reject) => {
-        const conn = new Client();
-        const timeout = setTimeout(() => { conn.end(); reject(new Error('SSH connection timeout')); }, 15000);
-        conn.on('ready', () => {
-            conn.exec(command, (err, stream) => {
-                if (err) { clearTimeout(timeout); conn.end(); reject(err); return; }
-                let stdout = '';
-                let stderr = '';
-                stream.on('close', (code: number) => { clearTimeout(timeout); conn.end(); resolve({ stdout, stderr, exitCode: code }); });
-                stream.on('data', (d: Buffer) => { stdout += d.toString(); });
-                stream.stderr.on('data', (d: Buffer) => { stderr += d.toString(); });
-            });
-        });
-        conn.on('error', (err) => { clearTimeout(timeout); reject(err); });
-        conn.connect({ host: target.host, port: target.port, username: target.username, privateKey: target.privateKey, readyTimeout: 10000 });
-    });
-}
-
 /**
  * Create (or repair) the non-admin shell account, log in as it with its new key, and only
  * enable it when it provably has no admin rights. Returns the account and the id of its
@@ -292,6 +268,7 @@ async function setupShellAccount(args: {
             const check = await sshExecWithKey(
                 { host: hostname, port, username: shellAccount, privateKey: pair.privateKey },
                 windows ? powershellCommand(WINDOWS_SHELL_VERIFY_COMMAND) : SHELL_VERIFY_COMMAND,
+                sshConfig,
             );
             verification = windows ? parseWindowsShellVerification(check.stdout, shellAccount) : parseShellVerification(check.stdout, shellAccount);
         } catch (err) {
@@ -381,7 +358,12 @@ export async function POST(request: NextRequest) {
         }
 
         const isWindowsHost = platform === 'windows';
-        const sshConfig: SshAuth = { host: hostname, port, username: admin_username, password: admin_password };
+        // A host Bosun already knows is held to its pinned host key; a new one is pinned by the first
+        // connection below and every later connection in this request must match it.
+        const sshConfig: SshAuth = {
+            host: hostname, port, username: admin_username, password: admin_password,
+            hostKey: await pinnedHostKey({ serverId: targetServerId, host: hostname, port }),
+        };
 
         // Step 1: Test admin connection
         try {
@@ -426,13 +408,7 @@ export async function POST(request: NextRequest) {
         // Step 4: Test connection with the new key
         let testSuccess = false;
         try {
-            const testConn = new Client();
-            await new Promise<void>((resolve, reject) => {
-                const timeout = setTimeout(() => { testConn.end(); reject(new Error('Test timeout')); }, 10000);
-                testConn.on('ready', () => { clearTimeout(timeout); testConn.end(); resolve(); });
-                testConn.on('error', (err) => { clearTimeout(timeout); reject(err); });
-                testConn.connect({ host: hostname, port, username: service_account, privateKey, readyTimeout: 10000 });
-            });
+            await sshExecWithKey({ host: hostname, port, username: service_account, privateKey }, isWindowsHost ? powershellCommand('Write-Output connected') : 'true', sshConfig);
             testSuccess = true;
             steps.push('Key-based connection OK');
         } catch (err) {
@@ -559,6 +535,9 @@ export async function POST(request: NextRequest) {
             if (row) {
                 const [existingId, existingName, oldKeyId, oldShellKeyId] = row as string[];
                 await rqlite.execute('UPDATE servers SET ssh_key_id = ?, ssh_user = ?, updated_at = ? WHERE id = ?', [keyId, service_account, now, existingId]);
+                if (sshConfig.hostKey) {
+                    await rqlite.execute('UPDATE servers SET host_key_fingerprint = ? WHERE id = ? AND host_key_fingerprint IS NULL', [sshConfig.hostKey, existingId]);
+                }
                 if (shell) {
                     await rqlite.execute('UPDATE servers SET shell_user = ?, shell_key_id = ? WHERE id = ?', [shell.user, shell.keyId, existingId]);
                     if (oldShellKeyId && oldShellKeyId !== shell.keyId) {
@@ -594,6 +573,8 @@ export async function POST(request: NextRequest) {
                 leftover_keys: leftoverKeys.map(k => ({ fingerprint: k.fingerprint, comment: k.comment })),
                 shell_user: shell?.user ?? null,
                 shell_key_id: shell?.keyId ?? null,
+                // The host key seen while provisioning; pass it when adding the server so it is pinned from the start.
+                host_key_fingerprint: sshConfig.hostKey ?? null,
                 steps,
             },
         });

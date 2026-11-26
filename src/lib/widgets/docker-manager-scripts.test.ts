@@ -195,18 +195,20 @@ describe('risky settings', () => {
   });
 
   it.skipIf(!hasSh)('cap_drop, ordinary host paths, named volumes and bridge networks are not risky', () => {
-    expect(create(base + 'cap_drop=ALL\ncap_drop=NET_RAW\nvolume=/srv/data:/d\nvolume=/etcetera:/e\nvolume=/usrlocal:/u\nvolume=/home/me/data:/h\nvolume=/home/me/.sshx:/h2\nvolume=/var/lib/dockerx:/v\nvolume=named:/n\nnetwork=bridge').error).toBeNull();
+    expect(create(base + 'cap_drop=ALL\ncap_drop=NET_RAW\nvolume=/srv/data:/d\nvolume=/etcetera:/e\nvolume=/usrlocal:/u\nvolume=/home/me/data:/h\nvolume=/home/me/sshx:/h2\nvolume=/var/lib/dockerx:/v\nvolume=named:/n\nnetwork=bridge').error).toBeNull();
   });
 
   it.skipIf(!hasSh)('detects sensitive host paths, also through ".." and trailing parts', () => {
     const risky = ['/', '/etc', '/etc/', '/etc/ssh', '/root', '/root/.ssh', '/proc', '/proc/1', '/sys', '/boot', '/usr', '/usr/bin', '/var/lib/docker', '/var/lib/docker/volumes',
-      '/var/run/docker.sock', '/run/docker.sock', '/opt/run/containerd.sock', '/srv/../etc', '/srv/data/../../etc/passwd', '/./etc', '//etc', '/etc/../', '/home/alice/.ssh', '/home/alice/.ssh/keys', '/srv/..', '/a/b/../../../etc'];
+      '/var/run/docker.sock', '/run/docker.sock', '/opt/run/containerd.sock', '/srv/../etc', '/srv/data/../../etc/passwd', '/./etc', '//etc', '/etc/../', '/home/alice/.ssh', '/home/alice/.ssh/keys', '/srv/..', '/a/b/../../../etc',
+      // a folder that contains a sensitive one, runtime sockets, devices, whole home folders and hidden files in them
+      '/var', '/var/lib', '/run', '/run/user/1000', '/dev', '/dev/sda', '/lib', '/bin', '/home', '/home/alice', '/home/alice/.bashrc', '/home/alice/.config/x', '/opt/podman.sock'];
     for (const p of risky) {
       const r = create(`${base}volume=${p}:/x`);
       expect(r.error, p).toMatch(/needs the permission to use elevated container options: host path /);
       expect(create(`${base}volume=${p}:/x`, 'true').error, p).toBeNull();
     }
-    for (const p of ['/srv', '/srv/etc', '/etcfoo', '/usrlocal', '/home', '/home/alice', '/home/alice/docs', '/var/lib', '/var/lib/other', '/opt/proc', '/tmp/..foo']) {
+    for (const p of ['/srv', '/srv/etc', '/etcfoo', '/usrlocal', '/home/alice/docs', '/home/alice/docs/.git', '/var/lib/other', '/var/log', '/mnt/data', '/opt/proc', '/tmp/..foo']) {
       expect(create(`${base}volume=${p}:/x`).error, p).toBeNull();
     }
   });
@@ -826,7 +828,9 @@ exit 0`);
     for (const [op, tail] of Object.entries(expected)) {
       fs.writeFileSync(log, '');
       expect(out('stack_action.sh', { name: 'web', op }).done, op).toBe(`${op}: web`);
-      expect(dockerCalls().filter((c) => c[0] === 'compose' && c[1] === '-p')).toEqual([[...base, ...tail]]);
+      // update checks the files for risky options first (the same check as a deployment)
+      const check = op === 'update' ? [[...base, 'config', '--format', 'json']] : [];
+      expect(dockerCalls().filter((c) => c[0] === 'compose' && c[1] === '-p')).toEqual([...check, [...base, ...tail]]);
     }
     fs.writeFileSync(log, '');
     out('stack_action.sh', { name: 'g', op: 'restart' });
@@ -841,6 +845,52 @@ exit 0`);
     expect(out('stack_action.sh', { name: 'web', op: 'start' }).error).toMatch(/docker compose start failed: service web: no such image/);
     fake('case "$1 $2" in "compose version") exit 1 ;; esac');
     expect(out('stack_action.sh', { name: 'web', op: 'start' }).error).toMatch(/is not installed/);
+  });
+
+  it.skipIf(!hasSh)('stack_action update re-checks the new version: risky options are refused (checkout restored) unless allow_risky', () => {
+    seed('g', { 'repo/.git/HEAD': 'x', 'repo/d/compose.yaml': 'x', 'bosun.meta': 'source=git\nbranch=main\nfile=d/compose.yaml\n' });
+    fakeCmd('git', `case "$*" in *'rev-parse HEAD'*) echo cafe1234 ;; esac; exit 0`);
+    const repo = shDir('g') + '/repo';
+    const gitArgs = () => calls().filter((c) => c[0] === 'git').map((c) => c.slice(1).join(' '));
+    for (const svc of ['      "privileged": true', '      "volumes_from": [\n        "other"\n      ]', '      "network_mode": "service:vpn"',
+      '      "volumes": [\n        {\n          "type": "bind",\n          "source": "/run",\n          "target": "/r"\n        }\n      ]']) {
+      fs.writeFileSync(log, '');
+      composeFake(config(svc));
+      const r = out('stack_action.sh', { name: 'g', op: 'update' });
+      expect(r.error, svc).toMatch(/the new version needs the permission to use elevated container options .*it was not deployed/);
+      expect(dockerCalls().some((c) => c.includes('up')), svc).toBe(false);
+      expect(gitArgs().at(-1), svc).toBe(`-C ${repo} reset --hard cafe1234`);
+      fs.writeFileSync(log, '');
+      expect(out('stack_action.sh', { name: 'g', op: 'update', allow_risky: 'true' }).done, svc).toBe('update: g');
+      expect(dockerCalls().some((c) => c.includes('--build')), svc).toBe(true);
+    }
+    // an ordinary new version goes through
+    fs.writeFileSync(log, '');
+    composeFake(config('      "ports": []'));
+    expect(out('stack_action.sh', { name: 'g', op: 'update' }).done).toBe('update: g');
+    expect(gitArgs()).toEqual([`-C ${repo} rev-parse HEAD`, `-C ${repo} fetch --depth 1 origin main`, `-C ${repo} reset --hard FETCH_HEAD`]);
+  });
+
+  it.skipIf(!hasSh)('stack_deploy also catches shared namespaces, volumes_from, build settings and host files used as secrets', () => {
+    const risky: [string, string, RegExp][] = [
+      ['      "volumes_from": [\n        "db"\n      ]', '', /volumes of db/],
+      ['      "network_mode": "container:abc"', '', /network of container:abc/],
+      ['      "pid": "service:x"', '', /PID namespace of service:x/],
+      ['      "runtime": "runc-hacked"', '', /runtime runc-hacked/],
+      ['      "device_cgroup_rules": [\n        "c 1:3 mr"\n      ]', '', /device rule c 1:3 mr/],
+      ['      "build": {\n        "context": "/etc",\n        "dockerfile": "Dockerfile"\n      }', '', /host path \/etc/],
+      ['      "build": {\n        "context": "/srv/app",\n        "network": "host"\n      }', '', /host network while building/],
+      ['', ',\n  "secrets": {\n    "s": {\n      "name": "demo_s",\n      "file": "/etc/shadow"\n    }\n  }', /host path \/etc\/shadow/],
+      ['', ',\n  "configs": {\n    "c": {\n      "name": "demo_c",\n      "file": "/root/.ssh/id_rsa"\n    }\n  }', /host path \/root\/.ssh\/id_rsa/],
+    ];
+    for (const [svc, top, why] of risky) {
+      composeFake(config(svc, top));
+      const r = parseScriptOutput(deploy().stdout);
+      expect(r.error, svc + top).toMatch(why);
+      expect(fs.existsSync(stackDir('demo')), svc + top).toBe(false);
+    }
+    composeFake(config('      "build": {\n        "context": "/srv/app",\n        "dockerfile": "Dockerfile"\n      }', ',\n  "secrets": {\n    "s": {\n      "name": "demo_s",\n      "file": "/srv/app/secret.txt"\n    }\n  }'));
+    expect(parseScriptOutput(deploy().stdout).error).toBeNull();
   });
 
   it.skipIf(!hasSh)('stack_remove: down (with --volumes when asked), then the folder goes; a failing down keeps it', () => {

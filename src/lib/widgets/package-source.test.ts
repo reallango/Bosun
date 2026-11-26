@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { listRemotePackages, fetchRemotePackage, isAllowedRef, SourceError } from './package-source';
+import { listRemotePackages, fetchRemotePackage, isAllowedRef, SourceError, manifestHashOf } from './package-source';
 
 const manifest = (id: string, extra: Record<string, unknown> = {}) => JSON.stringify({
   schema: 1, id, name: id.toUpperCase(), version: '0.0.1',
@@ -89,5 +89,18 @@ describe('fetchRemotePackage', () => {
     await expect(fetchRemotePackage('main', 'alpha', f)).rejects.toThrow(/must match/);
     await expect(fetchRemotePackage('main', 'beta', f)).rejects.toThrow(/not allowed|not valid/);
     await expect(fetchRemotePackage('main', 'missing', f)).rejects.toThrow();
+  });
+});
+
+describe('manifestHashOf', () => {
+  it('is the same for the listed and the fetched manifest, and changes with any change to it', async () => {
+    const files = { 'widgets/demo/manifest.json': manifest('demo'), 'widgets/demo/README.md': 'hi' };
+    const listed = (await listRemotePackages('main', fakeGithub(files).f)).packages[0].manifest;
+    const fetched = (await fetchRemotePackage('main', 'demo', fakeGithub(files).f)).manifest;
+    expect(manifestHashOf(listed)).toMatch(/^[0-9a-f]{64}$/);
+    expect(manifestHashOf(fetched)).toBe(manifestHashOf(listed));
+    const changed = { ...files, 'widgets/demo/manifest.json': manifest('demo', { description: 'now different' }) };
+    const later = (await fetchRemotePackage('main', 'demo', fakeGithub(changed).f)).manifest;
+    expect(manifestHashOf(later)).not.toBe(manifestHashOf(listed));
   });
 });

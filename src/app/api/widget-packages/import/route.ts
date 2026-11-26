@@ -4,7 +4,7 @@ import { logAudit, AuditActions } from '@/lib/audit/logger';
 import { readZip, ZipError } from '@/lib/widgets/zip';
 import { validateManifest, validateFiles } from '@/lib/widgets/package-manifest';
 import { reservedPackageNames } from '@/lib/widgets/system-packages';
-import { installPackage, getInstalledPackage } from '@/lib/widgets/package-store';
+import { installPackage, getInstalledPackage, secretsWouldBeCleared } from '@/lib/widgets/package-store';
 import { reviewPackage } from '@/lib/widgets/runtime/review';
 import { requirePackageAdmin, requestIp } from '@/lib/widgets/package-routes';
 
@@ -55,12 +55,14 @@ export async function POST(request: NextRequest) {
     // dry_run=1: validate and describe what the package can run, without installing it.
     if (query.get('dry_run') === '1') {
       const have = await getInstalledPackage(manifest.value.id);
-      return ok({ id: manifest.value.id, name: manifest.value.name, version: manifest.value.version, installedVersion: have?.pkg.version ?? null, review: reviewPackage(manifest.value, files.value) });
+      // Replacing a package from another source or author deletes the secrets stored for it (they were set for that package).
+      const secretsWillBeCleared = await secretsWouldBeCleared({ id: manifest.value.id, source: 'upload', author: manifest.value.author });
+      return ok({ id: manifest.value.id, name: manifest.value.name, version: manifest.value.version, installedVersion: have?.pkg.version ?? null, secretsWillBeCleared, review: reviewPackage(manifest.value, files.value) });
     }
     const replace = query.get('replace') === '1';
     const result = await installPackage({ manifest: manifest.value, files: files.value, source: 'upload', userId: auth.userId, allowSameOrOlder: replace });
     await logAudit({ userId: auth.userId, action: AuditActions.WIDGET_PACKAGE_INSTALL, status: 'success', ipAddress: requestIp(request),
-      details: `${result.id} ${result.previousVersion ? `${result.previousVersion} -> ` : ''}${result.version} from zip upload` });
+      details: `${result.id} ${result.previousVersion ? `${result.previousVersion} -> ` : ''}${result.version} from zip upload${result.secretsCleared ? ' (stored secrets cleared: different source)' : ''}` });
     return ok(result, { status: 201 });
   } catch (error) {
     return failFrom(error);

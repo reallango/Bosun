@@ -137,7 +137,20 @@ BOSUN_AWK_END
 esac
 
 errf=$(mktemp) || fail 'cannot create a temporary file'
-trap 'rm -f "$errf"' EXIT
+# One operation per stack at a time: deploy, update, remove and the compose operations all take this lock, so two of them
+# never work on the same stack folder at once. A lock left by a process that is gone (a cancelled job) is taken over.
+LOCK="$HOME/bosun-stacks/.lock-$name"
+mkdir -p "$HOME/bosun-stacks" 2>/dev/null
+take_lock() { mkdir "$LOCK" 2>/dev/null && echo $$ > "$LOCK/pid"; }
+if ! take_lock; then
+  lp=$(cat "$LOCK/pid" 2>/dev/null); case "$lp" in ''|*[!0-9]*) lp='' ;; esac
+  busy="another operation is running on the stack $name; try again when it has finished"
+  if [ -n "$lp" ] && kill -0 "$lp" 2>/dev/null; then fail "$busy"; fi
+  # no pid yet: another run may have just taken it, so only a lock older than a minute counts as left over
+  if [ -z "$lp" ] && [ -n "$(find "$LOCK" -maxdepth 0 -mmin -1 2>/dev/null)" ]; then fail "$busy"; fi
+  rm -rf "$LOCK"; take_lock || fail "$busy"
+fi
+trap 'rm -f "$errf"; rm -rf "$LOCK"' EXIT
 lastline() { tr -d '\r' < "$errf" | sed '/^$/d' | tail -n 3 | tr '\n' ' ' | cut -c1-400; }
 
 umask 077
@@ -252,10 +265,12 @@ sensitive() {
     for (i = 1; i <= n; i++) { if (a[i] == "" || a[i] == ".") continue; if (a[i] == "..") { if (k > 0) k--; continue } k++; s[k] = a[i] }
     if (k == 0) exit 0
     p = ""; for (i = 1; i <= k; i++) p = p "/" s[i]
-    b = tolower(s[k]); if (b == "docker.sock" || b == "containerd.sock") exit 0
-    n = split("/etc /root /proc /sys /boot /usr /var/lib/docker", r, " ")
-    for (i = 1; i <= n; i++) if (p == r[i] || index(p, r[i] "/") == 1) exit 0
-    if (k >= 3 && s[1] == "home" && s[3] == ".ssh") exit 0
+    b = tolower(s[k]); if (b ~ /(docker|containerd|crio|podman)\.sock$/) exit 0
+    # The folder itself, anything inside it, or a folder that contains it (mounting /var exposes /var/run/docker.sock).
+    n = split("/etc /root /proc /sys /dev /boot /usr /bin /sbin /lib /lib32 /lib64 /libx32 /run /var/run /var/lib/docker /var/lib/containerd /var/lib/kubelet /var/spool/cron", r, " ")
+    for (i = 1; i <= n; i++) if (p == r[i] || index(p, r[i] "/") == 1 || index(r[i], p "/") == 1) exit 0
+    # Home folders: /home, a whole /home/<user>, or anything hidden in one (.ssh, .bashrc, .config ...).
+    if (s[1] == "home" && (k <= 2 || substr(s[3], 1, 1) == ".")) exit 0
     exit 1 }'
 }
 host_path_risk() {
@@ -276,7 +291,7 @@ found=$(printf '%s\n' "$cfg" | awk '
     line = $0; match(line, /^ */); ind = RLENGTH
     if (ind == 2 && line ~ /^  "/) { sec = key(line); arr = ""; next }
     if (sec == "volumes" && ind == 8 && key(line) == "device") { v = unq(val(line)); if (v ~ /^\//) print "PATH " v; next }
-    if (sec != "services") next
+    if ((sec == "secrets" || sec == "configs") && ind == 6 && key(line) == "file") { v = unq(val(line)); if (v ~ /^\//) print "PATH " v; next }
     if (ind == 4) { arr = ""; next }
     if (ind == 6) {
       if (arr != "" && line ~ /^ *(\]|\}),?$/) { arr = ""; next }
@@ -288,7 +303,7 @@ found=$(printf '%s\n' "$cfg" | awk '
       else if (k == "uts" && v == "\"host\"") print "RISK host UTS namespace"
       else if (k == "userns_mode" && v == "\"host\"") print "RISK host user namespace"
       else if (k == "cgroup" && v == "\"host\"") print "RISK host cgroup namespace"
-      else if ((k == "cap_add" || k == "devices" || k == "security_opt" || k == "sysctls" || k == "volumes") && line ~ /[\[{]$/) arr = k
+      else if ((k == "cap_add" || k == "devices" || k == "security_opt" || k == "sysctls" || k == "volumes" || k == "volumes_from" || k == "device_cgroup_rules" || k == "build") && line ~ /[\[{]$/) arr = k
       next
     }
     if (arr == "cap_add" && ind == 8) print "RISK capability " item(line)
