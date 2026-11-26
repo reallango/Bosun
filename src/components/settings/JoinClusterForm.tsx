@@ -188,7 +188,7 @@ export default function JoinClusterForm() {
                 required
                 spellCheck={false}
                 autoComplete="off"
-                placeholder="BOSUN-JOIN-1.…"
+                placeholder="BOSUN-JOIN-2.…"
                 className="h-24 w-full resize-none rounded-md border bg-transparent p-2 font-mono text-xs break-all focus-visible:outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
               />
             </div>

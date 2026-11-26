@@ -3,10 +3,11 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { execFileSync } from 'child_process';
-import { encodeJoinCode, decodeJoinCode, type JoinCode } from './control';
+import { encodeJoinCode, decodeJoinCode, type JoinCodeV1, type JoinCodeV2 } from './control';
+import { newToken, tokenProof, proofMatches, sealSecrets, openSecrets, cleanWebOrigins } from './join-token';
 import { isValidAddr, isValidHost, isValidNodeId } from './config';
 
-const sample = (over: Partial<JoinCode> = {}): JoinCode => ({
+const sample = (over: Partial<JoinCodeV1> = {}): JoinCodeV1 => ({
   v: 1,
   exp: Date.now() + 60_000,
   members: [{ id: 'node1', raft: '192.168.1.20:4002' }],
@@ -34,6 +35,41 @@ describe('join codes', () => {
   });
 });
 
+describe('one-time join codes (version 2)', () => {
+  const tok = newToken();
+  const v2 = (over: Partial<JoinCodeV2> = {}): JoinCodeV2 => ({
+    v: 2, exp: Date.now() + 60_000, members: [{ id: 'node1', raft: '192.168.1.20:4002' }],
+    web: ['http://192.168.1.20:3042'], id: tok.id, s: tok.secret, ...over,
+  });
+
+  it('carry no cluster secrets, round-trip, and are checked like version 1', () => {
+    const code = encodeJoinCode(v2());
+    expect(code.startsWith('BOSUN-JOIN-2.')).toBe(true);
+    const decoded = Buffer.from(code.slice('BOSUN-JOIN-2.'.length), 'base64url').toString();
+    expect(decoded).not.toMatch(/"mk"|"as"/);
+    expect(decodeJoinCode(code)).toMatchObject({ v: 2, id: tok.id });
+    expect(() => decodeJoinCode(encodeJoinCode(v2({ web: ['ftp://x'] })))).toThrow(/incomplete/);
+    expect(() => decodeJoinCode(encodeJoinCode(v2({ id: 'short' })))).toThrow(/incomplete/);
+    expect(() => decodeJoinCode(encodeJoinCode(v2({ exp: Date.now() - 1 })))).toThrow(/expired/);
+  });
+
+  it('prove the code without sending its secret, and seal the secrets for its holder only', () => {
+    const proof = tokenProof(tok.id, tok.secret);
+    expect(proof).not.toContain(tok.secret);
+    expect(proofMatches(tok.id, tok.secret, proof)).toBe(true);
+    expect(proofMatches(tok.id, newToken().secret, proof)).toBe(false);
+    expect(proofMatches(tok.id, tok.secret, 'x')).toBe(false);
+    const sealed = sealSecrets(tok.id, tok.secret, { mk: 'master', as: 'auth' });
+    expect(JSON.stringify(sealed)).not.toMatch(/master|auth/);
+    expect(openSecrets(tok.id, tok.secret, sealed)).toEqual({ mk: 'master', as: 'auth' });
+    expect(() => openSecrets(tok.id, newToken().secret, sealed)).toThrow();
+    expect(() => openSecrets(newToken().id, tok.secret, sealed)).toThrow();
+  });
+
+  it('only keep http(s) origins for the exchange', () => {
+    expect(cleanWebOrigins(['http://a:3042/x', 'https://b.example', 'http://a:3042', 'javascript:alert(1)', 'http://u:p@c', 5])).toEqual(['http://a:3042', 'https://b.example']);
+  });
+});
 describe('cluster settings validation', () => {
   it('accepts hosts, addresses and node ids, rejects shell metacharacters', () => {
     expect(isValidHost('192.168.1.20')).toBe(true);

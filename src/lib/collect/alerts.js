@@ -43,7 +43,9 @@ function evaluateRules(rules, server, metrics, nowMs, lastFired) {
     if (!test(value, threshold)) continue;
     // Cooldown is per rule and host, so a fleet-wide rule alerts for each host.
     const key = `${rule.id}|${server.id}`;
-    const last = lastFired.get(key) ?? (rule.last_triggered ? Date.parse(rule.last_triggered) : -Infinity);
+    // Once seeded from the notifications (seedLastFired) the map is the whole truth per host; before that the rule's own
+    // last_triggered (any host) is the cautious fallback.
+    const last = lastFired.get(key) ?? (lastFired.seeded ? -Infinity : (rule.last_triggered ? Date.parse(rule.last_triggered) : -Infinity));
     if (nowMs - last < Number(rule.cooldown_sec || 300) * 1000) continue;
     lastFired.set(key, nowMs);
     const shown = Math.round(value * 10) / 10;
@@ -56,6 +58,26 @@ function evaluateRules(rules, server, metrics, nowMs, lastFired) {
   }
   return fired;
 }
+
+/**
+ * Fill the per-host cooldown map from the newest alert notification of each rule and host (rows of
+ * { alert_rule_id, server_id, last_ms }), e.g. after a restart or when this node becomes the poller.
+ * Without this, a fleet-wide rule that just fired for one host would silence every other host for its cooldown.
+ * @param {Array<{alert_rule_id: string, server_id: string, last_ms: number}>} rows
+ * @param {Map<string, number> & {seeded?: boolean}} lastFired
+ */
+function seedLastFired(rows, lastFired) {
+  lastFired.clear();
+  for (const r of rows || []) {
+    const ms = Number(r.last_ms);
+    if (r.alert_rule_id && r.server_id && Number.isFinite(ms)) lastFired.set(`${r.alert_rule_id}|${r.server_id}`, ms);
+  }
+  lastFired.seeded = true;
+}
+
+/** SQL for seedLastFired: the newest alert notification per rule and host in the last week. */
+const LAST_FIRED_SQL = `SELECT alert_rule_id, server_id, CAST(strftime('%s', MAX(created_at)) AS INTEGER) * 1000 AS last_ms FROM notifications `
+  + `WHERE alert_rule_id IS NOT NULL AND server_id IS NOT NULL AND julianday(created_at) > julianday('now', '-7 days') GROUP BY alert_rule_id, server_id`;
 
 /**
  * Email recipients configured on a rule: alert_rules.channel_config
@@ -179,4 +201,4 @@ async function deliverWebhooks(fired, channelsById) {
   }
 }
 
-module.exports = { evaluateRules, alertStatements, deliverWebhooks, deliverEmails, buildAlertEmail, alertRecipients, CONDITIONS };
+module.exports = { seedLastFired, LAST_FIRED_SQL, evaluateRules, alertStatements, deliverWebhooks, deliverEmails, buildAlertEmail, alertRecipients, CONDITIONS };

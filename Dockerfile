@@ -32,7 +32,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ARG S6_OVERLAY_VERSION=3.1.6.2
 ADD https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-noarch.tar.xz /tmp
 ADD https://github.com/just-containers/s6-overlay/releases/download/v${S6_OVERLAY_VERSION}/s6-overlay-x86_64.tar.xz /tmp
-RUN tar -C / -Jxpf /tmp/s6-overlay-noarch.tar.xz && \
+# Checksums from the s6-overlay release (*.tar.xz.sha256); update them together with the version.
+ARG S6_NOARCH_SHA256=05af2536ec4fb23f087a43ce305f8962512890d7c71572ed88852ab91d1434e3
+ARG S6_X86_64_SHA256=95081f11c56e5a351e9ccab4e70c2b1c3d7d056d82b72502b942762112c03d1c
+RUN echo "${S6_NOARCH_SHA256}  /tmp/s6-overlay-noarch.tar.xz" | sha256sum -c - && \
+    echo "${S6_X86_64_SHA256}  /tmp/s6-overlay-x86_64.tar.xz" | sha256sum -c - && \
+    tar -C / -Jxpf /tmp/s6-overlay-noarch.tar.xz && \
     tar -C / -Jxpf /tmp/s6-overlay-x86_64.tar.xz && \
     rm -f /tmp/s6-overlay-*.tar.xz
 
@@ -40,7 +45,10 @@ RUN tar -C / -Jxpf /tmp/s6-overlay-noarch.tar.xz && \
 # node-to-node port (-node-verify-client); 8.x accepted the flag but ignored it.
 ARG RQLITE_VERSION=9.4.5
 ADD https://github.com/rqlite/rqlite/releases/download/v${RQLITE_VERSION}/rqlite-v${RQLITE_VERSION}-linux-amd64.tar.gz /tmp
-RUN tar -C /tmp -xzf /tmp/rqlite-v${RQLITE_VERSION}-linux-amd64.tar.gz && \
+# SHA-256 of the official release archive (rqlite publishes none); update it together with the version.
+ARG RQLITE_SHA256=96c82652929085af49d1ebc8d14891a02105d063be7eee25a9bb90af4e5f9f3b
+RUN echo "${RQLITE_SHA256}  /tmp/rqlite-v${RQLITE_VERSION}-linux-amd64.tar.gz" | sha256sum -c - && \
+    tar -C /tmp -xzf /tmp/rqlite-v${RQLITE_VERSION}-linux-amd64.tar.gz && \
     mv /tmp/rqlite-v${RQLITE_VERSION}-linux-amd64/rqlited /usr/local/bin/ && \
     mv /tmp/rqlite-v${RQLITE_VERSION}-linux-amd64/rqlite /usr/local/bin/ && \
     rm -rf /tmp/rqlite-*
