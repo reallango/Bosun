@@ -424,4 +424,43 @@ describe('the stacks declaration (import from other tools)', () => {
     }
     expect(validateWidgetSpec({ ...spec, stacks: { ...spec.stacks, fields: { id: 'ID' } } }, own, m.id).ok).toBe(false);
   });
+
+  it('setup names a detect dataset and an install action without required parameters', async () => {
+    const fs = await import('fs');
+    const m = JSON.parse(fs.readFileSync('widgets/docker/manifest.json', 'utf8'));
+    const own = m.permissions.map((p: { id: string }) => p.id);
+    const spec = m.widgets[0].spec;
+    const ok = validateWidgetSpec(spec, own, m.id);
+    expect(ok.ok && ok.value.setup).toMatchObject({ label: 'Docker Engine', detect: 'host_detect', install: 'docker_install' });
+    for (const bad of [{ ...spec.setup, detect: 'nope' }, { ...spec.setup, install: 'nope' }, { ...spec.setup, install: 'stack_deploy' }, { ...spec.setup, label: '' }, 'x']) {
+      expect(validateWidgetSpec({ ...spec, setup: bad }, own, m.id).ok, JSON.stringify(bad)).toBe(false);
+    }
+  });
+
+  it('deployLater and deployPrivilegedLater name runnable actions; without them nothing changes', async () => {
+    const fs = await import('fs');
+    const m = JSON.parse(fs.readFileSync('widgets/docker/manifest.json', 'utf8'));
+    const own = m.permissions.map((p: { id: string }) => p.id);
+    const spec = m.widgets[0].spec;
+    const ok = validateWidgetSpec(spec, own, m.id);
+    expect(ok.ok && ok.value.stacks).toMatchObject({ deployLater: 'stack_deploy_later', deployPrivilegedLater: 'stack_deploy_privileged_later' });
+    for (const v of ['nope', 3]) {
+      expect(validateWidgetSpec({ ...spec, stacks: { ...spec.stacks, deployLater: v } }, own, m.id).ok, String(v)).toBe(false);
+    }
+    // a widget without them: own stacks are imported from another node, as before
+    const { deployLater: _a, deployPrivilegedLater: _b, ...without } = spec.stacks;
+    const old = validateWidgetSpec({ ...spec, stacks: without }, own, m.id);
+    expect(old.ok && old.value.stacks?.deployLater).toBeUndefined();
+  });
+
+  it('every caller of the deploy script gets start from the action itself (Bosun does not fill in defaults)', async () => {
+    const fs = await import('fs');
+    const m = JSON.parse(fs.readFileSync('widgets/docker/manifest.json', 'utf8'));
+    const users = m.widgets[0].spec.actions.filter((a: { variants?: { script: string }[] }) => a.variants?.some(v => v.script === 'stack_deploy'));
+    expect(users.map((a: { id: string }) => a.id).sort()).toEqual(['stack_deploy', 'stack_deploy_later', 'stack_deploy_privileged', 'stack_deploy_privileged_later']);
+    for (const a of users) {
+      expect(a.params.start, a.id).toBeUndefined();
+      expect(a.variants[0].args.start, a.id).toBe(a.id.endsWith('_later') ? 'literal:later' : 'literal:now');
+    }
+  });
 });

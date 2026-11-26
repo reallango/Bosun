@@ -30,7 +30,7 @@ describe('the Docker manager package', () => {
   it('has screens, datasets and menu entries that exist, and a review that lists what runs', () => {
     expect(Object.keys(spec.screens ?? {}).sort()).toEqual(['create', 'edit', 'manage', 'stack_edit', 'stack_new']);
     expect(spec.menu?.map(m => m.id)).toEqual(['new_container', 'new_stack', 'manage']);
-    expect(Object.keys(spec.datasets ?? {}).sort()).toEqual(['convert', 'export_compose', 'export_run', 'exposed_ports', 'git_branches', 'git_files', 'git_services', 'images', 'inspect', 'networks', 'stack_get', 'stacks', 'system', 'volumes']);
+    expect(Object.keys(spec.datasets ?? {}).sort()).toEqual(['convert', 'export_compose', 'export_run', 'exposed_ports', 'git_branches', 'git_files', 'git_services', 'host_detect', 'images', 'inspect', 'networks', 'stack_get', 'stacks', 'system', 'volumes']);
     const review = reviewPackage(manifest);
     expect(review.runsAsService).toBe(true);
     expect(review.widgets[0].commands.some(c => /dataset "inspect"/.test(c.what))).toBe(true);
@@ -97,8 +97,8 @@ describe('the Docker manager package', () => {
     const values = editorInitial(ed.fields, { context: undefined });
     values.name = 'demo'; values.yaml = 'services:\n  web:\n    image: nginx\n';
     const params = spec.scripts!.stack_deploy.params;
-    expect(() => validateParamValues(params, { name: 'demo', source: 'editor', yaml: String(values.yaml), env: '', repo: '-', branch: '-', file: '-', pull: 'false', allow_risky: 'false', override: '' })).not.toThrow();
-    expect(() => validateParamValues(params, { name: 'demo', source: 'git', yaml: '', env: 'A=1', repo: 'https://github.com/owner/repo', branch: 'main', file: 'deploy/compose.yaml', pull: 'true', allow_risky: 'false', override: 'svc.web.port=8080:80/tcp\nsvc.web.container_name=site' })).not.toThrow();
+    expect(() => validateParamValues(params, { name: 'demo', source: 'editor', yaml: String(values.yaml), env: '', repo: '-', branch: '-', file: '-', pull: 'false', allow_risky: 'false', override: '', start: 'now' })).not.toThrow();
+    expect(() => validateParamValues(params, { name: 'demo', source: 'git', yaml: '', env: 'A=1', repo: 'https://github.com/owner/repo', branch: 'main', file: 'deploy/compose.yaml', pull: 'true', allow_risky: 'false', override: 'svc.web.port=8080:80/tcp\nsvc.web.container_name=site', start: 'later' })).not.toThrow();
     expect(() => validateParamValues(params, { name: 'demo', source: 'git', yaml: '', env: '', repo: 'http://github.com/owner/repo', branch: 'main', file: 'a', pull: 'false', allow_risky: 'false', override: '' })).toThrow();   // https only
     expect(() => validateParamValues(params, { name: 'Bad Name', source: 'editor', yaml: '', env: '', repo: '-', branch: '-', file: '-', pull: 'false', allow_risky: 'false', override: '' })).toThrow();
     expect(() => validateParamValues(params, { name: 'demo', source: 'git', yaml: '', env: '', repo: 'https://github.com/owner/repo', branch: 'main', file: 'a.yml', pull: 'false', allow_risky: 'false', override: 'svc.web.volume=/etc:/etc\nrm -rf /' })).toThrow();   // an override line must be a svc.<service>.<setting>=value line

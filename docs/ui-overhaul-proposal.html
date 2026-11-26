@@ -505,7 +505,7 @@ figcaption { font-size: .8rem; color: var(--muted); margin-top: 6px; }
 </div>
 
 <h3>How the Docker widget uses it</h3>
-<p>The package only adds keys to its own <code>manifest.json</code>. Core code never names it. The prototype ships exactly this, bumping the package to 1.0.13:</p>
+<p>The package only adds keys to its own <code>manifest.json</code>. Core code never names it. The prototype ships exactly this, bumping the package to 1.0.15:</p>
 <pre><code>"view": {
   "type": "list",
   "filter":  { "fields": ["name", "image"], "placeholder": "Filter", "hideBelow": "sm" },
@@ -688,7 +688,7 @@ figcaption { font-size: .8rem; color: var(--muted); margin-top: 6px; }
   <li><code>src/lib/widgets/runtime/size.ts</code> (new, with tests): size classes, <code>splitActions</code>, and validators. <code>spec.ts</code> and <code>spec-v2.ts</code> accept <code>hideBelow</code>, <code>row.inline</code> and <code>row.subtitleHideBelow</code>.</li>
   <li><code>src/components/dashboard/widget-size.ts</code> (new): <code>useWidgetSize()</code> context. <code>WidgetFrame.tsx</code> measures the body and provides it, and <code>ScreenDialog.tsx</code> resets it to <code>lg</code>.</li>
   <li><code>DeclarativeWidget.tsx</code>, <code>LayoutView.tsx</code>, <code>parts.tsx</code>: honour the hints, and add the per-row ⋯ menu.</li>
-  <li><code>widgets/docker/manifest.json</code> (1.0.13) and <code>widgets/README.md</code>: the hints and their documentation.</li>
+  <li><code>widgets/docker/manifest.json</code> (1.0.15) and <code>widgets/README.md</code>: the hints and their documentation.</li>
 </ul>
 
 </main>

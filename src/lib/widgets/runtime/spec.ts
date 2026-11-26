@@ -178,6 +178,8 @@ export interface WidgetSpec {
   menu?: MenuEntry[];
   /** Version 2: how this widget manages Compose stacks, for importing stacks from other tools (see StacksSpec). */
   stacks?: StacksSpec;
+  /** Version 2: software this widget can install on a host, offered under "Set up this server" (see SetupSpec). */
+  setup?: SetupSpec;
 }
 
 
@@ -849,6 +851,13 @@ export function validateWidgetSpec(raw: unknown, ownPermissions: readonly string
     if (!s.ok) return s;
     stacks = s.value;
   }
+  let setup: SetupSpec | undefined;
+  if (raw.setup !== undefined) {
+    if (!v2on) return fail('"setup" needs spec version 2');
+    const s = validateSetup(raw.setup, actions, datasets.value);
+    if (!s.ok) return s;
+    setup = s.value;
+  }
   let metrics: MetricSpec[] | undefined;
   if (raw.metrics !== undefined) {
     const m = validateMetrics(raw.metrics, packageId);
@@ -866,6 +875,7 @@ export function validateWidgetSpec(raw: unknown, ownPermissions: readonly string
       ...(Object.keys(screens.value).length ? { screens: screens.value } : {}),
       ...(menu.value.length ? { menu: menu.value } : {}),
       ...(stacks ? { stacks } : {}),
+      ...(setup ? { setup } : {}),
     },
   };
 }
@@ -882,7 +892,31 @@ export interface StacksSpec {
   list: string; deploy: string; deployPrivileged?: string; guard: string; export?: string;
   /** An action taking name, service, image and as: pull image, tag it as s and re-create that service (self-update). */
   retag?: string;
+  /**
+   * Deploy actions (same parameters as deploy / deployPrivileged) that store the stack and start it from a job on the host after
+   * the action has answered. With them, a node's own stack (the Bosun that asks) can be imported on that same node.
+   */
+  deployLater?: string;
+  deployPrivilegedLater?: string;
   fields: { id: string; name: string; state: string; project: string; service: string };
+}
+
+/**
+ * Software a widget can install on a host ("Set up this server" on the server's page): `detect` is a dataset answering one
+ * object `{ installed: boolean, running?, version?, supported?, system?, note? }`, `install` a runnable action without
+ * parameters (usually a job). Core lists every installed widget's setup for a server; it never knows what is installed.
+ */
+export interface SetupSpec { label: string; description?: string; detect: string; install: string }
+
+function validateSetup(raw: unknown, actions: ActionSpec[], datasets: Record<string, DatasetSpec>): Validated<SetupSpec> {
+  if (!isObj(raw)) return fail('"setup" must be an object');
+  if (typeof raw.label !== 'string' || !raw.label.trim() || raw.label.length > 60) return fail('setup.label must be 1-60 characters');
+  if (raw.description !== undefined && (typeof raw.description !== 'string' || raw.description.length > 300)) return fail('setup.description must be at most 300 characters');
+  if (typeof raw.detect !== 'string' || !(raw.detect in datasets)) return fail('setup.detect must name one of the widget\'s datasets');
+  const a = actions.find(x => x.id === raw.install);
+  if (!a || (a.kind !== 'script' && a.kind !== 'command')) return fail('setup.install must name one of the widget\'s runnable actions');
+  if (a.params && Object.values(a.params).some(p => p.default === undefined && !p.from)) return fail('setup.install must be an action that needs no parameters');
+  return { ok: true, value: { label: raw.label.trim(), ...(raw.description ? { description: String(raw.description) } : {}), detect: raw.detect, install: String(raw.install) } };
 }
 
 function validateStacks(raw: unknown, actions: ActionSpec[], datasets: Record<string, DatasetSpec>): Validated<StacksSpec> {
@@ -905,6 +939,8 @@ function validateStacks(raw: unknown, actions: ActionSpec[], datasets: Record<st
   const guard = action('guard'); if (!guard.ok) return guard;
   const exp = dataset('export', true); if (!exp.ok) return exp;
   const retag = action('retag', true); if (!retag.ok) return retag;
+  const later = action('deployLater', true); if (!later.ok) return later;
+  const privLater = action('deployPrivilegedLater', true); if (!privLater.ok) return privLater;
   const f = raw.fields;
   if (!isObj(f) || !['id', 'name', 'state', 'project', 'service'].every(k => typeof f[k] === 'string' && FIELD_RE.test(f[k] as string))) {
     return fail('stacks.fields must name the row fields id, name, state, project and service');
@@ -913,6 +949,7 @@ function validateStacks(raw: unknown, actions: ActionSpec[], datasets: Record<st
     ok: true,
     value: {
       list: list.value!, deploy: deploy.value!, ...(priv.value ? { deployPrivileged: priv.value } : {}), guard: guard.value!, ...(exp.value ? { export: exp.value } : {}), ...(retag.value ? { retag: retag.value } : {}),
+      ...(later.value ? { deployLater: later.value } : {}), ...(privLater.value ? { deployPrivilegedLater: privLater.value } : {}),
       fields: { id: String(f.id), name: String(f.name), state: String(f.state), project: String(f.project), service: String(f.service) },
     },
   };

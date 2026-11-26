@@ -51,8 +51,11 @@ function importWarnings(c: Candidate, ch: Choice, connected: boolean): string[] 
     w.push('Portainer keeps listing it, so two tools manage the stack: a redeploy (or automatic git update) in Portainer replaces Bosun\'s version, and Bosun\'s changes do not show in Portainer. You can detach it later on this card.');
   }
   if (ch.detach) w.push(...detachWarnings(c.running));
+  if (c.own) w.push(OWN_WARNING);
   return w;
 }
+
+const OWN_WARNING = 'This is the Bosun you are using: it restarts (and again when it is detached), so this page is unreachable for about half a minute. Reload it afterwards; the outcome appears in the bell about a minute after Bosun is back.';
 
 function detachWarnings(running: boolean): string[] {
   return [
@@ -145,7 +148,7 @@ export function PortainerImportCard({ serverId }: { serverId: string }) {
   const runDetach = (d: DetachCandidate) => {
     setPending({
       title: `Detach ${d.name} from Portainer?`,
-      body: list([...detachWarnings(d.running), 'Bosun\'s copy of the stack stays as it is; from now on only Bosun manages it.']),
+      body: list([...detachWarnings(d.running), 'Bosun\'s copy of the stack stays as it is; from now on only Bosun manages it.', ...(d.own ? [OWN_WARNING] : [])]),
       label: 'Detach',
       destructive: true,
       run: async () => {

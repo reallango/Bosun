@@ -2,7 +2,8 @@
 # Docker (Linux): deploys a compose stack (`docker compose -p <name> up -d --remove-orphans`) and stores its files under
 # $HOME/bosun-stacks/<name>/ (compose.yaml, .env, bosun.meta, and repo/ for the git source).
 # Parameters: name, source (editor|git), yaml (text, editor), env (text, .env lines, may be empty), repo, branch, file
-# (git; "-" or empty = not given), pull (true/false: pull the images before starting).
+# (git; "-" or empty = not given), pull (true/false: pull the images before starting), start (now|later: later stores the stack and
+# starts it from a background job on the host a few seconds after this session ends, for a stack that contains the asking Bosun).
 # Nothing is stored or started before the compose file has been read by `docker compose config` and checked for risky
 # options (privileged, host namespaces and network, extra capabilities, devices, security options, sysctls, host-path or socket
 # mounts); those need allow_risky=true, which the caller only passes with the elevated permission. For the git source a
@@ -394,6 +395,19 @@ if [ "$BOSUN_PARAM_pull" = true ]; then
   dc pull >/dev/null 2>"$errf" || fail "pulling the images failed: $(lastline)"
 fi
 echo 'PROGRESS 4/5'
+if [ "${BOSUN_PARAM_start-now}" = later ]; then
+  # start=later: the stack is (re)started a few seconds after this session ends, by a job on the host that outlives it. Used when
+  # the stack contains the Bosun that asked (importing a node's own stack): re-creating it ends that Bosun, so it cannot wait.
+  echo "[step] Starting the stack $name in a few seconds, in the background"
+  (
+    trap '' HUP
+    sleep 3
+    dc up -d --remove-orphans
+  ) </dev/null >/dev/null 2>&1 &
+  echo 'PROGRESS 5/5'
+  echo "DONE deployed $name (starting in the background)"
+  exit 0
+fi
 echo "[step] Starting the stack $name"
 dc up -d --remove-orphans >/dev/null 2>"$errf" || fail "docker compose up failed: $(lastline)"
 echo 'PROGRESS 5/5'

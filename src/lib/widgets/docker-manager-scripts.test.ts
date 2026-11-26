@@ -659,6 +659,24 @@ exit 0`);
     expect(dockerCalls().filter((x) => x[1] === '-p').map((x) => x.slice(-1)[0] === 'json' ? 'config' : x[x.length - 1] === '--remove-orphans' ? 'up' : x.slice(-1)[0])).toEqual(['config', 'pull', 'up']);
   });
 
+  it.skipIf(!hasSh)('stack_deploy start=later stores the stack, answers at once, and starts it from a background job', async () => {
+    composeFake(config('      "ports": []'));
+    const r = parseScriptOutput(deploy({ start: 'later' }).stdout);
+    expect(r.error).toBeNull();
+    expect(r.done).toBe('deployed demo (starting in the background)');
+    const sd = shDir('demo');
+    expect(fs.readFileSync(path.join(stackDir('demo'), 'compose.yaml'), 'utf8')).toBe('services:\n  web:\n    image: nginx\n');
+    const up = ['compose', '-p', 'demo', '--project-directory', sd, '-f', sd + '/compose.yaml', '--env-file', sd + '/.env', 'up', '-d', '--remove-orphans'].join(' ');
+    // not yet when the script answers; a few seconds later, from the job it left behind
+    expect(dockerCalls().some(c => c.join(' ') === up)).toBe(false);
+    let seen = false;
+    for (let i = 0; i < 40 && !seen; i++) {
+      await new Promise(res => setTimeout(res, 250));
+      seen = dockerCalls().some(c => c.join(' ') === up);
+    }
+    expect(seen).toBe(true);
+  }, 20000);
+
   it.skipIf(!hasSh)('stack_deploy refuses an invalid file or risky options (nothing stored, nothing started), and lets them through with allow_risky', () => {
     const risky: [string, RegExp][] = [
       ['      "privileged": true', /privileged/],

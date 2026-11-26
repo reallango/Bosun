@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "docker",
   "name": "Docker Containers",
-  "version": "1.0.13",
+  "version": "1.0.15",
   "description": "Containers on the host with logs, a shell, start, stop and restart; edit a container, create containers and stacks (a compose file, or one from a Git repository), and a Manage page for images, volumes and networks.",
   "author": "Bosun",
   "permissions": [
@@ -64,6 +64,15 @@
       "id": "docker.delete",
       "label": "Remove containers, images, volumes, networks and stacks",
       "description": "Delete things from the host, including pruning unused images, volumes and networks.",
+      "group": "Docker",
+      "defaultLevel": "admin",
+      "risk": "high",
+      "scope": "server"
+    },
+    {
+      "id": "docker.install",
+      "label": "Install Docker on a host",
+      "description": "Install Docker Engine and the Compose plugin from Docker's apt repository (runs apt-get as root through the service account).",
       "group": "Docker",
       "defaultLevel": "admin",
       "risk": "high",
@@ -479,6 +488,14 @@
                 "maxLines": 100,
                 "linePattern": "^(#.*|svc\\.[A-Za-z0-9_.-]+\\.(container_name|port|volume|network)=.+)$",
                 "default": ""
+              },
+              "start": {
+                "type": "string",
+                "values": [
+                  "now",
+                  "later"
+                ],
+                "maxLength": 10
               }
             },
             "secrets": [
@@ -675,6 +692,18 @@
               "git_token",
               "git_credentials"
             ]
+          },
+          "host_detect": {
+            "as": "service",
+            "timeoutSec": 30,
+            "linux": "scripts/host_detect.sh",
+            "params": {}
+          },
+          "host_install": {
+            "as": "service",
+            "timeoutSec": 1800,
+            "linux": "scripts/host_install.sh",
+            "params": {}
           }
         },
         "data": {
@@ -1458,7 +1487,8 @@
                 "script": "stack_deploy",
                 "args": {
                   "allow_risky": "literal:false",
-                  "pull": "param.pull"
+                  "pull": "param.pull",
+                  "start": "literal:now"
                 }
               }
             ],
@@ -1537,13 +1567,177 @@
                 "script": "stack_deploy",
                 "args": {
                   "allow_risky": "literal:true",
-                  "pull": "param.pull"
+                  "pull": "param.pull",
+                  "start": "literal:now"
                 }
               }
             ],
             "icon": "upload",
             "job": true,
             "after": "refresh",
+            "confirm": {
+              "title": "Deploy with elevated options?",
+              "text": "The stack may use privileged mode, the host network, devices, the Docker socket or host folders.",
+              "destructive": true
+            }
+          },
+          {
+            "id": "stack_deploy_later",
+            "label": "Deploy stack (start in the background)",
+            "permission": "docker.manage",
+            "target": {
+              "kind": "stack",
+              "param": "name"
+            },
+            "kind": "script",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
+                "maxLength": 63
+              },
+              "source": {
+                "type": "string",
+                "values": [
+                  "editor",
+                  "git"
+                ],
+                "maxLength": 20
+              },
+              "yaml": {
+                "type": "text",
+                "maxLength": 65536,
+                "maxLines": 2000,
+                "default": ""
+              },
+              "env": {
+                "type": "text",
+                "maxLength": 8000,
+                "maxLines": 200,
+                "linePattern": "^(#.*|[A-Za-z_][A-Za-z0-9_]*=.*)$",
+                "default": ""
+              },
+              "repo": {
+                "type": "string",
+                "pattern": "^(-|https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/[A-Za-z0-9._/-]+)$",
+                "maxLength": 300,
+                "default": "-"
+              },
+              "branch": {
+                "type": "string",
+                "pattern": "^(-|[A-Za-z0-9._/-]{1,100})$",
+                "maxLength": 100,
+                "default": "-"
+              },
+              "file": {
+                "type": "string",
+                "pattern": "^(-|[A-Za-z0-9._/-]{1,200})$",
+                "maxLength": 200,
+                "default": "-"
+              },
+              "pull": {
+                "type": "boolean",
+                "default": false
+              },
+              "override": {
+                "type": "text",
+                "maxLength": 8000,
+                "maxLines": 100,
+                "linePattern": "^(#.*|svc\\.[A-Za-z0-9_.-]+\\.(container_name|port|volume|network)=.+)$",
+                "default": ""
+              }
+            },
+            "variants": [
+              {
+                "script": "stack_deploy",
+                "args": {
+                  "allow_risky": "literal:false",
+                  "pull": "param.pull",
+                  "start": "literal:later"
+                }
+              }
+            ],
+            "icon": "upload",
+            "job": true
+          },
+          {
+            "id": "stack_deploy_privileged_later",
+            "label": "Deploy with elevated options (start in the background)",
+            "permission": "docker.privileged",
+            "target": {
+              "kind": "stack",
+              "param": "name"
+            },
+            "kind": "script",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
+                "maxLength": 63
+              },
+              "source": {
+                "type": "string",
+                "values": [
+                  "editor",
+                  "git"
+                ],
+                "maxLength": 20
+              },
+              "yaml": {
+                "type": "text",
+                "maxLength": 65536,
+                "maxLines": 2000,
+                "default": ""
+              },
+              "env": {
+                "type": "text",
+                "maxLength": 8000,
+                "maxLines": 200,
+                "linePattern": "^(#.*|[A-Za-z_][A-Za-z0-9_]*=.*)$",
+                "default": ""
+              },
+              "repo": {
+                "type": "string",
+                "pattern": "^(-|https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/[A-Za-z0-9._/-]+)$",
+                "maxLength": 300,
+                "default": "-"
+              },
+              "branch": {
+                "type": "string",
+                "pattern": "^(-|[A-Za-z0-9._/-]{1,100})$",
+                "maxLength": 100,
+                "default": "-"
+              },
+              "file": {
+                "type": "string",
+                "pattern": "^(-|[A-Za-z0-9._/-]{1,200})$",
+                "maxLength": 200,
+                "default": "-"
+              },
+              "pull": {
+                "type": "boolean",
+                "default": false
+              },
+              "override": {
+                "type": "text",
+                "maxLength": 8000,
+                "maxLines": 100,
+                "linePattern": "^(#.*|svc\\.[A-Za-z0-9_.-]+\\.(container_name|port|volume|network)=.+)$",
+                "default": ""
+              }
+            },
+            "variants": [
+              {
+                "script": "stack_deploy",
+                "args": {
+                  "allow_risky": "literal:true",
+                  "pull": "param.pull",
+                  "start": "literal:later"
+                }
+              }
+            ],
+            "icon": "upload",
+            "job": true,
             "confirm": {
               "title": "Deploy with elevated options?",
               "text": "The stack may use privileged mode, the host network, devices, the Docker socket or host folders.",
@@ -1846,6 +2040,23 @@
               "requireText": "{name}"
             },
             "job": true
+          },
+          {
+            "id": "docker_install",
+            "label": "Install Docker",
+            "permission": "docker.install",
+            "kind": "script",
+            "variants": [
+              {
+                "script": "host_install"
+              }
+            ],
+            "icon": "download",
+            "job": true,
+            "confirm": {
+              "title": "Install Docker on this server?",
+              "text": "Adds Docker's apt repository (download.docker.com, key checked by its fingerprint) and installs Docker Engine with the Compose and Buildx plugins as root, then starts Docker and lets Bosun's service account use it. Debian, Ubuntu and their derivatives."
+            }
           }
         ],
         "datasets": {
@@ -1937,6 +2148,11 @@
             "script": "git_services",
             "cacheSec": 30,
             "permission": "docker.manage"
+          },
+          "host_detect": {
+            "script": "host_detect",
+            "cacheSec": 0,
+            "permission": "docker.view"
           }
         },
         "screens": {
@@ -4125,7 +4341,15 @@
             "project": "compose",
             "service": "service"
           },
-          "retag": "stack_retag"
+          "retag": "stack_retag",
+          "deployLater": "stack_deploy_later",
+          "deployPrivilegedLater": "stack_deploy_privileged_later"
+        },
+        "setup": {
+          "label": "Docker Engine",
+          "description": "Containers and Compose stacks (also needed to deploy Bosun to this server).",
+          "detect": "host_detect",
+          "install": "docker_install"
         }
       }
     }
