@@ -859,6 +859,8 @@ export function validateWidgetSpec(raw: unknown, ownPermissions: readonly string
  */
 export interface StacksSpec {
   list: string; deploy: string; deployPrivileged?: string; guard: string; export?: string;
+  /** An action taking name, service, image and as: pull image, tag it as s and re-create that service (self-update). */
+  retag?: string;
   fields: { id: string; name: string; state: string; project: string; service: string };
 }
 
@@ -881,6 +883,7 @@ function validateStacks(raw: unknown, actions: ActionSpec[], datasets: Record<st
   const priv = action('deployPrivileged', true); if (!priv.ok) return priv;
   const guard = action('guard'); if (!guard.ok) return guard;
   const exp = dataset('export', true); if (!exp.ok) return exp;
+  const retag = action('retag', true); if (!retag.ok) return retag;
   const f = raw.fields;
   if (!isObj(f) || !['id', 'name', 'state', 'project', 'service'].every(k => typeof f[k] === 'string' && FIELD_RE.test(f[k] as string))) {
     return fail('stacks.fields must name the row fields id, name, state, project and service');
@@ -888,7 +891,7 @@ function validateStacks(raw: unknown, actions: ActionSpec[], datasets: Record<st
   return {
     ok: true,
     value: {
-      list: list.value!, deploy: deploy.value!, ...(priv.value ? { deployPrivileged: priv.value } : {}), guard: guard.value!, ...(exp.value ? { export: exp.value } : {}),
+      list: list.value!, deploy: deploy.value!, ...(priv.value ? { deployPrivileged: priv.value } : {}), guard: guard.value!, ...(exp.value ? { export: exp.value } : {}), ...(retag.value ? { retag: retag.value } : {}),
       fields: { id: String(f.id), name: String(f.name), state: String(f.state), project: String(f.project), service: String(f.service) },
     },
   };

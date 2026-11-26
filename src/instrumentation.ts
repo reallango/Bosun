@@ -19,6 +19,9 @@ export async function register() {
         // Widget updates in the notification bell (the leader checks; see lib/widgets/update-check.ts).
         const { startWidgetUpdateCheck } = await import('@/lib/widgets/update-check');
         startWidgetUpdateCheck();
+        // Self-update: where this node runs, closing a finished rolling update, and new Bosun images (lib/update/rollout.ts).
+        const { startUpdateTasks } = await import('@/lib/update/rollout');
+        startUpdateTasks();
       })
       .catch(err => console.error('[db] initialisation failed:', err));
   }
