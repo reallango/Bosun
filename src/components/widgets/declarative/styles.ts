@@ -13,6 +13,27 @@ export const buttonClass =
 export const iconButtonClass =
   'rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40';
 
+/**
+ * Buttons of a toolbar (a `buttons` block and the dialog-form triggers above a view) share one height, padding and font
+ * size so they line up. Exactly one may be solid (the primary look); the rest are outlined, and a destructive action gets
+ * the outlined destructive look. Screens and pages use the large set, widget-sized toolbars the small one.
+ */
+export const TOOLBAR_BUTTON_SIZE = {
+  large: 'inline-flex h-8 items-center justify-center gap-1 rounded-md px-3 text-sm font-medium disabled:opacity-40',
+  small: 'inline-flex h-7 items-center justify-center gap-1 rounded-md px-2 text-xs font-medium disabled:opacity-40',
+} as const;
+
+export type ToolbarButtonVariant = 'primary' | 'outline' | 'destructive';
+
+const TOOLBAR_PRIMARY = 'bg-primary text-primary-foreground hover:bg-primary/90';
+const TOOLBAR_OUTLINE = 'border border-border bg-transparent hover:bg-muted';
+const TOOLBAR_DESTRUCTIVE = 'border border-destructive/50 text-destructive hover:bg-destructive/10';
+
+export function toolbarButtonClass(size: 'large' | 'small', variant: ToolbarButtonVariant): string {
+  const look = variant === 'primary' ? TOOLBAR_PRIMARY : variant === 'destructive' ? TOOLBAR_DESTRUCTIVE : TOOLBAR_OUTLINE;
+  return `${TOOLBAR_BUTTON_SIZE[size]} ${look}`;
+}
+
 const submitButtonClass = 'inline-flex items-center gap-1 rounded-md px-3 py-1.5 font-medium disabled:opacity-40';
 
 /** Solid submit button of an editor. */
