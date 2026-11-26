@@ -1,18 +1,22 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { ChevronDown, ChevronRight, Loader2 } from 'lucide-react';
+import { useEffect, useId, useRef, useState } from 'react';
+import { usePathname, useRouter, useSearchParams } from 'next/navigation';
+import { Dialog } from 'radix-ui';
+import { ChevronDown, ChevronRight, Loader2, X } from 'lucide-react';
 import type { Block, FormField } from '@/lib/widgets/runtime/spec-v2';
 import type { ViewSpec } from '@/lib/widgets/runtime/spec';
 import {
-  actionApplies, formInitial, formParams, jobHeadline, selectCurrent, selectParams, text, visible, visibleBadges,
+  actionApplies, activeTabId, formInitial, formParams, jobHeadline, layoutRows, selectCurrent, selectParams, tabCount, text, visible, visibleBadges,
   type JobState, type PublicActionLike, type ViewContext,
 } from '@/lib/widgets/runtime/layout';
 import { Bar, Fields } from './parts';
 import { fitsSize } from '@/lib/widgets/runtime/size';
 import { useWidgetSize } from '@/components/dashboard/widget-size';
 import { CodeBlock, EditorBlock } from './EditorBlock';
-import { buttonClass, inputClass, NOTICE_CLASS as NOTICE } from './styles';
+import {
+  buttonClass, DIALOG_CONTENT, DIALOG_FOOTER, DIALOG_HEADER, DIALOG_OVERLAY, DIALOG_TITLE, DIALOG_WIDTH, iconButtonClass, inputClass, NOTICE_CLASS as NOTICE, primarySubmitClass,
+} from './styles';
 
 const BADGE: Record<string, string> = {
   green: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300',
@@ -42,14 +46,31 @@ export interface LayoutUi {
   onSubmitted?: (ok: boolean) => void;
   /** Bigger text and fields, for dialogs and pages. */
   large?: boolean;
+  /** A full-page screen: tabs keep the open one in the URL. */
+  page?: boolean;
 }
 
-export function LayoutBlocks({ blocks, ctx, ui }: { blocks: Block[]; ctx: ViewContext; ui: LayoutUi }) {
+export function LayoutBlocks({ blocks, ctx, ui, groupToolbar }: { blocks: Block[]; ctx: ViewContext; ui: LayoutUi; groupToolbar?: boolean }) {
   // Blocks with `hideBelow` drop out while the widget is smaller (dialogs and pages count as the largest size).
   const { size } = useWidgetSize();
+  const shown = blocks.filter(b => fitsSize(b, size) && visible(b, ctx));
+  if (groupToolbar) {
+    // A tab's create buttons and actions share one row above the list they belong to.
+    return (
+      <div className="space-y-2">
+        {layoutRows(shown).map((row, i) => row.kind === 'toolbar'
+          ? (
+            <div key={i} className="flex flex-wrap items-center gap-1.5 sm:justify-end">
+              {row.blocks.map((b, j) => <BlockView key={j} block={b} ctx={ctx} ui={ui} />)}
+            </div>
+          )
+          : <BlockView key={i} block={row.block} ctx={ctx} ui={ui} />)}
+      </div>
+    );
+  }
   return (
     <div className="space-y-2">
-      {blocks.filter(b => fitsSize(b, size) && visible(b, ctx)).map((b, i) => <BlockView key={i} block={b} ctx={ctx} ui={ui} />)}
+      {shown.map((b, i) => <BlockView key={i} block={b} ctx={ctx} ui={ui} />)}
     </div>
   );
 }
@@ -61,11 +82,11 @@ function BlockView({ block, ctx, ui }: { block: Block; ctx: ViewContext; ui: Lay
     case 'text': return <p className="whitespace-pre-wrap break-words text-xs text-foreground">{text(block.text, ctx)}</p>;
     case 'notice': return <div role={block.level === 'error' ? 'alert' : 'status'} className={`rounded-md border px-2 py-1.5 text-xs ${NOTICE[block.level]}`}>{text(block.text, ctx)}</div>;
     case 'buttons': return <Buttons block={block} ctx={ctx} ui={ui} />;
-    case 'form': return <Form block={block} ctx={ctx} ui={ui} />;
+    case 'form': return block.open === 'dialog' ? <DialogBlock block={block} ctx={ctx} ui={ui} /> : <Form block={block} ctx={ctx} ui={ui} />;
     case 'select': return <SelectBlock block={block} ctx={ctx} ui={ui} />;
     case 'jobProgress': return <JobProgress job={ctx.job ?? null} ui={ui} />;
     case 'tabs': return <Tabs block={block} ctx={ctx} ui={ui} />;
-    case 'editor': return <EditorBlock block={block} ctx={ctx} ui={ui} />;
+    case 'editor': return block.open === 'dialog' ? <DialogBlock block={block} ctx={ctx} ui={ui} /> : <EditorBlock block={block} ctx={ctx} ui={ui} />;
     case 'code': return <CodeBlock title={block.title} text={String(pathOf(ctx, block.value) ?? '')} filename={block.filename} />;
     case 'view': {
       // A path that starts with `datasets.` or `context.` reads the screen's context; any other reads the widget's data.
@@ -85,20 +106,70 @@ function pathOf(data: unknown, path: string): unknown {
 }
 
 function Tabs({ block, ctx, ui }: { block: Extract<Block, { type: 'tabs' }>; ctx: ViewContext; ui: LayoutUi }) {
+  return ui.page
+    ? <PageTabs block={block} ctx={ctx} ui={ui} />
+    : <MemoryTabs block={block} ctx={ctx} ui={ui} />;
+}
+
+/** A page screen keeps its tab in `?tab=<id>` (replace, so Back leaves the page rather than walking the tabs). */
+function PageTabs({ block, ctx, ui }: { block: Extract<Block, { type: 'tabs' }>; ctx: ViewContext; ui: LayoutUi }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const search = useSearchParams();
+  const active = activeTabId(block.tabs, search.get('tab'));
+  const select = (id: string) => {
+    const params = new URLSearchParams(search.toString());
+    params.set('tab', id);
+    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  };
+  return <TabsView block={block} ctx={ctx} ui={ui} active={active} onSelect={select} />;
+}
+
+/** A dialog screen or a widget on a dashboard keeps the open tab in memory, as it always has. */
+function MemoryTabs({ block, ctx, ui }: { block: Extract<Block, { type: 'tabs' }>; ctx: ViewContext; ui: LayoutUi }) {
   const [active, setActive] = useState(block.tabs[0]?.id);
+  return <TabsView block={block} ctx={ctx} ui={ui} active={active} onSelect={setActive} />;
+}
+
+function TabsView({ block, ctx, ui, active, onSelect }: {
+  block: Extract<Block, { type: 'tabs' }>; ctx: ViewContext; ui: LayoutUi; active: string | undefined; onSelect: (id: string) => void;
+}) {
+  const base = useId().replace(/:/g, '');
+  const refs = useRef<(HTMLButtonElement | null)[]>([]);
   const tab = block.tabs.find(t => t.id === active) ?? block.tabs[0];
+  const onKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>, i: number) => {
+    const last = block.tabs.length - 1;
+    const next = e.key === 'ArrowRight' ? (i === last ? 0 : i + 1)
+      : e.key === 'ArrowLeft' ? (i === 0 ? last : i - 1)
+      : e.key === 'Home' ? 0
+      : e.key === 'End' ? last
+      : null;
+    if (next === null) return;
+    e.preventDefault();
+    onSelect(block.tabs[next].id);
+    refs.current[next]?.focus();
+  };
   return (
     <div className="space-y-3">
-      <div role="tablist" className="flex flex-wrap gap-1 border-b border-border">
-        {block.tabs.map(t => (
-          <button key={t.id} type="button" role="tab" aria-selected={t.id === tab.id} onClick={() => setActive(t.id)}
-            className={`-mb-px rounded-t-md border-b-2 px-3 py-1.5 ${ui.large ? 'text-sm' : 'text-xs'} font-medium ${t.id === tab.id ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
-            {t.label}
-          </button>
-        ))}
+      <div role="tablist" className="flex flex-nowrap gap-1 overflow-x-auto border-b border-border sm:flex-wrap sm:overflow-visible">
+        {block.tabs.map((t, i) => {
+          const selected = t.id === tab.id;
+          const count = tabCount(t.count, ctx);
+          return (
+            <button key={t.id} ref={el => { refs.current[i] = el; }} type="button" role="tab" id={`${base}-tab-${t.id}`}
+              aria-selected={selected} aria-controls={`${base}-panel-${t.id}`} tabIndex={selected ? 0 : -1} onClick={() => onSelect(t.id)}
+              onKeyDown={e => onKeyDown(e, i)}
+              className={`-mb-px inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-t-md border-b-2 px-3 py-1.5 ${ui.large ? 'text-sm' : 'text-xs'} font-medium ${selected ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
+              {t.label}
+              {count !== null && <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${selected ? 'bg-primary/10 text-primary' : 'bg-muted text-muted-foreground'}`}>{count}</span>}
+            </button>
+          );
+        })}
       </div>
       {/* keyed by tab: the editors of two tabs must not share their state */}
-      <div role="tabpanel" key={tab.id}><LayoutBlocks blocks={tab.blocks} ctx={ctx} ui={ui} /></div>
+      <div role="tabpanel" id={`${base}-panel-${tab.id}`} aria-labelledby={`${base}-tab-${tab.id}`} tabIndex={0} key={tab.id}>
+        <LayoutBlocks blocks={tab.blocks} ctx={ctx} ui={ui} groupToolbar />
+      </div>
     </div>
   );
 }
@@ -141,12 +212,45 @@ function Buttons({ block, ctx, ui }: { block: Extract<Block, { type: 'buttons' }
   );
 }
 
-function Form({ block, ctx, ui }: { block: Extract<Block, { type: 'form' }>; ctx: ViewContext; ui: LayoutUi }) {
+/** A form or editor block that shows as a button and opens in a dialog (spec key `"open": "dialog"`). */
+function DialogBlock({ block, ctx, ui }: { block: Extract<Block, { type: 'form' | 'editor' }>; ctx: ViewContext; ui: LayoutUi }) {
+  const [open, setOpen] = useState(false);
+  const usable = block.type === 'form'
+    ? (() => { const a = ui.actions.get(block.submit.action); return !!a && ui.allowed(a) && actionApplies(a, ctx); })()
+    : block.submits.some(s => { const a = ui.actions.get(s.action); return !!a && ui.allowed(a) && actionApplies(a, ctx); });
+  if (!usable) return null;
+  const title = block.type === 'form' && block.title ? block.title : block.label!;
+  const close = () => setOpen(false);
+  const dialogUi: LayoutUi = { ...ui, onSubmitted: ok => { if (ok) close(); ui.onSubmitted?.(ok); } };
+  return (
+    <>
+      <button type="button" className={primarySubmitClass} onClick={() => setOpen(true)}>{block.label}</button>
+      <Dialog.Root open={open} onOpenChange={setOpen}>
+        <Dialog.Portal>
+          <Dialog.Overlay className={DIALOG_OVERLAY} />
+          <Dialog.Content className={`${DIALOG_CONTENT} ${DIALOG_WIDTH.md}`} aria-describedby={undefined}>
+            <div className={DIALOG_HEADER}>
+              <Dialog.Title className={DIALOG_TITLE}>{title}</Dialog.Title>
+              <Dialog.Close asChild><button type="button" className={iconButtonClass} aria-label="Close"><X className="size-4" /></button></Dialog.Close>
+            </div>
+            {block.type === 'form'
+              ? <Form block={block} ctx={ctx} ui={ui} onClose={close} />
+              : <EditorBlock block={block} ctx={ctx} ui={dialogUi} dialog />}
+          </Dialog.Content>
+        </Dialog.Portal>
+      </Dialog.Root>
+    </>
+  );
+}
+
+function Form({ block, ctx, ui, onClose }: { block: Extract<Block, { type: 'form' }>; ctx: ViewContext; ui: LayoutUi; onClose?: () => void }) {
   const initial = formInitial(block.fields, ctx);
   const key = JSON.stringify(initial);
   const [values, setValues] = useState<Record<string, string>>(initial);
   const [touched, setTouched] = useState<Set<string>>(new Set());
   const [problem, setProblem] = useState<string | null>(null);
+  const [failure, setFailure] = useState<string | null>(null);
+  const [sending, setSending] = useState(false);
   // A field the person has not touched follows the current value of the host.
   useEffect(() => {
     setValues(v => Object.fromEntries(Object.entries(initial).map(([k, x]) => [k, touched.has(k) ? v[k] : x])));
@@ -159,12 +263,19 @@ function Form({ block, ctx, ui }: { block: Extract<Block, { type: 'form' }>; ctx
     const { params, missing } = formParams(action, block.submit, block.fields, values);
     if (missing.length) { setProblem(`Fill in: ${missing.join(', ')}`); return; }
     setProblem(null);
+    setFailure(null);
+    if (onClose && ui.submit) {
+      setSending(true);
+      void ui.submit(action, params)
+        .then(r => { if (!r.ok) { setFailure(r.error ?? 'That did not work'); return; } ui.onSubmitted?.(true); onClose(); })
+        .finally(() => setSending(false));
+      return;
+    }
     ui.onAction(action, params);
   };
   const set = (f: FormField, v: string) => { setTouched(t => new Set(t).add(f.name)); setValues(s => ({ ...s, [f.name]: v })); };
-  return (
-    <form onSubmit={submit} className="space-y-2">
-      {block.title && <div className="text-xs font-semibold">{block.title}</div>}
+  const fields = (
+    <>
       {block.fields.map(f => (
         <label key={f.name} className="block space-y-0.5">
           <span className="text-xs text-muted-foreground">{f.label}</span>
@@ -175,9 +286,27 @@ function Form({ block, ctx, ui }: { block: Extract<Block, { type: 'form' }>; ctx
         </label>
       ))}
       {problem && <div role="alert" className="text-xs text-destructive">{problem}</div>}
-      <button type="submit" className={buttonClass} disabled={ui.busy !== null || (action.job && ctx.job?.status === 'running')}>
-        {ui.busy === action.id && <Loader2 className="size-3 animate-spin motion-reduce:animate-none" aria-hidden />}{block.submit.label}
-      </button>
+      {failure && <div role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-xs text-destructive">{failure}</div>}
+    </>
+  );
+  const submitButton = (
+    <button type="submit" className={onClose ? primarySubmitClass : buttonClass} disabled={ui.busy !== null || sending || (action.job && ctx.job?.status === 'running')}>
+      {(sending || ui.busy === action.id) && <Loader2 className="size-3 animate-spin motion-reduce:animate-none" aria-hidden />}{block.submit.label}
+    </button>
+  );
+  if (onClose) {
+    return (
+      <form onSubmit={submit} className="flex min-h-0 flex-1 flex-col">
+        <div className="min-h-0 flex-1 space-y-2 overflow-auto pr-1">{fields}</div>
+        <div className={DIALOG_FOOTER}>{submitButton}</div>
+      </form>
+    );
+  }
+  return (
+    <form onSubmit={submit} className="space-y-2">
+      {block.title && <div className="text-xs font-semibold">{block.title}</div>}
+      {fields}
+      {submitButton}
     </form>
   );
 }

@@ -166,14 +166,14 @@ export interface EditorSubmit {
 /** Every block may carry `hideBelow`: hidden while the widget is smaller than that size class (see size.ts). */
 export type Block = (
   | { type: 'code'; title?: string; value: string; filename?: string; when?: Cond }
-  | { type: 'tabs'; tabs: { id: string; label: string; blocks: Block[] }[]; when?: Cond }
-  | { type: 'editor'; fields: EditorField[]; /** The text parameter of the submit actions that receives the settings blob (none: the fields are mapped one by one in each submit's params). */ param?: string; submits: EditorSubmit[]; when?: Cond }
+  | { type: 'tabs'; tabs: { id: string; label: string; /** A path into the context: the length of the list there shows as a chip after the label. */ count?: string; blocks: Block[] }[]; when?: Cond }
+  | { type: 'editor'; fields: EditorField[]; /** The text parameter of the submit actions that receives the settings blob (none: the fields are mapped one by one in each submit's params). */ param?: string; submits: EditorSubmit[]; open?: 'dialog'; label?: string; when?: Cond }
   | { type: 'section'; title: string; defaultOpen: boolean; badges: Badge[]; summary?: string; blocks: Block[]; when?: Cond }
   | { type: 'kv'; items: FieldSpec[]; when?: Cond }
   | { type: 'text'; text: string; when?: Cond }
   | { type: 'notice'; level: 'info' | 'warning' | 'error'; text: string; when?: Cond }
   | { type: 'buttons'; actions: string[]; when?: Cond }
-  | { type: 'form'; title?: string; fields: FormField[]; submit: { action: string; label: string; params: Record<string, string> }; when?: Cond }
+  | { type: 'form'; title?: string; fields: FormField[]; submit: { action: string; label: string; params: Record<string, string> }; open?: 'dialog'; label?: string; when?: Cond }
   | { type: 'select'; label: string; value: string; options: { value: string; label: string }[]; action: string; param: string; when?: Cond }
   | { type: 'jobProgress'; when?: Cond }
   /** `path`: the part of the widget's data the inner view shows (default: all of it). */
@@ -490,6 +490,18 @@ function validateEditorFields(raw: unknown, where: string): Validated<EditorFiel
   return { ok: true, value: out };
 }
 
+/** `"open": "dialog"` (with the button's `label`) on a form or editor: the block shows as a button that opens it in a dialog. */
+function dialogOpen(b: Obj, where: string): Validated<{ open?: 'dialog'; label?: string }> {
+  if (b.open === undefined) {
+    if (b.label !== undefined) return fail(`${where}: "label" is only used with "open": "dialog"`);
+    return { ok: true, value: {} };
+  }
+  if (b.open !== 'dialog') return fail(`${where}: "open" must be "dialog" (leave it out to show the block inline)`);
+  const label = text(b.label, 40);
+  if (!label) return fail(`${where}: "open": "dialog" needs a "label" for its button`);
+  return { ok: true, value: { open: 'dialog', label } };
+}
+
 export function validateLayout(
   rawBlocks: unknown, actionIds: ReadonlySet<string>, innerView: ViewValidator, validateFields: (raw: unknown, where: string) => Validated<FieldSpec[]>,
 ): Validated<Block[]> {
@@ -584,7 +596,9 @@ export function validateLayout(
           }
           const title = b.title === undefined ? undefined : text(b.title, 80);
           if (title === null) return fail(`${w}: "title" must be text`);
-          out.push({ type: 'form', ...(title ? { title } : {}), fields, submit: { action: b.submit.action as string, label, params }, ...base });
+          const opened = dialogOpen(b, w);
+          if (!opened.ok) return opened;
+          out.push({ type: 'form', ...(title ? { title } : {}), fields, submit: { action: b.submit.action as string, label, params }, ...opened.value, ...base });
           break;
         }
         case 'select': {
@@ -609,14 +623,19 @@ export function validateLayout(
         }
         case 'tabs': {
           if (!Array.isArray(b.tabs) || b.tabs.length < 1 || b.tabs.length > 12) return fail(`${w}: "tabs" must list 1-12 tabs`);
-          const tabs: { id: string; label: string; blocks: Block[] }[] = [];
+          const tabs: { id: string; label: string; count?: string; blocks: Block[] }[] = [];
           for (const t of b.tabs as unknown[]) {
             if (!isObj(t) || typeof t.id !== 'string' || !ID_RE.test(t.id) || tabs.some(x => x.id === t.id)) return fail(`${w}: each tab needs a unique "id" (lowercase letters, digits, underscores)`);
             const label = text(t.label, 40);
             if (!label) return fail(`${w}: tab "${t.id}" needs a label`);
+            let count: string | undefined;
+            if (t.count !== undefined) {
+              if (typeof t.count !== 'string' || !FIELD_RE.test(t.count)) return fail(`${w}: tab "${t.id}": "count" must be a dotted data path such as "datasets.images"`);
+              count = t.count;
+            }
             const inner = walk(t.blocks, depth + 1, `${w} tab "${t.id}"`);
             if (!inner.ok) return inner;
-            tabs.push({ id: t.id, label, blocks: inner.value });
+            tabs.push({ id: t.id, label, ...(count ? { count } : {}), blocks: inner.value });
           }
           out.push({ type: 'tabs', tabs, ...base });
           break;
@@ -645,7 +664,9 @@ export function validateLayout(
             }
             submits.push({ action: s.action as string, label, style: s.style === 'danger' ? 'danger' : 'primary', params });
           }
-          out.push({ type: 'editor', fields: fields.value, ...(typeof b.param === 'string' ? { param: b.param } : {}), submits, ...base });
+          const opened = dialogOpen(b, w);
+          if (!opened.ok) return opened;
+          out.push({ type: 'editor', fields: fields.value, ...(typeof b.param === 'string' ? { param: b.param } : {}), submits, ...opened.value, ...base });
           break;
         }
         case 'view': {

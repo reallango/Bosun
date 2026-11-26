@@ -258,6 +258,31 @@ describe('layout views', () => {
     expect(layout([{ type: 'text', text: 'x', hideBelow: 'xs' }]).ok).toBe(false);
     expect(layout([{ type: 'text', text: 'x', hideBelow: 'huge' }]).ok).toBe(false);
   });
+
+  it('take a tab count and forms or editors that open in a dialog', () => {
+    const r = layout([
+      { type: 'tabs', tabs: [{ id: 'images', label: 'Images', count: 'datasets.images', blocks: [{ type: 'text', text: 'x' }] }] },
+      { type: 'form', open: 'dialog', label: 'Pull image', fields: [{ name: 'ref', label: 'Image', input: 'text' }], submit: { action: 'go', label: 'Pull', params: { name: 'ref' } } },
+      { type: 'editor', open: 'dialog', label: 'New volume', fields: [{ name: 'name', label: 'Name', input: 'text' }], submits: [{ action: 'go', label: 'Create' }] },
+    ], [action]);
+    if (!r.ok) throw new Error(r.error);
+    const blocks = r.value.view.blocks!;
+    expect(blocks[0]).toMatchObject({ type: 'tabs', tabs: [{ id: 'images', label: 'Images', count: 'datasets.images' }] });
+    expect(blocks[1]).toMatchObject({ type: 'form', open: 'dialog', label: 'Pull image' });
+    expect(blocks[2]).toMatchObject({ type: 'editor', open: 'dialog', label: 'New volume' });
+  });
+
+  it('refuse unknown tab counts, open values and a dialog without a label', () => {
+    expect(layout([{ type: 'tabs', tabs: [{ id: 'a', label: 'A', count: 'not a path', blocks: [{ type: 'text', text: 'x' }] }] }]).ok).toBe(false);
+    expect(layout([{ type: 'tabs', tabs: [{ id: 'a', label: 'A', count: 3, blocks: [{ type: 'text', text: 'x' }] }] }]).ok).toBe(false);
+    const form = { type: 'form', fields: [{ name: 'a', label: 'A', input: 'text' }], submit: { action: 'go', label: 'Go' } };
+    expect(layout([{ ...form, open: 'page', label: 'New' }], [action]).ok).toBe(false);
+    expect(layout([{ ...form, open: 'dialog' }], [action]).ok).toBe(false);
+    expect(layout([{ ...form, label: 'New' }], [action]).ok).toBe(false);
+    const editor = { type: 'editor', fields: [{ name: 'a', label: 'A', input: 'text' }], submits: [{ action: 'go', label: 'Go' }] };
+    expect(layout([{ ...editor, open: 'page', label: 'New' }], [action]).ok).toBe(false);
+    expect(layout([{ ...editor, open: 'dialog' }], [action]).ok).toBe(false);
+  });
 });
 
 describe('conditions', () => {

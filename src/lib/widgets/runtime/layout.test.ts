@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { visible, visibleBadges, coerceParam, actionApplies, formInitial, formParams, selectParams, selectCurrent, text, jobHeadline, JOB_ACTIVE, type PublicActionLike } from './layout';
-import type { FormField } from './spec-v2';
+import { visible, visibleBadges, coerceParam, actionApplies, formInitial, formParams, selectParams, selectCurrent, text, jobHeadline, JOB_ACTIVE, tabCount, activeTabId, layoutRows, type PublicActionLike } from './layout';
+import type { Block, FormField } from './spec-v2';
 
 const ctx = {
   data: { models: [{ name: 'a' }], n: 3 },
@@ -70,6 +70,42 @@ describe('forms', () => {
     expect(ok).toEqual({ params: { length: 8192, model: 'llama', keep: false }, missing: [] });
     const bad = formParams(action as never, { params: { length: 'context' } }, fields, { context: '', model: '', mode: 'a' });
     expect(bad.missing).toEqual(['Context length', 'Model']);
+  });
+});
+
+describe('tabs', () => {
+  const tabs = [{ id: 'overview' }, { id: 'images' }, { id: 'stacks' }];
+  it('shows the length of the list a tab names, and nothing when the path is missing or is not a list', () => {
+    const c = { datasets: { images: [{ id: 1 }, { id: 2 }] }, data: { n: 3, name: 'x' } };
+    expect(tabCount('datasets.images', c)).toBe(2);
+    expect(tabCount('data.n', c)).toBeNull();
+    expect(tabCount('data.name', c)).toBeNull();
+    expect(tabCount('datasets.volumes', c)).toBeNull();
+    expect(tabCount(undefined, c)).toBeNull();
+  });
+  it('opens the tab named in the URL, or the first when it is missing or unknown', () => {
+    expect(activeTabId(tabs, 'images')).toBe('images');
+    expect(activeTabId(tabs, 'nope')).toBe('overview');
+    expect(activeTabId(tabs, null)).toBe('overview');
+    expect(activeTabId([], 'images')).toBeUndefined();
+  });
+});
+
+describe('tab toolbars', () => {
+  const buttons = { type: 'buttons', actions: ['go'] } as unknown as Block;
+  const dialogForm = { type: 'form', fields: [], submit: { action: 'go', label: 'Go', params: {} }, open: 'dialog', label: 'New' } as unknown as Block;
+  const inlineForm = { type: 'form', fields: [], submit: { action: 'go', label: 'Go', params: {} } } as unknown as Block;
+  const view = { type: 'view', view: { type: 'text', text: 'x' } } as unknown as Block;
+
+  it('puts the buttons and dialog forms directly before a view on one row', () => {
+    const rows = layoutRows([buttons, dialogForm, view]);
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toEqual({ kind: 'toolbar', blocks: [buttons, dialogForm] });
+    expect(rows[1]).toEqual({ kind: 'single', block: view });
+  });
+  it('leaves blocks alone when no view follows them, and keeps inline forms where they are', () => {
+    expect(layoutRows([buttons, dialogForm])).toEqual([{ kind: 'single', block: buttons }, { kind: 'single', block: dialogForm }]);
+    expect(layoutRows([inlineForm, view])).toEqual([{ kind: 'single', block: inlineForm }, { kind: 'single', block: view }]);
   });
 });
 

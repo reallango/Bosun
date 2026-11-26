@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "docker",
   "name": "Docker Containers",
-  "version": "1.0.15",
+  "version": "1.0.16",
   "description": "Containers on the host with logs, a shell, start, stop and restart; edit a container, create containers and stacks (a compose file, or one from a Git repository), and a Manage page for images, volumes and networks.",
   "author": "Bosun",
   "permissions": [
@@ -3903,6 +3903,7 @@
                   {
                     "id": "containers",
                     "label": "Containers",
+                    "count": "data",
                     "blocks": [
                       {
                         "type": "buttons",
@@ -3966,9 +3967,12 @@
                   {
                     "id": "images",
                     "label": "Images",
+                    "count": "datasets.images",
                     "blocks": [
                       {
                         "type": "form",
+                        "open": "dialog",
+                        "label": "Pull image",
                         "title": "Pull an image",
                         "fields": [
                           {
@@ -4050,9 +4054,12 @@
                   {
                     "id": "volumes",
                     "label": "Volumes",
+                    "count": "datasets.volumes",
                     "blocks": [
                       {
                         "type": "editor",
+                        "open": "dialog",
+                        "label": "New volume",
                         "fields": [
                           {
                             "name": "name",
@@ -4136,9 +4143,12 @@
                   {
                     "id": "networks",
                     "label": "Networks",
+                    "count": "datasets.networks",
                     "blocks": [
                       {
                         "type": "editor",
+                        "open": "dialog",
+                        "label": "New network",
                         "fields": [
                           {
                             "name": "name",
@@ -4241,6 +4251,7 @@
                   {
                     "id": "stacks",
                     "label": "Stacks",
+                    "count": "datasets.stacks",
                     "blocks": [
                       {
                         "type": "buttons",
