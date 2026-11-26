@@ -86,7 +86,8 @@ function useNavData() {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         .then(r => readJson<any>(r))
         .then(j => {
-          if (!cancelled) setServers(ensureArray<Server>(j?.data?.servers ?? j?.servers));
+          // GET /api/servers names the address `host`; the sidebar's helpers read `hostname`.
+          if (!cancelled) setServers(ensureArray<Server & { host?: string }>(j?.data?.servers ?? j?.servers).map(s => ({ ...s, hostname: s.hostname ?? s.host ?? '' })));
         })
         .catch(err => {
           // A failed refresh keeps the list that is shown; only the first load falls back to empty.
