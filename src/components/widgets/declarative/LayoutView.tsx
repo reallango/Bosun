@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useId, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useId, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Dialog } from 'radix-ui';
 import { ChevronDown, ChevronRight, Loader2, X } from 'lucide-react';
@@ -12,6 +12,7 @@ import {
 } from '@/lib/widgets/runtime/layout';
 import { Bar, Fields } from './parts';
 import { fitsSize } from '@/lib/widgets/runtime/size';
+import { statTone } from '@/lib/widgets/runtime/stat';
 import { useWidgetSize } from '@/components/dashboard/widget-size';
 import { CodeBlock, EditorBlock } from './EditorBlock';
 import {
@@ -27,6 +28,9 @@ const BADGE: Record<string, string> = {
   blue: 'bg-primary/10 text-primary',
 };
 const FINISHED_JOB_SHOWN_MS = 10 * 60 * 1000;
+
+/** A stat tile's `tab` switches the tabs around it; null outside a tab group (the tile then stays static). */
+const TabSelectContext = createContext<((id: string) => void) | null>(null);
 
 /** What the layout needs from the widget around it. */
 export interface LayoutUi {
@@ -117,6 +121,7 @@ function BlockView({ block, ctx, ui, toolbar }: { block: Block; ctx: ViewContext
   switch (block.type) {
     case 'section': return <Section block={block} ctx={ctx} ui={ui} />;
     case 'kv': return <Fields fields={block.items} data={ctx} />;
+    case 'stat': return <StatBlock block={block} ctx={ctx} />;
     case 'text': return <p className="whitespace-pre-wrap break-words text-xs text-foreground">{text(block.text, ctx)}</p>;
     case 'notice': return <div role={block.level === 'error' ? 'alert' : 'status'} className={`rounded-md border px-2 py-1.5 text-xs ${NOTICE[block.level]}`}>{text(block.text, ctx)}</div>;
     case 'buttons': return <Buttons block={block} ctx={ctx} ui={ui} toolbar={toolbar} />;
@@ -206,8 +211,41 @@ function TabsView({ block, ctx, ui, active, onSelect }: {
       </div>
       {/* keyed by tab: the editors of two tabs must not share their state */}
       <div role="tabpanel" id={`${base}-panel-${tab.id}`} aria-labelledby={`${base}-tab-${tab.id}`} tabIndex={0} key={tab.id}>
-        <LayoutBlocks blocks={tab.blocks} ctx={ctx} ui={ui} groupToolbar />
+        <TabSelectContext.Provider value={onSelect}>
+          <LayoutBlocks blocks={tab.blocks} ctx={ctx} ui={ui} groupToolbar />
+        </TabSelectContext.Provider>
       </div>
+    </div>
+  );
+}
+
+const STAT_COLUMNS: Record<string, string> = { xs: 'grid-cols-1', sm: 'grid-cols-2', md: 'grid-cols-3', lg: 'grid-cols-4' };
+const STAT_TONE_CLASS: Record<string, string> = {
+  danger: 'text-destructive',
+  warning: 'text-warning',
+  success: 'text-success',
+};
+
+/** A responsive grid of number cards; a card with a `tab` switches to that tab when it is inside a tab group. */
+function StatBlock({ block, ctx }: { block: Extract<Block, { type: 'stat' }>; ctx: ViewContext }) {
+  const { size } = useWidgetSize();
+  const selectTab = useContext(TabSelectContext);
+  return (
+    <div className={`grid gap-2 ${STAT_COLUMNS[size] ?? STAT_COLUMNS.lg}`}>
+      {block.items.map((item, i) => {
+        const tone = statTone(item.tone, ctx);
+        const card = `flex min-w-0 flex-col gap-0.5 rounded-lg border border-border bg-card p-3 text-left`;
+        const content = (
+          <>
+            <div className="truncate text-xs text-muted-foreground">{item.label}</div>
+            <div className={`${size === 'xs' ? 'text-xl' : 'text-2xl'} font-semibold tabular-nums ${tone ? STAT_TONE_CLASS[tone] : 'text-foreground'}`}>{text(item.value, ctx) || '—'}</div>
+            {item.sub && <div className="truncate text-xs text-muted-foreground">{text(item.sub, ctx)}</div>}
+          </>
+        );
+        return item.tab && selectTab
+          ? <button key={i} type="button" onClick={() => selectTab(item.tab!)} className={`${card} hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}>{content}</button>
+          : <div key={i} className={card}>{content}</div>;
+      })}
     </div>
   );
 }

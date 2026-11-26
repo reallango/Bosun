@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { validateWidgetSpec, publicSpec, evalCond, isNewerVersion } from './spec';
 import { cond } from './spec-util';
+import type { Block } from './spec-v2';
 import { validateManifest, scriptFilesOf, validateScriptFiles, manifestToJson } from '@/lib/widgets/package-manifest';
 import { extractMetrics } from './data';
 
@@ -270,6 +271,42 @@ describe('layout views', () => {
     expect(blocks[0]).toMatchObject({ type: 'tabs', tabs: [{ id: 'images', label: 'Images', count: 'datasets.images' }] });
     expect(blocks[1]).toMatchObject({ type: 'form', open: 'dialog', label: 'Pull image' });
     expect(blocks[2]).toMatchObject({ type: 'editor', open: 'dialog', label: 'New volume' });
+  });
+
+  it('accept stat tiles with templates, a fixed or conditional tone and a tab of the same screen', () => {
+    const r = layout([
+      { type: 'tabs', tabs: [
+        { id: 'overview', label: 'Overview', blocks: [
+          { type: 'stat', items: [
+            { label: 'Running', value: '{state.running}', sub: 'of {state.total}', tab: 'containers' },
+            { label: 'Stopped', value: '{state.stopped}', tone: 'warning' },
+            { label: 'Cache', value: '{state.cache}', tone: { danger: { field: 'state.cache', gt: 10 }, warning: { field: 'state.cache', gt: 0 } } },
+          ] },
+        ] },
+        { id: 'containers', label: 'Containers', blocks: [{ type: 'text', text: 'x' }] },
+      ] },
+    ]);
+    if (!r.ok) throw new Error(r.error);
+    const tabs = r.value.view.blocks![0] as Extract<Block, { type: 'tabs' }>;
+    const stat = tabs.tabs[0].blocks[0] as Extract<Block, { type: 'stat' }>;
+    expect(stat.items.map(i => i.label)).toEqual(['Running', 'Stopped', 'Cache']);
+    expect(stat.items[0]).toMatchObject({ tab: 'containers', sub: 'of {state.total}' });
+    expect(stat.items[1].tone).toBe('warning');
+    expect(stat.items[2].tone).toEqual({ danger: { field: 'state.cache', gt: 10 }, warning: { field: 'state.cache', gt: 0 } });
+  });
+
+  it('refuse stat tiles without a value, a bad tone or a tab that does not exist', () => {
+    const stat = (item: unknown) => layout([{ type: 'stat', items: [item] }]);
+    expect(stat({ label: 'A', value: '{a}' }).ok).toBe(true);
+    expect(stat({ label: 'A' }).ok).toBe(false);
+    expect(stat({ value: '{a}' }).ok).toBe(false);
+    expect(stat({ label: 'A', value: '{a}', tone: 'purple' }).ok).toBe(false);
+    expect(stat({ label: 'A', value: '{a}', tone: { purple: { field: 'a', equals: 1 } } }).ok).toBe(false);
+    expect(stat({ label: 'A', value: '{a}', tone: { warning: { field: 'a' } } }).ok).toBe(false);
+    expect(stat({ label: 'A', value: '{a}', tab: 'Not A Tab' }).ok).toBe(false);
+    expect(layout([{ type: 'stat', items: [] }]).ok).toBe(false);
+    // A tab link needs a tab in the same screen, even when it sits outside the tab group.
+    expect(layout([{ type: 'stat', items: [{ label: 'A', value: '{a}', tab: 'missing' }] }]).ok).toBe(false);
   });
 
   it('refuse unknown tab counts, open values and a dialog without a label', () => {

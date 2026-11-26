@@ -77,6 +77,22 @@ export interface FormField {
   options?: { value: string; label: string }[];
 }
 
+export const STAT_TONES = ['warning', 'danger', 'success'] as const;
+export type StatTone = (typeof STAT_TONES)[number];
+
+/**
+ * One card of a `stat` block. `value` and `sub` are templates over the screen's context (like other blocks). `tone` is
+ * a fixed tone, or a map of tones to conditions whose first matching entry colours the number. `tab` names a tab of the
+ * same screen: clicking the card switches to it (and updates `?tab=` on a page).
+ */
+export interface StatItem {
+  label: string;
+  value: string;
+  sub?: string;
+  tone?: StatTone | Partial<Record<StatTone, Cond>>;
+  tab?: string;
+}
+
 export const EDITOR_INPUTS = ['text', 'number', 'select', 'checkbox', 'textarea', 'lines', 'pairs', 'rows', 'button', 'heading'] as const;
 
 /** One column of a `rows` field: a labelled box (text, number or a drop-down). */
@@ -170,6 +186,7 @@ export type Block = (
   | { type: 'editor'; fields: EditorField[]; /** The text parameter of the submit actions that receives the settings blob (none: the fields are mapped one by one in each submit's params). */ param?: string; submits: EditorSubmit[]; open?: 'dialog'; label?: string; when?: Cond }
   | { type: 'section'; title: string; defaultOpen: boolean; badges: Badge[]; summary?: string; blocks: Block[]; when?: Cond }
   | { type: 'kv'; items: FieldSpec[]; when?: Cond }
+  | { type: 'stat'; items: StatItem[]; when?: Cond }
   | { type: 'text'; text: string; when?: Cond }
   | { type: 'notice'; level: 'info' | 'warning' | 'error'; text: string; when?: Cond }
   | { type: 'buttons'; actions: string[]; when?: Cond }
@@ -506,6 +523,9 @@ export function validateLayout(
   rawBlocks: unknown, actionIds: ReadonlySet<string>, innerView: ViewValidator, validateFields: (raw: unknown, where: string) => Validated<FieldSpec[]>,
 ): Validated<Block[]> {
   let count = 0;
+  // Every tab id of this screen, and every stat tile that links to one; checked once the whole tree is known.
+  const tabIds = new Set<string>();
+  const statTabs: { tab: string; where: string }[] = [];
   const walk = (raw: unknown, depth: number, where: string): Validated<Block[]> => {
     if (!Array.isArray(raw) || raw.length < 1 || raw.length > 30) return fail(`${where}: "blocks" must list 1-30 blocks`);
     if (depth > MAX_BLOCK_DEPTH) return fail(`${where}: blocks are nested too deeply`);
@@ -547,6 +567,48 @@ export function validateLayout(
           const items = validateFields(b.items, `${w} items`);
           if (!items.ok) return items;
           out.push({ type: 'kv', items: items.value, ...base });
+          break;
+        }
+        case 'stat': {
+          if (!Array.isArray(b.items) || b.items.length < 1 || b.items.length > 12) return fail(`${w}: "items" must list 1-12 stat tiles`);
+          const items: StatItem[] = [];
+          for (const raw of b.items as unknown[]) {
+            if (!isObj(raw)) return fail(`${w}: each stat item must be an object`);
+            const label = text(raw.label, 40);
+            const value = text(raw.value, 200);
+            if (!label || !value) return fail(`${w}: each stat item needs a "label" and a "value"`);
+            const sub = raw.sub === undefined ? undefined : text(raw.sub, 200);
+            if (sub === null) return fail(`${w}: stat "${label}": "sub" must be text`);
+            let tone: StatItem['tone'];
+            if (raw.tone !== undefined) {
+              if (typeof raw.tone === 'string') {
+                if (!(STAT_TONES as readonly string[]).includes(raw.tone)) return fail(`${w}: stat "${label}": "tone" must be one of ${STAT_TONES.join(', ')}`);
+                tone = raw.tone as StatTone;
+              } else if (isObj(raw.tone)) {
+                const keys = Object.keys(raw.tone);
+                if (keys.length < 1 || keys.length > STAT_TONES.length || !keys.every(k => (STAT_TONES as readonly string[]).includes(k))) {
+                  return fail(`${w}: stat "${label}": a "tone" object maps ${STAT_TONES.join(', ')} to conditions`);
+                }
+                const conditions: Partial<Record<StatTone, Cond>> = {};
+                for (const [name, condition] of Object.entries(raw.tone)) {
+                  const c = cond(condition, `${w} stat "${label}" tone "${name}"`);
+                  if (!c.ok) return c;
+                  conditions[name as StatTone] = c.value;
+                }
+                tone = conditions;
+              } else {
+                return fail(`${w}: stat "${label}": "tone" must be ${STAT_TONES.join(', ')} or an object of those to conditions`);
+              }
+            }
+            let tab: string | undefined;
+            if (raw.tab !== undefined) {
+              if (typeof raw.tab !== 'string' || !ID_RE.test(raw.tab)) return fail(`${w}: stat "${label}": "tab" must be a tab id`);
+              tab = raw.tab;
+              statTabs.push({ tab, where: `${w} stat "${label}"` });
+            }
+            items.push({ label, value, ...(sub ? { sub } : {}), ...(tone ? { tone } : {}), ...(tab ? { tab } : {}) });
+          }
+          out.push({ type: 'stat', items, ...base });
           break;
         }
         case 'text': {
@@ -626,6 +688,7 @@ export function validateLayout(
           const tabs: { id: string; label: string; count?: string; blocks: Block[] }[] = [];
           for (const t of b.tabs as unknown[]) {
             if (!isObj(t) || typeof t.id !== 'string' || !ID_RE.test(t.id) || tabs.some(x => x.id === t.id)) return fail(`${w}: each tab needs a unique "id" (lowercase letters, digits, underscores)`);
+            tabIds.add(t.id);
             const label = text(t.label, 40);
             if (!label) return fail(`${w}: tab "${t.id}" needs a label`);
             let count: string | undefined;
@@ -678,10 +741,14 @@ export function validateLayout(
           break;
         }
         default:
-          return fail(`${w}: unknown block type "${b.type}" (section, tabs, kv, text, code, notice, buttons, form, editor, select, jobProgress or view)`);
+          return fail(`${w}: unknown block type "${b.type}" (section, tabs, kv, stat, text, code, notice, buttons, form, editor, select, jobProgress or view)`);
       }
     }
     return { ok: true, value: out };
   };
-  return walk(rawBlocks, 1, 'layout');
+  const result = walk(rawBlocks, 1, 'layout');
+  if (!result.ok) return result;
+  const unknownTab = statTabs.find(s => !tabIds.has(s.tab));
+  if (unknownTab) return fail(`${unknownTab.where}: "tab" names no tab of this screen ("${unknownTab.tab}")`);
+  return result;
 }

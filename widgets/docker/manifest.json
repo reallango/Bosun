@@ -2,11 +2,11 @@
   "schema": 1,
   "id": "docker",
   "name": "Docker Containers",
-  "version": "1.0.18",
+  "version": "1.0.19",
   "description": "Containers on the host with logs, a shell, start, stop and restart; edit a container, create containers and stacks (a compose file, or one from a Git repository), and a Manage page for images, volumes and networks.",
   "author": "Bosun",
   "requires": {
-    "api": 3
+    "api": 4
   },
   "permissions": [
     {
@@ -3862,6 +3862,47 @@
                         }
                       },
                       {
+                        "type": "stat",
+                        "items": [
+                          {
+                            "label": "Running",
+                            "value": "{datasets.system.containers.running}",
+                            "sub": "of {datasets.system.containers.total}",
+                            "tab": "containers"
+                          },
+                          {
+                            "label": "Stopped",
+                            "value": "{datasets.system.containers.stopped}",
+                            "sub": "not running",
+                            "tone": {
+                              "warning": {
+                                "field": "datasets.system.containers.stopped",
+                                "gt": 0
+                              }
+                            },
+                            "tab": "containers"
+                          },
+                          {
+                            "label": "Images",
+                            "value": "{datasets.system.images}",
+                            "sub": "{datasets.system.disk.images}",
+                            "tab": "images"
+                          },
+                          {
+                            "label": "Volumes",
+                            "value": "{datasets.system.disk.volumes}",
+                            "sub": "disk used",
+                            "tab": "volumes"
+                          },
+                          {
+                            "label": "Build cache",
+                            "value": "{datasets.system.disk.cache}",
+                            "sub": "prune on Images",
+                            "tab": "images"
+                          }
+                        ]
+                      },
+                      {
                         "type": "kv",
                         "items": [
                           {
@@ -3870,33 +3911,36 @@
                             "format": "text"
                           },
                           {
-                            "label": "Containers",
-                            "value": "{datasets.system.containers.running} running, {datasets.system.containers.stopped} stopped, {datasets.system.containers.total} in total",
+                            "label": "Compose",
+                            "value": "installed",
+                            "format": "text",
+                            "when": {
+                              "field": "datasets.system.compose",
+                              "equals": true
+                            }
+                          },
+                          {
+                            "label": "Compose",
+                            "value": "not installed",
+                            "format": "text",
+                            "when": {
+                              "field": "datasets.system.compose",
+                              "equals": false
+                            }
+                          },
+                          {
+                            "label": "Volume drivers",
+                            "value": "{datasets.system.drivers.volume}",
                             "format": "text"
                           },
                           {
-                            "label": "Images",
-                            "value": "{datasets.system.images}",
-                            "format": "text"
-                          },
-                          {
-                            "label": "Disk used by images",
-                            "value": "{datasets.system.disk.images}",
+                            "label": "Network drivers",
+                            "value": "{datasets.system.drivers.network}",
                             "format": "text"
                           },
                           {
                             "label": "Disk used by containers",
                             "value": "{datasets.system.disk.containers}",
-                            "format": "text"
-                          },
-                          {
-                            "label": "Disk used by volumes",
-                            "value": "{datasets.system.disk.volumes}",
-                            "format": "text"
-                          },
-                          {
-                            "label": "Build cache",
-                            "value": "{datasets.system.disk.cache}",
                             "format": "text"
                           }
                         ]
@@ -3960,6 +4004,11 @@
                             "logs",
                             "shell",
                             "restart",
+                            "stop",
+                            "start",
+                            "remove"
+                          ],
+                          "bulk": [
                             "stop",
                             "start",
                             "remove"
@@ -4043,6 +4092,9 @@
                           ],
                           "rowActions": [
                             "run_image",
+                            "image_remove"
+                          ],
+                          "bulk": [
                             "image_remove"
                           ],
                           "filter": {
@@ -4139,6 +4191,9 @@
                             }
                           ],
                           "rowActions": [
+                            "volume_remove"
+                          ],
+                          "bulk": [
                             "volume_remove"
                           ],
                           "filter": {
@@ -4313,6 +4368,9 @@
                             "stack_pull",
                             "stack_update",
                             "stack_update_privileged",
+                            "stack_remove"
+                          ],
+                          "bulk": [
                             "stack_remove"
                           ],
                           "filter": {

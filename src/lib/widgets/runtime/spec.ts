@@ -148,6 +148,8 @@ export interface ViewSpec {
   defaultSort?: { column: string; dir: 'asc' | 'desc' };
   /** A table: clicking a row (or pressing Enter on it) opens this screen in a side sheet, with the row as its context. */
   open?: string;
+  /** A table on a page: these row actions can run on several selected rows at once, with one confirmation. */
+  bulk?: string[];
   text?: string;
 }
 
@@ -627,7 +629,7 @@ function validateFields(raw: unknown, where: string): Validated<FieldSpec[]> {
   return { ok: true, value: out };
 }
 
-function validateView(raw: unknown, actionIds: ReadonlySet<string>, v2 = false): Validated<ViewSpec> {
+function validateView(raw: unknown, actionIds: ReadonlySet<string>, v2 = false, rowTargetIds?: ReadonlySet<string>): Validated<ViewSpec> {
   if (!isObj(raw)) return fail('"view" is required');
   if (raw.type !== 'list' && raw.type !== 'table' && raw.type !== 'text' && raw.type !== 'fields' && raw.type !== 'chart' && raw.type !== 'layout') {
     return fail('view.type must be "list", "table", "fields", "chart", "layout" or "text"');
@@ -635,7 +637,7 @@ function validateView(raw: unknown, actionIds: ReadonlySet<string>, v2 = false):
   const view: ViewSpec = { type: raw.type };
   if (raw.type === 'layout') {
     if (!v2) return fail('layout views need spec version 2');
-    const blocks = validateLayout(raw.blocks, actionIds, inner => validateView(inner, actionIds, true), validateFields);
+    const blocks = validateLayout(raw.blocks, actionIds, inner => validateView(inner, actionIds, true, rowTargetIds), validateFields);
     if (!blocks.ok) return blocks;
     view.blocks = blocks.value;
     return { ok: true, value: view };
@@ -712,6 +714,7 @@ function validateView(raw: unknown, actionIds: ReadonlySet<string>, v2 = false):
     if (typeof raw.open !== 'string' || !ID_RE.test(raw.open)) return fail('view.open must be the id of a screen (lowercase letters, digits and underscores)');
     view.open = raw.open;
   }
+  if (raw.bulk !== undefined && raw.type !== 'table') return fail('view.bulk is only for table views');
   if (raw.type === 'list') {
     if (!isObj(raw.row)) return fail('a list view needs "row"');
     const title = text(raw.row.title, 200);
@@ -769,6 +772,16 @@ function validateView(raw: unknown, actionIds: ReadonlySet<string>, v2 = false):
     const a = refActions(raw.rowActions, 'view.rowActions');
     if (!a.ok) return a;
     view.rowActions = a.value;
+    if (raw.bulk !== undefined) {
+      if (!Array.isArray(raw.bulk) || raw.bulk.length < 1 || raw.bulk.length > 10 || !raw.bulk.every(x => typeof x === 'string' && actionIds.has(x))) {
+        return fail('view.bulk must list 1-10 ids of actions this widget declares');
+      }
+      const outside = (raw.bulk as string[]).find(id => !view.rowActions!.includes(id));
+      if (outside) return fail(`view.bulk names "${outside}", which is not one of view.rowActions`);
+      const notRowAction = rowTargetIds ? (raw.bulk as string[]).find(id => !rowTargetIds.has(id)) : undefined;
+      if (notRowAction) return fail(`view.bulk names "${notRowAction}", which cannot run on a row (it needs a "target" or a parameter "from" a row field)`);
+      view.bulk = raw.bulk as string[];
+    }
     if (raw.defaultSort !== undefined) {
       if (!isObj(raw.defaultSort)) return fail('view.defaultSort must be an object like {"column": "Size", "dir": "desc"}');
       const column = text(raw.defaultSort.column, 40);
@@ -853,7 +866,11 @@ export function validateWidgetSpec(raw: unknown, ownPermissions: readonly string
       actions.push(v.value);
     }
   }
-  const view = validateView(raw.view, ids, v2on);
+  // Actions that can be aimed at a row: a resource target, or a parameter taken from a row field.
+  const rowTargetIds = new Set(actions
+    .filter(a => a.target || Object.values(a.params).some(p => p.from))
+    .map(a => a.id));
+  const view = validateView(raw.view, ids, v2on, rowTargetIds);
   if (!view.ok) return view;
   const state = v2on ? validateState(raw.state, scripts.value) : { ok: true as const, value: undefined };
   if (!state.ok) return state;
@@ -862,7 +879,7 @@ export function validateWidgetSpec(raw: unknown, ownPermissions: readonly string
   const datasets = v2on ? validateDatasets(raw.datasets, scripts.value, own) : { ok: true as const, value: {} as Record<string, DatasetSpec> };
   if (!datasets.ok) return datasets;
   const screens = v2on
-    ? validateScreens(raw.screens, actions, datasets.value, scripts.value, inner => validateView(inner, ids, true), validateFields)
+    ? validateScreens(raw.screens, actions, datasets.value, scripts.value, inner => validateView(inner, ids, true, rowTargetIds), validateFields)
     : { ok: true as const, value: {} as Record<string, ScreenSpec> };
   if (!screens.ok) return screens;
   for (const a of actions) if (a.kind === 'screen' && !(a.screen! in screens.value)) return fail(`action "${a.id}": the screen "${a.screen}" is not declared`);

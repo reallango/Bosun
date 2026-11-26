@@ -46,6 +46,7 @@ newer Bosun is still listed under Available (so the reason is visible) but canno
 | 1 | The original spec: `data` (snapshot and command sources), `view` (list, table, fields, text), `actions` (command and terminal), `metrics`, data filters, the unavailable notice, fields and gauges, and the formats. |
 | 2 | Spec version 2 as it was before the additions below: `scripts` and package secrets, `state`, `lookups`, script actions with variants and jobs, `layout` views and editor blocks, screens, datasets, menu entries, multi-line text parameters, and stack import (`stacks` without its later keys); also `resources` on data and `target` on actions. |
 | 3 | `stacks.retag`, `stacks.deployLater` and `stacks.deployPrivilegedLater` (which replaced the earlier `stacks.startLater`), `setup`, and the widget-size keys `hideBelow`, `row.inline` and `row.subtitleHideBelow`. |
+| 4 | `bulk` on table views, the `stat` block, and the Manage-page keys of the earlier work: tab `count`, `open: "dialog"` on forms and editors, column `sort`, view `defaultSort`, and view `open` for row details. |
 
 New spec keys that an older Bosun cannot honour raise the level in `src/lib/widgets/api-level.ts`; keys an older
 Bosun can safely ignore (because it renders the widget sensibly without them) do not.
@@ -230,6 +231,56 @@ screen would pass it. Rows answer Enter as well as a click. Without `open`, rows
 At the largest size class (a full-page or dialog screen, or a wide widget) a table shows at most two row actions as icons
 and puts the rest in a per-row ⋯ menu, destructive actions last and in red. A smaller table keeps showing every action,
 as before. An older Bosun ignores these keys and renders the table without sorting or row details.
+
+### Bulk actions
+
+A table can run a row action on several selected rows with one confirmation. Name the actions in `bulk`; every id must
+also be one of `rowActions` and must be able to aim at a row (it declares a `target`, or takes a parameter `from` a row
+field). On a page-size table (a full-page screen, not a widget on a dashboard) Bosun adds a checkbox column, and the
+header checkbox selects every visible (filtered and sorted) row.
+
+With rows selected, a bar above the table shows "N selected" and one button per bulk action the person may use on at least
+one selected row. The action's permission is checked as for a single click, and its `when` decides which selected rows it
+applies to; the others are skipped and counted. Clicking a button opens one confirmation that lists the affected rows
+(the first 10, then "and N more") and uses the destructive style when `confirm.destructive` is true. Confirming sends one
+request per row, in order, through the same endpoint a single row action uses, so every run is its own permission-checked
+and audited request (or job). The dialog shows "3 of 5" progress; afterwards the selection clears, the table reloads, and
+a toast reports how many succeeded, failed and were skipped. A bulk confirmation does not ask for `confirm.requireText`:
+one row's name cannot confirm several rows. Without `bulk`, a table shows no checkboxes; an older Bosun ignores the key.
+
+```jsonc
+"view": {
+  "type": "table",
+  "columns": [{ "title": "Repository", "value": "{repo}" }, { "title": "Size", "value": "{size}" }],
+  "rowActions": ["run_image", "image_remove"],
+  "bulk": ["image_remove"]
+}
+```
+
+### Stat tiles
+
+A `stat` block is a responsive grid of number cards, for an overview tab: a big value, a small label and an optional
+sub-line. `value` and `sub` are templates over the screen's context, like the values of a `kv` block.
+
+- `tone` is either a fixed `"warning"`, `"danger"` or `"success"`, or an object mapping those tones to conditions. The
+  first tone whose condition holds (in the order written) colours the number.
+- `tab` names a tab of the same screen. Clicking the card switches to it; on a page screen it also updates `?tab=`.
+  Outside a tab group the card stays static.
+
+Cards use the theme tokens and follow the widget's size class: one column on `xs`, two on `sm`, three on `md` and four on
+`lg`. The block also works in a widget on a dashboard. An older Bosun ignores the block, so a screen that uses it keeps
+working there without the tiles.
+
+```jsonc
+"blocks": [
+  { "type": "stat", "items": [
+    { "label": "Running", "value": "{datasets.system.containers.running}", "sub": "of {datasets.system.containers.total}", "tab": "containers" },
+    { "label": "Stopped", "value": "{datasets.system.containers.stopped}", "tone": { "warning": { "field": "datasets.system.containers.stopped", "gt": 0 } }, "tab": "containers" },
+    { "label": "Images", "value": "{datasets.system.images}", "sub": "{datasets.system.disk.images}", "tab": "images" }
+  ] },
+  { "type": "kv", "items": [{ "label": "Docker version", "value": "{datasets.system.version}", "format": "text" }] }
+]
+```
 
 ## Managing the Ollama installation
 

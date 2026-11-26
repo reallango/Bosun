@@ -169,6 +169,25 @@ describe('validateWidgetSpec', () => {
     expect(bad(s => { s.view = { type: 'table', columns: [{ title: 'Name', value: '{name}' }], open: 'Bad Id' }; }).ok).toBe(false);
   });
 
+  it('names bulk actions that are row actions of the same table, and only on tables', () => {
+    const good = bad(s => {
+      s.view = { type: 'table', columns: [{ title: 'Name', value: '{name}' }], rowActions: ['logs', 'restart'], bulk: ['restart', 'logs'] };
+    });
+    if (!good.ok) throw new Error(good.error);
+    expect(good.value.view.bulk).toEqual(['restart', 'logs']);
+
+    expect(bad(s => { s.view = { type: 'table', columns: [{ title: 'Name', value: '{name}' }], rowActions: ['restart'], bulk: ['logs'] }; }).ok).toBe(false);
+    expect(bad(s => { s.view = { type: 'table', columns: [{ title: 'Name', value: '{name}' }], rowActions: ['restart'], bulk: ['nuke'] }; }).ok).toBe(false);
+    expect(bad(s => { s.view = { type: 'table', columns: [{ title: 'Name', value: '{name}' }], rowActions: ['restart'], bulk: [] }; }).ok).toBe(false);
+    expect(bad(s => { s.view = { type: 'list', row: { title: '{name}', actions: ['restart'] }, bulk: ['restart'] }; }).ok).toBe(false);
+
+    // A bulk action must be able to aim at a row: a target, or a parameter taken from one.
+    expect(bad(s => {
+      s.actions.push({ id: 'prune', label: 'Prune', permission: 'dk.control', as: 'service', command: 'docker prune' });
+      s.view = { type: 'table', columns: [{ title: 'Name', value: '{name}' }], rowActions: ['prune'], bulk: ['prune'] };
+    }).ok).toBe(false);
+  });
+
   it('is validated as part of a package manifest, against the package permissions', () => {
     const perm = (id: string) => ({ id, label: id, description: 'd', group: 'Dk', defaultLevel: 'admin', risk: 'high', scope: 'server' });
     const manifest = (spec: any) => ({ schema: 1, id: 'dk', name: 'Dk', version: '0.0.1', permissions: [perm('dk.control'), perm('dk.logs'), perm('dk.view')], widgets: [{ type: 'dk_w', display_name: 'Dk', spec }] });

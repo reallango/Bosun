@@ -18,7 +18,7 @@ describe('GET /api/health', () => {
       version: { commit: 'abcdef0', short: 'abcdef0', channel: 'dev' },
       widget_api_level: WIDGET_API_LEVEL,
     });
-    expect(body.widget_api_level).toBe(3);
+    expect(body.widget_api_level).toBe(4);
     expect(typeof body.timestamp).toBe('string');
   });
 });
