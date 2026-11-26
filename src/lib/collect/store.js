@@ -184,6 +184,8 @@ function cleanupStatements(cfg) {
   if (cfg.notificationDays > 0) stmts.push({ sql: "DELETE FROM notifications WHERE julianday(created_at) < julianday('now', ?)", params: [days(cfg.notificationDays)] });
   // Sessions: the expired ones, once they have been expired for that many days.
   if (cfg.sessionDays > 0) stmts.push({ sql: "DELETE FROM sessions WHERE julianday(expires_at) < julianday('now', ?)", params: [days(cfg.sessionDays)] });
+  // Permission grants that expired more than a week ago (they stopped counting when they expired).
+  stmts.push({ sql: "DELETE FROM permission_grants WHERE expires_at IS NOT NULL AND julianday(expires_at) < julianday('now', '-7 days')", params: [] });
   return stmts;
 }
 

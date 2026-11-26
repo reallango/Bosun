@@ -5,7 +5,7 @@
  */
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import type { PermissionDef } from './catalog';
-import type { Grant, GrantScope, ServerContext } from './evaluate';
+import { RESOURCE_NAME_RE, type Grant, type GrantResource, type GrantScope, type ServerContext } from './evaluate';
 
 const TTL_MS = 30_000;
 const MAX_ENTRIES = 2000;
@@ -37,6 +37,13 @@ function toScope(type: unknown, id: unknown): GrantScope | null {
   return null;
 }
 
+/** null: no limit (the whole server); undefined: an unreadable limit (the grant must not count). */
+export function toResource(kind: unknown, name: unknown): GrantResource | null | undefined {
+  if (!kind) return null;
+  if ((kind === 'stack' || kind === 'container') && typeof name === 'string' && RESOURCE_NAME_RE.test(name)) return { kind, name };
+  return undefined;
+}
+
 /** Grants a principal holds through its permission groups (not counting its access level). */
 export async function loadGroupGrants(p: Principal): Promise<Grant[]> {
   const key = `${p.kind}:${p.id}`;
@@ -44,13 +51,20 @@ export async function loadGroupGrants(p: Principal): Promise<Grant[]> {
   if (hit && Date.now() - hit.at < TTL_MS) return hit.grants;
 
   const sql = p.kind === 'user'
-    ? 'SELECT gr.permission, gr.scope_type, gr.scope_id, gr.effect FROM permission_grants gr JOIN user_groups m ON m.group_id = gr.group_id WHERE m.user_id = ?'
-    : 'SELECT gr.permission, gr.scope_type, gr.scope_id, gr.effect FROM permission_grants gr JOIN api_key_groups m ON m.group_id = gr.group_id WHERE m.api_key_id = ?';
+    ? 'SELECT gr.permission, gr.scope_type, gr.scope_id, gr.effect, gr.resource_kind, gr.resource_name, gr.expires_at FROM permission_grants gr JOIN user_groups m ON m.group_id = gr.group_id WHERE m.user_id = ?'
+    : 'SELECT gr.permission, gr.scope_type, gr.scope_id, gr.effect, gr.resource_kind, gr.resource_name, gr.expires_at FROM permission_grants gr JOIN api_key_groups m ON m.group_id = gr.group_id WHERE m.api_key_id = ?';
   const r = await rqlite.query(sql, [p.id]);
   const grants: Grant[] = [];
-  for (const row of rowsToObjects(r) as Array<{ permission: string; scope_type: string; scope_id: string; effect: string }>) {
+  for (const row of rowsToObjects(r) as Array<Record<string, unknown>>) {
     const scope = toScope(row.scope_type, row.scope_id);
-    if (scope) grants.push({ permission: row.permission, scope, effect: row.effect === 'deny' ? 'deny' : 'allow' });
+    if (!scope) continue;
+    const resource = toResource(row.resource_kind, row.resource_name);
+    // A limit that cannot be read is never dropped silently into "the whole server": the grant is skipped.
+    if (resource === undefined) continue;
+    grants.push({
+      permission: String(row.permission), scope, effect: row.effect === 'deny' ? 'deny' : 'allow',
+      ...(resource ? { resource } : {}), ...(row.expires_at ? { expiresAt: String(row.expires_at) } : {}),
+    });
   }
   if (cache.grants.size > MAX_ENTRIES) cache.grants.clear();
   cache.grants.set(key, { at: Date.now(), grants });

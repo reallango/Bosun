@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "docker",
   "name": "Docker Containers",
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "Containers on the host with logs, a shell, start, stop and restart; edit a container, create containers and stacks (a compose file, or one from a GitHub repository), and a Manage page for images, volumes and networks.",
   "author": "Bosun",
   "permissions": [
@@ -668,6 +668,10 @@
             "status": "Status",
             "ports": "Ports",
             "compose": "ComposeProject"
+          },
+          "resources": {
+            "container": "name",
+            "stack": "compose"
           }
         },
         "metrics": [
@@ -746,6 +750,10 @@
             "label": "Logs",
             "icon": "scroll-text",
             "permission": "docker.logs",
+            "target": {
+              "kind": "container",
+              "param": "name"
+            },
             "kind": "script",
             "result": "text",
             "params": {
@@ -775,6 +783,10 @@
             "label": "Shell",
             "icon": "terminal-square",
             "permission": "docker.shell",
+            "target": {
+              "kind": "container",
+              "param": "ref"
+            },
             "when": {
               "field": "state",
               "equals": "running"
@@ -791,6 +803,10 @@
             "label": "Restart",
             "icon": "rotate-cw",
             "permission": "docker.containers.control",
+            "target": {
+              "kind": "container",
+              "param": "name"
+            },
             "kind": "script",
             "after": "refresh",
             "when": {
@@ -824,6 +840,10 @@
             "label": "Stop",
             "icon": "square",
             "permission": "docker.containers.control",
+            "target": {
+              "kind": "container",
+              "param": "name"
+            },
             "kind": "script",
             "after": "refresh",
             "when": {
@@ -857,6 +877,10 @@
             "label": "Start",
             "icon": "play",
             "permission": "docker.containers.control",
+            "target": {
+              "kind": "container",
+              "param": "name"
+            },
             "kind": "script",
             "after": "refresh",
             "when": {
@@ -972,6 +996,10 @@
             "id": "recreate",
             "label": "Save and replace container",
             "permission": "docker.manage",
+            "target": {
+              "kind": "container",
+              "param": "name"
+            },
             "kind": "script",
             "params": {
               "name": {
@@ -1007,6 +1035,10 @@
             "id": "recreate_privileged",
             "label": "Save with elevated options",
             "permission": "docker.privileged",
+            "target": {
+              "kind": "container",
+              "param": "name"
+            },
             "kind": "script",
             "params": {
               "name": {
@@ -1042,6 +1074,10 @@
             "id": "remove",
             "label": "Remove",
             "permission": "docker.delete",
+            "target": {
+              "kind": "container",
+              "param": "name"
+            },
             "kind": "script",
             "params": {
               "name": {
@@ -1322,6 +1358,10 @@
             "id": "stack_deploy",
             "label": "Deploy stack",
             "permission": "docker.manage",
+            "target": {
+              "kind": "stack",
+              "param": "name"
+            },
             "kind": "script",
             "params": {
               "name": {
@@ -1397,6 +1437,10 @@
             "id": "stack_deploy_privileged",
             "label": "Deploy with elevated options",
             "permission": "docker.privileged",
+            "target": {
+              "kind": "stack",
+              "param": "name"
+            },
             "kind": "script",
             "params": {
               "name": {
@@ -1477,6 +1521,10 @@
             "id": "stack_start",
             "label": "Start stack",
             "permission": "docker.manage",
+            "target": {
+              "kind": "stack",
+              "param": "name"
+            },
             "kind": "script",
             "params": {
               "name": {
@@ -1502,6 +1550,10 @@
             "id": "stack_stop",
             "label": "Stop stack",
             "permission": "docker.manage",
+            "target": {
+              "kind": "stack",
+              "param": "name"
+            },
             "kind": "script",
             "params": {
               "name": {
@@ -1531,6 +1583,10 @@
             "id": "stack_restart",
             "label": "Restart stack",
             "permission": "docker.manage",
+            "target": {
+              "kind": "stack",
+              "param": "name"
+            },
             "kind": "script",
             "params": {
               "name": {
@@ -1560,6 +1616,10 @@
             "id": "stack_pull",
             "label": "Pull and redeploy",
             "permission": "docker.manage",
+            "target": {
+              "kind": "stack",
+              "param": "name"
+            },
             "kind": "script",
             "params": {
               "name": {
@@ -1585,6 +1645,10 @@
             "id": "stack_update",
             "label": "Update from source and redeploy",
             "permission": "docker.manage",
+            "target": {
+              "kind": "stack",
+              "param": "name"
+            },
             "kind": "script",
             "params": {
               "name": {
@@ -1611,6 +1675,10 @@
             "label": "Update with elevated options",
             "description": "Update from source and redeploy when the new version uses privileged mode, the host network, devices, the Docker socket or host folders.",
             "permission": "docker.privileged",
+            "target": {
+              "kind": "stack",
+              "param": "name"
+            },
             "kind": "script",
             "params": {
               "name": {
@@ -1642,6 +1710,10 @@
             "id": "stack_remove",
             "label": "Remove stack",
             "permission": "docker.delete",
+            "target": {
+              "kind": "stack",
+              "param": "name"
+            },
             "kind": "script",
             "params": {
               "name": {
@@ -1674,7 +1746,11 @@
           "inspect": {
             "script": "inspect",
             "cacheSec": 0,
-            "permission": "docker.manage"
+            "permission": "docker.manage",
+            "target": {
+              "kind": "container",
+              "param": "name"
+            }
           },
           "images": {
             "script": "images",
@@ -1699,22 +1775,37 @@
           "stacks": {
             "script": "stacks",
             "cacheSec": 5,
-            "permission": "docker.view"
+            "permission": "docker.view",
+            "resources": {
+              "stack": "name"
+            }
           },
           "stack_get": {
             "script": "stack_get",
             "cacheSec": 0,
-            "permission": "docker.manage"
+            "permission": "docker.manage",
+            "target": {
+              "kind": "stack",
+              "param": "name"
+            }
           },
           "export_run": {
             "script": "export_run",
             "cacheSec": 0,
-            "permission": "docker.manage"
+            "permission": "docker.manage",
+            "target": {
+              "kind": "container",
+              "param": "name"
+            }
           },
           "export_compose": {
             "script": "export_compose",
             "cacheSec": 0,
-            "permission": "docker.manage"
+            "permission": "docker.manage",
+            "target": {
+              "kind": "container",
+              "param": "name"
+            }
           },
           "convert": {
             "script": "convert",

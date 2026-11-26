@@ -12,6 +12,7 @@ import { ParamError } from '@/lib/widgets/runtime/command';
 import { openTerminalAction } from '@/lib/widgets/runtime/terminal-action';
 import { decryptOrigin, editorFieldsOf, encryptOrigin, maskValues, resolveTokens, sanitizeOrigin } from '@/lib/widgets/jobs/origin';
 import { getJob, getOriginEnc, redactParams } from '@/lib/widgets/jobs/store';
+import { resolveTarget, TargetError } from '@/lib/widgets/runtime/resource-check';
 
 /**
  * Run one action of a package widget: POST /api/servers/:serverId/widget-actions/:widgetType/:actionId
@@ -30,11 +31,26 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const loaded = await loadWidgetSpec(widgetType);
     const action = loaded?.spec.actions.find(a => a.id === actionId);
     if (!loaded || !action) return fail('Unknown widget action', 404, 'NOT_FOUND');
-    const denied = await requirePermission(auth, action.permission, serverId);
-    if (denied) return denied;
+    // An action that names its stack or container (action.target) is checked against that exact one once the request
+    // has been read, so a grant limited to some stacks or containers works; any other action needs the permission for
+    // the whole server.
+    if (!action.target) {
+      const denied = await requirePermission(auth, action.permission, serverId);
+      if (denied) return denied;
+    }
 
     let body: { params?: unknown; confirm?: unknown; ref?: unknown; widgetId?: unknown; origin?: unknown; savedFrom?: unknown };
     try { body = await request.json(); } catch { body = {}; }
+    if (action.target) {
+      const value = action.kind === 'terminal' ? body.ref : (body.params && typeof body.params === 'object' ? (body.params as Record<string, unknown>)[action.target.param] : undefined);
+      let resource;
+      try { resource = await resolveTarget(serverId, loaded, action.target, value); } catch (e) {
+        if (e instanceof TargetError) return fail(e.message, e.status, e.code);
+        throw e;
+      }
+      const denied = await requirePermission(auth, action.permission, serverId, resource);
+      if (denied) return denied;
+    }
     // A terminal action runs one command the package declared in an interactive terminal: API keys get a token for an
     // API terminal (after the action's check), a signed-in Full access user a token for the web terminal. The target is
     // `ref`; see lib/widgets/runtime/terminal-action.ts.

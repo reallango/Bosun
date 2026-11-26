@@ -9,6 +9,7 @@ import { resolveWidgetDefinition, supportsPlatform } from '@/components/widgets/
 import { visibleWidgets } from '@/lib/widgets/visibility';
 import { serverVisible } from '@/lib/permissions/effective';
 import { loadWidgetSpec } from '@/lib/widgets/runtime/execute';
+import { viewFilter } from '@/lib/widgets/runtime/resource-check';
 import crypto from 'crypto';
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ dashboardId: string }> }) {
@@ -44,8 +45,10 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     if (!def) return NextResponse.json({ error: { message: `Unknown widget type: ${widget_type}` } }, { status: 400 });
     // A package widget needs its data permission for that server, so nobody can place a widget they could not see.
     if (def.packageId) {
-      const dataPerm = (await loadWidgetSpec(widget_type))?.spec.data.permission;
-      if (dataPerm) { const denied = await requirePermission(auth, dataPerm, server_id); if (denied) return denied; }
+      const dataSpec = (await loadWidgetSpec(widget_type))?.spec.data;
+      if (dataSpec?.permission && !(await viewFilter(auth, dataSpec.permission, String(server_id), dataSpec.resources))) {
+        const denied = await requirePermission(auth, dataSpec.permission, server_id); if (denied) return denied;
+      }
     }
     // Platform support and enabled state are enforced here, not just hidden in the picker.
     const srv = await rqlite.query('SELECT platform FROM servers WHERE id = ?', [server_id]);

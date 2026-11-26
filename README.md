@@ -375,6 +375,16 @@ exactly as described above when no group is involved.
   Installing a widget will register the permissions it declares, so they appear in the
   editor on their own.
 - **Scope.** A grant applies to all servers, to one server, or to a **server group**.
+- **Stacks and containers.** A widget package's permission can also be limited, on those
+  servers, to some stacks or containers by name (a name ending in `*` matches by prefix, so
+  `test-*` covers every stack starting with `test-`). A stack limit covers the stack and its
+  containers. Actions that name what they act on (restart a container, deploy or update a stack,
+  their logs and shell) are checked against it; lists show only the allowed stacks and containers;
+  actions about the whole host (pull an image, prune, create a volume) need the permission for the
+  whole server. Example: give an AI agent's API key *Docker: manage* limited to the stack
+  `test-ai` on one server, and it can deploy, update and restart that stack and nothing else.
+- **Expiry.** Any grant can have an end time; after it, the grant no longer counts (and it is
+  deleted a week later).
   Server groups are optional named sets of servers (a server can be in several); create
   them on the same page, or skip them and grant per server.
 - **Who holds a group.** Assign groups to a user (Settings → Users) or to an API key
