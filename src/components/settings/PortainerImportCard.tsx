@@ -93,7 +93,7 @@ export function PortainerImportCard({ serverId }: { serverId: string }) {
       <CardContent className="space-y-4">
         <p className="text-xs text-muted-foreground">
           Stacks that another tool started on this server can become Bosun stacks under the same name, so their volumes (data) are kept.
-          Importing restarts the stack once (its containers are re-created from Bosun's copy). With Portainer&apos;s address and an API key (Portainer: My account &gt; Access tokens) Bosun copies the exact compose file,
+          Importing restarts the stack once (its containers are re-created from Bosun&apos;s copy). With Portainer&apos;s address and an API key (Portainer: My account &gt; Access tokens) Bosun copies the exact compose file,
           variables and git settings; otherwise it rebuilds the compose file from the running containers.
         </p>
         <div className="grid gap-3 sm:grid-cols-2">
