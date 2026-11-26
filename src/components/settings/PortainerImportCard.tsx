@@ -8,6 +8,7 @@ import { Label } from '@/components/ui/label';
 import { useToast } from '@/components/ui/toast';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { readJson } from '@/lib/api/readJson';
+import { ConfirmActionDialog } from '@/components/widgets/shared/ConfirmActionDialog';
 
 interface Candidate {
   name: string;
@@ -20,7 +21,47 @@ interface Candidate {
   reason: string | null;
 }
 
+interface DetachCandidate {
+  name: string;
+  running: boolean;
+  own: boolean;
+  portainer: { id: number; git: { repo: string; branch: string; file: string } | null };
+  detachable: boolean;
+  reason: string | null;
+}
+
 type Choice = { from: 'portainer' | 'containers'; detach: boolean };
+
+type Pending = { title: string; body: React.ReactNode; label: string; destructive: boolean; run: () => Promise<void> };
+
+/** What each import choice costs, said before the import starts. */
+function importWarnings(c: Candidate, ch: Choice, connected: boolean): string[] {
+  const w: string[] = [];
+  w.push(c.running
+    ? 'The stack restarts once: Docker Compose re-creates its containers from Bosun\'s copy. Volumes (data) are kept.'
+    : 'The stack is started from Bosun\'s copy. Volumes (data) are kept.');
+  if (ch.from === 'containers') {
+    w.push('Rebuilt from the containers: every environment value, passwords and keys included, is written into the compose file itself (no .env, no ${VARIABLES}).');
+    w.push('There is no git source or build context, so Stack Update cannot pull new commits or rebuild it: only pull newer images.');
+    w.push('Compose-only settings that a container does not show (depends_on, profiles, secrets/configs, comments) are not copied.');
+  }
+  if (!connected) {
+    w.push('Portainer is not connected for this server. If Portainer manages this stack, it keeps managing it too, and you can detach it only after connecting Portainer here.');
+  } else if (c.portainer && !ch.detach) {
+    w.push('Portainer keeps listing it, so two tools manage the stack: a redeploy (or automatic git update) in Portainer replaces Bosun\'s version, and Bosun\'s changes do not show in Portainer. You can detach it later on this card.');
+  }
+  if (ch.detach) w.push(...detachWarnings(c.running));
+  return w;
+}
+
+function detachWarnings(running: boolean): string[] {
+  return [
+    running
+      ? 'Portainer cannot forget a stack without stopping it: deleting it runs docker compose down (volumes are kept). Bosun first starts a waiter on the host that brings the stack back from Bosun\'s copy, a few seconds of downtime. If that fails, the stack stays stopped until you start it in Bosun.'
+      : 'Portainer deletes its record of the stack; volumes are kept.',
+    'Portainer\'s own settings for it (webhooks, automatic git updates, access control, its copy of the file) are deleted.',
+  ];
+}
 
 async function call<T>(url: string, init?: RequestInit): Promise<{ ok: boolean; data?: T; error?: string }> {
   const res = await fetchWithAuth(url, init);
@@ -45,11 +86,14 @@ export function PortainerImportCard({ serverId }: { serverId: string }) {
   const [perror, setPerror] = useState<string | null>(null);
   const [choice, setChoice] = useState<Record<string, Choice>>({});
   const [busy, setBusy] = useState<string | null>(null);
+  const [detachable, setDetachable] = useState<DetachCandidate[]>([]);
+  const [pending, setPending] = useState<Pending | null>(null);
 
   const loadStacks = useCallback(async () => {
-    const r = await call<{ candidates: Candidate[]; portainer: { configured: boolean; error: string | null } }>(`/api/servers/${serverId}/portainer/stacks`);
-    if (!r.ok) { setCandidates([]); setPerror(r.error ?? null); return; }
+    const r = await call<{ candidates: Candidate[]; detachable?: DetachCandidate[]; portainer: { configured: boolean; error: string | null } }>(`/api/servers/${serverId}/portainer/stacks`);
+    if (!r.ok) { setCandidates([]); setDetachable([]); setPerror(r.error ?? null); return; }
     setCandidates(r.data!.candidates);
+    setDetachable(r.data!.detachable ?? []);
     setPerror(r.data!.portainer.error);
     setChoice(prev => Object.fromEntries(r.data!.candidates.map(c => [c.name, prev[c.name] ?? { from: c.from[0] ?? 'containers', detach: false }])));
   }, [serverId]);
@@ -75,16 +119,46 @@ export function PortainerImportCard({ serverId }: { serverId: string }) {
     await loadStacks();
   };
 
-  const runImport = async (c: Candidate) => {
-    const ch = choice[c.name];
-    setBusy(c.name);
-    const r = await call<{ jobId: string | null; notes: string[] }>(`/api/servers/${serverId}/portainer/import`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: c.name, from: ch.from, detach: ch.detach }),
+  const connected = !!conn?.has_key;
+  const list = (items: string[]) => <ul className="mt-2 list-disc space-y-1.5 pl-5">{items.map(t => <li key={t}>{t}</li>)}</ul>;
+
+  const runImport = (c: Candidate) => {
+    const ch = choice[c.name] ?? { from: c.from[0] ?? 'containers', detach: false };
+    setPending({
+      title: `Import ${c.name} ${ch.from === 'portainer' ? 'from Portainer' : 'from its containers'}${ch.detach ? ' and detach it' : ''}?`,
+      body: list(importWarnings(c, ch, connected)),
+      label: ch.detach ? 'Import and detach' : 'Import',
+      destructive: ch.detach || ch.from === 'containers',
+      run: async () => {
+        setBusy(c.name);
+        const r = await call<{ jobId: string | null; notes: string[] }>(`/api/servers/${serverId}/portainer/import`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: c.name, from: ch.from, detach: ch.detach }),
+        });
+        setBusy(null);
+        if (!r.ok) throw new Error(r.error ?? 'Import failed');
+        toast(`Importing ${c.name}: follow it in the bell (the result appears there)`, { variant: 'success' });
+        setTimeout(loadStacks, 5000);
+      },
     });
-    setBusy(null);
-    if (!r.ok) { toast(r.error ?? 'Import failed', { variant: 'error' }); return; }
-    toast(`Importing ${c.name}: follow it in the bell (the result appears there)`, { variant: 'success' });
-    setTimeout(loadStacks, 5000);
+  };
+
+  const runDetach = (d: DetachCandidate) => {
+    setPending({
+      title: `Detach ${d.name} from Portainer?`,
+      body: list([...detachWarnings(d.running), 'Bosun\'s copy of the stack stays as it is; from now on only Bosun manages it.']),
+      label: 'Detach',
+      destructive: true,
+      run: async () => {
+        setBusy(d.name);
+        const r = await call<{ name: string }>(`/api/servers/${serverId}/portainer/detach`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: d.name }),
+        });
+        setBusy(null);
+        if (!r.ok) throw new Error(r.error ?? 'Detach failed');
+        toast(`Detaching ${d.name}: the result appears in the bell`, { variant: 'success' });
+        setTimeout(loadStacks, 8000);
+      },
+    });
   };
 
   return (
@@ -128,6 +202,12 @@ export function PortainerImportCard({ serverId }: { serverId: string }) {
             <Button size="sm" variant="ghost" onClick={loadStacks}>Refresh</Button>
           </div>
           {perror && <p className="text-xs text-destructive">Portainer: {perror}</p>}
+          {!connected && candidates !== null && candidates.length > 0 && (
+            <p className="rounded-md bg-amber-50 px-2 py-1.5 text-xs text-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+              Portainer is not connected for this server, so stacks can only be rebuilt from their containers and cannot be detached.
+              If Portainer manages them, connect it above first.
+            </p>
+          )}
           {candidates === null ? <p className="text-xs text-muted-foreground">Loading…</p> : candidates.length === 0 ? (
             <p className="text-xs text-muted-foreground">None: every stack on this server is already managed by Bosun.</p>
           ) : candidates.map(c => {
@@ -161,7 +241,36 @@ export function PortainerImportCard({ serverId }: { serverId: string }) {
             );
           })}
         </div>
+
+        {detachable.length > 0 && (
+          <div className="space-y-2">
+            <span className="text-sm font-medium">Bosun stacks Portainer still lists</span>
+            <p className="text-xs text-muted-foreground">
+              Imported without detaching: both tools manage these, and a redeploy in Portainer would replace Bosun&apos;s version.
+            </p>
+            {detachable.map(d => (
+              <div key={d.name} className="flex flex-wrap items-center gap-2 rounded-md border p-3 text-sm">
+                <span className="font-mono font-medium">{d.name}</span>
+                <span className="text-xs text-muted-foreground">
+                  {d.running ? 'running' : 'stopped'}{d.portainer.git ? `; Portainer git: ${d.portainer.git.repo} ${d.portainer.git.branch}` : ''}
+                </span>
+                {d.detachable
+                  ? <Button size="sm" variant="outline" className="ml-auto" onClick={() => runDetach(d)} disabled={busy !== null}>{busy === d.name ? 'Starting…' : 'Detach from Portainer'}</Button>
+                  : <span className="w-full text-xs text-muted-foreground">{d.reason}</span>}
+              </div>
+            ))}
+          </div>
+        )}
       </CardContent>
+      <ConfirmActionDialog
+        open={pending !== null}
+        onOpenChange={o => { if (!o) setPending(null); }}
+        title={pending?.title ?? ''}
+        description={pending?.body}
+        confirmLabel={pending?.label ?? 'OK'}
+        destructive={pending?.destructive}
+        onConfirm={async () => { await pending?.run(); }}
+      />
     </Card>
   );
 }

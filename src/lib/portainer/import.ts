@@ -45,6 +45,17 @@ export interface ImportCandidate {
   reason: string | null;
 }
 
+/** A stack Bosun already manages that Portainer still lists (imported without detaching): it can be detached now. */
+export interface DetachCandidate {
+  name: string;
+  running: boolean;
+  /** This Bosun runs in this stack: detach it from another node's Bosun. */
+  own: boolean;
+  portainer: { id: number; endpointId: number; git: { repo: string; branch: string; file: string } | null };
+  detachable: boolean;
+  reason: string | null;
+}
+
 type Row = Record<string, unknown>;
 const str = (v: unknown) => (typeof v === 'string' ? v : v == null ? '' : String(v));
 
@@ -59,7 +70,7 @@ function isOwn(rows: Row[], idField: string): boolean {
   return rows.some(r => { const id = str(r[idField]); return !!id && mine.some(m => id.startsWith(m) || m.startsWith(id)); });
 }
 
-export async function listCandidates(serverId: string): Promise<{ candidates: ImportCandidate[]; portainer: { configured: boolean; error: string | null } }> {
+export async function listCandidates(serverId: string): Promise<{ candidates: ImportCandidate[]; detachable: DetachCandidate[]; portainer: { configured: boolean; error: string | null } }> {
   const loaded = await stackManager();
   if (!loaded?.spec.stacks) throw new ImportError('No installed widget manages Compose stacks', 409, 'NO_STACK_MANAGER');
   const s = loaded.spec.stacks;
@@ -102,7 +113,23 @@ export async function listCandidates(serverId: string): Promise<{ candidates: Im
       reason,
     });
   }
-  return { candidates: out, portainer: { configured: !!conn?.hasKey, error: perror } };
+  const detachable: DetachCandidate[] = [];
+  for (const name of Array.from(managed).sort()) {
+    const p = byName.get(name);
+    if (!p) continue;
+    const mine = rows.filter(r => str(r[s.fields.project]) === name);
+    const own = isOwn(mine, s.fields.id);
+    const reason = own ? 'This Bosun runs in this stack: detach it from another node\'s Bosun, so it is never stopping itself' : null;
+    detachable.push({
+      name,
+      running: mine.some(r => str(r[s.fields.state]) === 'running'),
+      own,
+      portainer: { id: p.Id, endpointId: p.EndpointId, git: gitSourceOf(p.GitConfig, []) },
+      detachable: !reason,
+      reason,
+    });
+  }
+  return { candidates: out, detachable, portainer: { configured: !!conn?.hasKey, error: perror } };
 }
 
 /** What to deploy for one candidate. */
@@ -141,6 +168,55 @@ async function waitForJob(jobId: string, timeoutMs = 30 * 60_000): Promise<{ sta
   return { status: 'error', message: 'timed out waiting for the deployment' };
 }
 
+/**
+ * Remove a stack Bosun manages from Portainer. Portainer cannot forget a stack without stopping it ("docker compose down",
+ * volumes kept), so for a running stack the host waiter (`guard`) is started first: it waits until Portainer has taken the
+ * stack down and starts it again from Bosun's copy. Answers a sentence for the bell; never throws.
+ */
+async function detachStack(
+  auth: TokenPayload, serverId: string, loaded: LoadedSpec, name: string,
+  portainer: { id: number; endpointId: number }, running: boolean, ip?: string,
+): Promise<string> {
+  const s = loaded.spec.stacks!;
+  try {
+    if (running) {
+      const guard = loaded.spec.actions.find(a => a.id === s.guard);
+      if (!guard) throw new Error('the stack widget cannot restart a stack after a hand-over');
+      const g = await runWidgetAction(auth, serverId, loaded, guard, { params: { name }, confirm: true }, { ip });
+      if (g.status >= 400) throw new Error(`could not start the restart guard (HTTP ${g.status})`);
+    }
+    await deleteStack(serverId, portainer.id, portainer.endpointId);
+    return running ? 'It was removed from Portainer and started again from Bosun\'s copy.' : 'It was removed from Portainer.';
+  } catch (e) {
+    return `Detaching from Portainer failed: ${e instanceof Error ? e.message : String(e)}. The stack is managed by Bosun; Portainer still lists it.`;
+  }
+}
+
+/**
+ * Detach a stack that was imported earlier without detaching (Bosun manages it, Portainer still lists it). Runs in the
+ * background; the outcome goes to the bell. Signed-in Full access only (the route checks).
+ */
+export async function startDetach(auth: TokenPayload, serverId: string, name: string, ip?: string): Promise<{ name: string }> {
+  const loaded = await stackManager();
+  if (!loaded?.spec.stacks) throw new ImportError('No installed widget manages Compose stacks', 409, 'NO_STACK_MANAGER');
+  const { detachable, portainer } = await listCandidates(serverId);
+  if (!portainer.configured) throw new ImportError('Connect Portainer for this server first', 400, 'NO_PORTAINER');
+  if (portainer.error) throw new ImportError(`Portainer: ${portainer.error}`, 502, 'PORTAINER_ERROR');
+  const c = detachable.find(x => x.name === name);
+  if (!c) throw new ImportError('Bosun does not manage a stack of that name that Portainer still lists', 404, 'NOT_FOUND');
+  if (!c.detachable) throw new ImportError(c.reason || 'This stack cannot be detached here', 409, 'NOT_DETACHABLE');
+  await logAudit({ userId: auth.userId, serverId, action: 'stack.detach', category: 'stacks', status: 'success', ipAddress: ip, details: JSON.stringify({ name, portainer: c.portainer.id }).slice(0, 900) }).catch(() => undefined);
+
+  void (async () => {
+    const outcome = await detachStack(auth, serverId, loaded, name, c.portainer, c.running, ip);
+    const failed = outcome.startsWith('Detaching from Portainer failed');
+    await notify({ kind: 'alert', severity: failed ? 'warning' : 'success', title: failed ? `Detaching ${name} failed` : `Detached ${name} from Portainer`, message: `${outcome}`.slice(0, 1900), serverId, audience: 'admin' });
+    await logAudit({ userId: auth.userId, serverId, action: 'stack.detach_done', category: 'stacks', status: failed ? 'failure' : 'success', details: `${name}: ${outcome}`.slice(0, 900) }).catch(() => undefined);
+  })().catch(err => console.error('[detach] background step failed:', err));
+
+  return { name };
+}
+
 export interface ImportStarted { name: string; jobId: string | null; notes: string[] }
 
 /**
@@ -177,20 +253,7 @@ export async function startImport(auth: TokenPayload, serverId: string, name: st
       await notify({ kind: 'alert', severity: 'warning', title: `Importing ${name} failed`, message: outcome.message || 'The deployment did not finish', serverId, audience: 'admin' });
       return;
     }
-    let detached = '';
-    if (detach && c.portainer) {
-      try {
-        if (c.running) {
-          const guard = loaded.spec.actions.find(a => a.id === s.guard)!;
-          const g = await runWidgetAction(auth, serverId, loaded, guard, { params: { name }, confirm: true }, { ip });
-          if (g.status >= 400) throw new Error(`could not start the restart guard (HTTP ${g.status})`);
-        }
-        await deleteStack(serverId, c.portainer.id, c.portainer.endpointId);
-        detached = c.running ? ' It was removed from Portainer and started again from Bosun\'s copy.' : ' It was removed from Portainer.';
-      } catch (e) {
-        detached = ` Detaching from Portainer failed: ${e instanceof Error ? e.message : String(e)}. The stack is managed by Bosun; Portainer still lists it.`;
-      }
-    }
+    const detached = detach && c.portainer ? ` ${await detachStack(auth, serverId, loaded, name, c.portainer, c.running, ip)}` : '';
     await notify({
       kind: 'alert', severity: detached.includes('failed') ? 'warning' : 'success', title: `Imported ${name} into Bosun`,
       message: `${name} is now a Bosun stack.${detached}${src.notes.length ? ` Notes: ${src.notes.join('; ')}` : ''}`.slice(0, 1900), serverId, audience: 'admin',
