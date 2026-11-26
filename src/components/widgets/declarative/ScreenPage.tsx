@@ -96,7 +96,7 @@ function Inner({ widget, screenId }: { widget: WidgetRow; screenId: string }) {
           <ArrowLeft className="size-4" aria-hidden /> Back to the dashboard
         </Link>
         {runner.notice && (
-          <div className="flex items-center justify-between rounded bg-blue-50 px-3 py-2 text-sm text-blue-800 dark:bg-blue-950/50 dark:text-blue-200">
+          <div className="flex items-center justify-between rounded border border-primary/30 bg-primary/10 px-3 py-2 text-sm text-primary">
             <span className="truncate">{runner.notice}</span>
             <button onClick={() => runner.setNotice(null)} aria-label="Dismiss"><X className="size-4" /></button>
           </div>
@@ -107,7 +107,7 @@ function Inner({ widget, screenId }: { widget: WidgetRow; screenId: string }) {
           : jobId && !restore && !restoreError ? <LoadingSpinner />
           : <>
             {restoreError && <p role="alert" className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">{restoreError}. The screen is empty: fill it in again.</p>}
-            {restore && <p className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">This is the screen of an earlier task, with what you filled in then. Passwords and tokens you entered are kept safely on the server: leave them as they are to use them again, or type new ones.</p>}
+            {restore && <p className="rounded-md border border-primary/30 bg-primary/10 px-3 py-2 text-sm text-primary">This is the screen of an earlier task, with what you filled in then. Passwords and tokens you entered are kept safely on the server: leave them as they are to use them again, or type new ones.</p>}
             <ScreenView screen={screen} context={full} serverId={widget.server_id} widgetType={widget.widget_type} ui={ui} reloadToken={reloadToken}
               onDone={screen.kind === 'dialog' ? () => router.push(`/dashboards/${encodeURIComponent(widget.dashboard_id)}`) : undefined} />
           </>}

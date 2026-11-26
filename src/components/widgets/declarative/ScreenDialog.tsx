@@ -32,7 +32,7 @@ export function ScreenDialog({ id, row, screen, ctx, serverId, widgetType, ui, r
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-50 bg-black/50" />
         <Dialog.Content
-          className={`fixed inset-x-2 top-4 z-50 mx-auto flex max-h-[92vh] flex-col rounded-xl border border-gray-200 bg-white p-4 shadow-xl dark:border-gray-700 dark:bg-gray-900 ${DIALOG_WIDTH[screen?.size ?? 'lg']}`}
+          className={`fixed inset-x-2 top-4 z-50 mx-auto flex max-h-[92vh] flex-col rounded-xl border border-border bg-card p-4 text-card-foreground shadow-xl ${DIALOG_WIDTH[screen?.size ?? 'lg']}`}
           aria-describedby={undefined}
         >
           <div className="mb-3 flex items-start justify-between gap-2">

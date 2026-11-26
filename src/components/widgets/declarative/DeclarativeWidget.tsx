@@ -21,6 +21,7 @@ import type { ViewContext } from '@/lib/widgets/runtime/layout';
 import { MetricsChartWidget } from '@/components/widgets/metrics-chart/MetricsChartWidget';
 import { Bar, DOT, Fields, formatValue, ICONS, IconBtn, type Row } from './parts';
 import { LayoutBlocks, type LayoutUi } from './LayoutView';
+import { inputClass } from './styles';
 import { ScreenDialog } from './ScreenDialog';
 import { useActionRunner, type PublicAction } from './useActionRunner';
 
@@ -89,7 +90,7 @@ export function V1View({ view, data, widgetId, serverId, actions, allowed, busy,
   const { size } = useWidgetSize();
 
   if (view.type === 'chart') return <MetricsChartWidget widgetId={widgetId} serverId={serverId} defaultMetrics={view.chart?.metrics} />;
-  if (data === null || data === undefined) return <div className="p-2 text-sm text-gray-500">Waiting for the first data from this host…</div>;
+  if (data === null || data === undefined) return <div className="p-2 text-sm text-muted-foreground">Waiting for the first data from this host…</div>;
   const all: Row[] = Array.isArray(data) ? (data as Row[]) : [];
 
   // The row's actions that apply: as many as the widget has room for are buttons, the rest sit in a "more" menu.
@@ -130,31 +131,31 @@ export function V1View({ view, data, widgetId, serverId, actions, allowed, busy,
   const content = () => {
     if (view.type === 'fields') {
       const obj = (Array.isArray(data) ? (data[0] ?? null) : data) as Row | null;
-      if (!obj || typeof obj !== 'object') return <div className="py-4 text-center text-xs text-gray-500">{view.empty || 'Nothing to show'}</div>;
+      if (!obj || typeof obj !== 'object') return <div className="py-4 text-center text-xs text-muted-foreground">{view.empty || 'Nothing to show'}</div>;
       return <div className="min-h-0 flex-1 overflow-auto"><Fields fields={view.fields ?? []} data={obj} /></div>;
     }
     if (view.type === 'text') {
       const root = (data && typeof data === 'object' ? data : { text: String(data) }) as Row;
       return <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words font-mono text-xs">{fillTemplate(view.text ?? '', root)}</pre>;
     }
-    if (rows.length === 0) return <div className="py-4 text-center text-xs text-gray-500">{view.empty || 'Nothing to show'}</div>;
+    if (rows.length === 0) return <div className="py-4 text-center text-xs text-muted-foreground">{view.empty || 'Nothing to show'}</div>;
     if (view.type === 'list' && view.row) {
       const r = view.row;
       return (
-        <ul className="min-h-0 flex-1 divide-y divide-gray-100 overflow-auto dark:divide-gray-800">
+        <ul className="min-h-0 flex-1 divide-y divide-border overflow-auto">
           {rows.map((row, i) => (
             <li key={i} className="flex items-center gap-2 py-1.5">
-              {r.dot && <span className={`size-2 shrink-0 rounded-full ${DOT[r.dot.colors[String(getPath(row, r.dot.field) ?? '')]] || 'bg-gray-400'}`} aria-hidden />}
+              {r.dot && <span className={`size-2 shrink-0 rounded-full ${DOT[r.dot.colors[String(getPath(row, r.dot.field) ?? '')]] || 'bg-muted-foreground'}`} aria-hidden />}
               <div className="min-w-0 flex-1">
                 <div className="flex items-baseline gap-2">
                   <span className="truncate font-medium">{fillTemplate(r.title, row)}</span>
-                  {r.badge && fillTemplate(r.badge, row) && <span className="hidden truncate rounded bg-gray-100 px-1 text-[10px] text-gray-500 dark:bg-gray-800 sm:inline">{fillTemplate(r.badge, row)}</span>}
+                  {r.badge && fillTemplate(r.badge, row) && <span className="hidden truncate rounded bg-muted px-1 text-[10px] text-muted-foreground sm:inline">{fillTemplate(r.badge, row)}</span>}
                 </div>
-                {r.subtitle && showSubtitle && <div className="truncate text-xs text-gray-500" title={fillTemplate(r.subtitle, row)}>{fillTemplate(r.subtitle, row)}</div>}
+                {r.subtitle && showSubtitle && <div className="truncate text-xs text-muted-foreground" title={fillTemplate(r.subtitle, row)}>{fillTemplate(r.subtitle, row)}</div>}
                 {r.fields && <div className="mt-1"><Fields fields={r.fields} data={row} /></div>}
               </div>
               <div className="flex shrink-0 items-center gap-0.5">
-                {busy !== null && <Loader2 className="size-4 animate-spin text-gray-400 motion-reduce:animate-none" aria-label="Working" />}
+                {busy !== null && <Loader2 className="size-4 animate-spin text-muted-foreground motion-reduce:animate-none" aria-label="Working" />}
                 {rowButtons(row, r.actions)}
               </div>
             </li>
@@ -166,16 +167,16 @@ export function V1View({ view, data, widgetId, serverId, actions, allowed, busy,
     return (
       <div className="min-h-0 flex-1 overflow-auto">
         <table className="w-full text-left text-xs">
-          <thead className="sticky top-0 bg-white text-gray-500 dark:bg-gray-900">
+          <thead className="sticky top-0 bg-card text-muted-foreground">
             <tr>{cols.map(c => <th key={c.title} className="px-2 py-1 font-medium">{c.title}</th>)}{(view.rowActions?.length ?? 0) > 0 && <th className="w-0" />}</tr>
           </thead>
-          <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+          <tbody className="divide-y divide-border">
             {rows.map((row, i) => (
               <tr key={i}>
                 {cols.map(c => {
                   const text = formatValue(fillTemplate(c.value, row), c.format);
                   const bar = c.format === 'bar' ? Number(fillTemplate(c.value, row)) : NaN;
-                  return <td key={c.title} className="px-2 py-1">{c.format === 'badge' ? <span className="rounded bg-gray-100 px-1 dark:bg-gray-800">{text}</span> : Number.isFinite(bar) ? <div className="min-w-[4rem]"><div className="text-right">{text}</div><Bar value={bar} /></div> : text}</td>;
+                  return <td key={c.title} className="px-2 py-1">{c.format === 'badge' ? <span className="rounded bg-muted px-1">{text}</span> : Number.isFinite(bar) ? <div className="min-w-[4rem]"><div className="text-right">{text}</div><Bar value={bar} /></div> : text}</td>;
                 })}
                 {(view.rowActions?.length ?? 0) > 0 && <td className="px-2 py-1 text-right"><div className="flex justify-end gap-0.5">{rowButtons(row, view.rowActions ?? [])}</div></td>}
               </tr>
@@ -191,19 +192,19 @@ export function V1View({ view, data, widgetId, serverId, actions, allowed, busy,
       {(summary.length || showFilter || toggleList.length) ? (
         <div className="flex flex-wrap items-center gap-2">
           {summary.map(s => (
-            <span key={s.label} className="text-xs text-gray-500">
-              <span className="font-semibold text-gray-900 dark:text-gray-100">{s.where ? all.filter(r => evalCond(s.where!, r)).length : all.length}</span> {s.label}
+            <span key={s.label} className="text-xs text-muted-foreground">
+              <span className="font-semibold text-foreground">{s.where ? all.filter(r => evalCond(s.where!, r)).length : all.length}</span> {s.label}
             </span>
           ))}
           {showFilter && view.filter && (
             <div className="relative ml-auto min-w-0 flex-1 basis-32 sm:max-w-[220px]">
-              <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-gray-400" aria-hidden />
+              <Search className="pointer-events-none absolute left-2 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden />
               <input value={query} onChange={e => setQuery(e.target.value)} placeholder={view.filter.placeholder || 'Filter'} aria-label="Filter"
-                className="w-full rounded-md border border-gray-200 bg-transparent py-1 pl-7 pr-2 text-xs outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-700" />
+                className={`${inputClass} pl-7`} />
             </div>
           )}
           {toggleList.map(t => (
-            <label key={t.key} className="flex items-center gap-1 text-xs text-gray-500">
+            <label key={t.key} className="flex items-center gap-1 text-xs text-muted-foreground">
               <input type="checkbox" checked={!!toggles[t.key]} onChange={e => setToggles(s => ({ ...s, [t.key]: e.target.checked }))} /> {t.label}
             </label>
           ))}
@@ -269,11 +270,11 @@ export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [frame, menuKey, can, serverId, widgetId]);
 
-  if (specError) return <div className="p-2 text-sm text-gray-500">{specError}</div>;
+  if (specError) return <div className="p-2 text-sm text-muted-foreground">{specError}</div>;
   if (!spec || !view) return <WidgetLoading />;
   if (isLoading && data === null) return <WidgetLoading />;
   if (error) return <WidgetError error={error} onRetry={refresh} serverId={serverId} />;
-  if (unavailable) return <div className="p-2 text-sm text-gray-500">{unavailable}</div>;
+  if (unavailable) return <div className="p-2 text-sm text-muted-foreground">{unavailable}</div>;
 
   const actionsById = new Map(spec.actions.map(a => [a.id, a]));
   const fullCtx: ViewContext = { ...ctx, job };
@@ -306,7 +307,7 @@ export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
   return (
     <div className="flex h-full min-h-0 flex-col gap-2 text-sm">
       {notice && (
-        <div className="flex items-center justify-between rounded bg-blue-50 px-2 py-1 text-xs text-blue-800 dark:bg-blue-950/50 dark:text-blue-200">
+        <div className="flex items-center justify-between rounded border border-primary/30 bg-primary/10 px-2 py-1 text-xs text-primary">
           <span className="truncate">{notice}</span>
           <button onClick={() => setNotice(null)} aria-label="Dismiss"><X className="size-3" /></button>
         </div>
