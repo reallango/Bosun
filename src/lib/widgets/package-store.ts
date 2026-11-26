@@ -204,16 +204,17 @@ export async function installPackage(opts: InstallOptions): Promise<InstallResul
   for (const w of manifest.widgets) {
     const c = w.columns;
     stmts.push({
-      sql: `INSERT INTO custom_widgets (id, type, display_name, description, icon, category, default_size, min_size, refresh_interval,
+      sql: `INSERT INTO custom_widgets (id, type, display_name, description, icon, category, default_size, min_size, max_size, phone_height, refresh_interval,
               supports_linux, supports_windows, config_schema, enabled, builtin, package_id, spec)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0, ?, ?)
             ON CONFLICT(type) DO UPDATE SET display_name = excluded.display_name, description = excluded.description, icon = excluded.icon,
               category = excluded.category, default_size = excluded.default_size, min_size = excluded.min_size,
+              max_size = excluded.max_size, phone_height = excluded.phone_height,
               refresh_interval = excluded.refresh_interval, supports_linux = excluded.supports_linux,
               supports_windows = excluded.supports_windows, config_schema = excluded.config_schema,
               package_id = excluded.package_id, builtin = 0, spec = excluded.spec, updated_at = CURRENT_TIMESTAMP`,
       params: [`pkg-${manifest.id}-${w.type}`, w.type, c.display_name, c.description ?? '', c.icon ?? 'puzzle', c.category ?? 'custom',
-        c.default_size ?? '{"w":8,"h":6}', c.min_size ?? '{"w":4,"h":4}', c.refresh_interval ?? 30,
+        c.default_size ?? '{"w":8,"h":6}', c.min_size ?? '{"w":4,"h":4}', c.max_size ?? null, c.phone_height ?? null, c.refresh_interval ?? 30,
         c.supports_linux ?? 1, c.supports_windows ?? 1, c.config_schema ?? '[]', manifest.id, w.spec ? JSON.stringify(w.spec) : null],
     });
   }

@@ -248,7 +248,7 @@ export function manifestToJson(m: PackageManifest): Record<string, unknown> {
       const j = (s: unknown) => { try { return JSON.parse(String(s)); } catch { return undefined; } };
       return {
         type: w.type, display_name: c.display_name, description: c.description, icon: c.icon, category: c.category,
-        default_size: j(c.default_size), min_size: j(c.min_size), refresh_interval: c.refresh_interval,
+        default_size: j(c.default_size), min_size: j(c.min_size), max_size: j(c.max_size), phone_height: c.phone_height, refresh_interval: c.refresh_interval,
         supports_linux: c.supports_linux === undefined ? undefined : !!c.supports_linux,
         supports_windows: c.supports_windows === undefined ? undefined : !!c.supports_windows,
         config_schema: j(c.config_schema), ...(w.spec ? { spec: w.spec } : {}),

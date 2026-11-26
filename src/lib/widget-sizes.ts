@@ -104,6 +104,11 @@ export interface LayoutSource {
   grid_h?: number | null;
   grid_min_w?: number | null;
   grid_min_h?: number | null;
+  /** Optional cap, in base columns/rows, scaled per breakpoint like `grid_min_*`. */
+  grid_max_w?: number | null;
+  grid_max_h?: number | null;
+  /** Rows to use when the widget is stacked on a phone, instead of the 3-12 row clamp. */
+  phone_height?: number | null;
   layouts?: WidgetLayouts | null;
 }
 
@@ -111,6 +116,8 @@ export interface GridItem extends GridRect {
   i: string;
   minW?: number;
   minH?: number;
+  maxW?: number;
+  maxH?: number;
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
@@ -130,14 +137,22 @@ function scaleMin(min: number | null | undefined, cols: number) {
   return clamp(Math.round((min * cols) / BASE_COLS), 1, cols);
 }
 
-/** Clamp a stored rect so it fits the breakpoint's column count. */
-function fitRect(r: GridRect, cols: number): GridRect {
-  const w = clamp(int(r.w, 1), 1, cols);
+/** Scale a base-column cap like `scaleMin`; never below the widget's minimum. */
+function scaleMax(max: number | null | undefined, cols: number, min: number | undefined) {
+  if (!max || max <= 0) return undefined;
+  return clamp(Math.round((max * cols) / BASE_COLS), min ?? 1, cols);
+}
+
+const maxHeight = (max: number | null | undefined) => (max && max > 0 ? Math.max(1, int(max, 1)) : undefined);
+
+/** Clamp a stored rect so it fits the breakpoint's column count (and an optional maximum). */
+function fitRect(r: GridRect, cols: number, maxW?: number, maxH?: number): GridRect {
+  const w = clamp(int(r.w, 1), 1, Math.min(cols, maxW ?? cols));
   return {
     w,
     x: clamp(int(r.x, 0), 0, cols - w),
     y: Math.max(0, int(r.y, 0)),
-    h: Math.max(1, int(r.h, 3)),
+    h: clamp(Math.max(1, int(r.h, 3)), 1, maxH ?? Number.MAX_SAFE_INTEGER),
   };
 }
 
@@ -150,7 +165,13 @@ export function layoutForBreakpoint(widgets: LayoutSource[], bp: GridBreakpoint)
 
   if (bp === 'lg') {
     // An lg layout someone arranged on an lg screen (`layouts.lg`) wins over the base layout, which follows the last edit.
-    return widgets.map(w => ({ i: w.id, ...fitRect(w.layouts?.lg ?? lgRect(w), cols), minW: scaleMin(w.grid_min_w, cols), minH: w.grid_min_h || undefined }));
+    return widgets.map(w => {
+      const minW = scaleMin(w.grid_min_w, cols);
+      const maxW = scaleMax(w.grid_max_w, cols, minW);
+      const maxH = maxHeight(w.grid_max_h);
+      const minH = w.grid_min_h ? Math.min(w.grid_min_h, maxH ?? Infinity) : undefined;
+      return { i: w.id, ...fitRect(w.layouts?.lg ?? lgRect(w), cols, maxW, maxH), minW, minH, maxW, maxH };
+    });
   }
 
   if (STACKED_BREAKPOINTS.includes(bp)) {
@@ -162,10 +183,15 @@ export function layoutForBreakpoint(widgets: LayoutSource[], bp: GridBreakpoint)
     });
     let y = 0;
     return ordered.map(w => {
+      const maxH = maxHeight(w.grid_max_h);
       const saved = w.layouts?.[bp];
-      if (saved) return { i: w.id, ...fitRect(saved, cols) };
-      const h = clamp(lgRect(w).h, Math.max(3, w.grid_min_h || 0), 12);
-      const item = { i: w.id, x: 0, y, w: cols, h };
+      if (saved) return { i: w.id, ...fitRect(saved, cols, undefined, maxH), maxH };
+      // A widget may say how tall it wants to be on a phone; the rest keep the 3-12 row clamp.
+      const wanted = w.phone_height && w.phone_height > 0
+        ? clamp(int(w.phone_height, 3), 1, 48)
+        : clamp(lgRect(w).h, Math.max(3, w.grid_min_h || 0), 12);
+      const h = maxH ? Math.min(wanted, maxH) : wanted;
+      const item = { i: w.id, x: 0, y, w: cols, h, maxH };
       y += h;
       return item;
     });
@@ -174,18 +200,21 @@ export function layoutForBreakpoint(widgets: LayoutSource[], bp: GridBreakpoint)
   const factor = cols / BASE_COLS;
   return widgets.map(w => {
     const minW = scaleMin(w.grid_min_w, cols);
-    const minH = w.grid_min_h || undefined;
+    const maxW = scaleMax(w.grid_max_w, cols, minW);
+    const maxH = maxHeight(w.grid_max_h);
+    const minH = w.grid_min_h ? Math.min(w.grid_min_h, maxH ?? Infinity) : undefined;
     const saved = w.layouts?.[bp];
-    if (saved) return { i: w.id, ...fitRect(saved, cols), minW, minH };
+    if (saved) return { i: w.id, ...fitRect(saved, cols, maxW, maxH), minW, minH, maxW, maxH };
     const r = lgRect(w);
     // Scale both edges (not x and w separately) so widgets that touch on lg
     // still touch instead of overlapping after rounding, which would make the
     // grid push one of them down a row.
     const left = Math.round(r.x * factor);
     const right = Math.round((r.x + r.w) * factor);
-    const width = clamp(right - left, Math.min(cols, Math.max(2, minW ?? 0)), cols);
+    const width = clamp(right - left, Math.min(cols, Math.max(2, minW ?? 0)), Math.min(cols, maxW ?? cols));
     const x = clamp(left, 0, cols - width);
-    return { i: w.id, x, y: r.y, w: width, h: r.h, minW, minH };
+    const h = maxH ? Math.min(r.h, maxH) : r.h;
+    return { i: w.id, x, y: r.y, w: width, h, minW, minH, maxW, maxH };
   });
 }
 

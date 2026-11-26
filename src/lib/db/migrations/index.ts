@@ -660,6 +660,13 @@ const V17_ACCESS_REQUESTS: string[] = [
     `CREATE INDEX IF NOT EXISTS idx_access_requests_status ON access_requests(status, created_at)`,
     `CREATE INDEX IF NOT EXISTS idx_access_requests_requester ON access_requests(requester_type, requester_id)`,
 ];
+
+// V18: optional widget size hints. `max_size` caps a widget's size (base columns/rows, scaled per breakpoint like
+// `min_size`); `phone_height` is the row count used when widgets stack on phones. NULL = the old behaviour.
+const V18_WIDGET_SIZE_HINTS: string[] = [
+    `ALTER TABLE custom_widgets ADD COLUMN max_size TEXT`,
+    `ALTER TABLE custom_widgets ADD COLUMN phone_height INTEGER`,
+];
 export const MIGRATIONS: Migration[] = [
     {
         version: 1,
@@ -686,6 +693,7 @@ export const MIGRATIONS: Migration[] = [
     { version: 15, name: 'notification_kinds', statements: V15_NOTIFICATION_KINDS },
     { version: 16, name: 'resource_grants', statements: V16_RESOURCE_GRANTS },
     { version: 17, name: 'access_requests', statements: V17_ACCESS_REQUESTS },
+    { version: 18, name: 'widget_size_hints', statements: V18_WIDGET_SIZE_HINTS },
 ];
 
 /** The schema version this build expects. */

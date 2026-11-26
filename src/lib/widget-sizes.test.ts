@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { layoutForBreakpoint, GRID_COLS, applyLayoutEdit, applyLayoutEverywhere, resetLayoutAt, toBaseRect, hasOwnLayout } from './widget-sizes';
+import { layoutForBreakpoint, GRID_COLS, applyLayoutEdit, applyLayoutEverywhere, resetLayoutAt, toBaseRect, hasOwnLayout, type LayoutSource } from './widget-sizes';
 import type { GridBreakpoint } from '@/types/dashboard';
 
 const row = [0, 8, 16].map((x, i) => ({ id: `w${i}`, grid_x: x, grid_y: 0, grid_w: 8, grid_h: 5, grid_min_w: 2, grid_min_h: 2 }));
@@ -81,5 +81,57 @@ describe('one base layout that follows the last edit', () => {
     expect(toBaseRect({ x: 29, y: 0, w: 1, h: 1 }, 30).w).toBeGreaterThanOrEqual(1);
     expect(hasOwnLayout([{ id: 'x', layouts: { md: { x: 0, y: 0, w: 1, h: 1 } } }], 'md')).toBe(true);
     expect(hasOwnLayout([{ id: 'x', grid_x: 0 }], 'lg')).toBe(false);
+  });
+});
+
+describe('optional max_size and phone_height hints', () => {
+  const hinted = (over: Partial<LayoutSource>): LayoutSource => ({
+    id: 'w', grid_x: 0, grid_y: 0, grid_w: 12, grid_h: 6, grid_min_w: 4, grid_min_h: 3, ...over,
+  });
+
+  it('scales max_size per breakpoint like the minimums', () => {
+    const w = hinted({ grid_max_w: 16, grid_max_h: 8 });
+    expect(layoutForBreakpoint([w], 'xl')[0]).toMatchObject({ maxW: 20, maxH: 8 });
+    expect(layoutForBreakpoint([w], 'lg')[0]).toMatchObject({ maxW: 16, maxH: 8 });
+    expect(layoutForBreakpoint([w], 'md')[0]).toMatchObject({ maxW: 13, maxH: 8 });
+    expect(layoutForBreakpoint([w], 'sm')[0]).toMatchObject({ maxW: 8, maxH: 8 });
+  });
+
+  it('never scales a maximum below the minimum', () => {
+    const w = hinted({ grid_min_w: 12, grid_max_w: 8 });
+    expect(layoutForBreakpoint([w], 'lg')[0]).toMatchObject({ minW: 12, maxW: 12, w: 12 });
+  });
+
+  it('clamps a derived or saved rect to the maximum', () => {
+    const big = hinted({ grid_w: 24, grid_h: 20, grid_max_w: 12, grid_max_h: 8 });
+    expect(layoutForBreakpoint([big], 'lg')[0]).toMatchObject({ w: 12, h: 8 });
+    const saved = hinted({ layouts: { md: { x: 0, y: 0, w: 20, h: 20 } }, grid_max_w: 12, grid_max_h: 8 });
+    expect(layoutForBreakpoint([saved], 'md')[0]).toMatchObject({ w: 10, h: 8 });
+  });
+
+  it('uses phone_height when stacked, instead of the 3-12 row clamp', () => {
+    expect(layoutForBreakpoint([hinted({ grid_h: 15, phone_height: 7 })], 'xxs')[0]).toMatchObject({ h: 7, w: GRID_COLS.xxs });
+    expect(layoutForBreakpoint([hinted({ grid_h: 1, phone_height: 2 })], 'xs')[0].h).toBe(2);
+    expect(layoutForBreakpoint([hinted({ grid_h: 15 })], 'xxs')[0].h).toBe(12);
+    expect(layoutForBreakpoint([hinted({ grid_h: 1 })], 'xs')[0].h).toBe(3);
+  });
+
+  it('caps a stacked widget at max_size, including a saved phone arrangement', () => {
+    expect(layoutForBreakpoint([hinted({ grid_h: 12, grid_max_h: 5 })], 'xxs')[0]).toMatchObject({ h: 5, maxH: 5 });
+    expect(layoutForBreakpoint([hinted({ phone_height: 9, grid_max_h: 6 })], 'xxs')[0]).toMatchObject({ h: 6, maxH: 6 });
+    const saved = hinted({ layouts: { xxs: { x: 0, y: 0, w: 2, h: 9 } }, grid_max_h: 5 });
+    expect(layoutForBreakpoint([saved], 'xxs')[0]).toMatchObject({ h: 5, maxH: 5 });
+  });
+
+  it('keeps a phone arrangement the person saved', () => {
+    const saved = hinted({ phone_height: 7, layouts: { xxs: { x: 0, y: 0, w: 2, h: 9 } } });
+    expect(layoutForBreakpoint([saved], 'xxs')[0]).toMatchObject({ h: 9, w: GRID_COLS.xxs });
+  });
+
+  it('leaves widgets without hints exactly as before', () => {
+    const items = layoutForBreakpoint([hinted({})], 'lg');
+    expect(items[0]).toMatchObject({ w: 12, h: 6 });
+    expect(items[0].maxW).toBeUndefined();
+    expect(items[0].maxH).toBeUndefined();
   });
 });
