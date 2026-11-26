@@ -7,6 +7,7 @@
  * background, without rewriting the compose file. Before anything changes the database is backed up into the data volume.
  * Nodes are updated one at a time, each waited for until it answers on the new commit and is back in the cluster; this node
  * goes last (it restarts itself), and when it comes back on the new commit it closes the record and reports in the bell.
+ * A rollback is the same flow to the commit the last finished rollout came from, using its published `sha-<7>` image.
  */
 import fs from 'fs';
 import path from 'path';
@@ -22,20 +23,23 @@ import { runWidgetAction } from '@/lib/widgets/runtime/run-action';
 import { imageRevision } from './registry';
 import { health, listNodes, type NodeStatus } from './nodes';
 import { bosunVersion, commitTag } from './version';
+import { UpdateError } from './errors';
+import { previousCommit, rollbackImageProblem, rollbackTarget, rolloutRunning, sameCommit, usableCommit, type RolloutKind } from './rollback';
+
+export { UpdateError } from './errors';
+export type { RolloutKind } from './rollback';
 
 export interface UpdateConfig { image: string; channel: string; webPort: number }
 export interface Latest { commit: string | null; checked_at: string; error: string | null }
 export interface PlanStep {
   node: string; self: boolean; server_id: string | null; project: string | null; service: string | null; as: string | null;
   status: 'pending' | 'running' | 'restarting' | 'done' | 'failed' | 'skipped'; message: string | null;
+  /** The commit this node ran before the rollout (null when it did not say). */
+  from: string | null;
 }
 export interface Rollout {
-  id: string; target: string; image: string; started_by: string; started_at: string; finished_at: string | null;
-  status: 'running' | 'done' | 'failed'; backup: string | null; steps: PlanStep[];
-}
-
-export class UpdateError extends Error {
-  constructor(message: string, readonly status = 409, readonly code = 'UPDATE_NOT_READY') { super(message); }
+  id: string; kind: RolloutKind; target: string; from: string | null; image: string; started_by: string; started_at: string;
+  finished_at: string | null; status: 'running' | 'done' | 'failed'; backup: string | null; steps: PlanStep[];
 }
 
 const IMAGE_RE = /^[a-z0-9.-]+\.[a-z]{2,}(:\d+)?\/[a-z0-9._/-]+$/;
@@ -65,7 +69,16 @@ async function readJson<T>(key: string): Promise<T | null> {
 }
 const writeJson = (key: string, v: unknown) => setConfig(key, JSON.stringify(v));
 
-export const getRollout = () => readJson<Rollout>('update.rollout');
+export async function getRollout(): Promise<Rollout | null> {
+  const r = await readJson<Rollout>('update.rollout');
+  if (!r) return null;
+  return {
+    ...r,
+    kind: r.kind === 'rollback' ? 'rollback' : 'update',
+    from: usableCommit(r.from),
+    steps: Array.isArray(r.steps) ? r.steps.map(s => ({ ...s, from: usableCommit(s.from) })) : [],
+  };
+}
 const saveRollout = (r: Rollout) => writeJson('update.rollout', r);
 
 /** Ask the registry which commit the channel's image is, remember it, and announce it when a node runs something else. */
@@ -81,7 +94,7 @@ export async function checkForUpdate(): Promise<Latest> {
   await writeJson('update.latest', latest);
   if (latest.commit) {
     const nodes = await listNodes(cfg.webPort).catch(() => [] as NodeStatus[]);
-    const behind = nodes.filter(n => n.commit && !latest.commit!.startsWith(n.commit.slice(0, 7)) && !n.commit.startsWith(latest.commit!.slice(0, 7)));
+    const behind = nodes.filter(n => n.commit && !sameCommit(n.commit, latest.commit));
     if (behind.length) {
       await notify({
         kind: 'bosun_update', severity: 'info', title: `Bosun update available: ${latest.commit.slice(0, 7)} (${cfg.channel})`,
@@ -104,7 +117,10 @@ export async function plan(nodes: NodeStatus[]): Promise<{ steps: PlanStep[]; pr
   const f = loaded.spec.stacks.fields;
   const steps: PlanStep[] = [];
   for (const n of nodes) {
-    const step: PlanStep = { node: n.id, self: n.self, server_id: n.record?.server_id ?? null, project: null, service: null, as: null, status: 'pending', message: null };
+    const step: PlanStep = {
+      node: n.id, self: n.self, server_id: n.record?.server_id ?? null, project: null, service: null, as: null,
+      status: 'pending', message: null, from: usableCommit(n.commit),
+    };
     steps.push(step);
     if (!n.reachable || !n.healthy) { problems.push(`${n.id} is not reachable${n.web ? ` at ${n.web}` : ''}`); continue; }
     if (!n.record?.server_id) { problems.push(`${n.id} does not know which server it runs on (add that server, or set it under Settings → Wake-on-LAN)`); continue; }
@@ -142,37 +158,78 @@ export async function updateStatus() {
   const nodes = await listNodes(config.webPort);
   const latest = await readJson<Latest>('update.latest');
   const { steps, problems } = await plan(nodes);
-  return { config, running: bosunVersion(), latest, nodes, plan: steps, problems, rollout: await getRollout() };
+  const rollout = await getRollout();
+  return { config, running: bosunVersion(), latest, nodes, plan: steps, problems, rollout, previous: previousCommit(rollout) };
+}
+
+/** Nodes that already run `target` are left alone. */
+function markSkipped(steps: PlanStep[], nodes: NodeStatus[], target: string): void {
+  for (const s of steps) {
+    const n = nodes.find(x => x.id === s.node);
+    if (sameCommit(n?.commit, target)) { s.status = 'skipped'; s.message = 'already on this version'; }
+  }
+}
+
+interface Launch { target: string; kind: RolloutKind; from: string | null }
+
+/** Back up, record the rollout, and start moving the nodes. Returns at once; progress is in the record and the bell. */
+async function launch(auth: TokenPayload, l: Launch, cfg: UpdateConfig, steps: PlanStep[], ip?: string): Promise<Rollout> {
+  const rollout: Rollout = {
+    id: `${Date.now()}`, kind: l.kind, target: l.target, from: l.from, image: `${cfg.image}:${commitTag(l.target)}`,
+    started_by: auth.username, started_at: new Date().toISOString(), finished_at: null, status: 'running',
+    backup: await backup(l.target), steps: [...steps.filter(s => !s.self), ...steps.filter(s => s.self)],
+  };
+  await saveRollout(rollout);
+  await logAudit({
+    userId: auth.userId, action: l.kind === 'rollback' ? 'bosun.rollback_start' : 'bosun.update_start', category: 'update', status: 'success', ipAddress: ip,
+    details: JSON.stringify({ target: l.target, from: l.from, image: rollout.image, backup: rollout.backup }).slice(0, 900),
+  }).catch(() => undefined);
+  void run(auth, rollout, cfg, ip).catch(async err => {
+    rollout.status = 'failed'; rollout.finished_at = new Date().toISOString();
+    await saveRollout(rollout).catch(() => undefined);
+    await notify({ kind: 'alert', severity: 'warning', title: `Bosun ${l.kind === 'rollback' ? 'rollback' : 'update'} stopped`, message: err instanceof Error ? err.message : String(err), audience: 'admin', link: '/settings/updates' });
+  });
+  return rollout;
 }
 
 /** Start a rolling update to the newest image of the channel. Returns at once; progress is in the record and the bell. */
 export async function startRollout(auth: TokenPayload, ip?: string): Promise<Rollout> {
   const current = await getRollout();
-  if (current?.status === 'running' && Date.now() - Date.parse(current.started_at) < 60 * 60_000) throw new UpdateError('An update is already running', 409, 'UPDATE_RUNNING');
+  if (rolloutRunning(current)) throw new UpdateError('An update is already running', 409, 'UPDATE_RUNNING');
   const cfg = await getUpdateConfig();
   const latest = await checkForUpdate();
   if (!latest.commit) throw new UpdateError(`No image to update to: ${latest.error ?? 'unknown'}`);
   const nodes = await listNodes(cfg.webPort);
   const { steps, problems } = await plan(nodes);
   if (problems.length) throw new UpdateError(`Not ready: ${problems.join('; ')}`);
-  const target = latest.commit;
-  for (const s of steps) {
-    const n = nodes.find(x => x.id === s.node)!;
-    if (n.commit && (target.startsWith(n.commit.slice(0, 7)) || n.commit.startsWith(target.slice(0, 7)))) { s.status = 'skipped'; s.message = 'already on this version'; }
-  }
+  markSkipped(steps, nodes, latest.commit);
   if (steps.every(s => s.status === 'skipped')) throw new UpdateError('Every node already runs this version', 409, 'UP_TO_DATE');
-  const rollout: Rollout = {
-    id: `${Date.now()}`, target, image: `${cfg.image}:${commitTag(target)}`, started_by: auth.username, started_at: new Date().toISOString(),
-    finished_at: null, status: 'running', backup: await backup(target), steps: [...steps.filter(s => !s.self), ...steps.filter(s => s.self)],
-  };
-  await saveRollout(rollout);
-  await logAudit({ userId: auth.userId, action: 'bosun.update_start', category: 'update', status: 'success', ipAddress: ip, details: JSON.stringify({ target, image: rollout.image, backup: rollout.backup }).slice(0, 900) }).catch(() => undefined);
-  void run(auth, rollout, cfg, ip).catch(async err => {
-    rollout.status = 'failed'; rollout.finished_at = new Date().toISOString();
-    await saveRollout(rollout).catch(() => undefined);
-    await notify({ kind: 'alert', severity: 'warning', title: 'Bosun update stopped', message: err instanceof Error ? err.message : String(err), audience: 'admin', link: '/settings/updates' });
-  });
-  return rollout;
+  return launch(auth, { target: latest.commit, kind: 'update', from: usableCommit(nodes.find(n => n.self)?.commit) }, cfg, steps, ip);
+}
+
+/**
+ * Start a rolling update to the commit the last finished rollout came from (its published `sha-<7>` image). Same
+ * safety as an update: nothing may be running, the previous commit must be known and its image must still exist, and
+ * the database is backed up first. The backup is not restored.
+ */
+export async function startRollback(auth: TokenPayload, ip?: string): Promise<Rollout> {
+  const current = await getRollout();
+  const cfg = await getUpdateConfig();
+  const choice = rollbackTarget(current, cfg.image);
+  let rev: { commit: string | null; digest: string | null };
+  try {
+    rev = await imageRevision(cfg.image, commitTag(choice.target));
+  } catch (e) {
+    throw new UpdateError(`Could not check the registry for ${choice.image}: ${e instanceof Error ? e.message : String(e)}`, 409, 'NO_IMAGE');
+  }
+  const missing = rollbackImageProblem(rev, choice.target, choice.image);
+  if (missing) throw new UpdateError(missing, 409, 'NO_IMAGE');
+  const nodes = await listNodes(cfg.webPort);
+  const { steps, problems } = await plan(nodes);
+  if (problems.length) throw new UpdateError(`Not ready: ${problems.join('; ')}`);
+  markSkipped(steps, nodes, choice.target);
+  if (steps.every(s => s.status === 'skipped')) throw new UpdateError('Every node already runs this version', 409, 'UP_TO_DATE');
+  return launch(auth, { target: choice.target, kind: 'rollback', from: usableCommit(nodes.find(n => n.self)?.commit) }, cfg, steps, ip);
 }
 
 async function retag(auth: TokenPayload, step: PlanStep, image: string, ip?: string): Promise<void> {
@@ -202,14 +259,14 @@ async function run(auth: TokenPayload, r: Rollout, cfg: UpdateConfig, ip?: strin
     while (Date.now() < until) {
       const h = await health(node?.web ?? null);
       const back = (await rqlite.getNodes().catch(() => [])).find(n => n.id === step.node)?.reachable;
-      if (h.healthy && back && h.commit && (r.target.startsWith(h.commit.slice(0, 7)) || h.commit.startsWith(r.target.slice(0, 7)))) { ok = true; break; }
+      if (h.healthy && back && sameCommit(h.commit, r.target)) { ok = true; break; }
       await new Promise(res => setTimeout(res, 5000));
     }
     if (!ok) {
       step.status = 'failed'; step.message = 'did not come back on the new version within 10 minutes';
       r.status = 'failed'; r.finished_at = new Date().toISOString();
       await saveRollout(r);
-      await notify({ kind: 'alert', severity: 'critical', title: `Bosun update stopped at ${step.node}`, message: `${step.node} did not come back on ${r.target.slice(0, 7)} within 10 minutes. The other nodes were not touched. Database backup: ${r.backup}`, audience: 'admin', link: '/settings/updates' });
+      await notify({ kind: 'alert', severity: 'critical', title: `Bosun ${r.kind === 'rollback' ? 'rollback' : 'update'} stopped at ${step.node}`, message: `${step.node} did not come back on ${r.target.slice(0, 7)} within 10 minutes. The other nodes were not touched. Database backup: ${r.backup}`, audience: 'admin', link: '/settings/updates' });
       return;
     }
     step.status = 'done'; step.message = null;
@@ -221,7 +278,8 @@ async function run(auth: TokenPayload, r: Rollout, cfg: UpdateConfig, ip?: strin
 async function finish(r: Rollout): Promise<void> {
   r.status = 'done'; r.finished_at = new Date().toISOString();
   await saveRollout(r);
-  await notify({ kind: 'bosun_update', severity: 'success', title: `Bosun updated to ${r.target.slice(0, 7)}`, message: `Every node now runs ${r.image} (started by ${r.started_by}).`, audience: 'admin', link: '/settings/updates', dedupeKey: `bosun-updated:${r.id}` });
+  const verb = r.kind === 'rollback' ? 'rolled back to' : 'updated to';
+  await notify({ kind: 'bosun_update', severity: 'success', title: `Bosun ${verb} ${r.target.slice(0, 7)}`, message: `Every node now runs ${r.image} (started by ${r.started_by}).`, audience: 'admin', link: '/settings/updates', dedupeKey: `bosun-updated:${r.id}` });
 }
 
 /** On startup: if this node was the last step of a running update and now runs the target, close the record. */
@@ -234,8 +292,7 @@ export async function finishRolloutOnStart(): Promise<void> {
     if (Date.now() - Date.parse(r.started_at) > 2 * 60 * 60_000) { r.status = 'failed'; r.finished_at = new Date().toISOString(); await saveRollout(r); }
     return;
   }
-  const v = bosunVersion().commit;
-  if (v !== 'unknown' && (r.target.startsWith(v.slice(0, 7)) || v.startsWith(r.target.slice(0, 7)))) {
+  if (sameCommit(bosunVersion().commit, r.target)) {
     step.status = 'done';
     await finish(r);
   }

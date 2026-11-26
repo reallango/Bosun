@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { clientIp, requireUserLevel } from '@/lib/auth/middleware';
 import { ok, fail, failFrom } from '@/lib/api/response';
-import { checkForUpdate, setUpdateConfig, startRollout, updateStatus, UpdateError } from '@/lib/update/rollout';
+import { checkForUpdate, setUpdateConfig, startRollback, startRollout, updateStatus, UpdateError } from '@/lib/update/rollout';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,7 +34,10 @@ export async function PUT(request: NextRequest) {
   }
 }
 
-/** { action: 'check' } looks for a newer image now; { action: 'start', confirm: true } starts the rolling update. */
+/**
+ * { action: 'check' } looks for a newer image now; { action: 'start', confirm: true } starts the rolling update;
+ * { action: 'rollback', confirm: true } moves every node back to the commit the last finished rollout came from.
+ */
 export async function POST(request: NextRequest) {
   const auth = await requireUserLevel(request, 'admin');
   if (auth instanceof NextResponse) return auth;
@@ -42,11 +45,14 @@ export async function POST(request: NextRequest) {
   try { body = await request.json(); } catch { return fail('Invalid JSON body'); }
   try {
     if (body.action === 'check') return ok({ latest: await checkForUpdate() });
-    if (body.action === 'start') {
+    if (body.action === 'start' || body.action === 'rollback') {
       if (body.confirm !== true) return fail('Confirmation required', 400, 'CONFIRM_REQUIRED');
-      return ok({ rollout: await startRollout(auth, clientIp(request) ?? undefined) }, { status: 202 });
+      const rollout = body.action === 'rollback'
+        ? await startRollback(auth, clientIp(request) ?? undefined)
+        : await startRollout(auth, clientIp(request) ?? undefined);
+      return ok({ rollout }, { status: 202 });
     }
-    return fail('action must be "check" or "start"');
+    return fail('action must be "check", "start" or "rollback"');
   } catch (error) {
     if (error instanceof UpdateError) return fail(error.message, error.status, error.code);
     return failFrom(error);
