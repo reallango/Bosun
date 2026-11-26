@@ -30,7 +30,7 @@ describe('the Docker manager package', () => {
   it('has screens, datasets and menu entries that exist, and a review that lists what runs', () => {
     expect(Object.keys(spec.screens ?? {}).sort()).toEqual(['create', 'edit', 'manage', 'stack_edit', 'stack_new']);
     expect(spec.menu?.map(m => m.id)).toEqual(['new_container', 'new_stack', 'manage']);
-    expect(Object.keys(spec.datasets ?? {}).sort()).toEqual(['convert', 'export_compose', 'export_run', 'exposed_ports', 'git_branches', 'git_files', 'git_services', 'images', 'inspect', 'networks', 'stack_get', 'stacks', 'system', 'volumes']);
+    expect(Object.keys(spec.datasets ?? {}).sort()).toEqual(['convert', 'export_compose', 'export_run', 'exposed_ports', 'git_branches', 'git_files', 'git_services', 'host_detect', 'images', 'inspect', 'networks', 'stack_get', 'stacks', 'system', 'volumes']);
     const review = reviewPackage(manifest);
     expect(review.runsAsService).toBe(true);
     expect(review.widgets[0].commands.some(c => /dataset "inspect"/.test(c.what))).toBe(true);
