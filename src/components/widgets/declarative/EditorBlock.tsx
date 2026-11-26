@@ -387,7 +387,7 @@ export function EditorBlock({ block, ctx, ui, dialog }: { block: EditorBlockSpec
   const submitCount = submitButtons.filter(Boolean).length;
   const portalToFooter = !dialog && !!footerSlot?.target && submitCount > 0;
   useEffect(() => {
-    if (dialog || !footerSlot || submitCount === 0) return;
+    if (dialog || !footerSlot?.target || submitCount === 0) return;
     return footerSlot.claim(footerClaimId);
   }, [dialog, footerSlot, submitCount, footerClaimId]);
   if (dialog) {
