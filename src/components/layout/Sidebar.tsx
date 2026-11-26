@@ -1,9 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
-import { Dialog as DialogPrimitive } from 'radix-ui';
 import {
   House,
   LayoutDashboard,
@@ -21,6 +20,9 @@ import { cn } from '@/lib/utils';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { readJson } from '@/lib/api/readJson';
 import { ensureArray } from '@/lib/api/ensureArray';
+import { sortServersForSidebar, serverHealth, serverStatusLabel, serverSubtitle, type ServerHealth } from '@/lib/servers/sidebar';
+import { Sheet, SheetClose, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useShell } from './ShellContext';
 import { useAuth } from '@/hooks/useAuth';
 import { DASHBOARDS_CHANGED, SERVERS_CHANGED, notifyDashboardsChanged } from '@/lib/dashboards/events';
@@ -32,7 +34,8 @@ interface Server {
   name: string;
   hostname: string;
   is_online: number | boolean;
-  /** false = monitoring paused (shown as a yellow dot). */
+  last_seen?: string | null;
+  /** false = monitoring paused (shown as a warning dot). */
   poll_enabled?: boolean;
 }
 
@@ -134,6 +137,22 @@ function SectionLabel({ children, collapsed }: { children: React.ReactNode; coll
   );
 }
 
+const STATUS_DOT_CLASS: Record<ServerHealth, string> = {
+  online: 'bg-success',
+  offline: 'bg-muted-foreground',
+  paused: 'bg-warning',
+};
+
+function StatusDot({ health, className }: { health: ServerHealth; className?: string }) {
+  return (
+    <span
+      role="img"
+      aria-label={serverStatusLabel(health)}
+      className={cn('size-2 shrink-0 rounded-full', STATUS_DOT_CLASS[health], className)}
+    />
+  );
+}
+
 function NavLink({
   href,
   label,
@@ -141,6 +160,8 @@ function NavLink({
   active,
   collapsed,
   leading,
+  description,
+  tooltip,
 }: {
   href: string;
   label: string;
@@ -148,11 +169,12 @@ function NavLink({
   active: boolean;
   collapsed: boolean;
   leading?: React.ReactNode;
+  description?: string;
+  tooltip?: React.ReactNode;
 }) {
-  return (
+  const link = (
     <Link
       href={href}
-      title={collapsed ? label : undefined}
       aria-label={collapsed ? label : undefined}
       aria-current={active ? 'page' : undefined}
       className={cn(
@@ -165,8 +187,24 @@ function NavLink({
       )}
     >
       {leading ?? (Icon && <Icon className="size-4 shrink-0" aria-hidden />)}
-      {!collapsed && <span className="truncate">{label}</span>}
+      {!collapsed && (
+        <span className="min-w-0 flex-1">
+          <span className="block truncate">{label}</span>
+          {description && (
+            <span className="block truncate text-xs text-sidebar-muted/80">{description}</span>
+          )}
+        </span>
+      )}
     </Link>
+  );
+
+  if (!collapsed) return link;
+
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>{link}</TooltipTrigger>
+      <TooltipContent side="right">{tooltip ?? label}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -180,6 +218,7 @@ function SidebarNav({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?
   const [creating, setCreating] = useState(false);
   const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
   const [orderError, setOrderError] = useState('');
+  const sortedServers = useMemo(() => sortServersForSidebar(servers), [servers]);
 
   // Move a custom dashboard one place up or down and save the new order.
   const moveDashboard = async (index: number, direction: -1 | 1) => {
@@ -282,40 +321,63 @@ function SidebarNav({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?
       ))}
 
       <SectionLabel collapsed={collapsed}>Servers</SectionLabel>
-      {servers.map(s => (
-        <NavLink
-          key={s.id}
-          href={`/servers/${s.id}`}
-          label={s.name}
-          active={isActive(pathname, `/servers/${s.id}`)}
-          collapsed={collapsed}
-          leading={
-            collapsed ? (
-              <span className="relative flex size-6 items-center justify-center rounded bg-sidebar-accent text-[11px] font-semibold uppercase text-sidebar-foreground">
-                {s.name.slice(0, 2)}
-                <span
-                  className={cn(
-                    'absolute -bottom-0.5 -right-0.5 size-2 rounded-full ring-2 ring-sidebar',
-                    s.poll_enabled === false ? 'bg-yellow-500' : s.is_online ? 'bg-green-500' : 'bg-gray-500'
-                  )}
-                />
-              </span>
-            ) : (
-              <span
-                className={cn('ml-1 mr-1 size-2 shrink-0 rounded-full', s.poll_enabled === false ? 'bg-yellow-500' : s.is_online ? 'bg-green-500' : 'bg-gray-500')}
-                aria-label={s.poll_enabled === false ? 'not monitored' : s.is_online ? 'online' : 'offline'}
+      {servers.length === 0 ? (
+        <>
+          {!collapsed && (
+            <p className="px-3 pb-1 pt-1 text-xs text-sidebar-muted/80">No servers yet.</p>
+          )}
+          <NavLink
+            href="/settings/servers/new"
+            label="Add a server"
+            icon={Plus}
+            active={pathname === '/settings/servers/new'}
+            collapsed={collapsed}
+          />
+        </>
+      ) : (
+        <>
+          {sortedServers.map(s => {
+            const health = serverHealth(s);
+            const subtitle = serverSubtitle(s);
+            return (
+              <NavLink
+                key={s.id}
+                href={`/servers/${s.id}`}
+                label={s.name}
+                active={isActive(pathname, `/servers/${s.id}`)}
+                collapsed={collapsed}
+                description={subtitle || undefined}
+                tooltip={
+                  <span className="flex flex-col">
+                    <span>{s.name}</span>
+                    {subtitle && <span className="text-muted-foreground">{subtitle}</span>}
+                  </span>
+                }
+                leading={
+                  collapsed ? (
+                    <span className="relative flex size-6 items-center justify-center rounded bg-sidebar-accent text-[11px] font-semibold uppercase text-sidebar-foreground">
+                      {s.name.slice(0, 2)}
+                      <StatusDot
+                        health={health}
+                        className="absolute -bottom-0.5 -right-0.5 ring-2 ring-sidebar"
+                      />
+                    </span>
+                  ) : (
+                    <StatusDot health={health} className="ml-1 mr-1" />
+                  )
+                }
               />
-            )
-          }
-        />
-      ))}
-      <NavLink
-        href="/settings/servers/new"
-        label="Add Server"
-        icon={Plus}
-        active={pathname === '/settings/servers/new'}
-        collapsed={collapsed}
-      />
+            );
+          })}
+          <NavLink
+            href="/settings/servers/new"
+            label="Add Server"
+            icon={Plus}
+            active={pathname === '/settings/servers/new'}
+            collapsed={collapsed}
+          />
+        </>
+      )}
 
       <DashboardNameDialog open={creating} onOpenChange={setCreating} onSaved={d => router.push(`/dashboards/${d.id}`)} />
       <DashboardNameDialog
@@ -361,17 +423,22 @@ function Brand({ collapsed }: { collapsed: boolean }) {
 
 /** Double chevron: points left to collapse the rail, right to expand it. */
 function RailToggle({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
+  const label = collapsed ? 'Expand sidebar' : 'Collapse sidebar';
   return (
-    <button
-      type="button"
-      onClick={onToggle}
-      aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-      aria-expanded={!collapsed}
-      title={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-      className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-sidebar-muted transition-colors hover:bg-sidebar-accent/60 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-    >
-      {collapsed ? <ChevronsRight className="size-4" /> : <ChevronsLeft className="size-4" />}
-    </button>
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-label={label}
+          aria-expanded={!collapsed}
+          className="inline-flex size-8 shrink-0 items-center justify-center rounded-md text-sidebar-muted transition-colors hover:bg-sidebar-accent/60 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        >
+          {collapsed ? <ChevronsRight className="size-4" /> : <ChevronsLeft className="size-4" />}
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side={collapsed ? 'right' : 'bottom'}>{label}</TooltipContent>
+    </Tooltip>
   );
 }
 
@@ -410,31 +477,31 @@ export default function Sidebar() {
       </aside>
 
       {/* Phone: off-canvas drawer */}
-      <DialogPrimitive.Root open={mobileOpen} onOpenChange={setMobileOpen}>
-        <DialogPrimitive.Portal>
-          <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/50 md:hidden" />
-          <DialogPrimitive.Content
-            className={cn(
-              'fixed inset-y-0 left-0 z-50 flex w-72 max-w-[85vw] flex-col bg-sidebar text-sidebar-foreground shadow-xl outline-none md:hidden',
-              'pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pt-[env(safe-area-inset-top)]'
-            )}
-          >
-            <DialogPrimitive.Title className="sr-only">Navigation</DialogPrimitive.Title>
-            <DialogPrimitive.Description className="sr-only">Site navigation menu</DialogPrimitive.Description>
-            <div className="flex h-14 items-center justify-between border-b border-sidebar-border px-3">
-              <Brand collapsed={false} />
-              <DialogPrimitive.Close
-                className="rounded-md p-2 text-sidebar-muted hover:bg-sidebar-accent hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
-                aria-label="Close menu"
-              >
-                <X className="size-5" />
-              </DialogPrimitive.Close>
-            </div>
-            <SidebarNav collapsed={false} onNavigate={() => setMobileOpen(false)} />
-            <SettingsLink collapsed={false} onNavigate={() => setMobileOpen(false)} />
-          </DialogPrimitive.Content>
-        </DialogPrimitive.Portal>
-      </DialogPrimitive.Root>
+      <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
+        <SheetContent
+          side="left"
+          hideClose
+          overlayClassName="md:hidden"
+          className={cn(
+            'w-72 max-w-[85vw] border-sidebar-border bg-sidebar text-sidebar-foreground md:hidden',
+            'pb-[env(safe-area-inset-bottom)] pl-[env(safe-area-inset-left)] pt-[env(safe-area-inset-top)]'
+          )}
+        >
+          <SheetTitle className="sr-only">Navigation</SheetTitle>
+          <SheetDescription className="sr-only">Site navigation menu</SheetDescription>
+          <div className="flex h-14 shrink-0 items-center justify-between border-b border-sidebar-border px-3">
+            <Brand collapsed={false} />
+            <SheetClose
+              className="rounded-md p-2 text-sidebar-muted hover:bg-sidebar-accent hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+              aria-label="Close menu"
+            >
+              <X className="size-5" />
+            </SheetClose>
+          </div>
+          <SidebarNav collapsed={false} onNavigate={() => setMobileOpen(false)} />
+          <SettingsLink collapsed={false} onNavigate={() => setMobileOpen(false)} />
+        </SheetContent>
+      </Sheet>
     </>
   );
 }
