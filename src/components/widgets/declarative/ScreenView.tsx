@@ -7,6 +7,7 @@ import { readJson } from '@/lib/api/readJson';
 import type { ScreenSpec } from '@/lib/widgets/runtime/spec-screens';
 import { screenArgs, text, type PublicActionLike, type ViewContext } from '@/lib/widgets/runtime/layout';
 import { LayoutBlocks, type LayoutUi } from './LayoutView';
+import { buttonClass } from './styles';
 
 type Datasets = Record<string, unknown>;
 
@@ -95,18 +96,18 @@ export function ScreenView({ screen, context, serverId, widgetType, ui, onDone, 
   const waiting = loading && loadedAt === 0;
   return (
     <div className="space-y-3">
-      {screen.description && <p className="text-sm text-gray-600 dark:text-gray-400">{text(screen.description, ctx)}</p>}
+      {screen.description && <p className="text-sm text-muted-foreground">{text(screen.description, ctx)}</p>}
       {failed.map(([alias, msg]) => (
-        <div key={alias} role="alert" className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">{msg}</div>
+        <div key={alias} role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">{msg}</div>
       ))}
       {waiting ? (
-        <div className="flex items-center gap-2 py-6 text-sm text-gray-500"><Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden /> Loading from the host…</div>
+        <div className="flex items-center gap-2 py-6 text-sm text-muted-foreground"><Loader2 className="size-4 animate-spin motion-reduce:animate-none" aria-hidden /> Loading from the host…</div>
       ) : (
         <div>
           {screen.kind === 'page' && !hideReload && Object.keys(screen.load).length > 0 && (
             <div className="mb-2 flex justify-end">
               <button type="button" onClick={() => void reload()} disabled={loading}
-                className="inline-flex items-center gap-1 rounded-md border border-gray-200 px-2 py-1 text-xs hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:hover:bg-gray-800">
+                className={buttonClass}>
                 <RefreshCw className={`size-3 ${loading ? 'animate-spin motion-reduce:animate-none' : ''}`} aria-hidden /> Reload
               </button>
             </div>

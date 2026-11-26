@@ -12,18 +12,14 @@ import { Bar, Fields } from './parts';
 import { fitsSize } from '@/lib/widgets/runtime/size';
 import { useWidgetSize } from '@/components/dashboard/widget-size';
 import { CodeBlock, EditorBlock } from './EditorBlock';
+import { buttonClass, inputClass, NOTICE_CLASS as NOTICE } from './styles';
 
 const BADGE: Record<string, string> = {
   green: 'bg-green-100 text-green-800 dark:bg-green-900/40 dark:text-green-300',
   amber: 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300',
   red: 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300',
-  gray: 'bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300',
-  blue: 'bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300',
-};
-const NOTICE: Record<string, string> = {
-  info: 'border-blue-200 bg-blue-50 text-blue-900 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200',
-  warning: 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200',
-  error: 'border-red-300 bg-red-50 text-red-900 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200',
+  gray: 'bg-muted text-muted-foreground',
+  blue: 'bg-primary/10 text-primary',
 };
 const FINISHED_JOB_SHOWN_MS = 10 * 60 * 1000;
 
@@ -48,9 +44,6 @@ export interface LayoutUi {
   large?: boolean;
 }
 
-const inputClass = 'w-full rounded-md border border-gray-200 bg-transparent px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-700';
-const buttonClass = 'inline-flex items-center gap-1 rounded-md border border-gray-200 px-2 py-1 text-xs font-medium hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:hover:bg-gray-800';
-
 export function LayoutBlocks({ blocks, ctx, ui }: { blocks: Block[]; ctx: ViewContext; ui: LayoutUi }) {
   // Blocks with `hideBelow` drop out while the widget is smaller (dialogs and pages count as the largest size).
   const { size } = useWidgetSize();
@@ -65,7 +58,7 @@ function BlockView({ block, ctx, ui }: { block: Block; ctx: ViewContext; ui: Lay
   switch (block.type) {
     case 'section': return <Section block={block} ctx={ctx} ui={ui} />;
     case 'kv': return <Fields fields={block.items} data={ctx} />;
-    case 'text': return <p className="whitespace-pre-wrap break-words text-xs text-gray-700 dark:text-gray-300">{text(block.text, ctx)}</p>;
+    case 'text': return <p className="whitespace-pre-wrap break-words text-xs text-foreground">{text(block.text, ctx)}</p>;
     case 'notice': return <div role={block.level === 'error' ? 'alert' : 'status'} className={`rounded-md border px-2 py-1.5 text-xs ${NOTICE[block.level]}`}>{text(block.text, ctx)}</div>;
     case 'buttons': return <Buttons block={block} ctx={ctx} ui={ui} />;
     case 'form': return <Form block={block} ctx={ctx} ui={ui} />;
@@ -96,10 +89,10 @@ function Tabs({ block, ctx, ui }: { block: Extract<Block, { type: 'tabs' }>; ctx
   const tab = block.tabs.find(t => t.id === active) ?? block.tabs[0];
   return (
     <div className="space-y-3">
-      <div role="tablist" className="flex flex-wrap gap-1 border-b border-gray-200 dark:border-gray-800">
+      <div role="tablist" className="flex flex-wrap gap-1 border-b border-border">
         {block.tabs.map(t => (
           <button key={t.id} type="button" role="tab" aria-selected={t.id === tab.id} onClick={() => setActive(t.id)}
-            className={`-mb-px rounded-t-md border-b-2 px-3 py-1.5 ${ui.large ? 'text-sm' : 'text-xs'} font-medium ${t.id === tab.id ? 'border-blue-500 text-blue-600 dark:text-blue-400' : 'border-transparent text-gray-500 hover:text-gray-900 dark:hover:text-gray-100'}`}>
+            className={`-mb-px rounded-t-md border-b-2 px-3 py-1.5 ${ui.large ? 'text-sm' : 'text-xs'} font-medium ${t.id === tab.id ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground'}`}>
             {t.label}
           </button>
         ))}
@@ -115,15 +108,15 @@ function Section({ block, ctx, ui }: { block: Extract<Block, { type: 'section' }
   const badges = visibleBadges(block.badges, ctx);
   const summary = block.summary ? text(block.summary, ctx) : '';
   return (
-    <section className="rounded-lg border border-gray-200 dark:border-gray-800">
+    <section className="rounded-lg border border-border">
       <button type="button" onClick={() => setOpen(o => !o)} aria-expanded={open}
-        className="flex w-full items-center gap-2 px-2 py-1.5 text-left hover:bg-gray-50 dark:hover:bg-gray-800/50">
-        {open ? <ChevronDown className="size-3.5 shrink-0 text-gray-500" aria-hidden /> : <ChevronRight className="size-3.5 shrink-0 text-gray-500" aria-hidden />}
+        className="flex w-full items-center gap-2 px-2 py-1.5 text-left hover:bg-muted">
+        {open ? <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" aria-hidden /> : <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />}
         <span className="text-xs font-semibold">{block.title}</span>
         {badges.map((b, i) => <span key={i} className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${BADGE[b.color]}`}>{b.text}</span>)}
-        {!open && summary && <span className="ml-auto min-w-0 truncate text-xs text-gray-500">{summary}</span>}
+        {!open && summary && <span className="ml-auto min-w-0 truncate text-xs text-muted-foreground">{summary}</span>}
       </button>
-      {open && <div className="border-t border-gray-100 p-2 dark:border-gray-800"><LayoutBlocks blocks={block.blocks} ctx={ctx} ui={ui} /></div>}
+      {open && <div className="border-t border-border p-2"><LayoutBlocks blocks={block.blocks} ctx={ctx} ui={ui} /></div>}
     </section>
   );
 }
@@ -174,14 +167,14 @@ function Form({ block, ctx, ui }: { block: Extract<Block, { type: 'form' }>; ctx
       {block.title && <div className="text-xs font-semibold">{block.title}</div>}
       {block.fields.map(f => (
         <label key={f.name} className="block space-y-0.5">
-          <span className="text-xs text-gray-500">{f.label}</span>
+          <span className="text-xs text-muted-foreground">{f.label}</span>
           {f.input === 'select'
             ? <select className={inputClass} value={values[f.name] ?? ''} onChange={e => set(f, e.target.value)}>{f.options?.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}</select>
             : <input className={inputClass} type={f.input === 'number' ? 'number' : 'text'} value={values[f.name] ?? ''} placeholder={f.placeholder} onChange={e => set(f, e.target.value)} />}
-          {f.help && <span className="block text-[11px] text-gray-500">{f.help}</span>}
+          {f.help && <span className="block text-[11px] text-muted-foreground">{f.help}</span>}
         </label>
       ))}
-      {problem && <div role="alert" className="text-xs text-red-600 dark:text-red-400">{problem}</div>}
+      {problem && <div role="alert" className="text-xs text-destructive">{problem}</div>}
       <button type="submit" className={buttonClass} disabled={ui.busy !== null || (action.job && ctx.job?.status === 'running')}>
         {ui.busy === action.id && <Loader2 className="size-3 animate-spin motion-reduce:animate-none" aria-hidden />}{block.submit.label}
       </button>
@@ -195,7 +188,7 @@ function SelectBlock({ block, ctx, ui }: { block: Extract<Block, { type: 'select
   const current = selectCurrent(block, ctx);
   return (
     <label className="flex items-center justify-between gap-2 text-xs">
-      <span className="text-gray-500">{block.label}</span>
+      <span className="text-muted-foreground">{block.label}</span>
       <select className={`${inputClass} w-auto max-w-[60%]`} value={current} disabled={ui.busy !== null} aria-label={block.label}
         onChange={e => { const { params, ok } = selectParams(action, block.param, e.target.value); if (ok) ui.onAction(action, params); }}>
         {!block.options.some(o => o.value === current) && <option value={current}>{current || '—'}</option>}
@@ -212,7 +205,7 @@ function JobProgress({ job, ui }: { job: JobState | null; ui: LayoutUi }) {
   if (job.status !== 'running' && finishedAt && Date.now() - finishedAt > FINISHED_JOB_SHOWN_MS) return null;
   const action = ui.actions.get(job.actionId);
   const running = job.status === 'running';
-  const tone = job.status === 'success' ? NOTICE.info : running ? 'border-gray-200 dark:border-gray-800' : NOTICE.error;
+  const tone = job.status === 'success' ? NOTICE.info : running ? 'border-border' : NOTICE.error;
   const steps = job.steps.slice(-5);
   return (
     <div className={`space-y-1.5 rounded-md border p-2 text-xs ${tone}`} role="status" aria-live="polite">
@@ -222,10 +215,10 @@ function JobProgress({ job, ui }: { job: JobState | null; ui: LayoutUi }) {
         {running && action && ui.allowed(action) && <button type="button" className={buttonClass} onClick={ui.onCancelJob}>Cancel</button>}
         {!running && <button type="button" className={buttonClass} onClick={() => setDismissed(job.id)}>Dismiss</button>}
       </div>
-      {running && job.percent !== null && <Bar value={job.percent} color="bg-blue-500" />}
+      {running && job.percent !== null && <Bar value={job.percent} color="bg-primary" />}
       {steps.length > 0 && (
-        <ol className="space-y-0.5 text-[11px] text-gray-600 dark:text-gray-400">
-          {steps.map((s, i) => <li key={i} className={i === steps.length - 1 && running ? 'font-medium text-gray-900 dark:text-gray-100' : ''}>{s}</li>)}
+        <ol className="space-y-0.5 text-[11px] text-muted-foreground">
+          {steps.map((s, i) => <li key={i} className={i === steps.length - 1 && running ? 'font-medium text-foreground' : ''}>{s}</li>)}
         </ol>
       )}
     </div>

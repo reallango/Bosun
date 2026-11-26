@@ -147,11 +147,11 @@ function Inner({ widget, screenId }: { widget: WidgetRow; screenId: string }) {
         <ActionRunnerToasts notice={runner.notice} onShown={clearNotice} />
         {error ? <p className="text-sm text-muted-foreground">{error}</p>
           : !spec ? <LoadingSpinner />
-          : !screen ? <p className="text-sm text-muted-foreground">This widget has no screen called “{screenId}”.</p>
+          : !screen ? <p className="text-sm text-muted-foreground">This widget has no screen called â€œ{screenId}â€.</p>
           : jobId && !restore && !restoreError ? <LoadingSpinner />
           : <>
             {restoreError && <p role="alert" className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">{restoreError}. The screen is empty: fill it in again.</p>}
-            {restore && <p className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-900 dark:border-blue-900 dark:bg-blue-950/40 dark:text-blue-200">This is the screen of an earlier task, with what you filled in then. Passwords and tokens you entered are kept safely on the server: leave them as they are to use them again, or type new ones.</p>}
+            {restore && <p className="rounded-md border border-primary/30 bg-primary/10 px-3 py-2 text-sm text-primary">This is the screen of an earlier task, with what you filled in then. Passwords and tokens you entered are kept safely on the server: leave them as they are to use them again, or type new ones.</p>}
             <ScreenView screen={screen} context={full} serverId={widget.server_id} widgetType={widget.widget_type} ui={ui} reloadToken={reloadToken} hideReload onStatus={onScreenStatus}
               onDone={screen.kind === 'dialog' ? () => router.push(`/dashboards/${encodeURIComponent(widget.dashboard_id)}`) : undefined} />
           </>}

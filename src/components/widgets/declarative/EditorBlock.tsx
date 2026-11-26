@@ -9,8 +9,7 @@ import {
   type EditorValue, type EditorValues, type RowValue, type ViewContext,
 } from '@/lib/widgets/runtime/layout';
 import type { LayoutUi } from './LayoutView';
-
-const buttonClass = 'inline-flex items-center gap-1 rounded-md border border-gray-200 px-2 py-1 text-xs font-medium hover:bg-gray-100 disabled:opacity-40 dark:border-gray-700 dark:hover:bg-gray-800';
+import { buttonClass, dangerSubmitClass, iconButtonClass, inputClass, primarySubmitClass } from './styles';
 
 type EditorBlockSpec = Extract<Block, { type: 'editor' }>;
 type Option = { value: string; label: string };
@@ -43,7 +42,7 @@ export function CodeBlock({ title, text, filename }: { title?: string; text: str
           <button type="button" className={buttonClass} onClick={download}><Download className="size-3" aria-hidden /> Download</button>
         </span>
       </div>
-      <pre className="max-h-96 overflow-auto whitespace-pre rounded-md border border-gray-200 bg-gray-50 p-3 font-mono text-xs leading-snug dark:border-gray-800 dark:bg-gray-950">{text || '(nothing to show)'}</pre>
+      <pre className="max-h-96 overflow-auto whitespace-pre rounded-md border border-border bg-muted p-3 font-mono text-xs leading-snug">{text || '(nothing to show)'}</pre>
     </div>
   );
 }
@@ -92,9 +91,9 @@ function RemoteSelect({ f, value, onChange, ctx, values, ui, cls }: { f: EditorF
       {(showBox || !state.options.length) && (
         <input className={cls} value={value} placeholder={f.placeholder} spellCheck={false} onChange={e => onChange(e.target.value)} aria-label={f.label} />
       )}
-      {state.loading && <span className="flex items-center gap-1 text-[11px] text-gray-500"><Loader2 className="size-3 animate-spin motion-reduce:animate-none" aria-hidden /> Asking the host…</span>}
+      {state.loading && <span className="flex items-center gap-1 text-[11px] text-muted-foreground"><Loader2 className="size-3 animate-spin motion-reduce:animate-none" aria-hidden /> Asking the host…</span>}
       {state.error && <span className="block text-[11px] text-amber-700 dark:text-amber-400">Could not look this up: {state.error}. Type it instead.</span>}
-      {missing.length > 0 && !state.loading && <span className="block text-[11px] text-gray-500">Fill in the field above to look up the choices.</span>}
+      {missing.length > 0 && !state.loading && <span className="block text-[11px] text-muted-foreground">Fill in the field above to look up the choices.</span>}
     </div>
   );
 }
@@ -144,7 +143,7 @@ function RowsField({ f, rows, onChange, ctx, cls, values, ui }: { f: EditorField
   return (
     <div className="space-y-1.5">
       {rows.length > 0 && (
-        <div className="text-[11px] text-gray-500" style={gridStyle}>
+        <div className="text-[11px] text-muted-foreground" style={gridStyle}>
           {cols.map(c => <span key={c.name} className="truncate" title={c.label}>{c.label}</span>)}
           <span aria-hidden />
         </div>
@@ -164,7 +163,7 @@ function RowsField({ f, rows, onChange, ctx, cls, values, ui }: { f: EditorField
               {c.suggest && i === 0 && <datalist id={listId(c)}>{suggestions(c).map(s => <option key={s} value={s} />)}</datalist>}
             </span>
           ))}
-          <button type="button" className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:hover:bg-gray-800" aria-label={`Remove ${f.label} ${i + 1}`} onClick={() => onChange(rows.filter((_, j) => j !== i))}><X className="size-3.5" /></button>
+          <button type="button" className={iconButtonClass} aria-label={`Remove ${f.label} ${i + 1}`} onClick={() => onChange(rows.filter((_, j) => j !== i))}><X className="size-3.5" /></button>
         </div>
       ))}
       <button type="button" className={buttonClass} onClick={() => onChange([...rows, newEditorRow(f)])}><Plus className="size-3" aria-hidden /> Add</button>
@@ -189,7 +188,7 @@ export function EditorBlock({ block, ctx, ui }: { block: EditorBlockSpec; ctx: V
   const [toolBusy, setToolBusy] = useState<string | null>(null);
   const [toolResult, setToolResult] = useState<Record<string, ToolResult | undefined>>({});
   const big = ui.large === true;
-  const field = `w-full rounded-md border border-gray-200 bg-transparent px-2 ${big ? 'py-1.5 text-sm' : 'py-1 text-xs'} outline-none focus:ring-2 focus:ring-blue-500 dark:border-gray-700`;
+  const field = `${inputClass} ${big ? 'py-1.5 !text-sm' : ''}`;
   const set = (name: string, v: EditorValue) => setValues(s => ({ ...s, [name]: v }));
   const warnings = editorWarnings(block.fields, values);
   const hidden = useMemo(() => hiddenByHeading(block.fields, open), [block.fields, open]);
@@ -243,7 +242,7 @@ export function EditorBlock({ block, ctx, ui }: { block: EditorBlockSpec; ctx: V
       if (f.collapsed) {
         const isOpen = open.has(f.name);
         return (
-          <button key={f.name} type="button" aria-expanded={isOpen} className={`mt-1 flex w-full items-center gap-1 rounded-md border border-gray-200 px-2 py-1.5 text-left font-semibold hover:bg-gray-50 dark:border-gray-800 dark:hover:bg-gray-800/50 ${big ? 'text-sm' : 'text-xs'}`}
+          <button key={f.name} type="button" aria-expanded={isOpen} className={`mt-1 flex w-full items-center gap-1 rounded-md border border-border px-2 py-1.5 text-left font-semibold hover:bg-muted ${big ? 'text-sm' : 'text-xs'}`}
             onClick={() => setOpen(s => { const n = new Set(s); if (n.has(f.name)) n.delete(f.name); else n.add(f.name); return n; })}>
             {isOpen ? <ChevronDown className="size-3.5" aria-hidden /> : <ChevronRight className="size-3.5" aria-hidden />}{f.label}
           </button>
@@ -259,25 +258,25 @@ export function EditorBlock({ block, ctx, ui }: { block: EditorBlockSpec; ctx: V
             {toolBusy === f.name && <Loader2 className="size-3 animate-spin motion-reduce:animate-none" aria-hidden />}{toolBusy === f.name && f.tool?.busy ? f.tool.busy : f.label}
           </button>
           {res && res.errors.length > 0 && (
-            <div role="alert" className="space-y-0.5 rounded-md border border-red-300 bg-red-50 px-2 py-1.5 text-xs text-red-900 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">
+            <div role="alert" className="space-y-0.5 rounded-md border border-destructive/30 bg-destructive/10 px-2 py-1.5 text-xs text-destructive">
               <div className="font-medium">{res.applied ? 'Imported what could be converted. These parts were not:' : 'Nothing could be imported:'}</div>
               <ul className="list-disc pl-4">{res.errors.map((e, i) => <li key={i}>{e}</li>)}</ul>
             </div>
           )}
           {res && res.errors.length === 0 && res.applied && <div role="status" className="rounded-md border border-green-300 bg-green-50 px-2 py-1 text-xs text-green-900 dark:border-green-900 dark:bg-green-950/40 dark:text-green-200">Done. Check the fields below.</div>}
-          {res && res.notes.length > 0 && <ul className="list-disc space-y-0.5 pl-5 text-[11px] text-gray-600 dark:text-gray-400">{res.notes.map((n, i) => <li key={i}>{n}</li>)}</ul>}
+          {res && res.notes.length > 0 && <ul className="list-disc space-y-0.5 pl-5 text-[11px] text-muted-foreground">{res.notes.map((n, i) => <li key={i}>{n}</li>)}</ul>}
         </div>
       );
     }
     const used = f.warn && (f.input === 'checkbox' ? values[f.name] === true : Array.isArray(values[f.name]) ? (values[f.name] as unknown[]).length > 0 : String(values[f.name] ?? '').trim() !== '');
-    const label = <span className={`${big ? 'text-sm' : 'text-xs'} text-gray-600 dark:text-gray-400`}>{f.label}{f.required && <span className="text-red-500"> *</span>}</span>;
+    const label = <span className={`${big ? 'text-sm' : 'text-xs'} text-muted-foreground`}>{f.label}{f.required && <span className="text-destructive"> *</span>}</span>;
     if (f.input === 'checkbox') {
       return (
         <div key={f.name} className="space-y-0.5">
           <label className={`flex items-center gap-2 ${big ? 'text-sm' : 'text-xs'}`}>
             <input type="checkbox" checked={values[f.name] === true} onChange={e => set(f.name, e.target.checked)} /> {f.label}
           </label>
-          {f.help && <span className="block text-[11px] text-gray-500">{f.help}</span>}
+          {f.help && <span className="block text-[11px] text-muted-foreground">{f.help}</span>}
           {used && <Warn text={f.warn!} />}
         </div>
       );
@@ -329,7 +328,7 @@ export function EditorBlock({ block, ctx, ui }: { block: EditorBlockSpec; ctx: V
                       {f.mask && isSecretName(k) ? (
                         <>
                           <input className={`${field} font-mono`} type={revealed.has(`${f.name}:${i}`) ? 'text' : 'password'} value={v} placeholder="value" spellCheck={false} autoComplete="off" aria-label={`${f.label} value ${i + 1}`} onChange={e => setRow(i, `${k}=${e.target.value}`)} />
-                          <button type="button" className="rounded px-1.5 py-0.5 text-[11px] text-gray-500 hover:bg-gray-100 dark:hover:bg-gray-800" onClick={() => setRevealed(s => { const n = new Set(s); const key = `${f.name}:${i}`; if (n.has(key)) n.delete(key); else n.add(key); return n; })}>{revealed.has(`${f.name}:${i}`) ? 'Hide' : 'Show'}</button>
+                          <button type="button" className="rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground" onClick={() => setRevealed(s => { const n = new Set(s); const key = `${f.name}:${i}`; if (n.has(key)) n.delete(key); else n.add(key); return n; })}>{revealed.has(`${f.name}:${i}`) ? 'Hide' : 'Show'}</button>
                         </>
                       ) : (
                         <input className={`${field} font-mono`} value={v} placeholder="value" spellCheck={false} aria-label={`${f.label} value ${i + 1}`} onChange={e => setRow(i, `${k}=${e.target.value}`)} />
@@ -337,7 +336,7 @@ export function EditorBlock({ block, ctx, ui }: { block: EditorBlockSpec; ctx: V
                     </>
                   )
                   : <input className={`${field} font-mono`} value={v} placeholder={f.placeholder} spellCheck={false} aria-label={`${f.label} ${i + 1}`} onChange={e => setRow(i, e.target.value)} />}
-                <button type="button" className="rounded p-1 text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:hover:bg-gray-800" aria-label={`Remove ${f.label} ${i + 1}`} onClick={() => set(f.name, rows.filter((_, j) => j !== i))}><X className="size-3.5" /></button>
+                <button type="button" className={iconButtonClass} aria-label={`Remove ${f.label} ${i + 1}`} onClick={() => set(f.name, rows.filter((_, j) => j !== i))}><X className="size-3.5" /></button>
               </div>
             );
           })}
@@ -351,7 +350,7 @@ export function EditorBlock({ block, ctx, ui }: { block: EditorBlockSpec; ctx: V
     return (
       <div key={f.name} className="space-y-0.5">
         {labelled ? <label className="block space-y-0.5">{label}{control}</label> : <><div>{label}</div>{control}</>}
-        {f.help && <span className="block text-[11px] text-gray-500">{f.help}</span>}
+        {f.help && <span className="block text-[11px] text-muted-foreground">{f.help}</span>}
         {used && <Warn text={f.warn!} />}
       </div>
     );
@@ -360,10 +359,10 @@ export function EditorBlock({ block, ctx, ui }: { block: EditorBlockSpec; ctx: V
   return (
     <div className="space-y-3">
       {block.fields.filter(f => editorFieldVisible(f, values) && !hidden.has(f.name)).map(f => renderField(f))}
-      {problem && <div role="alert" className="text-xs text-red-600 dark:text-red-400">{problem}</div>}
+      {problem && <div role="alert" className="text-xs text-destructive">{problem}</div>}
       {warnings.length > 0 && <div role="status" className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">Elevated options are set: they can give this container control over the host.</div>}
       {failure && (
-        <div ref={errorRef} role="alert" className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-900 dark:border-red-900 dark:bg-red-950/40 dark:text-red-200">
+        <div ref={errorRef} role="alert" className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           <div className="font-medium">That did not work</div>
           <div className="whitespace-pre-wrap break-words text-xs">{failure}</div>
         </div>
@@ -374,7 +373,7 @@ export function EditorBlock({ block, ctx, ui }: { block: EditorBlockSpec; ctx: V
           if (!action || !ui.allowed(action) || !actionApplies(action, ctx)) return null;
           return (
             <button key={s.action + s.label} type="button" disabled={ui.busy !== null || sending !== null}
-              className={`inline-flex items-center gap-1 rounded-md px-3 py-1.5 ${big ? 'text-sm' : 'text-xs'} font-medium text-white disabled:opacity-40 ${s.style === 'danger' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}
+              className={`${s.style === 'danger' ? dangerSubmitClass : primarySubmitClass} ${big ? 'text-sm' : 'text-xs'}`}
               onClick={() => send(s)}>
               {sending === s.action + s.label && <Loader2 className="size-3 animate-spin motion-reduce:animate-none" aria-hidden />}{s.label}
             </button>

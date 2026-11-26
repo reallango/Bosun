@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
-import Header from '@/components/layout/Header';
+import { PageHeader } from '@/components/settings/PageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
@@ -128,13 +128,13 @@ RAM: ${d.data.total_ram_mb} MB`,
     };
 
     if (loading) {
-        return <><Header title="Edit Server" /><div className="page"><LoadingSpinner /></div></>;
+        return <><PageHeader title="Edit server" /><div><LoadingSpinner /></div></>;
     }
 
     return (
         <>
-            <Header title={`Edit: ${form.name}`} />
-            <div className="page max-w-2xl">
+            <PageHeader title={form.name ? `Edit ${form.name}` : 'Edit server'} />
+            <div>
                 <Card>
                     <CardHeader><CardTitle>Server Configuration</CardTitle></CardHeader>
                     <CardContent className="space-y-4">

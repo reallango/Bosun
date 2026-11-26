@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { Pencil, Plus, Trash2, Users } from 'lucide-react';
-import Header from '@/components/layout/Header';
+import { PageHeader } from '@/components/settings/PageHeader';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -31,8 +31,8 @@ export default function PermissionsPage() {
   if (!isAdmin) {
     return (
       <>
-        <Header title="Permissions" />
-        <div className="page max-w-6xl"><AdminOnlyNotice /></div>
+        <PageHeader title="Permissions" />
+        <div><AdminOnlyNotice /></div>
       </>
     );
   }
@@ -56,8 +56,8 @@ export default function PermissionsPage() {
 
   return (
     <>
-      <Header title="Permissions" />
-      <div className="page max-w-6xl space-y-6">
+      <PageHeader title="Permissions" description="Permission groups decide what each role and API key can do." />
+      <div className="space-y-6">
         <Card>
           <CardContent className="space-y-2 text-sm">
             <p className="font-medium">How access works</p>

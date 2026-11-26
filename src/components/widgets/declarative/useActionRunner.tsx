@@ -155,7 +155,7 @@ export function useActionRunner(o: Options) {
       <Dialog.Root open={!!shellFor} onOpenChange={open => { if (!open) setShellFor(null); }}>
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-[60] bg-black/50" />
-          <Dialog.Content className="fixed inset-0 z-[60] flex flex-col bg-white p-2 shadow-xl dark:bg-gray-900 sm:inset-6 sm:rounded-xl sm:border sm:border-gray-700 lg:inset-x-[8%]">
+          <Dialog.Content className="fixed inset-0 z-[60] flex flex-col bg-background p-2 text-foreground shadow-xl sm:inset-6 sm:rounded-xl sm:border sm:border-border lg:inset-x-[8%]">
             <div className="mb-2 flex items-center justify-between gap-2 px-1">
               <Dialog.Title className="truncate font-semibold">{shellFor?.label}</Dialog.Title>
               <Dialog.Description className="sr-only">Interactive terminal session</Dialog.Description>
@@ -171,7 +171,7 @@ export function useActionRunner(o: Options) {
       <Dialog.Root open={!!output} onOpenChange={open => { if (!open) setOutput(null); }}>
         <Dialog.Portal>
           <Dialog.Overlay className="fixed inset-0 z-[60] bg-black/50" />
-          <Dialog.Content className="fixed inset-2 z-[60] flex flex-col rounded-xl border border-gray-200 bg-white p-3 shadow-xl dark:border-gray-700 dark:bg-gray-900 sm:inset-8 lg:inset-x-[10%]">
+          <Dialog.Content className="fixed inset-2 z-[60] flex flex-col rounded-xl border border-border bg-card p-3 text-card-foreground shadow-xl sm:inset-8 lg:inset-x-[10%]">
             <div className="mb-2 flex items-center justify-between gap-2">
               <Dialog.Title className="truncate font-semibold">{output?.title}</Dialog.Title>
               <Dialog.Description className="sr-only">Output of the action</Dialog.Description>
