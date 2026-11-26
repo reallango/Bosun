@@ -188,7 +188,7 @@ export function EditorBlock({ block, ctx, ui }: { block: EditorBlockSpec; ctx: V
   const [toolBusy, setToolBusy] = useState<string | null>(null);
   const [toolResult, setToolResult] = useState<Record<string, ToolResult | undefined>>({});
   const big = ui.large === true;
-  const field = `${inputClass} ${big ? 'py-1.5 text-sm' : ''}`;
+  const field = `${inputClass} ${big ? 'py-1.5 !text-sm' : ''}`;
   const set = (name: string, v: EditorValue) => setValues(s => ({ ...s, [name]: v }));
   const warnings = editorWarnings(block.fields, values);
   const hidden = useMemo(() => hiddenByHeading(block.fields, open), [block.fields, open]);
