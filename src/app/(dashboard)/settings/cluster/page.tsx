@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Crown, RefreshCw, Trash2 } from 'lucide-react';
-import Header from '@/components/layout/Header';
+import { PageHeader } from '@/components/settings/PageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -81,8 +81,8 @@ export default function ClusterPage() {
 
   return (
     <>
-      <Header title="Cluster" />
-      <div className="page max-w-5xl space-y-4">
+      <PageHeader title="Cluster" description="Database nodes and failover." />
+      <div className="space-y-4">
         {restarting && (
           <div role="status" className="flex items-center gap-2 rounded-md border border-yellow-500/40 bg-yellow-500/10 p-3 text-sm">
             <RefreshCw className="size-4 animate-spin motion-reduce:animate-none" aria-hidden />

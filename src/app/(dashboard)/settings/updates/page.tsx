@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { CircleAlert, CircleCheck, Loader2, RefreshCw, Download } from 'lucide-react';
-import Header from '@/components/layout/Header';
+import { PageHeader } from '@/components/settings/PageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -81,7 +81,7 @@ export default function UpdatesPage() {
     } finally { setBusy(null); }
   };
 
-  if (!isAdmin && user) return (<><Header title="Updates" /><div className="page max-w-5xl"><AdminOnlyNotice /></div></>);
+  if (!isAdmin && user) return (<><PageHeader title="Updates" /><div><AdminOnlyNotice /></div></>);
 
   const latest = s?.latest?.commit ?? null;
   const behind = s ? s.nodes.filter(n => latest && !same(n.commit, latest)) : [];
@@ -89,8 +89,8 @@ export default function UpdatesPage() {
 
   return (
     <>
-      <Header title="Updates" />
-      <div className="page max-w-5xl space-y-4">
+      <PageHeader title="Updates" description="Bosun version on each node." />
+      <div className="space-y-4">
         {!s ? (error ? <ErrorState message={error} onRetry={load} /> : <LoadingSpinner />) : (
           <>
             <Card>

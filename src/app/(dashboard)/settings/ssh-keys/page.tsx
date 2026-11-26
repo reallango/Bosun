@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Copy, KeyRound, Plus, Trash2 } from 'lucide-react';
-import Header from '@/components/layout/Header';
+import { PageHeader } from '@/components/settings/PageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -118,8 +118,8 @@ export default function SSHKeysPage() {
 
   return (
     <>
-      <Header title="SSH Keys" />
-      <div className="page max-w-6xl">
+      <PageHeader title="SSH keys" description="Keys Bosun uses to sign in to your servers." />
+      <div>
         <Card>
           <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2">
             <CardTitle>SSH keys</CardTitle>

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { BellRing, Mail, Plus, Trash2 } from 'lucide-react';
-import Header from '@/components/layout/Header';
+import { PageHeader } from '@/components/settings/PageHeader';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -155,8 +155,8 @@ export default function AlertsPage() {
 
   return (
     <>
-      <Header title="Alert Rules" />
-      <div className="page max-w-5xl space-y-4">
+      <PageHeader title="Alert rules" description="Rules that email you when a server or service goes wrong." />
+      <div className="space-y-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
           <p className="text-sm text-muted-foreground">Notify when a metric crosses a threshold.</p>
           {!showForm && (

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
-import Header from '@/components/layout/Header';
+import { PageHeader } from '@/components/settings/PageHeader';
 import { Card, CardContent } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
@@ -75,8 +75,8 @@ export default function AuditLogPage() {
 
   return (
     <>
-      <Header title="Audit Log" />
-      <div className="page max-w-6xl space-y-4">
+      <PageHeader title="Audit log" description="Who changed what, and when." />
+      <div className="space-y-4">
         <div className="flex flex-col gap-2 xs:flex-row">
           <label className="xs:w-48">
             <span className="sr-only">Filter by action</span>
