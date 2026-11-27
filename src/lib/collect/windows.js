@@ -14,7 +14,7 @@
 const zlib = require('zlib');
 const linux = require('./linux');
 const macs = require('./macs');
-const { metricsSection } = require('./metrics-section');
+const { metricsSection, withSlowMetrics } = require('./metrics-section');
 const { splitSections } = linux;
 
 const PROBES = ['stat', 'mem', 'netdev', 'gpu', 'df', 'ip', 'services', 'system'];
@@ -228,7 +228,7 @@ function buildSnapshot(raw, prev, now = Date.now()) {
     Object.assign(metrics, r.metrics);
   }
 
-  sections.metrics = metricsSection(metrics, state.uptimeSeconds);
+  sections.metrics = metricsSection(withSlowMetrics(metrics, state), state.uptimeSeconds);
   return { sections, metrics, state };
 }
 

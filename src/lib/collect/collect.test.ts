@@ -73,6 +73,21 @@ describe('linux collector', () => {
     expect(b.sections.ollama).toBeUndefined();   // widget-specific data is collected by the widget's own package, not by the poller's probes
   });
 
+  it('keeps the last disk usage in the metrics snapshot between disk probes, but not in the history', () => {
+    const t0 = 1_000_000;
+    // a full poll (disks included), then a fast poll without the df probe
+    const a = linux.buildSnapshot(linux.splitSections(output('cpu 100 0 100 800 0 0 0 0', 1000, 2000)), null, t0);
+    const { df: _skip, ...fast } = linux.splitSections(output('cpu 150 0 150 900 0 0 0 0', 11000, 4000));
+    const b = linux.buildSnapshot(fast, a.state, t0 + 10_000);
+    expect(b.sections.disks).toBeUndefined();                        // the disks section is only written when df ran
+    expect(b.sections.metrics.disk).toEqual({ root_used_pct: 50, max_used_pct: 90 }); // the snapshot keeps them
+    expect(b.metrics['disk.root_used_pct']).toBeUndefined();        // the history only records real samples
+    expect(b.sections.metrics.cpu.usage).toBe(50);                  // this poll's own numbers are there too
+    // the next disk probe replaces them (a disk that is gone does not linger)
+    const c = linux.buildSnapshot(linux.splitSections(output('cpu 200 0 200 1000 0 0 0 0', 12000, 5000)), b.state, t0 + 20_000);
+    expect(c.sections.metrics.disk.root_used_pct).toBe(50);
+  });
+
   it('treats a counter reset as no sample instead of a negative rate', () => {
     const a = linux.buildSnapshot({ netdev: NETDEV(5000, 5000) }, null, 0);
     const b = linux.buildSnapshot({ netdev: NETDEV(10, 10) }, a.state, 10_000);

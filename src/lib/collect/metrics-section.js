@@ -22,4 +22,25 @@ function metricsSection(metrics, uptimeSeconds) {
   return out;
 }
 
-module.exports = { metricsSection };
+/** Metrics that come from a slower probe tier (disks: every minute or two), so a fast poll does not have them. */
+const SLOW_PREFIXES = ['disk.'];
+
+/**
+ * The numbers for the `metrics` snapshot: this poll's, plus the last value of every slow-tier metric this poll did not
+ * measure, so a widget showing disk usage does not lose it between disk probes. `state` (the collector's per-server
+ * state) keeps those last values. Only the snapshot gets them: the metric history records real samples only.
+ */
+function withSlowMetrics(metrics, state) {
+  const slow = (state.slowMetrics && typeof state.slowMetrics === 'object') ? state.slowMetrics : {};
+  const measured = Object.keys(metrics).filter(k => SLOW_PREFIXES.some(p => k.startsWith(p)));
+  if (measured.length) {
+    // A slow probe ran: its values replace all earlier ones (a disk that is gone must not linger).
+    const next = {};
+    for (const k of measured) next[k] = metrics[k];
+    state.slowMetrics = next;
+    return { ...metrics };
+  }
+  return { ...slow, ...metrics };
+}
+
+module.exports = { metricsSection, withSlowMetrics };
