@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { WIDGET_API_LEVEL, apiLevelProblem } from './api-level';
 
 describe('WIDGET_API_LEVEL', () => {
-  it('is 5', () => {
-    expect(WIDGET_API_LEVEL).toBe(5);
+  it('is 6', () => {
+    expect(WIDGET_API_LEVEL).toBe(6);
   });
 });
 
@@ -17,10 +17,10 @@ describe('apiLevelProblem', () => {
 
   it('refuses a newer level with the message the admin is shown', () => {
     expect(apiLevelProblem({ api: WIDGET_API_LEVEL + 1 })).toBe(
-      'This widget needs a newer Bosun (widget API level 6; this Bosun has 5). Update Bosun first.',
+      'This widget needs a newer Bosun (widget API level 7; this Bosun has 6). Update Bosun first.',
     );
     expect(apiLevelProblem({ api: 99 })).toBe(
-      'This widget needs a newer Bosun (widget API level 99; this Bosun has 5). Update Bosun first.',
+      'This widget needs a newer Bosun (widget API level 99; this Bosun has 6). Update Bosun first.',
     );
   });
 });

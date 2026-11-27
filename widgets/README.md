@@ -48,6 +48,7 @@ newer Bosun is still listed under Available (so the reason is visible) but canno
 | 3 | `stacks.retag`, `stacks.deployLater` and `stacks.deployPrivilegedLater` (which replaced the earlier `stacks.startLater`), `setup`, and the widget-size keys `hideBelow`, `row.inline` and `row.subtitleHideBelow`. |
 | 4 | `bulk` on table views, the `stat` block, and the Manage-page keys of the earlier work: tab `count`, `open: "dialog"` on forms and editors, column `sort`, view `defaultSort`, and view `open` for row details. |
 | 5 | `schedules`: the runs a package offers under Settings → Schedules. |
+| 6 | Up to 64 actions per widget (40 before). |
 
 New spec keys that an older Bosun cannot honour raise the level in `src/lib/widgets/api-level.ts`; keys an older
 Bosun can safely ignore (because it renders the widget sensibly without them) do not.
@@ -343,6 +344,46 @@ working there without the tiles.
   { "type": "kv", "items": [{ "label": "Docker version", "value": "{datasets.system.version}", "format": "text" }] }
 ]
 ```
+
+## Docker Containers: backups and restore
+
+Docker Containers 1.0.23 can back up a container or a Bosun-managed stack with [restic](https://restic.net/), run
+as a short-lived `restic/restic` container with the data mounted read-only; nothing is installed on the host. Choose
+the destination once per server in the widget's settings: a folder on the host (a mounted NAS counts), SFTP
+(`sftp:user@host:/path`) or an S3-compatible endpoint (`s3:https://endpoint/bucket/prefix`). The destination and the
+repository password are package secrets (`backup_repository`, `backup_password`, and `backup_credentials` for the SFTP
+key or the S3 credentials). They reach the script only as `BOSUN_SECRET_*` environment variables; the key and the
+credentials are written to mode-0600 temporary files, never to a command line, the output or a log. Initialise the
+repository once from the Backups tab (the password reminder is shown there) and keep that password somewhere else:
+without it the backups cannot be read.
+
+A backup can include, per run: the container's named volumes (default on), its bind-mounted host folders ("mapped
+drives", default on; sensitive paths such as `/`, `/etc` and `/var/run/docker.sock` are refused), the stored compose
+file, `.env` and override of a Bosun-managed stack (default on), and the image itself through `docker save` (default
+off; large). Every backup also stores a small metadata file with the container, its stack and service, the image
+reference and id, its repo digest, the resolved version, labels, the mounts and where they belong, and the time.
+The resolved version is the `org.opencontainers.image.version` label when present; otherwise the widget asks the
+registry for the repository's tags (registry v2 `tags/list`, the same anonymous token as the image update check) and
+looks for a version-looking tag whose digest is this image's digest, recording `repo:<tag>` as `pinned_ref`; without
+one it records `repo@sha256:...`, which can still be pulled later.
+
+Each run chooses the consistency (`live`, or `stop` to stop the container or stack first and always start it again,
+also on failure) and the retention: `keep_last`, `keep_daily` (default 7), `keep_weekly` (4) and `keep_monthly` (6),
+applied with `restic forget --prune` only to that container's or stack's snapshots (tagged `bosun:container=<name>`
+or `bosun:stack=<name>`).
+
+The Backups tab of the Manage page shows the destination, the snapshots with time, size, what was included and the
+pinned version; open a snapshot to restore its data (stopping the container or stack first and starting it after),
+optionally pin the image to that snapshot's version — a standalone container is recreated with the pinned image, a
+Bosun-managed stack is redeployed with an extra `compose.backup-pin.yaml` override (the stored compose file is not
+edited) — or restore into new volumes to inspect the data first, and to delete the snapshot. Container and stack row
+menus also have "Back up", which runs with the defaults; the dialog with the inclusion and retention options is on
+the Containers and Stacks tabs (the package already uses all 40 actions the spec allows, so a separate row-menu
+dialog would need a core change). The new permissions are `docker.backup` ("Back up containers and stacks") and
+`docker.restore` ("Restore backups"), both high and admin by default. The row actions take the container or stack
+from the row and the Backups dataset declares its container/stack resources; because one action cannot name both a
+container and a stack target, the actions themselves are checked at server scope (a core `target.byKind`, or a second
+action per kind, would allow limiting them).
 
 ## Managing the Ollama installation
 

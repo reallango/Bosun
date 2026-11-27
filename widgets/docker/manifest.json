@@ -2,11 +2,11 @@
   "schema": 1,
   "id": "docker",
   "name": "Docker Containers",
-  "version": "1.0.24",
-  "description": "Containers on the host with logs, a shell, start, stop and restart; edit a container, create containers and stacks (a compose file, or one from a Git repository), and a Manage page for images, volumes and networks.",
+  "version": "1.0.25",
+  "description": "Containers on the host with logs, a shell, start, stop and restart; edit a container, create containers and stacks (a compose file, or one from a Git repository), back containers and stacks up with restic (volumes, mapped folders, stack files and the image, with the pinned image version) and restore them, update containers and stacks to newer images with a health check and automatic rollback, and a Manage page for images, volumes, networks and backups.",
   "author": "Bosun",
   "requires": {
-    "api": 5
+    "api": 6
   },
   "permissions": [
     {
@@ -76,6 +76,24 @@
       "id": "docker.install",
       "label": "Install Docker on a host",
       "description": "Install Docker Engine and the Compose plugin from Docker's apt repository (runs apt-get as root through the service account).",
+      "group": "Docker",
+      "defaultLevel": "admin",
+      "risk": "high",
+      "scope": "server"
+    },
+    {
+      "id": "docker.backup",
+      "label": "Back up containers and stacks",
+      "description": "Create backups of containers and stacks, see the backups of this server and initialise the backup repository. The data goes to the destination set in the package secrets.",
+      "group": "Docker",
+      "defaultLevel": "admin",
+      "risk": "high",
+      "scope": "server"
+    },
+    {
+      "id": "docker.restore",
+      "label": "Restore backups",
+      "description": "Restore a backup into the volumes and mapped folders of a container or stack (replacing its data), recreate it on the image version the backup recorded, and delete backups.",
       "group": "Docker",
       "defaultLevel": "admin",
       "risk": "high",
@@ -750,6 +768,100 @@
             "timeoutSec": 1800,
             "linux": "scripts/host_install.sh",
             "params": {}
+          },
+          "backup_run": {
+            "as": "service",
+            "timeoutSec": 1800,
+            "linux": "scripts/backup_run.sh",
+            "params": {
+              "mode": {
+                "type": "string",
+                "values": [
+                  "run",
+                  "init"
+                ],
+                "maxLength": 10,
+                "default": "run"
+              },
+              "kind": {
+                "type": "string",
+                "values": [
+                  "container",
+                  "stack"
+                ],
+                "maxLength": 20,
+                "default": "container"
+              },
+              "name": {
+                "type": "string",
+                "pattern": "^(-|[A-Za-z0-9][A-Za-z0-9_.-]{0,127})$",
+                "maxLength": 128,
+                "default": "-"
+              },
+              "settings": {
+                "type": "text",
+                "maxLength": 4000,
+                "maxLines": 100,
+                "linePattern": "^(#.*|[a-z_]+=.*)$",
+                "default": ""
+              }
+            },
+            "secrets": [
+              "backup_repository",
+              "backup_password",
+              "backup_credentials"
+            ]
+          },
+          "backup_restore": {
+            "as": "service",
+            "timeoutSec": 1800,
+            "linux": "scripts/backup_restore.sh",
+            "params": {
+              "mode": {
+                "type": "string",
+                "values": [
+                  "list",
+                  "restore",
+                  "forget"
+                ],
+                "maxLength": 20,
+                "default": "list"
+              },
+              "kind": {
+                "type": "string",
+                "values": [
+                  "all",
+                  "container",
+                  "stack"
+                ],
+                "maxLength": 20,
+                "default": "all"
+              },
+              "name": {
+                "type": "string",
+                "pattern": "^(-|[A-Za-z0-9][A-Za-z0-9_.-]{0,127})$",
+                "maxLength": 128,
+                "default": "-"
+              },
+              "snapshot": {
+                "type": "string",
+                "pattern": "^(-|[0-9a-f]{8,64})$",
+                "maxLength": 64,
+                "default": "-"
+              },
+              "settings": {
+                "type": "text",
+                "maxLength": 2000,
+                "maxLines": 20,
+                "linePattern": "^(#.*|[a-z_]+=.*)$",
+                "default": ""
+              }
+            },
+            "secrets": [
+              "backup_repository",
+              "backup_password",
+              "backup_credentials"
+            ]
           }
         },
         "data": {
@@ -1019,14 +1131,6 @@
             "permission": "docker.manage",
             "kind": "screen",
             "screen": "edit"
-          },
-          {
-            "id": "run_image",
-            "label": "Run",
-            "icon": "play",
-            "permission": "docker.manage",
-            "kind": "screen",
-            "screen": "create"
           },
           {
             "id": "stack_edit",
@@ -2185,6 +2289,129 @@
               "title": "Install Docker on this server?",
               "text": "Adds Docker's apt repository (download.docker.com, key checked by its fingerprint) and installs Docker Engine with the Compose and Buildx plugins as root, then starts Docker and lets Bosun's service account use it. Debian, Ubuntu and their derivatives."
             }
+          },
+          {
+            "id": "backup_run",
+            "label": "Back up",
+            "permission": "docker.backup",
+            "kind": "script",
+            "params": {
+              "mode": {
+                "type": "string",
+                "values": [
+                  "run",
+                  "init"
+                ],
+                "maxLength": 10,
+                "default": "run"
+              },
+              "kind": {
+                "type": "string",
+                "values": [
+                  "container",
+                  "stack"
+                ],
+                "maxLength": 20,
+                "default": "container",
+                "from": "kind"
+              },
+              "name": {
+                "type": "string",
+                "pattern": "^(-|[A-Za-z0-9][A-Za-z0-9_.-]{0,127})$",
+                "maxLength": 128,
+                "default": "-",
+                "from": "name"
+              },
+              "settings": {
+                "type": "text",
+                "maxLength": 4000,
+                "maxLines": 100,
+                "linePattern": "^(#.*|[a-z_]+=.*)$",
+                "default": ""
+              }
+            },
+            "variants": [
+              {
+                "script": "backup_run",
+                "args": {
+                  "mode": "param.mode",
+                  "kind": "param.kind",
+                  "name": "param.name",
+                  "settings": "param.settings"
+                }
+              }
+            ],
+            "job": true,
+            "icon": "download",
+            "result": "toast",
+            "after": "refresh"
+          },
+          {
+            "id": "backup_restore",
+            "label": "Restore or delete a backup",
+            "permission": "docker.restore",
+            "kind": "script",
+            "params": {
+              "mode": {
+                "type": "string",
+                "values": [
+                  "restore",
+                  "forget"
+                ],
+                "maxLength": 10,
+                "default": "restore"
+              },
+              "kind": {
+                "type": "string",
+                "values": [
+                  "container",
+                  "stack"
+                ],
+                "maxLength": 20,
+                "default": "container",
+                "from": "kind"
+              },
+              "name": {
+                "type": "string",
+                "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
+                "maxLength": 128,
+                "from": "name"
+              },
+              "snapshot": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{8,64}$",
+                "maxLength": 64,
+                "from": "id"
+              },
+              "settings": {
+                "type": "text",
+                "maxLength": 2000,
+                "maxLines": 20,
+                "linePattern": "^(#.*|[a-z_]+=.*)$",
+                "default": ""
+              }
+            },
+            "variants": [
+              {
+                "script": "backup_restore",
+                "args": {
+                  "mode": "param.mode",
+                  "kind": "param.kind",
+                  "name": "param.name",
+                  "snapshot": "param.snapshot",
+                  "settings": "param.settings"
+                }
+              }
+            ],
+            "job": true,
+            "icon": "upload",
+            "result": "toast",
+            "after": "refresh",
+            "confirm": {
+              "title": "Restore or delete this backup?",
+              "text": "Restoring replaces the data in the volumes and mapped folders and restarts the container or stack; files created after the backup are removed. Deleting removes the snapshot and cannot be undone.",
+              "destructive": true
+            }
           }
         ],
         "datasets": {
@@ -2291,6 +2518,15 @@
             "script": "host_detect",
             "cacheSec": 0,
             "permission": "docker.view"
+          },
+          "backups": {
+            "script": "backup_restore",
+            "cacheSec": 10,
+            "permission": "docker.backup",
+            "resources": {
+              "container": "container",
+              "stack": "stack"
+            }
           }
         },
         "screens": {
@@ -3984,6 +4220,10 @@
                 "args": {
                   "mode": "literal:summary"
                 }
+              },
+              "backups": {
+                "dataset": "backups",
+                "args": {}
               }
             },
             "blocks": [
@@ -4114,6 +4354,129 @@
                         "actions": [
                           "new_container",
                           "stack_new"
+                        ]
+                      },
+                      {
+                        "type": "editor",
+                        "open": "dialog",
+                        "label": "Back up a container",
+                        "description": "Choose what one backup includes and how many backups are kept. The engine runs as a short-lived restic container, so nothing is installed on the host.",
+                        "param": "settings",
+                        "fields": [
+                          {
+                            "name": "name",
+                            "label": "Container",
+                            "input": "select",
+                            "required": true,
+                            "optionsFrom": {
+                              "path": "data",
+                              "value": "name",
+                              "label": "name"
+                            },
+                            "transient": true
+                          },
+                          {
+                            "name": "h_what",
+                            "label": "What to include",
+                            "input": "heading"
+                          },
+                          {
+                            "name": "volumes",
+                            "label": "Named volumes",
+                            "input": "select",
+                            "options": [
+                              {
+                                "value": "true",
+                                "label": "Yes"
+                              },
+                              {
+                                "value": "false",
+                                "label": "No"
+                              }
+                            ]
+                          },
+                          {
+                            "name": "binds",
+                            "label": "Mapped host folders",
+                            "input": "select",
+                            "options": [
+                              {
+                                "value": "true",
+                                "label": "Yes"
+                              },
+                              {
+                                "value": "false",
+                                "label": "No"
+                              }
+                            ]
+                          },
+                          {
+                            "name": "image",
+                            "label": "The container image (large)",
+                            "input": "checkbox",
+                            "help": "Saved with docker save. Useful when the registry may drop the version."
+                          },
+                          {
+                            "name": "h_when",
+                            "label": "Consistency",
+                            "input": "heading"
+                          },
+                          {
+                            "name": "consistency",
+                            "label": "While copying",
+                            "input": "select",
+                            "options": [
+                              {
+                                "value": "live",
+                                "label": "Leave it running"
+                              },
+                              {
+                                "value": "stop",
+                                "label": "Stop it, copy, start it again"
+                              }
+                            ]
+                          },
+                          {
+                            "name": "h_keep",
+                            "label": "Retention (0 = do not apply)",
+                            "input": "heading"
+                          },
+                          {
+                            "name": "keep_last",
+                            "label": "Keep the last",
+                            "input": "number",
+                            "placeholder": "0"
+                          },
+                          {
+                            "name": "keep_daily",
+                            "label": "Keep daily",
+                            "input": "number",
+                            "placeholder": "7"
+                          },
+                          {
+                            "name": "keep_weekly",
+                            "label": "Keep weekly",
+                            "input": "number",
+                            "placeholder": "4"
+                          },
+                          {
+                            "name": "keep_monthly",
+                            "label": "Keep monthly",
+                            "input": "number",
+                            "placeholder": "6"
+                          }
+                        ],
+                        "submits": [
+                          {
+                            "action": "backup_run",
+                            "label": "Back up now",
+                            "style": "primary",
+                            "params": {
+                              "mode": "literal:run",
+                              "kind": "literal:container",
+                              "name": "values.name"
+                            }
+                          }
                         ]
                       },
                       {
@@ -4301,7 +4664,7 @@
                             }
                           ],
                           "rowActions": [
-                            "run_image",
+                            "new_container",
                             "image_remove"
                           ],
                           "bulk": [
@@ -4537,6 +4900,144 @@
                         ]
                       },
                       {
+                        "type": "editor",
+                        "open": "dialog",
+                        "label": "Back up a stack",
+                        "description": "Choose what one backup includes and how many backups are kept. The engine runs as a short-lived restic container, so nothing is installed on the host.",
+                        "param": "settings",
+                        "fields": [
+                          {
+                            "name": "name",
+                            "label": "Stack",
+                            "input": "select",
+                            "required": true,
+                            "optionsFrom": {
+                              "path": "datasets.stacks",
+                              "value": "name",
+                              "label": "name"
+                            },
+                            "transient": true
+                          },
+                          {
+                            "name": "h_what",
+                            "label": "What to include",
+                            "input": "heading"
+                          },
+                          {
+                            "name": "volumes",
+                            "label": "Named volumes",
+                            "input": "select",
+                            "options": [
+                              {
+                                "value": "true",
+                                "label": "Yes"
+                              },
+                              {
+                                "value": "false",
+                                "label": "No"
+                              }
+                            ]
+                          },
+                          {
+                            "name": "binds",
+                            "label": "Mapped host folders",
+                            "input": "select",
+                            "options": [
+                              {
+                                "value": "true",
+                                "label": "Yes"
+                              },
+                              {
+                                "value": "false",
+                                "label": "No"
+                              }
+                            ]
+                          },
+                          {
+                            "name": "stack_files",
+                            "label": "The stored compose, .env and override files",
+                            "input": "select",
+                            "options": [
+                              {
+                                "value": "true",
+                                "label": "Yes"
+                              },
+                              {
+                                "value": "false",
+                                "label": "No"
+                              }
+                            ]
+                          },
+                          {
+                            "name": "image",
+                            "label": "The container image (large)",
+                            "input": "checkbox",
+                            "help": "Saved with docker save. Useful when the registry may drop the version."
+                          },
+                          {
+                            "name": "h_when",
+                            "label": "Consistency",
+                            "input": "heading"
+                          },
+                          {
+                            "name": "consistency",
+                            "label": "While copying",
+                            "input": "select",
+                            "options": [
+                              {
+                                "value": "live",
+                                "label": "Leave it running"
+                              },
+                              {
+                                "value": "stop",
+                                "label": "Stop it, copy, start it again"
+                              }
+                            ]
+                          },
+                          {
+                            "name": "h_keep",
+                            "label": "Retention (0 = do not apply)",
+                            "input": "heading"
+                          },
+                          {
+                            "name": "keep_last",
+                            "label": "Keep the last",
+                            "input": "number",
+                            "placeholder": "0"
+                          },
+                          {
+                            "name": "keep_daily",
+                            "label": "Keep daily",
+                            "input": "number",
+                            "placeholder": "7"
+                          },
+                          {
+                            "name": "keep_weekly",
+                            "label": "Keep weekly",
+                            "input": "number",
+                            "placeholder": "4"
+                          },
+                          {
+                            "name": "keep_monthly",
+                            "label": "Keep monthly",
+                            "input": "number",
+                            "placeholder": "6"
+                          }
+                        ],
+                        "submits": [
+                          {
+                            "action": "backup_run",
+                            "label": "Back up now",
+                            "style": "primary",
+                            "params": {
+                              "mode": "literal:run",
+                              "kind": "literal:stack",
+                              "name": "values.name"
+                            }
+                          }
+                        ]
+                      },
+                      {
                         "type": "view",
                         "path": "datasets.stacks",
                         "view": {
@@ -4592,6 +5093,250 @@
                         }
                       }
                     ]
+                  },
+                  {
+                    "id": "backups",
+                    "label": "Backups",
+                    "count": "datasets.backups.rows",
+                    "blocks": [
+                      {
+                        "type": "kv",
+                        "items": [
+                          {
+                            "label": "Destination",
+                            "value": "{datasets.backups.status.repository}",
+                            "format": "text"
+                          },
+                          {
+                            "label": "State",
+                            "value": "{datasets.backups.status.state}",
+                            "format": "text"
+                          },
+                          {
+                            "label": "Snapshots",
+                            "value": "{datasets.backups.status.snapshots}",
+                            "format": "text"
+                          },
+                          {
+                            "label": "Repository size",
+                            "value": "{datasets.backups.status.size}",
+                            "format": "text"
+                          }
+                        ]
+                      },
+                      {
+                        "type": "notice",
+                        "level": "warning",
+                        "text": "{datasets.backups.status.message}",
+                        "when": {
+                          "field": "datasets.backups.status.initialised",
+                          "equals": false
+                        }
+                      },
+                      {
+                        "type": "notice",
+                        "level": "info",
+                        "text": "Backups are kept with restic. Restore replaces the data of a container or stack; use a new volume to inspect it first.",
+                        "when": {
+                          "field": "datasets.backups.status.initialised",
+                          "equals": true
+                        }
+                      },
+                      {
+                        "type": "editor",
+                        "fields": [
+                          {
+                            "name": "h_init",
+                            "label": "Repository",
+                            "input": "heading"
+                          }
+                        ],
+                        "submits": [
+                          {
+                            "action": "backup_run",
+                            "label": "Initialise repository",
+                            "style": "primary",
+                            "params": {
+                              "mode": "literal:init",
+                              "kind": "literal:container",
+                              "name": "literal:-"
+                            }
+                          }
+                        ]
+                      },
+                      {
+                        "type": "view",
+                        "path": "datasets.backups.rows",
+                        "view": {
+                          "type": "table",
+                          "empty": "No backups yet",
+                          "open": "restore_backup",
+                          "filter": {
+                            "fields": [
+                              "name",
+                              "included",
+                              "pinned_ref"
+                            ],
+                            "placeholder": "Filter"
+                          },
+                          "columns": [
+                            {
+                              "title": "Target",
+                              "value": "{name}",
+                              "format": "text",
+                              "sort": "name"
+                            },
+                            {
+                              "title": "Kind",
+                              "value": "{kind}",
+                              "format": "badge"
+                            },
+                            {
+                              "title": "Time",
+                              "value": "{time}",
+                              "format": "ago",
+                              "sort": "time"
+                            },
+                            {
+                              "title": "Size",
+                              "value": "{size_bytes}",
+                              "format": "bytes"
+                            },
+                            {
+                              "title": "Included",
+                              "value": "{included}",
+                              "format": "text"
+                            },
+                            {
+                              "title": "Pinned image",
+                              "value": "{pinned_ref}",
+                              "format": "text"
+                            },
+                            {
+                              "title": "Snapshot",
+                              "value": "{short}",
+                              "format": "text"
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "type": "editor",
+                        "param": "settings",
+                        "fields": [
+                          {
+                            "name": "init",
+                            "label": "Initialise the backup repository (once per server)",
+                            "input": "heading"
+                          }
+                        ],
+                        "submits": [
+                          {
+                            "action": "backup_run",
+                            "label": "Initialise the repository",
+                            "params": {
+                              "mode": "literal:init",
+                              "kind": "literal:container",
+                              "name": "literal:-"
+                            }
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          },
+          "restore_backup": {
+            "kind": "dialog",
+            "size": "md",
+            "title": "Restore or delete {context.name}",
+            "description": "Bring the data of a backup back, optionally pin the image version, or delete the snapshot.",
+            "load": {},
+            "blocks": [
+              {
+                "type": "kv",
+                "items": [
+                  {
+                    "label": "Backup",
+                    "value": "{context.time}",
+                    "format": "ago"
+                  },
+                  {
+                    "label": "Size",
+                    "value": "{context.size_bytes}",
+                    "format": "bytes"
+                  },
+                  {
+                    "label": "Included",
+                    "value": "{context.included}",
+                    "format": "text"
+                  },
+                  {
+                    "label": "Pinned image",
+                    "value": "{context.pinned_ref}",
+                    "format": "text"
+                  }
+                ]
+              },
+              {
+                "type": "notice",
+                "level": "warning",
+                "text": "Restoring replaces the data in the volumes and mapped folders and restarts the container or stack; files created after the backup are removed. Choose a new volume to inspect the data first without touching anything running. Deleting a snapshot cannot be undone."
+              },
+              {
+                "type": "editor",
+                "param": "settings",
+                "fields": [
+                  {
+                    "name": "mode",
+                    "label": "Do",
+                    "input": "select",
+                    "options": [
+                      {
+                        "value": "restore",
+                        "label": "Restore this backup"
+                      },
+                      {
+                        "value": "forget",
+                        "label": "Delete this backup"
+                      }
+                    ]
+                  },
+                  {
+                    "name": "pin_image",
+                    "label": "Pin the image to the version in this backup",
+                    "input": "checkbox",
+                    "help": "A standalone container is recreated with that image; a Bosun-managed stack is redeployed with an extra override file."
+                  },
+                  {
+                    "name": "restore_mode",
+                    "label": "Restore into",
+                    "input": "select",
+                    "options": [
+                      {
+                        "value": "replace",
+                        "label": "The container's volumes and folders"
+                      },
+                      {
+                        "value": "new_volume",
+                        "label": "New volumes (inspect first, nothing running is touched)"
+                      }
+                    ]
+                  }
+                ],
+                "submits": [
+                  {
+                    "action": "backup_restore",
+                    "label": "Continue",
+                    "style": "danger",
+                    "params": {
+                      "mode": "values.mode",
+                      "kind": "context.kind",
+                      "name": "context.name",
+                      "snapshot": "context.id"
+                    }
                   }
                 ]
               }
@@ -4676,6 +5421,21 @@
       "id": "git_credentials",
       "label": "Git credentials for other hosts",
       "description": "For private repositories on GitLab, Gitea, Bitbucket or your own Git server: entries \"host=token\" or \"host=user:token\" separated by spaces, e.g. \"gitlab.com=glpat-xxx git.lan:3000=bosun:token\". Each is sent only to its own host."
+    },
+    {
+      "id": "backup_repository",
+      "label": "Backup destination",
+      "description": "Where restic keeps the backups: an absolute folder on the host (a mounted NAS counts, e.g. /mnt/backups/bosun), sftp:user@host:/path, or s3:https://endpoint/bucket/prefix. Used by the Backups tab of the Docker widget."
+    },
+    {
+      "id": "backup_password",
+      "label": "Backup repository password",
+      "description": "The restic password of the backup repository. Store a copy somewhere else too: without it the backups cannot be read. Never shown again after saving."
+    },
+    {
+      "id": "backup_credentials",
+      "label": "Backup credentials",
+      "description": "For an SFTP destination: the private key, base64-encoded (base64 -w0 < key) or an absolute path to the key file on the host. For S3: ACCESS_KEY:SECRET_KEY. Not used for a local folder."
     }
   ]
 }

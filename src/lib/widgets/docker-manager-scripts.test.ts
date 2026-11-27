@@ -16,9 +16,12 @@ const script = (name: string) => fs.readFileSync(path.join(dir, name), 'utf8');
 let bin = '';
 let log = '';
 let home = '';
+let capture = '';
 beforeEach(() => {
   bin = fs.mkdtempSync(path.join(os.tmpdir(), 'bosun-fakedm-'));
   home = fs.mkdtempSync(path.join(os.tmpdir(), 'bosun-fakehome-'));
+  capture = path.join(bin, 'capture');
+  fs.mkdirSync(capture);
   log = path.join(bin, 'calls.log');
   fs.writeFileSync(log, '');
 });
@@ -51,7 +54,7 @@ const run = (file: string, params: Record<string, string> = {}, extraEnv: Record
   const inv = buildScriptInvocation('linux', script(file), params, { stdinParams: ['settings', 'input', 'yaml', 'env', 'override'] });
   return spawnSync('sh', ['-c', inv.command], {
     input: inv.stdin, encoding: 'utf8', cwd: bin,
-    env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, LOG: log, HOME: home, BOSUN_RECREATE_WAIT: '0', ...extraEnv },
+    env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, LOG: log, HOME: home, CAPTURE: capture, BOSUN_RECREATE_WAIT: '0', ...extraEnv },
   });
 };
 const out = (file: string, params: Record<string, string> = {}, extraEnv: Record<string, string> = {}) => parseScriptOutput(run(file, params, extraEnv).stdout);
@@ -708,8 +711,8 @@ describe('stacks', () => {
     fake(`case "$1" in ps) printf 'mine${t}web${t}running\\nmine${t}db${t}exited\\nmine${t}web${t}running\\next${t}app${t}running\\next${t}app2${t}running\\n' ;; esac`);
     const j = JSON.parse(run('stacks.sh').stdout);
     expect(j.map((s: { name: string }) => s.name)).toEqual(['ext', 'idle', 'mine', 'weird']);
-    expect(j.find((s: { name: string }) => s.name === 'mine')).toEqual({ name: 'mine', status: 'partial', services: 2, source: 'git', repo: 'https://github.com/o/r', branch: 'main', file: 'deploy/compose.yaml', updated: '2025-01-02T03:04:05Z' });
-    expect(j.find((s: { name: string }) => s.name === 'ext')).toEqual({ name: 'ext', status: 'running', services: 2, source: 'external', repo: '', branch: '', file: '', updated: '' });
+    expect(j.find((s: { name: string }) => s.name === 'mine')).toEqual({ name: 'mine', kind: 'stack', status: 'partial', services: 2, source: 'git', repo: 'https://github.com/o/r', branch: 'main', file: 'deploy/compose.yaml', updated: '2025-01-02T03:04:05Z' });
+    expect(j.find((s: { name: string }) => s.name === 'ext')).toEqual({ name: 'ext', kind: 'stack', status: 'running', services: 2, source: 'external', repo: '', branch: '', file: '', updated: '' });
     expect(j.find((s: { name: string }) => s.name === 'idle')).toMatchObject({ status: 'stopped', services: 0, source: 'editor' });
     expect(j.find((s: { name: string }) => s.name === 'weird')).toMatchObject({ repo: 'a"b\\c', branch: 'xY' });
     fs.rmSync(path.join(home, 'bosun-stacks'), { recursive: true });
@@ -2897,15 +2900,18 @@ exit 0
 });
 
 describe('image_updates (dataset)', () => {
-  type ImageRow = { cid: string; name: string; ref: string; stack?: string; service?: string; imageId: string; repoDigests: string };
-  // A fake Docker for image_updates.sh: the containers, their image ids and RepoDigests, and the registry lookup (buildx
-  // when `buildx`, docker manifest inspect otherwise). A reference in `failures` makes the lookup fail with that message.
+  // `identity` is what the containerd image store says the image came from: "pull" (pulled), "build" (built here), or
+  // undefined (nothing recorded: a classic image store, or an imported image).
+  type ImageRow = { cid: string; name: string; ref: string; stack?: string; service?: string; imageId: string; repoDigests: string; identity?: 'pull' | 'build' };
+  // A fake Docker for image_updates.sh: the containers, their image ids, RepoDigests and origin, and the registry lookup
+  // (buildx when `buildx`, docker manifest inspect otherwise). A reference in `failures` makes the lookup fail with that message.
   const imageFake = (list: ImageRow[], remote: Record<string, string>, buildx = true, failures: Record<string, string> = {}) => {
     const lines = (xs: string[]) => xs.join('\\n');
     const ps = lines(list.map((r) => `${r.cid}|${r.name}|${r.ref}|${r.stack ?? ''}|${r.service ?? ''}`));
     const cids = lines(list.map((r) => r.cid));
     const cid = lines(list.map((r) => `${r.cid}|${r.imageId}`));
-    const imgs = lines([...new Map(list.map((r) => [r.imageId, r.repoDigests])).entries()].map(([id, d]) => `${id}|${d}`));
+    const ident = (r: ImageRow) => (r.identity === 'pull' ? '{"Pull":[{"Repository":"o/app"}]}' : r.identity === 'build' ? '{"Build":[{"Ref":"abc"}]}' : 'null');
+    const imgs = lines([...new Map(list.map((r) => [r.imageId, `${r.repoDigests}|${ident(r)}`])).entries()].map(([id, d]) => `${id}|${d}`));
     const cases = [
       ...Object.entries(remote).map(([ref, json]) => `    ${ref}) printf '%s\\n' '${json}' ;;`),
       ...Object.entries(failures).map(([ref, msg]) => `    ${ref}) printf '%s\\n' '${msg}' >&2; exit 1 ;;`),
@@ -2926,6 +2932,8 @@ ${cases}
 esac`);
   };
   const jsonRows = (r: { stdout: string }) => JSON.parse(r.stdout) as Array<Record<string, unknown>>;
+  const lookups = () => dockerCalls().filter((c) => (c[0] === 'buildx' && c[1] === 'imagetools') || (c[0] === 'manifest' && c[1] === 'inspect'));
+  const LOCAL = 'c'.repeat(64);
 
   it.skipIf(!hasSh)('marks a tag that still points to the local image up to date and one that moved as available', () => {
     imageFake([
@@ -2956,10 +2964,33 @@ esac`);
     expect(jsonRows(run('image_updates.sh'))[0]).toMatchObject({ image: 'ghcr.io/o/app:1.2', local_digest: `sha256:${idx}`, remote_digest: `sha256:${idx}`, update_available: false, note: '' });
   });
 
-  it.skipIf(!hasSh)('leaves a locally built image unknown with a note', () => {
+  it.skipIf(!hasSh)('reports an image with no repo digests as built locally, without a lookup', () => {
     imageFake([{ cid: 'c1', name: 'app', ref: 'myapp:latest', imageId: 'sha256:i1', repoDigests: '[]' }], {});
-    expect(jsonRows(run('image_updates.sh'))[0]).toMatchObject({ local_digest: '', remote_digest: '', update_available: null, update: '', note: 'locally built' });
-    expect(dockerCalls().some((c) => c[0] === 'buildx' && c[1] === 'imagetools')).toBe(false);
+    expect(jsonRows(run('image_updates.sh'))[0]).toMatchObject({ local_digest: '', remote_digest: '', update_available: null, update: '', note: 'built locally' });
+    expect(lookups()).toHaveLength(0);
+  });
+
+  it.skipIf(!hasSh)('reports an image the containerd store gives its own digest as built locally, without a lookup', () => {
+    const own = (repo: string, id: string) => `["${repo}@sha256:${id}"]`;
+    imageFake([
+      { cid: 'c1', name: 'audio', ref: 'audiobook-studio-audiobook-studio', imageId: `sha256:${ID}`, repoDigests: own('audiobook-studio-audiobook-studio', ID), identity: 'build' },
+      { cid: 'c2', name: 'orch', ref: 'langgraph-orchestrator:api', imageId: `sha256:${NEW}`, repoDigests: own('langgraph-orchestrator', NEW), identity: 'build' },
+      { cid: 'c3', name: 'whisper', ref: 'local/faster-whisper:latest', imageId: `sha256:${LOCAL}`, repoDigests: own('local/faster-whisper', LOCAL), identity: 'build' },
+    ], {});
+    expect(jsonRows(run('image_updates.sh'))).toMatchObject([
+      { container: 'audio', image: 'audiobook-studio-audiobook-studio', local_digest: '', remote_digest: '', update_available: null, update: '', note: 'built locally' },
+      { container: 'orch', image: 'langgraph-orchestrator:api', local_digest: '', remote_digest: '', update_available: null, update: '', note: 'built locally' },
+      { container: 'whisper', image: 'local/faster-whisper:latest', local_digest: '', remote_digest: '', update_available: null, update: '', note: 'built locally' },
+    ]);
+    expect(lookups()).toHaveLength(0);
+  });
+
+  it.skipIf(!hasSh)('still compares a pulled Docker Hub image whose digest is its own id', () => {
+    imageFake([{ cid: 'c1', name: 'web', ref: 'nginx:latest', imageId: `sha256:${ID}`, repoDigests: `["nginx@sha256:${ID}"]`, identity: 'pull' }], {
+      'nginx:latest': `{"digest":"sha256:${NEW}"}`,
+    });
+    expect(jsonRows(run('image_updates.sh'))[0]).toMatchObject({ local_digest: `sha256:${ID}`, remote_digest: `sha256:${NEW}`, update_available: true, update: 'available', note: '' });
+    expect(lookups()).toHaveLength(1);
   });
 
   it.skipIf(!hasSh)('leaves a digest-pinned reference unknown with a note', () => {
@@ -2981,7 +3012,16 @@ esac`);
     imageFake([{ cid: 'c1', name: 'app', ref: 'private/app:1', imageId: 'sha256:i1', repoDigests: `["private/app@sha256:${ID}"]` }], {}, true, {
       'private/app:1': 'Error response from daemon: unauthorized: authentication required',
     });
-    expect(jsonRows(run('image_updates.sh'))[0]).toMatchObject({ update_available: null, note: 'needs credentials' });
+    expect(jsonRows(run('image_updates.sh'))[0]).toMatchObject({ local_digest: `sha256:${ID}`, update_available: null, note: 'needs credentials' });
+    expect(lookups()).toHaveLength(1);
+  });
+
+  it.skipIf(!hasSh)('reports a refused Docker Hub name as built locally when Docker records no pull for the image', () => {
+    imageFake([{ cid: 'c1', name: 'app', ref: 'myapp:api', imageId: `sha256:${ID}`, repoDigests: `["myapp@sha256:${ID}"]` }], {}, true, {
+      'myapp:api': 'Error response from daemon: unauthorized: authentication required',
+    });
+    expect(jsonRows(run('image_updates.sh'))[0]).toMatchObject({ local_digest: '', remote_digest: '', update_available: null, update: '', note: 'built locally' });
+    expect(lookups()).toHaveLength(1);
   });
 
   it.skipIf(!hasSh)('looks a reference up once for two containers', () => {
@@ -3053,3 +3093,254 @@ esac`);
   });
 });
 
+
+describe('backup and restore (restic in a container)', () => {
+  it('keeps the restic runner identical in the backup and restore scripts', () => {
+    const grab = (name: string) => {
+      const s = script(name);
+      return s.slice(s.indexOf('# >>> restic runner'), s.indexOf('# <<< restic runner'));
+    };
+    expect(grab('backup_run.sh')).toBe(grab('backup_restore.sh'));
+  });
+
+
+  const DIG = '1'.repeat(64);
+  const IMGID = 'sha256:' + '2'.repeat(64);
+  const CID = 'a'.repeat(64);
+  const SNAP = 'c'.repeat(64);
+  const NEWID = 'd'.repeat(64);
+  const CAPTURE_META = `meta=''; prev=''
+for a in "$@"; do [ "$prev" = -v ] && case "$a" in *:/bosun/meta:ro) meta=\${a%:/bosun/meta:ro} ;; esac; prev=$a; done
+[ -z "$meta" ] || cp -r "$meta"/. "$CAPTURE"/ 2>/dev/null`;
+
+  /** A fake docker for a standalone container; `backup` is the body of the restic backup call. */
+  const backupDocker = (opts: {
+    label?: string; mounts?: string; backup?: string; facts?: string;
+    save?: string; onBackup?: string; pinned?: string;
+  } = {}) => {
+    const label = opts.label ?? '1.2.3';
+    const mounts = opts.mounts ?? 'volume\\tdata\\t/var/lib/docker/volumes/data/_data\\t/data\\ttrue\\nbind\\t-\\t/srv/app\\t/app\\tfalse';
+    const backup = opts.backup ?? `echo '{"snapshot_id":"${SNAP}"}'`;
+    const facts = opts.facts ?? `printf 'ID %s\\nRUN true\\nREF nginx:latest\\nIMGID ${IMGID}\\nPROJ \\nSVC \\n' ${CID}`;
+    return fake(`case "$1" in
+  ps) case "$*" in *-aq*) echo ${CID} ;; esac; exit 0 ;;
+  image) case "$2" in inspect) case "$*" in *RepoDigests*) echo '["nginx@sha256:${DIG}"]' ;; *opencontainers*) echo '${label}' ;; *) exit 0 ;; esac ;; *) exit 0 ;; esac ;;
+  inspect) case "$*" in
+    *web-bosun-old*) exit 1 ;;
+    *'{{$c := .Config}}'*) printf 'ID\\t%s\\nRUN\\ttrue\\nREF\\tnginx:latest\\nIMGID\\t${IMGID}\\n' ${CID} ;;
+    *'{{range .Mounts}}'*) printf '${mounts}\\n' ;;
+    *'{{json .Config.Labels}}'*) echo '{"com.docker.compose.project":"","com.docker.compose.service":""}' ;;
+    *'{{.Name}}'*) echo /web ;;
+    *'--format {{.State.Running}}'*) echo true ;;
+    *'--format {{.Id}}'*) echo ${CID} ;;
+    *'--format {{.Image}}'*) echo ${IMGID} ;;
+    *RUN*) ${facts} ;;
+    *REF*) printf 'ID %s\\nREF nginx:latest\\nIMGID ${IMGID}\\nPROJ \\nSVC \\n' ${CID} ;;
+    *) exit 0 ;;
+  esac ;;
+  create) echo ${NEWID} ;;
+  rename|stop|start|rm|pull) exit 0 ;;
+  run) case "$*" in
+    *'--entrypoint /bin/sh'*) case "$*" in *'du -sk'*) echo 123 ;; *'restore'*) echo restored ;; *'compose.yaml'*) printf '# Managed by Bosun\\nservices:\\n  web:\\n    image: nginx:latest\\n' ;; *) echo ok ;; esac ;;
+    *' backup '*) ${CAPTURE_META}${opts.onBackup ? `; ${opts.onBackup}` : ''}; ${backup} ;;
+    *' forget '*) echo forgot ;;
+    *' cat config'*) exit 0 ;;
+    *' snapshots --json'*) echo '[]' ;;
+    *' dump '*) case "$*" in
+      *'/bosun/meta/restore_map'*) printf 'web\\tvolume\\tdata\\t/data\\ttrue\\t/bosun/data/0-v1\\nweb\\tbind\\t${bin}/app\\t/app\\tfalse\\t/bosun/data/0-b1\\n' ;;
+      *'/bosun/meta/pinned_map'*) printf '${opts.pinned ?? 'web\\t-\\tnginx:1.2.3\\t1.2.3'}\\n' ;;
+      *) exit 1 ;;
+    esac ;;
+    *) exit 0 ;;
+  esac ;;
+  save) ${opts.save ?? 'exit 0'} ;;
+  *) exit 0 ;;
+esac`);
+  };
+
+  const env = (repo: string, extra: Record<string, string> = {}) => ({
+    BOSUN_SECRET_backup_repository: repo, BOSUN_SECRET_backup_password: 'repo-pw', ...extra,
+  });
+  const repoPath = () => path.join(bin, 'repo');
+
+  it.skipIf(!hasSh)('backs up only what was chosen, and records the pinned image version in the metadata', () => {
+    backupDocker();
+    const r = run('backup_run.sh', {
+      mode: 'run', kind: 'container', name: 'web',
+      settings: 'volumes=false\nbinds=true\nstack_files=false\nimage=false\nconsistency=live\nkeep_daily=3',
+    }, env(repoPath()));
+    expect(r.stdout).not.toContain('ERROR:');
+    const backup = dockerCalls().find(c => c[0] === 'run' && c.includes('backup'))!;
+    expect(backup.some(a => a.includes('/bosun/data/0-b1'))).toBe(true);
+    expect(backup.some(a => a.includes('/bosun/data/0-v1'))).toBe(false);
+    expect(backup).toEqual(expect.arrayContaining(['--tag', 'bosun:binds=1', '--tag', 'bosun:pinned=nginx:1.2.3', '--tag', 'bosun:version=1.2.3']));
+    expect(backup).not.toContain('bosun:volumes=1');
+    expect(backup).not.toContain('bosun:files=1');
+    const meta = JSON.parse(fs.readFileSync(path.join(capture, 'web.json'), 'utf8'));
+    expect(meta).toMatchObject({
+      kind: 'container', name: 'web', container: 'web', image: 'nginx:latest', image_id: IMGID,
+      repo_digest: 'sha256:' + DIG, resolved_version: '1.2.3', pinned_ref: 'nginx:1.2.3', version_source: 'label',
+      included: { volumes: false, binds: true, stack_files: false, image: false },
+    });
+    expect(meta.mounts).toEqual([{ type: 'bind', source: '/srv/app', destination: '/app', target: '/bosun/data/0-b1', read_only: false }]);
+    expect(meta.labels).toHaveProperty('com.docker.compose.project');
+  });
+
+  it.skipIf(!hasSh)('refuses a sensitive bind path and never starts restic', () => {
+    backupDocker({ mounts: 'bind\\t-\\t/etc\\t/etc\\tfalse' });
+    const r = run('backup_run.sh', {
+      mode: 'run', kind: 'container', name: 'web', settings: 'binds=true\nvolumes=false\nimage=false',
+    }, env(repoPath()));
+    expect(r.stdout).toMatch(/sensitive host path/);
+    expect(dockerCalls().some(c => c[0] === 'run' && c.includes('backup'))).toBe(false);
+  });
+
+  it.skipIf(!hasSh)('resolves a moving tag from the registry tags when there is no version label', () => {
+    backupDocker({ label: '' });
+    fakeCmd('curl', `case "$*" in
+  *auth.docker.io*) echo '{"token":"tok"}' ;;
+  *tags/list*) echo '{"name":"library/nginx","tags":["latest","1.2.3","1.2.4"]}' ;;
+  *manifests/1.2.4*) printf 'HTTP/1.1 200 OK\\r\\nDocker-Content-Digest: sha256:${DIG}\\r\\n' ;;
+  *manifests/*) printf 'HTTP/1.1 200 OK\\r\\nDocker-Content-Digest: sha256:0000000000000000000000000000000000000000000000000000000000000000\\r\\n' ;;
+  *) exit 0 ;;
+esac`);
+    const r = run('backup_run.sh', { mode: 'run', kind: 'container', name: 'web', settings: 'volumes=true\nbinds=false\nimage=false' }, env(repoPath()));
+    expect(r.stdout).not.toContain('ERROR:');
+    const meta = JSON.parse(fs.readFileSync(path.join(capture, 'web.json'), 'utf8'));
+    expect(meta).toMatchObject({ resolved_version: '1.2.4', pinned_ref: 'nginx:1.2.4', version_source: 'registry' });
+    const backup = dockerCalls().find(c => c[0] === 'run' && c.includes('backup'))!;
+    expect(backup).toContain('bosun:pinned=nginx:1.2.4');
+  });
+
+  it.skipIf(!hasSh)('falls back to the repo digest when no tag can be resolved', () => {
+    backupDocker({ label: '' });
+    fakeCmd('curl', `case "$*" in *tags/list*) echo '{"name":"library/nginx","tags":[]}' ;; *) exit 0 ;; esac`);
+    const r = run('backup_run.sh', { mode: 'run', kind: 'container', name: 'web', settings: 'volumes=true\nbinds=false\nimage=false' }, env(repoPath()));
+    expect(r.stdout).not.toContain('ERROR:');
+    const meta = JSON.parse(fs.readFileSync(path.join(capture, 'web.json'), 'utf8'));
+    expect(meta).toMatchObject({ resolved_version: 'sha256:' + DIG, pinned_ref: 'nginx@sha256:' + DIG, version_source: 'digest' });
+  });
+
+  it.skipIf(!hasSh)('applies retention only to this container', () => {
+    backupDocker();
+    const r = run('backup_run.sh', {
+      mode: 'run', kind: 'container', name: 'web',
+      settings: 'volumes=true\nbinds=false\nimage=false\nkeep_last=2\nkeep_daily=3\nkeep_weekly=4\nkeep_monthly=5',
+    }, env(repoPath()));
+    expect(r.stdout).not.toContain('ERROR:');
+    const forget = dockerCalls().find(c => c[0] === 'run' && c.includes('forget'))!;
+    expect(forget).toEqual(expect.arrayContaining(['--tag', 'bosun:container=web', '--keep-last', '2', '--keep-daily', '3', '--keep-weekly', '4', '--keep-monthly', '5']));
+    expect(forget).not.toContain('bosun:stack=web');
+  });
+
+  it.skipIf(!hasSh)('stop mode stops the container and always starts it again, even when the backup fails', () => {
+    backupDocker({ backup: 'exit 1' });
+    const r = run('backup_run.sh', { mode: 'run', kind: 'container', name: 'web', settings: 'consistency=stop\nvolumes=false\nbinds=false\nimage=false' }, env(repoPath()));
+    expect(r.stdout).toContain('ERROR:');
+    expect(verbs()).toContain('stop ' + CID);
+    expect(verbs()).toContain('start ' + CID);
+  });
+
+  it.skipIf(!hasSh)('restores the recorded volumes and folders without touching the image when pinning is off', () => {
+    backupDocker();
+    const r = run('backup_restore.sh', {
+      mode: 'restore', kind: 'container', name: 'web', snapshot: CID,
+      settings: 'pin_image=false\nrestore_mode=replace\nmode=restore',
+    }, env(repoPath()));
+    expect(r.stdout).not.toContain('ERROR:');
+    const restore = dockerCalls().find(c => c[0] === 'run' && c.includes('--entrypoint') && c.some(a => a.includes('restore')))!;
+    expect(restore).toEqual(expect.arrayContaining(['-v', `data:/bosun/target-root/bosun/data/0-v1`, '-v', `${bin}/app:/bosun/target-root/bosun/data/0-b1`]));
+    expect(dockerCalls().some(c => c[0] === 'create')).toBe(false);
+  });
+
+  it.skipIf(!hasSh)('pins a standalone container to the image version recorded in the snapshot', () => {
+    backupDocker();
+    const r = run('backup_restore.sh', {
+      mode: 'restore', kind: 'container', name: 'web', snapshot: CID,
+      settings: 'pin_image=true\nrestore_mode=replace\nmode=restore',
+    }, env(repoPath()));
+    expect(r.stdout).not.toContain('ERROR:');
+    const create = dockerCalls().find(c => c[0] === 'create')!;
+    expect(create).toEqual(expect.arrayContaining(['--name=web', 'nginx:1.2.3']));
+    expect(verbs()).toEqual(expect.arrayContaining(['start ' + NEWID, 'rename web', 'rm -f']));
+  });
+
+  it.skipIf(!hasSh)('pins a Bosun-managed stack with an extra override file, leaving the compose file alone', () => {
+    backupDocker({ pinned: 'web\\tweb\\tnginx:1.2.3\\t1.2.3' });
+    const stackDir = path.join(home, 'bosun-stacks', 'demo');
+    fs.mkdirSync(stackDir, { recursive: true });
+    fs.writeFileSync(path.join(stackDir, 'compose.yaml'), '# Managed by Bosun\nservices:\n  web:\n    image: nginx:latest\n');
+    const r = run('backup_restore.sh', {
+      mode: 'restore', kind: 'stack', name: 'demo', snapshot: 'b'.repeat(64),
+      settings: 'pin_image=true\nrestore_mode=replace\nmode=restore',
+    }, env(repoPath()));
+    expect(r.stdout).not.toContain('ERROR:');
+    expect(fs.readFileSync(path.join(stackDir, 'compose.yaml'), 'utf8')).toContain('nginx:latest');
+    expect(fs.readFileSync(path.join(stackDir, 'compose.backup-pin.yaml'), 'utf8')).toContain('image: "nginx:1.2.3"');
+    const up = dockerCalls().find(c => c[0] === 'compose' && c.includes('up'))!;
+    expect(up).toContain(path.join(stackDir, 'compose.backup-pin.yaml'));
+  });
+
+  it.skipIf(!hasSh)('saves the image itself when asked', () => {
+    backupDocker();
+    const r = run('backup_run.sh', { mode: 'run', kind: 'container', name: 'web', settings: 'volumes=false\nbinds=false\nimage=true' }, env(repoPath()));
+    expect(r.stdout).not.toContain('ERROR:');
+    const save = dockerCalls().find(c => c[0] === 'save')!;
+    expect(save.join(' ')).toContain('web.tar');
+    const backup = dockerCalls().find(c => c[0] === 'run' && c.includes('backup'))!;
+    expect(backup.some(a => a.includes('/bosun/images'))).toBe(true);
+    expect(backup).toContain('bosun:image=1');
+    const meta = JSON.parse(fs.readFileSync(path.join(capture, 'web.json'), 'utf8'));
+    expect(meta.included.image).toBe(true);
+  });
+
+  it.skipIf(!hasSh)('backs up a stack with its files and scopes retention to the stack', () => {
+    backupDocker();
+    const stackDir = path.join(home, 'bosun-stacks', 'demo');
+    fs.mkdirSync(stackDir, { recursive: true });
+    fs.writeFileSync(path.join(stackDir, 'compose.yaml'), '# Managed by Bosun\nservices:\n  web:\n    image: nginx:latest\n');
+    fs.writeFileSync(path.join(stackDir, '.env'), 'TAG=1\n');
+    const r = run('backup_run.sh', { mode: 'run', kind: 'stack', name: 'demo', settings: 'volumes=true\nbinds=true\nstack_files=true\nimage=false\nkeep_weekly=2' }, env(repoPath()));
+    expect(r.stdout).not.toContain('ERROR:');
+    const backup = dockerCalls().find(c => c[0] === 'run' && c.includes('backup'))!;
+    expect(backup).toContain('bosun:stack=demo');
+    expect(backup).toContain('bosun:files=1');
+    expect(backup.some(a => a.includes('/bosun/stack'))).toBe(true);
+    const forget = dockerCalls().find(c => c[0] === 'run' && c.includes('forget'))!;
+    expect(forget).toContain('bosun:stack=demo');
+    expect(forget).toEqual(expect.arrayContaining(['--keep-weekly', '2']));
+    const meta = JSON.parse(fs.readFileSync(path.join(capture, 'web.json'), 'utf8'));
+    expect(meta).toMatchObject({ kind: 'stack', stack: 'demo', service: 'web', included: { stack_files: true } });
+  });
+
+  it.skipIf(!hasSh)('can restore into new volumes without stopping the container', () => {
+    backupDocker();
+    const r = run('backup_restore.sh', {
+      mode: 'restore', kind: 'container', name: 'web', snapshot: CID,
+      settings: 'pin_image=false\nrestore_mode=new_volume\nmode=restore',
+    }, env(repoPath()));
+    expect(r.stdout).not.toContain('ERROR:');
+    expect(r.stdout).toContain('bosun-restore-');
+    expect(verbs()).not.toContain('stop ' + CID);
+    const create = dockerCalls().find(c => c[0] === 'volume' && c[1] === 'create')!;
+    expect(create[2]).toContain('bosun-restore-');
+  });
+
+  it.skipIf(!hasSh)('never puts the repository password or the credentials on a command line or in the output', () => {
+    backupDocker();
+    const secret = 'sup3r-secret-pw';
+    const creds = Buffer.from('-----BEGIN OPENSSH PRIVATE KEY-----\nKEY\n-----END OPENSSH PRIVATE KEY-----').toString('base64');
+    const r = run('backup_run.sh', { mode: 'run', kind: 'container', name: 'web', settings: 'volumes=true\nbinds=false\nimage=false' }, {
+      BOSUN_SECRET_backup_repository: `sftp:user@host:${repoPath()}`,
+      BOSUN_SECRET_backup_password: secret,
+      BOSUN_SECRET_backup_credentials: creds,
+    });
+    expect(r.stdout).not.toContain('ERROR:');
+    for (const c of dockerCalls()) expect(c.join(' '), 'arguments').not.toContain(secret);
+    expect(r.stdout).not.toContain(secret);
+    expect(r.stderr).not.toContain(secret);
+    const backup = dockerCalls().find(c => c[0] === 'run' && c.includes('backup'))!;
+    expect(backup.join(' ')).not.toContain(creds);
+    expect(backup.join(' ')).toContain('/bosun/secret/id');
+  });
+});

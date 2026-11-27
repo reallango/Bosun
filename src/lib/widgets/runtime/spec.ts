@@ -861,7 +861,7 @@ export function validateWidgetSpec(raw: unknown, ownPermissions: readonly string
   const actions: ActionSpec[] = [];
   const ids = new Set<string>();
   if (raw.actions !== undefined) {
-    if (!Array.isArray(raw.actions) || raw.actions.length > 40) return fail('"actions" must be a list of up to 40 actions');
+    if (!Array.isArray(raw.actions) || raw.actions.length > 64) return fail('"actions" must be a list of up to 64 actions');
     for (const a of raw.actions) {
       const v = validateAction(a, own, v2);
       if (!v.ok) return v;
