@@ -133,7 +133,7 @@ describe('the CPU/Memory reference adoption', () => {
 
   it('needs the new API level and a version past the one it ever had', () => {
     expect(manifest.value.requires).toEqual({ api: 7 });
-    expect(manifest.value.version).toBe('1.1.0');
+    expect(manifest.value.version).toBe('1.1.1');
   });
 
   it('offers Tiles and Gauges with Tiles as the default', () => {

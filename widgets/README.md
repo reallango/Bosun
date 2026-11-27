@@ -400,9 +400,17 @@ conditions and size classes.
 ### Filling the widget
 
 Inside a widget on a dashboard, `stat` tiles and `gauges` flow into a grid that grows its columns and rows to use the
-whole body. The number in a tile (and the ring in a gauge) scales with the tile, not the screen, within a sensible
-minimum and maximum; a sparkline stretches to the tile's width. At the smallest size class (`xs`) the tiles stay in one
-compact row so nothing overflows. In a dialog, a sheet or a full page the same blocks keep their normal reading size.
+whole body. Each card is a size container: the number in a tile, the value in a ring and the label above them scale
+with the card's width and height (container query units), not with the screen, within a sensible minimum and maximum.
+The value inside a ring is a share of the ring area, so it stays inside the circle at every size. A sparkline stretches
+to the tile's width and its height follows the card. At the smallest size class (`xs`) the tiles stay in one compact
+row so nothing overflows. In a dialog, a sheet or a full page the same blocks keep their normal reading size.
+
+A widget of about three grid rows switches these blocks to a compact layout: the padding and gaps shrink, a tile drops
+its sparkline and sub-line (the number and bar stay), a gauge moves its label inside the ring under the value, and a
+`text` block is kept to one truncated line. The result must fit without clipping the ring or the footer. Lowering a
+package's `min_size` in an upgrade also lowers the stored minimum of the widgets already on dashboards, so they can be
+made smaller without removing and adding them again.
 
 Bosun applies these rules for every widget (they are not per widget). A spec only chooses the look and what each block
 shows; it does not need any layout CSS of its own.

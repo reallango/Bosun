@@ -19,7 +19,8 @@ import { useWidgetSize } from '@/components/dashboard/widget-size';
 import { useWidgetFill } from './fill';
 import { CodeBlock, EditorBlock } from './EditorBlock';
 import {
-  buttonClass, DIALOG_CONTENT, DIALOG_FOOTER, DIALOG_HEADER, DIALOG_OVERLAY, DIALOG_TITLE, DIALOG_WIDTH, FILL_CARD, FILL_GAUGE_VALUE, FILL_GRID, FILL_GRID_XS, FILL_LABEL, FILL_SUB, FILL_VALUE,
+  buttonClass, DIALOG_CONTENT, DIALOG_FOOTER, DIALOG_HEADER, DIALOG_OVERLAY, DIALOG_TITLE, DIALOG_WIDTH, FILL_CARD, FILL_CARD_COMPACT, FILL_GAUGE_CARD,
+  FILL_GAUGE_CARD_COMPACT, FILL_GAUGE_LABEL, FILL_GAUGE_VALUE, FILL_GRID, FILL_GRID_XS, FILL_LABEL, FILL_SUB, FILL_VALUE, FILL_VALUE_COMPACT,
   iconButtonClass, inputClass, NOTICE_CLASS as NOTICE, primarySubmitClass, toolbarButtonClass,
 } from './styles';
 
@@ -132,7 +133,7 @@ function BlockView({ block, ctx, ui, toolbar }: { block: Block; ctx: ViewContext
     case 'kv': return <Fields fields={block.items} data={ctx} />;
     case 'stat': return <StatBlock block={block} ctx={ctx} />;
     case 'gauges': return <GaugeBlock block={block} ctx={ctx} />;
-    case 'text': return <p className="whitespace-pre-wrap break-words text-xs text-foreground">{text(block.text, ctx)}</p>;
+    case 'text': return <TextBlock block={block} ctx={ctx} />;
     case 'notice': return <div role={block.level === 'error' ? 'alert' : 'status'} className={`rounded-md border px-2 py-1.5 text-xs ${NOTICE[block.level]}`}>{text(block.text, ctx)}</div>;
     case 'buttons': return <Buttons block={block} ctx={ctx} ui={ui} toolbar={toolbar} />;
     case 'form': return block.open === 'dialog' ? <DialogBlock block={block} ctx={ctx} ui={ui} toolbar={toolbar} /> : <Form block={block} ctx={ctx} ui={ui} />;
@@ -243,10 +244,14 @@ const STAT_TONE_STROKE: Record<StatToneName, string> = {
 const STAT_CARD = 'flex min-w-0 flex-col gap-0.5 rounded-lg border border-border bg-card p-3 text-left';
 const GAUGE_CARD = 'flex min-w-0 flex-col items-center gap-1 rounded-lg border border-border bg-card p-3 text-center';
 
+/** Below this measured widget body height (about three grid rows) tiles and gauges switch to their compact layout. */
+const COMPACT_HEIGHT = 160;
+
 /** A responsive grid of number cards; a card with a `tab` switches to that tab when it is inside a tab group. */
 function StatBlock({ block, ctx }: { block: Extract<Block, { type: 'stat' }>; ctx: ViewContext }) {
-  const { size } = useWidgetSize();
+  const { size, height } = useWidgetSize();
   const fill = useWidgetFill();
+  const compact = fill && height > 0 && height < COMPACT_HEIGHT;
   const selectTab = useContext(TabSelectContext);
   return (
     <div className={`grid gap-2 ${fill ? (size === 'xs' ? FILL_GRID_XS : FILL_GRID) : (STAT_COLUMNS[size] ?? STAT_COLUMNS.lg)}`}>
@@ -255,16 +260,18 @@ function StatBlock({ block, ctx }: { block: Extract<Block, { type: 'stat' }>; ct
         const numeric = Number(fillTemplate(item.value, ctx));
         const tone = statTone(item.tone, ctx) ?? thresholdTone(numeric, item.thresholds);
         const bar = item.bar ? Number(fillTemplate(item.bar, ctx)) : NaN;
-        const card = fill ? FILL_CARD : STAT_CARD;
+        const card = fill ? (compact ? FILL_CARD_COMPACT : FILL_CARD) : STAT_CARD;
         const valueText = withUnit(value || '—', item.unit);
         const valueTone = tone ? STAT_TONE_CLASS[tone] : 'text-foreground';
+        const valueSize = fill ? (compact ? FILL_VALUE_COMPACT : FILL_VALUE) : size === 'xs' ? 'text-xl' : 'text-2xl';
         const content = (
           <>
             <div className={fill ? FILL_LABEL : 'truncate text-xs text-muted-foreground'}>{item.label}</div>
-            <div className={`${fill ? FILL_VALUE : size === 'xs' ? 'text-xl' : 'text-2xl'} font-semibold tabular-nums ${valueTone}`}>{valueText}</div>
+            <div className={`${valueSize} font-semibold tabular-nums ${valueTone}`}>{valueText}</div>
             {Number.isFinite(bar) && <Bar value={bar} tone={tone} />}
-            {item.trend && <Sparkline trend={item.trend} tone={tone} />}
-            {item.sub && <div className={fill ? FILL_SUB : 'truncate text-xs text-muted-foreground'}>{text(item.sub, ctx)}</div>}
+            {/* A three-row tile has no room for a trend line; the number and bar are the parts that must stay. */}
+            {!compact && item.trend && <Sparkline trend={item.trend} tone={tone} />}
+            {!compact && item.sub && <div className={fill ? FILL_SUB : 'truncate text-xs text-muted-foreground'}>{text(item.sub, ctx)}</div>}
           </>
         );
         return item.tab && selectTab
@@ -277,28 +284,32 @@ function StatBlock({ block, ctx }: { block: Extract<Block, { type: 'stat' }>; ct
 
 /** A ring gauge: the value in the middle of a circle that fills as it approaches `max`. */
 function Gauge({ item, ctx, fill }: { item: GaugeItem; ctx: ViewContext; fill: boolean }) {
+  const { height } = useWidgetSize();
+  const compact = fill && height > 0 && height < COMPACT_HEIGHT;
   const value = text(item.value, ctx);
   const numeric = Number(fillTemplate(item.value, ctx));
   const tone = thresholdTone(numeric, item.thresholds);
   const geometry = gaugeGeometry(numeric, item.max ?? 100);
   const label = `${item.label}: ${withUnit(value || '—', item.unit)}`;
   return (
-    <div className={fill ? `${FILL_CARD} items-center text-center` : GAUGE_CARD}>
-      <div className={fill ? FILL_LABEL : 'truncate text-xs text-muted-foreground'}>{item.label}</div>
-      <div className={fill ? 'relative min-h-0 w-full flex-1' : 'relative mx-auto aspect-square w-full max-w-[9rem]'}>
+    <div className={fill ? (compact ? FILL_GAUGE_CARD_COMPACT : FILL_GAUGE_CARD) : GAUGE_CARD}>
+      {/* A short card puts the label inside the ring, under the value, so the ring can use the whole height. */}
+      {!compact && <div className={fill ? FILL_LABEL : 'truncate text-xs text-muted-foreground'}>{item.label}</div>}
+      <div className={fill ? 'relative min-h-0 w-full flex-1 [container-type:size]' : 'relative mx-auto aspect-square w-full max-w-[9rem]'}>
         <svg viewBox={`0 0 ${GAUGE_VIEWBOX} ${GAUGE_VIEWBOX}`} preserveAspectRatio="xMidYMid meet" className="size-full" role="img" aria-label={label}>
           <circle cx={geometry.cx} cy={geometry.cy} r={geometry.r} fill="none" strokeWidth={GAUGE_STROKE} className="stroke-muted" />
           <circle cx={geometry.cx} cy={geometry.cy} r={geometry.r} fill="none" strokeWidth={GAUGE_STROKE} strokeLinecap="round"
             strokeDasharray={geometry.circumference} strokeDashoffset={geometry.dashOffset} transform={`rotate(-90 ${geometry.cx} ${geometry.cy})`}
             className={tone ? STAT_TONE_STROKE[tone] : 'stroke-primary'} />
         </svg>
-        <div className="absolute inset-0 flex items-center justify-center" aria-hidden="true">
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-0.5 overflow-hidden text-center leading-none" aria-hidden="true">
           <span className={`${fill ? FILL_GAUGE_VALUE : 'text-xl'} font-semibold tabular-nums ${tone ? STAT_TONE_CLASS[tone] : 'text-foreground'}`}>
             {withUnit(value || '—', item.unit)}
           </span>
+          {compact && <span className={FILL_GAUGE_LABEL}>{item.label}</span>}
         </div>
       </div>
-      {item.sub && <div className={fill ? FILL_SUB : 'truncate text-xs text-muted-foreground'}>{text(item.sub, ctx)}</div>}
+      {!compact && item.sub && <div className={fill ? FILL_SUB : 'truncate text-xs text-muted-foreground'}>{text(item.sub, ctx)}</div>}
     </div>
   );
 }
@@ -310,6 +321,20 @@ function GaugeBlock({ block, ctx }: { block: Extract<Block, { type: 'gauges' }>;
     <div className={`grid gap-2 ${fill ? (size === 'xs' ? FILL_GRID_XS : FILL_GRID) : (STAT_COLUMNS[size] ?? STAT_COLUMNS.lg)}`}>
       {block.items.map((item, i) => <Gauge key={i} item={item} ctx={ctx} fill={fill} />)}
     </div>
+  );
+}
+
+/** A line of text. A short widget keeps it to one line (truncated), so it cannot push the tiles out of the body. */
+function TextBlock({ block, ctx }: { block: Extract<Block, { type: 'text' }>; ctx: ViewContext }) {
+  const { height } = useWidgetSize();
+  const fill = useWidgetFill();
+  const short = fill && height > 0 && height < COMPACT_HEIGHT;
+  return (
+    <p className={short
+      ? 'min-w-0 shrink-0 truncate text-xs text-foreground'
+      : 'whitespace-pre-wrap break-words text-xs text-foreground'}>
+      {text(block.text, ctx)}
+    </p>
   );
 }
 

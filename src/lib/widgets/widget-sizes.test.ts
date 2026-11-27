@@ -21,6 +21,11 @@ const MIN_FLOOR: Record<string, { w: number; h: number }> = { chart: { w: 6, h: 
 
 describe('widget sizes of the bundled packages', () => {
   it('finds the bundled widgets', () => expect(widgets.length).toBeGreaterThanOrEqual(12));
+  it('lets the CPU/Memory widget be three rows high', () => {
+    const cpuMemory = widgets.find(w => w.type === 'cpu_memory');
+    expect(cpuMemory?.min).toEqual({ w: 4, h: 3 });
+    expect(cpuMemory?.def.h).toBeGreaterThanOrEqual(3);
+  });
   for (const w of widgets) {
     it(`${w.type}: default >= smallest, both inside the grid, smallest not below the floor of its screen`, () => {
       expect(w.def.w, 'default width').toBeGreaterThanOrEqual(w.min.w);
