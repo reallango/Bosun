@@ -120,7 +120,8 @@ in the widget's settings and through the API.
 3. Add the widget to a dashboard. Grant the permissions you declared to the groups that should have them.
 
 The scripts are stored in Bosun's database and written to each host that needs them when the widget runs, so one
-package works on every node of a cluster. Upgrading is installing a higher `version`.
+package works on every node of a cluster. Upgrading is installing a higher `version`; a widget change is released
+this way and does not wait for a new Bosun image.
 
 ## Rules Bosun keeps for you
 

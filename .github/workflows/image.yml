@@ -6,6 +6,14 @@ name: image
 on:
   push:
     branches: [main, dev]
+    # A widget-only or docs-only commit does not need a new image: widgets update through their own package channel
+    # (Settings -> Widgets compares installed versions with the widgets/ folder on GitHub), and publishing an image for
+    # such a commit would only raise a pointless "Bosun update available" on every node. Pull requests still build and
+    # run the tests, so widget and docs changes are checked before they land.
+    paths-ignore:
+      - 'widgets/**'
+      - 'docs/**'
+      - '**/*.md'
   pull_request:
     branches: [main, dev]
   workflow_dispatch:
