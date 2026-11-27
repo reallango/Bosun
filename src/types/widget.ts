@@ -28,6 +28,8 @@ export interface WidgetDefinition {
   defaultSize: { w: number; h: number };
   minSize: { w: number; h: number };
   maxSize?: { w: number; h: number };
+  /** Rows to use when the widget is stacked on a phone; without it the 3-12 row clamp applies. */
+  phoneHeight?: number;
   refreshInterval: number;
   supportsStream?: boolean;
   // Background polling options

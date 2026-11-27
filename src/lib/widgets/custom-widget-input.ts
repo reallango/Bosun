@@ -9,14 +9,14 @@ const FIELD_TYPES = ['string', 'number', 'boolean', 'select'];
 const CATEGORIES = ['system', 'docker', 'gpu', 'ai', 'network', 'utility', 'advanced', 'custom'];
 
 export type CustomWidgetColumns = Partial<Record<
-  'display_name' | 'description' | 'icon' | 'category' | 'default_size' | 'min_size' | 'refresh_interval' |
+  'display_name' | 'description' | 'icon' | 'category' | 'default_size' | 'min_size' | 'max_size' | 'phone_height' | 'refresh_interval' |
   'supports_linux' | 'supports_windows' | 'config_schema' | 'enabled', string | number>>;
 
-function size(v: any): string | null {
+function size(v: any): { w: number; h: number } | null {
   const w = Math.round(Number(v?.w));
   const h = Math.round(Number(v?.h));
   if (!(w >= 1 && w <= 48 && h >= 1 && h <= 48)) return null;
-  return JSON.stringify({ w, h });
+  return { w, h };
 }
 
 function schema(v: any): string | null {
@@ -53,12 +53,25 @@ export function sanitizeCustomWidget(body: any, creating: boolean): { values: Cu
     if (!CATEGORIES.includes(body.category)) return { error: 'Unknown category' };
     values.category = body.category;
   }
-  for (const key of ['default_size', 'min_size'] as const) {
+  const sizes: Partial<Record<'default_size' | 'min_size' | 'max_size', { w: number; h: number }>> = {};
+  for (const key of ['default_size', 'min_size', 'max_size'] as const) {
     if (body?.[key] !== undefined) {
       const s = size(body[key]);
       if (!s) return { error: `${key} must be {w, h} between 1 and 48` };
-      values[key] = s;
+      sizes[key] = s;
+      values[key] = JSON.stringify(s);
     }
+  }
+  for (const other of ['default_size', 'min_size'] as const) {
+    const max = sizes.max_size;
+    // A manifest may leave a size out; the installer then uses 8x6 / 4x4, so validate against those.
+    const value = sizes[other] ?? (creating ? (other === 'default_size' ? { w: 8, h: 6 } : { w: 4, h: 4 }) : undefined);
+    if (max && value && (max.w < value.w || max.h < value.h)) return { error: `max_size cannot be smaller than ${other}` };
+  }
+  if (body?.phone_height !== undefined) {
+    const h = Math.round(Number(body.phone_height));
+    if (!(h >= 1 && h <= 48)) return { error: 'phone_height must be a whole number of rows from 1 to 48' };
+    values.phone_height = h;
   }
   if (body?.refresh_interval !== undefined) {
     const r = Math.round(Number(body.refresh_interval));

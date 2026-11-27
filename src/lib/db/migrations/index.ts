@@ -672,6 +672,13 @@ const V18_TASK_DISMISSALS: string[] = [
     )`,
     `CREATE INDEX IF NOT EXISTS idx_task_dismissals_user ON task_dismissals(user_id)`,
 ];
+
+// V19: optional widget size hints. `max_size` caps a widget's size (base columns/rows, scaled per breakpoint like
+// `min_size`); `phone_height` is the row count used when widgets stack on phones. NULL = the old behaviour.
+const V19_WIDGET_SIZE_HINTS: string[] = [
+    `ALTER TABLE custom_widgets ADD COLUMN max_size TEXT`,
+    `ALTER TABLE custom_widgets ADD COLUMN phone_height INTEGER`,
+];
 export const MIGRATIONS: Migration[] = [
     {
         version: 1,
@@ -699,6 +706,7 @@ export const MIGRATIONS: Migration[] = [
     { version: 16, name: 'resource_grants', statements: V16_RESOURCE_GRANTS },
     { version: 17, name: 'access_requests', statements: V17_ACCESS_REQUESTS },
     { version: 18, name: 'task_dismissals', statements: V18_TASK_DISMISSALS },
+    { version: 19, name: 'widget_size_hints', statements: V19_WIDGET_SIZE_HINTS },
 ];
 
 /** The schema version this build expects. */

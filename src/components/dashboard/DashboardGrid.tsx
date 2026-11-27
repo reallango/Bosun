@@ -14,10 +14,12 @@ import {
   GRID_ROW_HEIGHT,
   STACKED_BREAKPOINTS,
   buildResponsiveLayouts,
+  type LayoutSource,
 } from '@/lib/widget-sizes';
 import { WidgetFrame } from './WidgetFrame';
 import { getWidgetDefinition } from '@/components/widgets/registry';
 import { EmptyState } from '@/components/shared/EmptyState';
+import { useWidgetDefinitions } from '@/hooks/useWidgetDefinitions';
 import { useWidgetNames } from '@/hooks/useWidgetNames';
 import { ensureArray } from '@/lib/api/ensureArray';
 
@@ -92,9 +94,21 @@ export function DashboardGrid({
 }: DashboardGridProps) {
   const safeWidgets = useMemo(() => ensureArray<Widget>(widgets), [widgets]);
   const names = useWidgetNames();
+  const definitions = useWidgetDefinitions();
+
+  // Size hints live in the widget definition, not in the saved widget row.
+  const sizedWidgets = useMemo<LayoutSource[]>(() => safeWidgets.map(w => {
+    const def = definitions[w.widget_type];
+    return {
+      ...w,
+      grid_max_w: def?.maxSize?.w ?? null,
+      grid_max_h: def?.maxSize?.h ?? null,
+      phone_height: def?.phoneHeight ?? null,
+    };
+  }), [safeWidgets, definitions]);
 
   // Layouts for every breakpoint: saved per-breakpoint rects, otherwise derived from lg.
-  const derived = useMemo(() => buildResponsiveLayouts(safeWidgets), [safeWidgets]);
+  const derived = useMemo(() => buildResponsiveLayouts(sizedWidgets), [sizedWidgets]);
   const [layouts, setLayouts] = useState<Layouts>(derived);
   const layoutsRef = useRef(layouts);
   layoutsRef.current = layouts;
