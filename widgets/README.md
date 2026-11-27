@@ -114,9 +114,11 @@ Each action is also an API endpoint, `POST /api/servers/:serverId/widget-actions
 System Services, Network, OS Info, CPU/Memory, GPU Monitoring, Server Summary, Metrics History,
 OS Update Check and Custom Command). They are ordinary packages: an admin can remove them (a removed one is not
 brought back at the next start, only by installing it again) and upgrade them from GitHub. A newer bundled
-version replaces an older one that came from the image; a package the admin installed from GitHub or a zip is
-left alone. Every bundled widget has a `<id>.view` data permission at the `viewer` level, so Read only users keep
-their dashboards unless a group denies it.
+version replaces an older one that came from the image or from GitHub — both are this same repository, so the
+package's secrets are kept; a zip upload is left alone. Widget changes are released through this GitHub channel,
+not through a new image: the image workflow skips widget-only commits, so the folder here can be newer than the
+image that installed the package. Every bundled widget has a `<id>.view` data permission at the `viewer` level, so
+Read only users keep their dashboards unless a group denies it.
 
 Every one of them, including Ollama Status, OS Update Check, Docker Containers and Custom Command, is built only from
 its manifest, scripts and declarative screen; Bosun has no code of its own for any of them. To write your own, see

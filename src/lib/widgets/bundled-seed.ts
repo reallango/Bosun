@@ -1,12 +1,27 @@
 /**
- * Install the bundled widget packages that are missing and upgrade the ones that were installed from
- * the image earlier. Runs once after the migrations. Packages installed from GitHub or a zip are the
- * admin's and are left alone; removed ones are not brought back. Never throws.
+ * Install the bundled widget packages that are missing and upgrade the ones the image ships a newer version of.
+ * Runs once after the migrations. A package installed from GitHub comes from this same repository, so a newer
+ * bundled version replaces it and its secrets are kept; a zip upload is the admin's and is left alone. Removed
+ * ones are not brought back. Never throws.
  */
 import { compareVersions } from '@/lib/widgets/package-manifest';
 import { getInstalledPackage, installPackage } from '@/lib/widgets/package-store';
 import { rqlite } from '@/lib/db/rqlite-client';
 import { bundledIds, catalogIds, readBundledPackages, removedBundledIds } from '@/lib/widgets/bundled';
+
+export interface SeedInstalled { source: 'github' | 'upload' | 'bundled'; version: string }
+export type SeedAction = 'install' | 'upgrade' | 'skip';
+
+/**
+ * What the seed does with one bundled package. Pure: a removed package stays removed, a zip upload is never touched,
+ * and nothing is reinstalled at the same version or downgraded.
+ */
+export function seedDecision(bundledVersion: string, installed: SeedInstalled | null, removed: boolean): SeedAction {
+  if (removed) return 'skip';
+  if (!installed) return 'install';
+  if (installed.source === 'upload') return 'skip';
+  return compareVersions(bundledVersion, installed.version) > 0 ? 'upgrade' : 'skip';
+}
 
 export async function seedBundledPackages(): Promise<void> {
   try {
@@ -14,12 +29,15 @@ export async function seedBundledPackages(): Promise<void> {
     for (const e of errors) console.warn(`[widgets] bundled package skipped: ${e}`);
     const removed = await removedBundledIds();
     for (const { manifest, files } of packages) {
-      if (removed.includes(manifest.id)) continue;
       try {
         const have = await getInstalledPackage(manifest.id);
-        if (have && (have.pkg.source !== 'bundled' || compareVersions(manifest.version, have.pkg.version) <= 0)) continue;
+        const action = seedDecision(manifest.version, have?.pkg ?? null, removed.includes(manifest.id));
+        if (action === 'skip') continue;
+        // The copy now comes from the image, so it is stored as `bundled` again: the settings page says
+        // "preinstalled" (a stale `github` source would show a branch it no longer comes from) and the next
+        // image keeps upgrading it.
         await installPackage({ manifest, files, source: 'bundled' });
-        console.log(`[widgets] ${have ? 'upgraded' : 'installed'} bundled package ${manifest.id} ${manifest.version}`);
+        console.log(`[widgets] ${action === 'upgrade' ? 'upgraded' : 'installed'} bundled package ${manifest.id} ${manifest.version}`);
       } catch (err) {
         console.warn(`[widgets] could not install bundled package ${manifest.id}: ${err instanceof Error ? err.message : err}`);
       }

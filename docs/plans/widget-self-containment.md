@@ -23,7 +23,8 @@ complexity can be written as a package alone.
   section or a command, list/table/text/fields/chart views, command and terminal actions, per-instance settings),
   poller-collected command data, tracked metrics with per-metric retention, OpenAPI generated from installed packages.
 - Bundled ("preinstalled") packages: `widgets/bundled.json` lists packages installed on start and upgraded when the
-  image carries a newer version; removed ones stay removed; GitHub/zip packages are never touched.
+  image carries a newer version; removed ones stay removed; a GitHub install of a bundled package is upgraded only
+  to a higher version, and a zip upload is never touched.
 - Every widget except the SSH Terminal is a package: `docker`, `disk_usage`, `system_services`, `network`, `os_info`,
   `cpu_memory`, `gpu_monitoring`, `server_summary`, `metrics_chart`, `ollama`, `updates`, `commands`.
 - Pure data widgets (disk, network, services, os info, cpu/memory, gpu, server summary, metrics history, docker list)
@@ -349,7 +350,8 @@ widget's code from core and are independently releasable.
   one-time cleanup of the old rows.
 - Database migrations stay additive and numbered (current schema version 10; new tables such as `package_jobs`
   continue the sequence). Each migration runs in one transaction; nodes racing each other are tolerated.
-- A package installed from GitHub or a zip is never changed by an image update.
+- A zip upload is never changed by an image update. A GitHub install of a bundled package is upgraded only to a
+  higher version: it comes from the same repository, so its secrets are kept.
 
 ## 8. Test strategy (what worked this time, keep doing it)
 
