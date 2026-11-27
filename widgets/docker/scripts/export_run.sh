@@ -281,6 +281,7 @@ function pubport(i,   p, h) {
   return p
 }
 # <<< export reader
+# >>> export run writer (the same text in export_run.sh and container_update.sh; a test compares them)
 function add(s) { L[++nl] = s }
 function opt(flag, v) { add(flag " " shq(v)) }
 END {
@@ -370,6 +371,7 @@ END {
   for (i = 1; i <= nnet; i++) if (netn[i] != netmode && netn[i] != "bridge" && !(netmode == "bridge" && netn[i] == "bridge")) extra = extra (extra == "" ? "" : ", ") netn[i]
   if (extra != "") print "# Also attached to the networks: " extra " (docker network connect <network> " cname ")"
 }
+# <<< export run writer
 BOSUN_AWK_END
 
 if ! awk -f "$tmp/prog.awk" "$tmp/in" > "$tmp/out" 2>"$tmp/err"; then fail "could not build the command: $(tr -d '\r' < "$tmp/err" | tail -n 1 | cut -c1-200)"; fi

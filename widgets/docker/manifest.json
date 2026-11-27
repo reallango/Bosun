@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "docker",
   "name": "Docker Containers",
-  "version": "1.0.21",
+  "version": "1.0.24",
   "description": "Containers on the host with logs, a shell, start, stop and restart; edit a container, create containers and stacks (a compose file, or one from a Git repository), and a Manage page for images, volumes and networks.",
   "author": "Bosun",
   "requires": {
@@ -280,6 +280,25 @@
               }
             }
           },
+          "container_update": {
+            "as": "service",
+            "timeoutSec": 1800,
+            "linux": "scripts/container_update.sh",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$",
+                "maxLength": 128
+              },
+              "health_timeout": {
+                "type": "number",
+                "min": 0,
+                "max": 600,
+                "integer": true,
+                "default": 180
+              }
+            }
+          },
           "container_remove": {
             "as": "service",
             "timeoutSec": 120,
@@ -543,7 +562,8 @@
                   "stop",
                   "start",
                   "guard_up",
-                  "retag"
+                  "retag",
+                  "update_images"
                 ],
                 "maxLength": 20
               },
@@ -573,6 +593,13 @@
                 "pattern": "^(-|[A-Za-z0-9][A-Za-z0-9_.-]{0,62})$",
                 "maxLength": 63,
                 "default": "-"
+              },
+              "health_timeout": {
+                "type": "number",
+                "min": 0,
+                "max": 600,
+                "integer": true,
+                "default": 180
               }
             },
             "secrets": [
@@ -1148,6 +1175,74 @@
               "title": "Replace the container with elevated options?",
               "text": "These options can give the container control over the host. The container is stopped and replaced by a new one; volumes are kept.",
               "destructive": true
+            },
+            "job": true
+          },
+          {
+            "id": "container_update",
+            "label": "Update",
+            "icon": "download",
+            "permission": "docker.manage",
+            "target": {
+              "kind": "container",
+              "param": "name"
+            },
+            "when": {
+              "field": "update_available",
+              "equals": true
+            },
+            "kind": "script",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$",
+                "maxLength": 128,
+                "from": "container"
+              },
+              "stack": {
+                "type": "text",
+                "maxLength": 63,
+                "from": "stack"
+              },
+              "service": {
+                "type": "text",
+                "maxLength": 63,
+                "from": "service"
+              },
+              "health_timeout": {
+                "type": "number",
+                "min": 0,
+                "max": 600,
+                "integer": true,
+                "default": 180
+              }
+            },
+            "variants": [
+              {
+                "when": {
+                  "field": "param.stack",
+                  "equals": ""
+                },
+                "script": "container_update",
+                "args": {
+                  "health_timeout": "param.health_timeout"
+                }
+              },
+              {
+                "script": "stack_action",
+                "args": {
+                  "op": "literal:update_images",
+                  "name": "param.stack",
+                  "service": "param.service",
+                  "health_timeout": "param.health_timeout"
+                }
+              }
+            ],
+            "after": "refresh",
+            "confirm": {
+              "title": "Update {container}?",
+              "text": "Bosun pulls the image, replaces the container (or only the changed services of its stack) with the same settings on the new image, waits for it to be healthy and rolls back automatically if it is not. The previous image is kept.",
+              "destructive": false
             },
             "job": true
           },
@@ -1859,8 +1954,8 @@
             }
           },
           {
-            "id": "stack_pull",
-            "label": "Pull newer images and redeploy",
+            "id": "stack_update_images",
+            "label": "Update images",
             "permission": "docker.manage",
             "target": {
               "kind": "stack",
@@ -1873,19 +1968,33 @@
                 "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
                 "maxLength": 63,
                 "from": "name"
+              },
+              "health_timeout": {
+                "type": "number",
+                "min": 0,
+                "max": 600,
+                "integer": true,
+                "default": 180
               }
             },
             "variants": [
               {
                 "script": "stack_action",
                 "args": {
-                  "op": "literal:pull"
+                  "op": "literal:update_images",
+                  "service": "literal:-",
+                  "health_timeout": "param.health_timeout"
                 }
               }
             ],
             "icon": "download",
             "job": true,
-            "after": "refresh"
+            "after": "refresh",
+            "confirm": {
+              "title": "Update the images of {name}?",
+              "text": "Bosun pulls the images, recreates only the services whose image changed, waits for them to be healthy and rolls back automatically if one is not. The previous images are kept.",
+              "destructive": false
+            }
           },
           {
             "id": "stack_update",
@@ -4105,6 +4214,12 @@
                                   "value": "{note}",
                                   "format": "text"
                                 }
+                              ],
+                              "rowActions": [
+                                "container_update"
+                              ],
+                              "bulk": [
+                                "container_update"
                               ]
                             }
                           }
@@ -4460,7 +4575,7 @@
                             "stack_start",
                             "stack_stop",
                             "stack_restart",
-                            "stack_pull",
+                            "stack_update_images",
                             "stack_update",
                             "stack_update_privileged",
                             "stack_remove"
