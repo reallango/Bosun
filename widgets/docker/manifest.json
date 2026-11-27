@@ -2,11 +2,11 @@
   "schema": 1,
   "id": "docker",
   "name": "Docker Containers",
-  "version": "1.0.20",
+  "version": "1.0.21",
   "description": "Containers on the host with logs, a shell, start, stop and restart; edit a container, create containers and stacks (a compose file, or one from a Git repository), and a Manage page for images, volumes and networks.",
   "author": "Bosun",
   "requires": {
-    "api": 4
+    "api": 5
   },
   "permissions": [
     {
@@ -4527,7 +4527,27 @@
           "description": "Containers and Compose stacks (also needed to deploy Bosun to this server).",
           "detect": "host_detect",
           "install": "docker_install"
-        }
+        },
+        "schedules": [
+          {
+            "id": "image_updates",
+            "label": "Check for image updates",
+            "description": "Compares each container's image with its registry (no pull, no restart) and tells the bell when newer images exist.",
+            "run": {
+              "dataset": "image_updates"
+            },
+            "target": "server",
+            "notify": {
+              "when": {
+                "field": "update_available",
+                "equals": true
+              },
+              "title": "{count} image update(s) on {server}",
+              "message": "The schedule {schedule} found {count} container(s) on {server} whose registry has a newer image for the same tag. See Docker → Manage → Containers.",
+              "severity": "info"
+            }
+          }
+        ]
       }
     }
   ],

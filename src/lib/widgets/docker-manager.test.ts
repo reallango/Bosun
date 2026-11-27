@@ -45,7 +45,15 @@ describe('the Docker manager package', () => {
     expect(tab('images').blocks[0]).toMatchObject({ type: 'form', open: 'dialog', label: 'Pull image' });
     expect(tab('volumes').blocks[0]).toMatchObject({ type: 'editor', open: 'dialog', label: 'New volume' });
     expect(tab('networks').blocks[0]).toMatchObject({ type: 'editor', open: 'dialog', label: 'New network' });
-    expect(manifest.requires).toEqual({ api: 4 });
+    expect(manifest.requires).toEqual({ api: 5 }); // level 5: `schedules`
+  });
+
+  it('offers a daily image update check as a schedule, on the dataset that compares digests', () => {
+    expect(spec.schedules).toEqual([expect.objectContaining({
+      id: 'image_updates', run: { dataset: 'image_updates' }, target: 'server',
+      notify: expect.objectContaining({ when: { field: 'update_available', equals: true } }),
+    })]);
+    expect(spec.datasets?.image_updates).toBeDefined();
   });
 
   it('the Manage page offers bulk actions on its lists and stat tiles on Overview', () => {
