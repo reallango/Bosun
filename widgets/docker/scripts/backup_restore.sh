@@ -172,178 +172,379 @@ host_path_sensitive() {
 }
 # <<< sensitive paths
 # >>> pinned image (a standalone container is recreated with the image the backup recorded, keeping its settings)
-clone_fmt='{{$c := .Config}}{{$h := .HostConfig}}
-ID	{{.Id}}
-RUN	{{.State.Running}}
-REF	{{$c.Image}}
-IMGID	{{.Image}}
-HOSTNAME	{{$c.Hostname}}
-USER	{{$c.User}}
-WORKDIR	{{$c.WorkingDir}}
-TTY	{{$c.Tty}}
-OPEN	{{$c.OpenStdin}}
-STOPSIG	{{$c.StopSignal}}
-STOPTO	{{$c.StopTimeout}}
-NETMODE	{{$h.NetworkMode}}
-RESTART	{{$h.RestartPolicy.Name}}
-RETRY	{{$h.RestartPolicy.MaximumRetryCount}}
-MEM	{{$h.Memory}}
-MEMRES	{{$h.MemoryReservation}}
-NANO	{{$h.NanoCpus}}
-CPUSHARES	{{$h.CpuShares}}
-CPUSET	{{$h.CpusetCpus}}
-PIDSLIM	{{$h.PidsLimit}}
-PRIV	{{$h.Privileged}}
-PIDM	{{$h.PidMode}}
-IPCM	{{$h.IpcMode}}
-UTS	{{$h.UTSMode}}
-USERNS	{{$h.UsernsMode}}
-CGP	{{$h.CgroupParent}}
-RT	{{$h.Runtime}}
-SHM	{{$h.ShmSize}}
-OOM	{{$h.OomScoreAdj}}
-INIT	{{$h.Init}}
-RO	{{$h.ReadonlyRootfs}}
-LOGT	{{$h.LogConfig.Type}}
-{{range $c.Env}}ENV	{{.}}
-{{end}}{{range $k, $v := $c.Labels}}LABEL	{{$k}}={{$v}}
-{{end}}{{range $c.Cmd}}CMD	{{.}}
-{{end}}{{range $c.Entrypoint}}EP	{{.}}
-{{end}}{{range .Mounts}}MNT	{{.Type}}	{{.Name}}	{{.Source}}	{{.Destination}}	{{.RW}}
-{{end}}{{range $p, $bs := $h.PortBindings}}{{range $bs}}PORT	{{.HostIp}}	{{.HostPort}}	{{$p}}
-{{end}}{{end}}{{range $n, $e := .NetworkSettings.Networks}}NET	{{$n}}
-{{range $e.Aliases}}ALIAS	{{$n}}	{{.}}
-{{end}}{{with $e.IPAMConfig}}{{with .IPv4Address}}IP4	{{$n}}	{{.}}
-{{end}}{{with .IPv6Address}}IP6	{{$n}}	{{.}}
-{{end}}{{end}}{{end}}{{range $h.Dns}}DNS	{{.}}
-{{end}}{{range $h.DnsSearch}}DNSS	{{.}}
-{{end}}{{range $h.DnsOptions}}DNSO	{{.}}
-{{end}}{{range $h.ExtraHosts}}EXTRAHOST	{{.}}
-{{end}}{{range $k, $v := $h.LogConfig.Config}}LOGO	{{$k}}={{$v}}
-{{end}}{{range $p, $o := $h.Tmpfs}}TMPFS	{{$p}}:{{$o}}
-{{end}}{{range $h.CapAdd}}CAPADD	{{.}}
-{{end}}{{range $h.CapDrop}}CAPDROP	{{.}}
-{{end}}{{range $h.SecurityOpt}}SECOPT	{{.}}
-{{end}}{{range $k, $v := $h.Sysctls}}SYSCTL	{{$k}}={{$v}}
-{{end}}{{range $h.Devices}}DEVICE	{{.PathOnHost}}	{{.PathInContainer}}	{{.CgroupPermissions}}
-{{end}}{{range $h.Ulimits}}ULIMIT	{{.Name}}	{{.Soft}}	{{.Hard}}
-{{end}}{{range $h.GroupAdd}}GRP	{{.}}
-{{end}}{{range $h.DeviceCgroupRules}}DCR	{{.}}
-{{end}}{{range $h.DeviceRequests}}GPU	{{.Count}}
-{{end}}{{range $k, $v := $h.StorageOpt}}SOPT	{{$k}}={{$v}}
-{{end}}{{with $c.Healthcheck}}HK	{{json .Test}}
-HKINT	{{.Interval}}
-HKTMO	{{.Timeout}}
-HKRET	{{.Retries}}
-HKSTART	{{.StartPeriod}}
-{{end}}'
+# >>> export collector (the same text in export_run.sh, export_compose.sh, container_update.sh and backup_restore.sh; a test compares them)
+# Docker's own `json` template function prints every string as JSON, so nothing a container contains can break the lines.
+fmt='{{$c := .Config}}{{$h := .HostConfig}}ID {{json .Id}}
+NAME {{json .Name}}
+IMAGE {{json (index $c "Image")}}
+IMGID {{.Image}}
+{{range (index $c "Env")}}ENV {{json .}}
+{{end}}CMDJ {{json (index $c "Cmd")}}
+EPJ {{json (index $c "Entrypoint")}}
+{{range (index $c "Cmd")}}CMD {{json .}}
+{{end}}{{range (index $c "Entrypoint")}}EP {{json .}}
+{{end}}{{range $k, $v := (index $c "Labels")}}LABEL {{json (printf "%s=%s" $k $v)}}
+{{end}}{{range $p, $bs := (index $h "PortBindings")}}{{range $bs}}PORT {{json (index . "HostIp")}} {{json (index . "HostPort")}} {{json $p}}
+{{end}}{{end}}{{range .Mounts}}MNT {{json .Type}} {{json (index . "Name")}} {{json .Source}} {{json .Destination}} {{.RW}}
+{{end}}{{range $p, $o := (index $h "Tmpfs")}}TMPFS {{if $o}}{{json (printf "%s:%s" $p $o)}}{{else}}{{json $p}}{{end}}
+{{end}}NETMODE {{json (index $h "NetworkMode")}}
+{{range $n, $e := .NetworkSettings.Networks}}NETN {{json $n}}
+{{range (index $e "Aliases")}}ALIAS {{json $n}} {{json .}}
+{{end}}{{with (index $e "IPAMConfig")}}{{with (index . "IPv4Address")}}IP4 {{json $n}} {{json .}}
+{{end}}{{with (index . "IPv6Address")}}IP6 {{json $n}} {{json .}}
+{{end}}{{end}}{{end}}RP {{json (index (index $h "RestartPolicy") "Name")}}
+RPN {{index (index $h "RestartPolicy") "MaximumRetryCount"}}
+HOSTNAME {{json (index $c "Hostname")}}
+USER {{json (index $c "User")}}
+WORKDIR {{json (index $c "WorkingDir")}}
+MEM {{index $h "Memory"}}
+NANO {{index $h "NanoCpus"}}
+{{range (index $h "Dns")}}DNS {{json .}}
+{{end}}{{range (index $h "ExtraHosts")}}EXTRAHOST {{json .}}
+{{end}}{{with (index $h "LogConfig")}}LOGT {{json (index . "Type")}}
+{{range $k, $v := (index . "Config")}}LOGO {{json (printf "%s=%s" $k $v)}}
+{{end}}{{end}}STOPSIG {{json (index $c "StopSignal")}}
+STOPTO {{index $c "StopTimeout"}}
+TTY {{index $c "Tty"}}
+OPEN {{index $c "OpenStdin"}}
+INIT {{index $h "Init"}}
+RO {{index $h "ReadonlyRootfs"}}
+HEALTHJ {{json (index $c "Healthcheck")}}
+{{with (index $c "Healthcheck")}}{{range $i, $t := (index . "Test")}}{{if eq $i 0}}HKIND {{json $t}}
+{{else}}HARG {{json $t}}
+{{end}}{{end}}HINT {{index . "Interval"}}
+HTO {{index . "Timeout"}}
+HRET {{index . "Retries"}}
+HSTART {{index . "StartPeriod"}}
+{{end}}PRIV {{index $h "Privileged"}}
+PIDM {{json (index $h "PidMode")}}
+IPCM {{json (index $h "IpcMode")}}
+{{range (index $h "CapAdd")}}CAPADD {{json .}}
+{{end}}{{range (index $h "CapDrop")}}CAPDROP {{json .}}
+{{end}}{{range (index $h "Devices")}}DEVICE {{json (printf "%s:%s:%s" .PathOnHost .PathInContainer .CgroupPermissions)}}
+{{end}}{{range (index $h "SecurityOpt")}}SECOPT {{json .}}
+{{end}}{{range $k, $v := (index $h "Sysctls")}}SYSCTL {{json (printf "%s=%s" $k $v)}}
+{{end}}{{range (index $h "DeviceRequests")}}GPU {{index . "Count"}}
+{{end}}{{range (index $h "DeviceCgroupRules")}}DCR {{json .}}
+{{end}}{{range (index $h "Ulimits")}}ULIM {{json .Name}} {{.Soft}} {{.Hard}}
+{{end}}{{range (index $h "GroupAdd")}}GRP {{json .}}
+{{end}}{{range $k, $v := (index $h "StorageOpt")}}SOPT {{json (printf "%s=%s" $k $v)}}
+{{end}}SHM {{index $h "ShmSize"}}
+OOM {{index $h "OomScoreAdj"}}
+CGP {{json (index $h "CgroupParent")}}
+RT {{json (index $h "Runtime")}}
+{{range (index $h "VolumesFrom")}}VFROM {{json .}}
+{{end}}{{range (index $h "Links")}}LINK {{json .}}
+{{end}}CPUSET {{json (index $h "CpusetCpus")}}
+{{range (index $h "DnsSearch")}}DNSS {{json .}}
+{{end}}{{range (index $h "DnsOptions")}}DNSO {{json .}}
+{{end}}CPUSHARES {{index $h "CpuShares"}}
+PIDSLIM {{index $h "PidsLimit"}}
+MEMRES {{index $h "MemoryReservation"}}
+UTS {{json (index $h "UTSMode")}}
+USERNS {{json (index $h "UsernsMode")}}
+'
+ifmt='{{$c := .Config}}{{range (index $c "Env")}}ENV {{json .}}
+{{end}}CMDJ {{json (index $c "Cmd")}}
+EPJ {{json (index $c "Entrypoint")}}
+{{range $k, $v := (index $c "Labels")}}LABEL {{json (printf "%s=%s" $k $v)}}
+{{end}}{{range $k, $v := (index $c "Volumes")}}VOL {{json $k}}
+{{end}}USER {{json (index $c "User")}}
+WORKDIR {{json (index $c "WorkingDir")}}
+STOPSIG {{json (index $c "StopSignal")}}
+HEALTHJ {{json (index $c "Healthcheck")}}
+'
+# The container (C lines), its image's defaults (I lines) and the volumes and networks that exist (X lines) go into one input file.
+collect() { # $1 = container, $2 = output file
+  facts=$($D inspect --type container --format "$fmt" "$1" 2>/dev/null) || return 1
+  imgid=$(printf '%s\n' "$facts" | sed -n 's/^IMGID //p' | head -n 1)
+  { case "$imgid" in ''|*[!0-9a-zA-Z:]*) ;; *) $D image inspect --format "$ifmt" "$imgid" 2>/dev/null | sed 's/^/I /' ;; esac
+    printf '%s\n' "$facts" | sed 's/^/C /'
+    $D volume ls -q 2>/dev/null | sed 's/^/X vol /'
+    $D network ls --format '{{.Name}}' 2>/dev/null | sed 's/^/X net /'
+  } > "$2"
+}
+# <<< export collector
 recreate_with_image() { # $1 = container, $2 = the image reference to run
   c=$1; ref=$2
   case "$ref" in ''|*[!A-Za-z0-9._/:@-]*) fail 'the pinned image reference is not valid' ;; esac
-  : > "$tmp/facts"; : > "$tmp/clone.cmd"
-  if ! $D inspect --type container --format "$clone_fmt" "$c" > "$tmp/clone.raw" 2>"$tmp/err"; then
-    fail "the settings of $c could not be read: $(lastline "$tmp/err")"
-  fi
-  awk -F '\t' -v facts="$tmp/facts" -v cmdf="$tmp/clone.cmd" '
-    function unq(s) { gsub(/^"|"$/, "", s); gsub(/\\"/, "\"", s); gsub(/\\\\/, "\\", s); return s }
-    function hk(j,   s, typ, rest, out) {
-      s = j; sub(/^\[/, "", s); sub(/\]$/, "", s)
-      if (match(s, /^"[^"]*"/)) { typ = unq(substr(s, RSTART, RLENGTH)); s = substr(s, RLENGTH + 1); sub(/^,/, "", s) }
-      if (typ == "NONE" || typ == "") return ""
-      if (typ == "CMD-SHELL") return unq(s)
-      out = ""; rest = s
-      while (match(rest, /"[^"]*"/)) { out = out (out == "" ? "" : " ") unq(substr(rest, RSTART, RLENGTH)); rest = substr(rest, RSTART + RLENGTH) }
-      return out
-    }
-    function dur(n) { if (n % 1000000000 == 0) return (n / 1000000000) "s"; if (n % 1000000 == 0) return (n / 1000000) "ms"; return n "ns" }
-    function isint(s) { return s ~ /^[0-9]+$/ }
-    BEGIN { bad = 0; epn = 0; nets = 0; netmode = ""; restart = ""; retry = ""; hkcmd = ""; hkint = 0; hktmo = 0; hkret = 0; hkstart = 0 }
-    NF == 0 { next }
-    $1 == "ID" { if (NF != 2) bad = 1; else print "id=" $2 > facts; next }
-    $1 == "RUN" { if (NF != 2) bad = 1; else print "run=" $2 > facts; next }
-    $1 == "REF" { if (NF != 2) bad = 1; else print "ref=" $2 > facts; next }
-    $1 == "IMGID" { if (NF != 2) bad = 1; else print "imgid=" $2 > facts; next }
-    $1 == "ENV" { if (NF != 2) bad = 1; else print "--env=" $2; next }
-    $1 == "LABEL" { if (NF != 2) bad = 1; else print "--label=" $2; next }
-    $1 == "CMD" { if (NF != 2) bad = 1; else print $2 > cmdf; next }
-    $1 == "EP" { if (NF != 2) bad = 1; else if (epn == 0) { epn = 1; print "--entrypoint=" $2 } else print $2 > cmdf; next }
-    $1 == "MNT" {
-      if (NF != 6) { bad = 1; next }
-      if ($2 == "volume") { if ($3 == "" || $5 == "") { bad = 1; next } print "--volume=" $3 ":" $5 ($6 == "true" ? "" : ":ro") }
-      else if ($2 == "bind") { if ($4 == "" || $5 == "") { bad = 1; next } print "--volume=" $4 ":" $5 ($6 == "true" ? "" : ":ro") }
-      next
-    }
-    $1 == "PORT" {
-      if (NF != 4) { bad = 1; next }
-      if ($2 != "") print "--publish=" $2 ":" ($3 == "" ? "" : $3) ":" $4
-      else if ($3 != "") print "--publish=" $3 ":" $4
-      else print "--publish=" $4
-      next
-    }
-    $1 == "NET" { if (NF != 2) { bad = 1; next } nets++; print "--network=" $2; next }
-    $1 == "ALIAS" { if (NF != 3) { bad = 1; next } print "--network-alias=" $3; next }
-    $1 == "IP4" { if (NF != 3) { bad = 1; next } print "--ip=" $3; next }
-    $1 == "IP6" { if (NF != 3) { bad = 1; next } print "--ip6=" $3; next }
-    $1 == "DNS" { if (NF != 2) { bad = 1; next } print "--dns=" $2; next }
-    $1 == "DNSS" { if (NF != 2) { bad = 1; next } print "--dns-search=" $2; next }
-    $1 == "DNSO" { if (NF != 2) { bad = 1; next } print "--dns-option=" $2; next }
-    $1 == "EXTRAHOST" { if (NF != 2) { bad = 1; next } print "--add-host=" $2; next }
-    $1 == "LOGT" { if (NF != 2) { bad = 1; next } if ($2 != "") print "--log-driver=" $2; next }
-    $1 == "LOGO" { if (NF != 2) { bad = 1; next } print "--log-opt=" $2; next }
-    $1 == "TMPFS" { if (NF != 2) { bad = 1; next } print "--tmpfs=" $2; next }
-    $1 == "CAPADD" { if (NF != 2) { bad = 1; next } print "--cap-add=" $2; next }
-    $1 == "CAPDROP" { if (NF != 2) { bad = 1; next } print "--cap-drop=" $2; next }
-    $1 == "SECOPT" { if (NF != 2) { bad = 1; next } print "--security-opt=" $2; next }
-    $1 == "SYSCTL" { if (NF != 2) { bad = 1; next } print "--sysctl=" $2; next }
-    $1 == "DEVICE" { if (NF != 4) { bad = 1; next } print "--device=" $2 ":" $3 ":" $4; next }
-    $1 == "ULIMIT" { if (NF != 4) { bad = 1; next } print "--ulimit=" $2 "=" $3 ":" $4; next }
-    $1 == "GRP" { if (NF != 2) { bad = 1; next } print "--group-add=" $2; next }
-    $1 == "DCR" { if (NF != 2) { bad = 1; next } print "--device-cgroup-rule=" $2; next }
-    $1 == "GPU" { if (NF != 2) { bad = 1; next } if ($2 == "-1") print "--gpus=all"; else if (isint($2) && $2 + 0 > 0) print "--gpus=" $2; next }
-    $1 == "SOPT" { if (NF != 2) { bad = 1; next } print "--storage-opt=" $2; next }
-    $1 == "HOSTNAME" { if (NF != 2) { bad = 1; next } if ($2 != "") print "--hostname=" $2; next }
-    $1 == "USER" { if (NF != 2) { bad = 1; next } if ($2 != "") print "--user=" $2; next }
-    $1 == "WORKDIR" { if (NF != 2) { bad = 1; next } if ($2 != "") print "--workdir=" $2; next }
-    $1 == "TTY" { if (NF != 2) { bad = 1; next } if ($2 == "true") print "--tty"; next }
-    $1 == "OPEN" { if (NF != 2) { bad = 1; next } if ($2 == "true") print "--interactive"; next }
-    $1 == "INIT" { if (NF != 2) { bad = 1; next } if ($2 == "true") print "--init"; next }
-    $1 == "RO" { if (NF != 2) { bad = 1; next } if ($2 == "true") print "--read-only"; next }
-    $1 == "STOPSIG" { if (NF != 2) { bad = 1; next } if ($2 != "") print "--stop-signal=" $2; next }
-    $1 == "STOPTO" { if (NF != 2) { bad = 1; next } if (isint($2) && $2 + 0 > 0) print "--stop-timeout=" $2; next }
-    $1 == "NETMODE" { if (NF != 2) { bad = 1; next } netmode = $2; next }
-    $1 == "RESTART" { if (NF != 2) { bad = 1; next } restart = $2; next }
-    $1 == "RETRY" { if (NF != 2) { bad = 1; next } retry = $2; next }
-    $1 == "MEM" { if (NF != 2) { bad = 1; next } if (isint($2) && $2 + 0 > 0) print "--memory=" $2; next }
-    $1 == "MEMRES" { if (NF != 2) { bad = 1; next } if (isint($2) && $2 + 0 > 0) print "--memory-reservation=" $2; next }
-    $1 == "NANO" { if (NF != 2) { bad = 1; next } if (isint($2) && $2 + 0 > 0) printf "--cpus=%g\n", $2 / 1000000000; next }
-    $1 == "CPUSHARES" { if (NF != 2) { bad = 1; next } if (isint($2) && $2 + 0 > 0) print "--cpu-shares=" $2; next }
-    $1 == "CPUSET" { if (NF != 2) { bad = 1; next } if ($2 != "") print "--cpuset-cpus=" $2; next }
-    $1 == "PIDSLIM" { if (NF != 2) { bad = 1; next } if (isint($2) && $2 + 0 > 0) print "--pids-limit=" $2; next }
-    $1 == "PRIV" { if (NF != 2) { bad = 1; next } if ($2 == "true") print "--privileged"; next }
-    $1 == "PIDM" { if (NF != 2) { bad = 1; next } if ($2 != "") print "--pid=" $2; next }
-    $1 == "IPCM" { if (NF != 2) { bad = 1; next } if ($2 != "") print "--ipc=" $2; next }
-    $1 == "UTS" { if (NF != 2) { bad = 1; next } if ($2 != "") print "--uts=" $2; next }
-    $1 == "USERNS" { if (NF != 2) { bad = 1; next } if ($2 != "") print "--userns=" $2; next }
-    $1 == "CGP" { if (NF != 2) { bad = 1; next } if ($2 != "") print "--cgroup-parent=" $2; next }
-    $1 == "RT" { if (NF != 2) { bad = 1; next } if ($2 != "") print "--runtime=" $2; next }
-    $1 == "SHM" { if (NF != 2) { bad = 1; next } if (isint($2) && $2 + 0 > 67108864) print "--shm-size=" $2; next }
-    $1 == "OOM" { if (NF != 2) { bad = 1; next } if (isint($2) && $2 + 0 != 0) print "--oom-score-adj=" $2; next }
-    $1 == "HK" { if (NF != 2) { bad = 1; next } hkcmd = hk($2); next }
-    $1 == "HKINT" { if (NF != 2) { bad = 1; next } hkint = $2 + 0; next }
-    $1 == "HKTMO" { if (NF != 2) { bad = 1; next } hktmo = $2 + 0; next }
-    $1 == "HKRET" { if (NF != 2) { bad = 1; next } hkret = $2 + 0; next }
-    $1 == "HKSTART" { if (NF != 2) { bad = 1; next } hkstart = $2 + 0; next }
-    { bad = 1 }
-    END {
-      if (bad) { print "the settings of the container could not be read (a value with a newline is not supported)" > "/dev/stderr"; exit 2 }
-      if (nets == 0 && netmode != "" && netmode != "default") print "--network=" netmode
-      if (restart != "" && restart != "no") { if (restart == "on-failure" && isint(retry) && retry + 0 > 0) print "--restart=on-failure:" retry; else print "--restart=" restart }
-      if (hkcmd != "") { print "--health-cmd=" hkcmd; if (hkint > 0) print "--health-interval=" dur(hkint); if (hktmo > 0) print "--health-timeout=" dur(hktmo); if (hkret > 0) print "--health-retries=" hkret; if (hkstart > 0) print "--health-start-period=" dur(hkstart) }
-    }
-  ' "$tmp/clone.raw" > "$tmp/clone.flags" 2>"$tmp/err" || fail "the settings of $c could not be read for the pinned image: $(lastline "$tmp/err")"
-  cid=''; wasrun=false
-  while IFS='=' read -r k v; do case "$k" in id) cid=$v ;; run) wasrun=$v ;; esac; done < "$tmp/facts"
+  cid=$($D inspect --type container --format '{{.Id}}' "$c" 2>/dev/null)
   case "$cid" in ''|*[!0-9a-f]*) fail "the container $c could not be read" ;; esac
+  wasrun=$($D inspect --type container --format '{{.State.Running}}' "$c" 2>/dev/null)
+  case "$wasrun" in true|false) ;; *) wasrun=true ;; esac
+  collect "$c" "$tmp/in" || fail "the settings of $c could not be read"
+  cat > "$tmp/prog.awk" <<'BOSUN_AWK_END'
+# >>> export reader (the same text in export_run.sh, export_compose.sh, container_update.sh and backup_restore.sh; a test compares them)
+# Input: lines "C TAG values" (the container), "I TAG values" (its image's own defaults), "X vol|net name" (what exists on the host).
+# Values are JSON strings (Docker's own `json` template function) or plain numbers/booleans.
+function hexval(h,   i, n, c) { n = 0; h = tolower(h); for (i = 1; i <= length(h); i++) { c = index("0123456789abcdef", substr(h, i, 1)); if (c == 0) return -1; n = n * 16 + c - 1 } return n }
+function jset(s) { TS = s; TP = 1 }
+function toknext(   c, o, k, n) {
+  while (TP <= length(TS) && substr(TS, TP, 1) == " ") TP++
+  if (TP > length(TS)) return ""
+  c = substr(TS, TP, 1)
+  if (c != "\"") { k = TP; while (TP <= length(TS) && substr(TS, TP, 1) != " ") TP++; o = substr(TS, k, TP - k); return (o == "null" ? "" : o) }
+  TP++; o = ""
+  while (TP <= length(TS)) {
+    c = substr(TS, TP, 1)
+    if (c == "\"") { TP++; return o }
+    if (c == "\\") {
+      TP++; c = substr(TS, TP, 1)
+      if (c == "n") o = o "\n"; else if (c == "t") o = o "\t"; else if (c == "r") o = o "\r"; else if (c == "b") o = o "\b"; else if (c == "f") o = o "\f"
+      else if (c == "u") { n = hexval(substr(TS, TP + 1, 4)); TP += 4; if (n > 0 && n < 128) o = o sprintf("%c", n); else if (n >= 128) o = o "?" }
+      else o = o c
+    } else o = o c
+    TP++
+  }
+  return o
+}
+function isint(s) { return s ~ /^[0-9]+$/ && length(s) <= 18 }
+function dur(n) { if (!isint(n) || n + 0 <= 0) return ""; if (n % 1000000000 == 0) return (n / 1000000000) "s"; if (n % 1000000 == 0) return (n / 1000000) "ms"; return n "ns" }
+function capname(s) { sub(/^CAP_/, "", s); return s }
+{
+  src = substr($0, 1, 1); tag = $2; rest = $0; sub(/^[CIX] [A-Za-z0-9]+ ?/, "", rest)
+  if (src == "X") { if (tag == "vol") vexists[rest] = 1; else if (tag == "net") nexists[rest] = 1; next }
+  jset(rest)
+  if (src == "I") {
+    if (tag == "ENV") ienv[toknext()] = 1
+    else if (tag == "LABEL") ilabel[toknext()] = 1
+    else if (tag == "VOL") ivol[toknext()] = 1
+    else if (tag == "CMDJ") icmdj = rest
+    else if (tag == "EPJ") iepj = rest
+    else if (tag == "USER") iuserj = rest
+    else if (tag == "WORKDIR") iwdj = rest
+    else if (tag == "STOPSIG") istopj = rest
+    else if (tag == "HEALTHJ") ihealthj = rest
+    next
+  }
+  if (tag == "ID") { id = toknext(); next }
+  if (tag == "NAME") { cname = toknext(); next }
+  if (tag == "IMAGE") { image = toknext(); next }
+  if (tag == "IMGID") { imgid = rest; next }
+  if (tag == "ENV") { v = toknext(); if (!(v in ienv)) env[++ne] = v; next }
+  if (tag == "CMDJ") { cmdj = rest; next }
+  if (tag == "EPJ") { epj = rest; next }
+  if (tag == "CMD") { cmd[++ncmd] = toknext(); next }
+  if (tag == "EP") { ep[++nep] = toknext(); next }
+  if (tag == "LABEL") { v = toknext(); if (v ~ /^com\.docker\.compose\./) ncomp++; else if (!(v in ilabel)) lab[++nlab] = v; next }
+  if (tag == "PORT") { np++; pip[np] = toknext(); php[np] = toknext(); pcp[np] = toknext(); next }
+  if (tag == "MNT") { nm++; mtype[nm] = toknext(); mname[nm] = toknext(); msrc[nm] = toknext(); mdst[nm] = toknext(); mrw[nm] = toknext(); next }
+  if (tag == "TMPFS") { tm[++ntm] = toknext(); next }
+  if (tag == "NETMODE") { netmode = toknext(); next }
+  if (tag == "NETN") { netn[++nnet] = toknext(); next }
+  if (tag == "ALIAS") { nal++; alnet[nal] = toknext(); alname[nal] = toknext(); next }
+  if (tag == "IP4") { k = toknext(); ip4[k] = toknext(); next }
+  if (tag == "IP6") { k = toknext(); ip6[k] = toknext(); next }
+  if (tag == "RP") { rp = toknext(); next }
+  if (tag == "RPN") { rpn = rest; next }
+  if (tag == "HOSTNAME") { host = toknext(); next }
+  if (tag == "USER") { userj = rest; user = toknext(); next }
+  if (tag == "WORKDIR") { wdj = rest; wd = toknext(); next }
+  if (tag == "MEM") { mem = rest; next }
+  if (tag == "NANO") { nano = rest; next }
+  if (tag == "DNS") { dns[++ndns] = toknext(); next }
+  if (tag == "EXTRAHOST") { xh[++nxh] = toknext(); next }
+  if (tag == "LOGT") { logt = toknext(); next }
+  if (tag == "LOGO") { lo[++nlo] = toknext(); next }
+  if (tag == "STOPSIG") { stopj = rest; stopsig = toknext(); next }
+  if (tag == "STOPTO") { stopto = rest; next }
+  if (tag == "TTY") { tty = rest; next }
+  if (tag == "OPEN") { open = rest; next }
+  if (tag == "INIT") { init = rest; next }
+  if (tag == "RO") { ro = rest; next }
+  if (tag == "HEALTHJ") { healthj = rest; next }
+  if (tag == "HKIND") { hkind = toknext(); next }
+  if (tag == "HARG") { ha[++nha] = toknext(); next }
+  if (tag == "HINT") { hint = rest; next }
+  if (tag == "HTO") { hto = rest; next }
+  if (tag == "HRET") { hret = rest; next }
+  if (tag == "HSTART") { hstart = rest; next }
+  if (tag == "PRIV") { priv = rest; next }
+  if (tag == "PIDM") { pidm = toknext(); next }
+  if (tag == "IPCM") { ipcm = toknext(); next }
+  if (tag == "CAPADD") { cadd[++ncadd] = capname(toknext()); next }
+  if (tag == "CAPDROP") { cdrop[++ncdrop] = capname(toknext()); next }
+  if (tag == "DEVICE") { dev[++ndev] = toknext(); next }
+  if (tag == "SECOPT") { sec[++nsec] = toknext(); next }
+  if (tag == "SYSCTL") { sys[++nsys] = toknext(); next }
+  if (tag == "GPU") { gpu = rest; next }
+  if (tag == "DCR") { dcr[++ndcr] = toknext(); next }
+  if (tag == "ULIM") { nul++; ulname[nul] = toknext(); ulsoft[nul] = toknext(); ulhard[nul] = toknext(); next }
+  if (tag == "GRP") { grp[++ngrp] = toknext(); next }
+  if (tag == "SOPT") { sop[++nsop] = toknext(); next }
+  if (tag == "SHM") { shm = rest; next }
+  if (tag == "OOM") { oom = rest; next }
+  if (tag == "CGP") { cgp = toknext(); next }
+  if (tag == "RT") { rt = toknext(); next }
+  if (tag == "LINK") { links = links (links == "" ? "" : ", ") toknext(); next }
+  if (tag == "VFROM") { vfrom = vfrom (vfrom == "" ? "" : ", ") toknext(); next }
+  if (tag == "CPUSET") { cpuset = toknext(); next }
+  if (tag == "DNSS") { dnss[++ndnss] = toknext(); next }
+  if (tag == "DNSO") { dnso[++ndnso] = toknext(); next }
+  if (tag == "CPUSHARES") { cpushares = rest; next }
+  if (tag == "PIDSLIM") { pidslim = rest; next }
+  if (tag == "MEMRES") { memres = rest; next }
+  if (tag == "UTS") { uts = toknext(); next }
+  if (tag == "USERNS") { userns = toknext(); next }
+}
+# The settings of the container as a person would give them (what differs from the image and from Docker's defaults).
+function derive(   i, c) {
+  sub(/^\//, "", cname)
+  shortid = substr(id, 1, 12)
+  if (netmode == "default" || netmode == "") netmode = "bridge"
+  out_cmd = (cmdj != icmdj) ? 1 : 0
+  out_ep = (epj != iepj) ? 1 : 0
+  epclear = (out_ep && nep == 0) ? 1 : 0
+  out_user = (userj != iuserj && user != "") ? user : ""
+  out_wd = (wdj != iwdj && wd != "") ? wd : ""
+  out_host = (host == shortid || netmode == "host" || host == "") ? "" : host
+  out_stopsig = (stopj != istopj && stopsig != "") ? stopsig : ""
+  out_stopto = isint(stopto) ? stopto : ""
+  restart = ""
+  if (rp == "always" || rp == "unless-stopped") restart = rp
+  else if (rp == "on-failure") restart = (isint(rpn) && rpn + 0 > 0) ? "on-failure:" rpn : "on-failure"
+  memory = ""
+  if (isint(mem) && mem + 0 > 0) { if (mem % 1073741824 == 0) memory = (mem / 1073741824) "g"; else if (mem % 1048576 == 0) memory = (mem / 1048576) "m"; else memory = mem "b" }
+  cpus = ""
+  if (isint(nano) && nano + 0 > 0) { cpus = sprintf("%.9f", nano / 1000000000); sub(/0+$/, "", cpus); sub(/\.$/, "", cpus) }
+  logdriver = logt; if (nlo == 0 && logdriver == "json-file") logdriver = ""
+  hnone = 0; hcmd = ""; out_health = 0
+  if (healthj != ihealthj && healthj != "null" && hkind != "") {
+    out_health = 1
+    if (hkind == "NONE") hnone = 1
+    else if (hkind == "CMD-SHELL") hcmd = ha[1]
+    else if (hkind == "CMD") { for (i = 1; i <= nha; i++) hcmd = hcmd (i > 1 ? " " : "") shq(ha[i]) }
+    hint_o = dur(hint); hto_o = dur(hto); hstart_o = dur(hstart)
+    hret_o = (isint(hret) && hret + 0 > 0) ? hret : ""
+  }
+  gpus = ""; if (gpu == "-1") gpus = "all"; else if (isint(gpu) && gpu + 0 > 0) gpus = gpu
+  for (i = 1; i <= nm; i++) {
+    c = 0
+    if (mtype[i] == "volume" && length(mname[i]) == 64 && mname[i] ~ /^[0-9a-f]+$/) c = 1
+    manon[i] = c
+    mskip[i] = (c && (mdst[i] in ivol)) ? 1 : 0
+  }
+  unm = ""
+  if (links != "") unm = unm (unm == "" ? "" : "; ") "links (" links ")"
+  if (vfrom != "") unm = unm (unm == "" ? "" : "; ") "volumes-from (" vfrom ")"
+  if (ncomp > 0) unm = unm (unm == "" ? "" : "; ") "the compose labels com.docker.compose.*"
+}
+function shq(s,   o, i, c, n) {
+  if (s == "") return "''"
+  if (s ~ /^[A-Za-z0-9_@%+=:,.\/-]+$/) return s
+  o = "'"; n = length(s)
+  for (i = 1; i <= n; i++) { c = substr(s, i, 1); if (c == "'") o = o "'\\''"; else o = o c }
+  return o "'"
+}
+function pubport(i,   p, h) {
+  p = pcp[i]; sub(/\/tcp$/, "", p)
+  h = pip[i]; if (h ~ /:/) h = "[" h "]"
+  if (pip[i] != "") return h ":" php[i] ":" p
+  if (php[i] != "") return php[i] ":" p
+  return p
+}
+# <<< export reader
+# >>> export run writer (the same text in export_run.sh, container_update.sh and backup_restore.sh; a test compares them)
+function add(s) { L[++nl] = s }
+function opt(flag, v) { add(flag " " shq(v)) }
+END {
+  derive()
+  if (nameoverride != "") { if (nameeq != "") add("--name=" shq(nameoverride)); else add("--name " shq(nameoverride)) }
+  else if (nameeq != "") add("--name=" shq(cname)); else add("--name " shq(cname))
+  if (restart != "") opt("--restart", restart)
+  if (out_host != "") opt("--hostname", out_host)
+  if (out_user != "") opt("--user", out_user)
+  if (out_wd != "") opt("--workdir", out_wd)
+  if (netmode != "bridge") opt("--network", netmode)
+  if (netmode != "bridge" && netmode != "host" && netmode != "none" && netmode !~ /^container:/) {
+    for (i = 1; i <= nal; i++) if (alnet[i] == netmode && alname[i] != shortid && alname[i] != cname) opt("--network-alias", alname[i])
+    if (netmode in ip4) opt("--ip", ip4[netmode])
+    if (netmode in ip6) opt("--ip6", ip6[netmode])
+  }
+  for (i = 1; i <= np; i++) opt("-p", pubport(i))
+  for (i = 1; i <= nm; i++) {
+    if (mtype[i] != "bind" && mtype[i] != "volume") continue
+    if (mskip[i] && keepvols == "") continue
+    if (manon[i] && keepvols == "") { opt("-v", mdst[i]); continue }
+    if (mtype[i] == "bind") v = msrc[i] ":" mdst[i]
+    else if (mname[i] == "") { opt("-v", mdst[i]); continue }
+    else v = mname[i] ":" mdst[i]
+    if (mrw[i] == "false") v = v ":ro"
+    opt("-v", v)
+  }
+  for (i = 1; i <= ntm; i++) opt("--tmpfs", tm[i])
+  for (i = 1; i <= ne; i++) opt("-e", env[i])
+  for (i = 1; i <= nlab; i++) opt("--label", lab[i])
+  if (memory != "") opt("--memory", memory)
+  if (cpus != "") opt("--cpus", cpus)
+  if (isint(memres) && memres + 0 > 0) opt("--memory-reservation", memres)
+  if (isint(cpushares) && cpushares + 0 > 0) opt("--cpu-shares", cpushares)
+  if (isint(pidslim) && pidslim + 0 > 0) opt("--pids-limit", pidslim)
+  if (cpuset != "") opt("--cpuset-cpus", cpuset)
+  if (isint(shm) && shm + 0 > 0 && shm + 0 != 67108864) opt("--shm-size", shm)
+  if (oom != "" && oom != "0" && oom ~ /^-?[0-9]+$/) opt("--oom-score-adj", oom)
+  for (i = 1; i <= nul; i++) opt("--ulimit", ulname[i] "=" ulsoft[i] ":" ulhard[i])
+  for (i = 1; i <= ngrp; i++) opt("--group-add", grp[i])
+  for (i = 1; i <= ndns; i++) opt("--dns", dns[i])
+  for (i = 1; i <= ndnss; i++) opt("--dns-search", dnss[i])
+  for (i = 1; i <= ndnso; i++) opt("--dns-option", dnso[i])
+  for (i = 1; i <= nxh; i++) opt("--add-host", xh[i])
+  if (logdriver != "") opt("--log-driver", logdriver)
+  for (i = 1; i <= nlo; i++) opt("--log-opt", lo[i])
+  if (out_stopsig != "") opt("--stop-signal", out_stopsig)
+  if (out_stopto != "") opt("--stop-timeout", out_stopto)
+  if (tty == "true") add("-t")
+  if (open == "true") add("-i")
+  if (init == "true") add("--init")
+  if (ro == "true") add("--read-only")
+  if (out_health) {
+    if (hnone) add("--no-healthcheck")
+    else {
+      if (hcmd != "") opt("--health-cmd", hcmd)
+      if (hint_o != "") opt("--health-interval", hint_o)
+      if (hto_o != "") opt("--health-timeout", hto_o)
+      if (hret_o != "") opt("--health-retries", hret_o)
+      if (hstart_o != "") opt("--health-start-period", hstart_o)
+    }
+  }
+  if (priv == "true") add("--privileged")
+  if (pidm == "host") add("--pid host")
+  if (ipcm == "host") add("--ipc host")
+  if (uts == "host") add("--uts host")
+  if (userns == "host") add("--userns host")
+  for (i = 1; i <= ncadd; i++) opt("--cap-add", cadd[i])
+  for (i = 1; i <= ncdrop; i++) opt("--cap-drop", cdrop[i])
+  for (i = 1; i <= ndev; i++) opt("--device", dev[i])
+  for (i = 1; i <= nsec; i++) opt("--security-opt", sec[i])
+  for (i = 1; i <= nsys; i++) opt("--sysctl", sys[i])
+  if (gpus != "") opt("--gpus", gpus)
+  for (i = 1; i <= ndcr; i++) opt("--device-cgroup-rule", dcr[i])
+  if (cgp != "") opt("--cgroup-parent", cgp)
+  if (rt != "" && rt != "runc") opt("--runtime", rt)
+  for (i = 1; i <= nsop; i++) opt("--storage-opt", sop[i])
+  if (out_ep) { if (epclear) opt("--entrypoint", ""); else opt("--entrypoint", ep[1]) }
+  s = "docker run -d"
+  for (i = 1; i <= nl; i++) s = s " \\\n  " L[i]
+  s = s " \\\n  " shq(newimage != "" ? newimage : image)
+  args = ""
+  if (out_ep) for (i = 2; i <= nep; i++) args = args " " shq(ep[i])
+  if (out_cmd) for (i = 1; i <= ncmd; i++) args = args " " shq(cmd[i])
+  if (args != "") s = s " \\\n " args
+  print s
+  # what no docker run flag carries here
+  if (unm != "") print "# Not exported: " unm
+  extra = ""
+  for (i = 1; i <= nnet; i++) if (netn[i] != netmode && netn[i] != "bridge" && !(netmode == "bridge" && netn[i] == "bridge")) extra = extra (extra == "" ? "" : ", ") netn[i]
+  if (extra != "") print "# Also attached to the networks: " extra " (docker network connect <network> " cname ")"
+}
+# <<< export run writer
+BOSUN_AWK_END
+  if ! awk -v newimage="$ref" -v nameoverride="$c" -v nameeq=1 -v keepvols=1 -f "$tmp/prog.awk" "$tmp/in" > "$tmp/out" 2>"$tmp/err"; then
+    fail "the settings of $c could not be read for the pinned image: $(lastline "$tmp/err")"
+  fi
+  cmd=$(cat "$tmp/out")
+  case "$cmd" in 'docker run -d'*) ;; *) fail 'could not build the container command' ;; esac
+  rest=${cmd#docker run -d}
   if ! $D image inspect "$ref" >/dev/null 2>&1; then
     echo "[step] Pulling $ref"
     $D pull "$ref" >/dev/null 2>&1 || fail "the image $ref could not be pulled (the data was restored)"
@@ -351,27 +552,23 @@ recreate_with_image() { # $1 = container, $2 = the image reference to run
   old="$c-bosun-old"
   if $D inspect --type container --format '{{.Id}}' "$old" >/dev/null 2>&1; then fail "a container named $old exists (left over from an earlier restore); remove it first"; fi
   echo "[step] Recreating $c with $ref"
-  newid=''
+  NEWID=''
   rollback() {
-    [ -z "$newid" ] || $D rm -f "$newid" >/dev/null 2>&1
+    [ -z "$NEWID" ] || $D rm -f "$NEWID" >/dev/null 2>&1
     if ! $D rename "$old" "$c" >/dev/null 2>&1; then fail "$1; and the old container could not be renamed back (it is still $old)"; fi
     if [ "$wasrun" = true ]; then $D start "$c" >/dev/null 2>&1; fi
     fail "$1 (the old container $c was put back)"
   }
   $D rename "$c" "$old" >/dev/null 2>"$tmp/err" || fail "the container $c could not be renamed: $(lastline "$tmp/err")"
-  set --
-  while IFS= read -r a; do set -- "$@" "$a"; done < "$tmp/clone.flags"
-  set -- "$@" "--name=$c" "$ref"
-  while IFS= read -r a; do set -- "$@" "$a"; done < "$tmp/clone.cmd"
-  newid=$($D create "$@" 2>"$tmp/err") || { newid=''; rollback "creating the container failed: $(lastline "$tmp/err")"; }
-  newid=$(printf '%s\n' "$newid" | tail -n 1)
-  case "$newid" in ''|*[!0-9a-f]*) newid=''; rollback 'docker create gave an unexpected answer' ;; esac
+  NEWID=$(sh -c "$D create$rest" 2>"$tmp/err") || { NEWID=''; rollback "creating the container failed: $(lastline "$tmp/err")"; }
+  NEWID=$(printf '%s\n' "$NEWID" | tail -n 1)
+  case "$NEWID" in ''|*[!0-9a-f]*) NEWID=''; rollback 'docker create gave an unexpected answer' ;; esac
   if [ "$wasrun" = true ]; then
     $D stop "$old" >/dev/null 2>&1
-    $D start "$newid" >/dev/null 2>"$tmp/err" || rollback "the new container could not be started: $(lastline "$tmp/err")"
+    $D start "$NEWID" >/dev/null 2>"$tmp/err" || rollback "the new container could not be started: $(lastline "$tmp/err")"
     wait=${BOSUN_RECREATE_WAIT:-2}; case "$wait" in ''|*[!0-9]*) wait=2 ;; esac
     [ "$wait" -eq 0 ] || sleep "$wait"
-    st=$($D inspect --type container --format '{{.State.Running}}' "$newid" 2>/dev/null)
+    st=$($D inspect --type container --format '{{.State.Running}}' "$NEWID" 2>/dev/null)
     [ "$st" = true ] || rollback 'the new container did not stay running'
   fi
   $D rm -f "$old" >/dev/null 2>&1
