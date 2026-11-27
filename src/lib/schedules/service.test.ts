@@ -36,12 +36,18 @@ const loaded = () => ({
     version: 2,
     data: { source: 'snapshot', section: 'services', permission: 'pkg.view' },
     view: { type: 'text', text: 'x' },
-    actions: [{ id: 'restart', label: 'Restart', as: 'service', command: 'echo {{name}}', permission: 'pkg.control', params: { name: { type: 'string', pattern: '^[a-z]+$' } } }],
+    actions: [
+      { id: 'restart', label: 'Restart', as: 'service', command: 'echo {{name}}', permission: 'pkg.control', params: { name: { type: 'string', pattern: '^[a-z]+$' } } },
+      { id: 'move', label: 'Move', as: 'service', command: 'echo {{kind}} {{name}}', permission: 'pkg.control',
+        params: { kind: { type: 'string', values: ['container', 'stack'] }, name: { type: 'string', pattern: '^[a-z]+$' } },
+        target: { byKind: 'kind', param: 'name' } },
+    ],
     scripts: { check: { as: 'service', linux: 'check.sh', params: {} } },
     datasets: { findings: { script: 'check', permission: 'pkg.view' } },
     schedules: [
       { id: 'check', label: 'Check', run: { dataset: 'findings' }, notify: { title: 'x', message: 'y' } },
       { id: 'restart_web', label: 'Restart', run: { action: 'restart' } },
+      { id: 'move_any', label: 'Move any', run: { action: 'move' }, target: 'byKind' },
     ],
   },
 });
@@ -101,6 +107,14 @@ describe('creating a schedule', () => {
     await expect(createSchedule(viewer, input({ timezone: 'Mars/Olympus' }))).rejects.toThrow(/IANA/);
   });
 
+  it('stores a byKind schedule with the kind and name it targets', async () => {
+    await createSchedule(viewer, input({ schedule_kind: 'move_any', resource_kind: 'stack', resource_name: 'demo' }));
+    const insert = db.execute.mock.calls.find(c => String(c[0]).includes('INSERT INTO schedules'))!;
+    expect(insert[1]).toContain('stack');
+    expect(insert[1]).toContain('demo');
+    await expect(createSchedule(viewer, input({ schedule_kind: 'move_any', resource_name: 'demo' }))).rejects.toThrow(/container or stack/);
+  });
+
   it('stores the schedule with the creator and the next run, and audits it', async () => {
     const dto = await createSchedule(viewer, input());
     expect(dto).toMatchObject({ name: 'Nightly', server_name: 'alpha', enabled: true });
@@ -154,7 +168,8 @@ describe('what a viewer may see', () => {
     expect(await listScheduleKinds(viewer, 'srv1')).toEqual([]);
     hasPermission.mockResolvedValue(true);
     const kinds = await listScheduleKinds(viewer, 'srv1');
-    expect(kinds.map(k => k.id).sort()).toEqual(['check', 'restart_web']);
+    expect(kinds.map(k => k.id).sort()).toEqual(['check', 'move_any', 'restart_web']);
+    expect(kinds.find(k => k.id === 'move_any')).toMatchObject({ target: 'byKind' });
     expect(kinds[0]).toMatchObject({ widget_type: 'pkg', package_id: 'pkg', target: 'server' });
   });
 });

@@ -224,7 +224,7 @@ describe('packages shipped in the repository', () => {
     expect(shell).toMatchObject({ kind: 'terminal', terminal: { ref: 'name', check: 'shell_check' }, permission: 'docker.shell', command: '' });
     expect(shell.terminal?.command).toContain('docker exec -it {{ref}}');
     expect(spec.metrics?.[0]).toMatchObject({ name: 'docker.running', from: { agg: 'count' } });
-    expect(spec.view.row?.actions).toEqual(['logs', 'shell', 'edit', 'restart', 'stop', 'start']);
+    expect(spec.view.row?.actions).toEqual(['logs', 'shell', 'edit', 'backup_run', 'backup_dialog', 'restart', 'stop', 'start']);
     expect(spec.view.filter?.fields).toEqual(['name', 'image']);
     expect(spec.view.toggles?.[0].key).toBe('stopped');
   });

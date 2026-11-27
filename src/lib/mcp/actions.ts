@@ -20,7 +20,7 @@ export interface WidgetDeps {
   viewFilter(auth: TokenPayload, permission: string, serverId: string, fields: ResourceFields | undefined): Promise<'all' | ((r: ResourceContext) => boolean) | null>;
   loadDataset(serverId: string, loaded: LoadedSpec, datasetId: string, rawArgs: unknown): Promise<{ data: unknown; collectedAt: string }>;
   filterRows(data: unknown, fields: ResourceFields, allow: 'all' | ((r: ResourceContext) => boolean)): unknown;
-  resolveTarget(serverId: string, loaded: LoadedSpec, target: ResourceTarget, value: unknown): Promise<ResourceContext>;
+  resolveTarget(serverId: string, loaded: LoadedSpec, target: ResourceTarget, value: unknown, kindValue?: unknown): Promise<ResourceContext>;
   runWidgetAction(auth: TokenPayload, serverId: string, loaded: LoadedSpec, action: ActionSpec, body: ActionBody, opts?: { ip?: string }): Promise<NextResponse>;
   openTerminalAction(auth: TokenPayload, serverId: string, loaded: LoadedSpec, action: ActionSpec, ref: unknown): Promise<NextResponse>;
   consumeActionRateLimit(userId: string): { allowed: boolean };
@@ -79,7 +79,7 @@ export async function callWidgetDataset(
 
   let result: { data: unknown; collectedAt: string };
   if (ds.target) {
-    const resource = await deps.resolveTarget(serverId, loaded, ds.target, rawArgs[ds.target.param]);
+    const resource = await deps.resolveTarget(serverId, loaded, ds.target, rawArgs[ds.target.param], 'byKind' in ds.target ? (rawArgs[ds.target.byKind] ?? loaded.spec.scripts?.[ds.script]?.params[ds.target.byKind]?.default) : undefined);
     const denied = await deps.requirePermission(ctx.auth, ds.permission, serverId, resource);
     if (denied) return errorResult(await toolErrorFromResponse(denied, 'Not permitted'));
     result = await deps.loadDataset(serverId, loaded, datasetId, rawArgs);
@@ -123,8 +123,9 @@ export async function callWidgetAction(
 
   const body = actionBody(action, args);
   if (action.target) {
-    const value = action.kind === 'terminal' ? body.ref : (body.params as Record<string, unknown> | undefined)?.[action.target.param];
-    const resource = await deps.resolveTarget(serverId, loaded, action.target, value);
+    const params = body.params as Record<string, unknown> | undefined;
+    const value = action.kind === 'terminal' ? body.ref : params?.[action.target.param];
+    const resource = await deps.resolveTarget(serverId, loaded, action.target, value, 'byKind' in action.target ? (params?.[action.target.byKind] ?? action.params[action.target.byKind]?.default) : undefined);
     const denied = await deps.requirePermission(ctx.auth, action.permission, serverId, resource);
     if (denied) return errorResult(await toolErrorFromResponse(denied, 'Not permitted'));
   } else {

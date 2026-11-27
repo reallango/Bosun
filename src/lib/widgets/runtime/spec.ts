@@ -678,7 +678,7 @@ function validateView(raw: unknown, actionIds: ReadonlySet<string>, v2 = false, 
   }
   const refActions = (list: unknown, where: string): Validated<string[]> => {
     if (list === undefined) return { ok: true, value: [] };
-    if (!Array.isArray(list) || list.length > 10 || !list.every(a => typeof a === 'string' && actionIds.has(a))) return fail(`${where} must list ids of actions this widget declares`);
+    if (!Array.isArray(list) || list.length > 12 || !list.every(a => typeof a === 'string' && actionIds.has(a))) return fail(`${where} must list ids of actions this widget declares`);
     return { ok: true, value: list as string[] };
   };
   if (raw.type === 'text') {

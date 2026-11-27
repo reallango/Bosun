@@ -6,7 +6,7 @@ import type { TokenPayload } from '@/lib/auth/jwt';
 import { hasPermission, resourceFilter } from '@/lib/permissions/authorize';
 import type { ResourceContext } from '@/lib/permissions/evaluate';
 import type { LoadedSpec } from '@/lib/widgets/runtime/execute';
-import { filterRows, rowResource, type ResourceFields, type ResourceTarget } from './resources';
+import { filterRows, rowResource, targetKindFor, type ResourceFields, type ResourceTarget } from './resources';
 
 /** A target value as sent: a plain name (no paths, no options). */
 const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
@@ -19,11 +19,15 @@ export class TargetError extends Error {
  * What an action acts on, from its declared target and the value sent for it. A container is looked up in the
  * widget's latest data to find its stack (so a stack grant covers it); a container that is not in that data yet
  * has no known stack, so only a grant for the container itself (or the whole server) covers it.
+ *
+ * `kindValue` is the value of the parameter named by `target.byKind` for a target whose kind is not fixed.
  */
-export async function resolveTarget(serverId: string, loaded: LoadedSpec, target: ResourceTarget, value: unknown): Promise<ResourceContext> {
-  if (typeof value !== 'string' || !NAME_RE.test(value.trim())) throw new TargetError(`"${target.param}" must name the ${target.kind}`);
+export async function resolveTarget(serverId: string, loaded: LoadedSpec, target: ResourceTarget, value: unknown, kindValue?: unknown): Promise<ResourceContext> {
+  const kind = targetKindFor(target, kindValue);
+  if (!kind) throw new TargetError(`"${'byKind' in target ? target.byKind : 'target.kind'}" must be "container" or "stack"`);
+  if (typeof value !== 'string' || !NAME_RE.test(value.trim())) throw new TargetError(`"${target.param}" must name the ${kind}`);
   const name = value.trim();
-  if (target.kind === 'stack') return { kind: 'stack', name };
+  if (kind === 'stack') return { kind: 'stack', name };
   const fields = loaded.spec.data.resources;
   if (!fields?.container || !fields.stack) return { kind: 'container', name, stack: null };
   const { loadRuntimeData } = await import('@/lib/widgets/runtime/execute');

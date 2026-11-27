@@ -50,6 +50,7 @@ newer Bosun is still listed under Available (so the reason is visible) but canno
 | 5 | `schedules`: the runs a package offers under Settings → Schedules. |
 | 6 | Up to 64 actions per widget (40 before). |
 | 7 | `looks` (and the "Look" choice Bosun adds to the widget's settings), `trend` on stat tiles and fields, the stat tile keys `bar`, `unit` and `thresholds`, and the `gauges` block. |
+| 8 | `before` on an action variant: a package script that runs first, and the action does not run when it fails (used to take a backup before an update); and `target.byKind` on actions and datasets (a target whose kind comes from one of its parameters, so one action can act on a container or a stack), with `"byKind"` as a schedule target. |
 
 New spec keys that an older Bosun cannot honour raise the level in `src/lib/widgets/api-level.ts`; keys an older
 Bosun can safely ignore (because it renders the widget sensibly without them) do not.
@@ -409,7 +410,7 @@ shows; it does not need any layout CSS of its own.
 
 ## Docker Containers: backups and restore
 
-Docker Containers 1.0.23 can back up a container or a Bosun-managed stack with [restic](https://restic.net/), run
+Docker Containers 1.0.27 can back up a container or a Bosun-managed stack with [restic](https://restic.net/), run
 as a short-lived `restic/restic` container with the data mounted read-only; nothing is installed on the host. Choose
 the destination once per server in the widget's settings: a folder on the host (a mounted NAS counts), SFTP
 (`sftp:user@host:/path`) or an S3-compatible endpoint (`s3:https://endpoint/bucket/prefix`). The destination and the
@@ -439,13 +440,20 @@ pinned version; open a snapshot to restore its data (stopping the container or s
 optionally pin the image to that snapshot's version — a standalone container is recreated with the pinned image, a
 Bosun-managed stack is redeployed with an extra `compose.backup-pin.yaml` override (the stored compose file is not
 edited) — or restore into new volumes to inspect the data first, and to delete the snapshot. Container and stack row
-menus also have "Back up", which runs with the defaults; the dialog with the inclusion and retention options is on
-the Containers and Stacks tabs (the package already uses all 40 actions the spec allows, so a separate row-menu
-dialog would need a core change). The new permissions are `docker.backup` ("Back up containers and stacks") and
-`docker.restore` ("Restore backups"), both high and admin by default. The row actions take the container or stack
-from the row and the Backups dataset declares its container/stack resources; because one action cannot name both a
-container and a stack target, the actions themselves are checked at server scope (a core `target.byKind`, or a second
-action per kind, would allow limiting them).
+menus have **Back up** (one click with the defaults) and **Back up…**, which opens the same inclusion and retention
+options in a dialog, prefilled with the row's container or stack. The dialog's submit (`backup_run`), the quick
+action and the Backups dataset declare their container or stack target with `target.byKind`, so a grant limited to one
+stack or container covers them. The permissions are `docker.backup` ("Back up containers and stacks") and
+`docker.restore` ("Restore backups"); both are high and admin by default and can be limited to a stack or container
+like the other Docker permissions.
+
+Settings → Schedules offers **Back up a container or stack** with the standard options (volumes, mapped folders,
+stack files, live consistency, daily/weekly/monthly retention). It runs as an ordinary job and re-checks
+`docker.backup` on the target every time; a failure raises a bell notice, and a success raises one too. The backup
+settings are stored with the schedule (`options.params.settings`), so an API caller can override them per schedule.
+The package also offers **Back up, then update** for a container and for a stack, and the matching schedules; they
+need `docker.backup_update` (which implies `docker.backup` and `docker.manage`) and take a restic backup first,
+stopping before the update when the backup fails.
 
 ## Managing the Ollama installation
 
@@ -491,7 +499,7 @@ server; the API action is `{ "action": "set_setting", "name": "OLLAMA_CONTEXT_LE
 
 ## Docker Containers: manual updates
 
-The Docker Containers package (1.0.24) can install a newer image by hand, one container or all at once, with a
+The Docker Containers package (1.0.27) can install a newer image by hand, one container or all at once, with a
 health check and an automatic rollback. On the Manage page, the Containers tab lists every container whose registry has
 a newer image for the tag it runs; each row with an update has an **Update** action, and the table's selection offers the
 same action as a bulk update (select the rows, or the header checkbox for all of them). The Stacks tab has **Update
@@ -516,9 +524,17 @@ others are left alone. A stack Bosun did not create has no stored compose file a
 Bosun's own container or stack is refused ("use Settings → Updates"), so the self-update path keeps owning that.
 
 Both actions need `docker.manage`, the same permission as editing a container and redeploying a stack; no new
-permission is introduced. Over the API:
+permission is introduced. The row menus also offer **Back up, then update** (and **Back up, then update images** for a
+stack): the same update path after a restic backup of the container or stack, and the update does not start when the
+backup fails. Those actions need `docker.backup_update`, which implies `docker.backup` and `docker.manage`; they are
+off by default because they are a separate choice, not a checkbox on the ordinary update. Settings → Schedules can
+apply an image update to a chosen container or stack (**Update a container's image**, **Update a stack's images**) or
+the same with a backup first. Each run re-checks `docker.manage` (or `docker.backup_update`) on the target and raises a
+bell notice with what was updated, rolled back or failed. Over the API:
 `POST /api/servers/:serverId/widget-actions/docker/container_update` with
 `{ "params": { "name": "<container>", "stack": "", "service": "", "health_timeout": 180 }, "confirm": true }` (for a
 compose service, `stack` and `service` are the service's values), and
 `POST /api/servers/:serverId/widget-actions/docker/stack_update_images` with
-`{ "params": { "name": "<stack>", "health_timeout": 180 }, "confirm": true }`.
+`{ "params": { "name": "<stack>", "health_timeout": 180 }, "confirm": true }`. For the backup-first actions use
+`container_update_backup` and `stack_update_images_backup` with the same parameters plus `settings` (the backup
+settings blob).

@@ -151,7 +151,7 @@ export async function createRequest(auth: TokenPayload, input: RequestInput): Pr
     let ctx: ResourceContext | null = null;
     if (a.target) {
       const { resolveTarget, TargetError } = await import('@/lib/widgets/runtime/resource-check');
-      try { ctx = await resolveTarget(input.serverId, loaded, a.target, input.params[a.target.param]); } catch (e) {
+      try { ctx = await resolveTarget(input.serverId, loaded, a.target, input.params[a.target.param], 'byKind' in a.target ? (input.params[a.target.byKind] ?? a.params[a.target.byKind]?.default) : undefined); } catch (e) {
         if (e instanceof TargetError) throw new RequestError(e.message, e.status, e.code);
         throw e;
       }
@@ -315,7 +315,8 @@ export async function decideRequest(approver: TokenPayload, id: string, decision
     const a = loaded?.spec.actions.find(x => x.id === action.actionId);
     if (loaded && a?.target) {
       const { resolveTarget } = await import('@/lib/widgets/runtime/resource-check');
-      ctx = await resolveTarget(serverId, loaded, a.target, (action.params ?? {})[a.target.param]).catch(() => ctx);
+      const params = action.params ?? {};
+      ctx = await resolveTarget(serverId, loaded, a.target, params[a.target.param], 'byKind' in a.target ? (params[a.target.byKind] ?? a.params[a.target.byKind]?.default) : undefined).catch(() => ctx);
     }
   }
   if (decision === 'approve' && !(await hasPermission(approver, def.id, serverId, resource && !ctx ? null : ctx))) {

@@ -28,7 +28,7 @@ const RISKY_KEYS = ['privileged', 'pid', 'ipc', 'cap_add', 'device', 'security_o
 
 describe('the Docker manager package', () => {
   it('has screens, datasets and menu entries that exist, and a review that lists what runs', () => {
-    expect(Object.keys(spec.screens ?? {}).sort()).toEqual(['create', 'edit', 'manage', 'restore_backup', 'stack_edit', 'stack_new']);
+    expect(Object.keys(spec.screens ?? {}).sort()).toEqual(['backup_target', 'create', 'edit', 'manage', 'restore_backup', 'stack_edit', 'stack_new']);
     expect(spec.menu?.map(m => m.id)).toEqual(['new_container', 'new_stack', 'manage']);
     expect(Object.keys(spec.datasets ?? {}).sort()).toEqual(['backups', 'convert', 'export_compose', 'export_run', 'exposed_ports', 'git_branches', 'git_files', 'git_services', 'host_detect', 'image_updates', 'image_updates_summary', 'images', 'inspect', 'networks', 'stack_get', 'stacks', 'system', 'volumes']);
     const review = reviewPackage(manifest);
@@ -45,7 +45,7 @@ describe('the Docker manager package', () => {
     expect(tab('images').blocks[0]).toMatchObject({ type: 'form', open: 'dialog', label: 'Pull image' });
     expect(tab('volumes').blocks[0]).toMatchObject({ type: 'editor', open: 'dialog', label: 'New volume' });
     expect(tab('networks').blocks[0]).toMatchObject({ type: 'editor', open: 'dialog', label: 'New network' });
-    expect(manifest.requires).toEqual({ api: 6 }); // level 6: more than 40 actions
+    expect(manifest.requires).toEqual({ api: 8 }); // level 8: a preparatory script before an action's own script
   });
 
   it('has a Backups tab over the backups dataset, with the destination state and the pinned image', () => {
@@ -73,12 +73,57 @@ describe('the Docker manager package', () => {
     expect(spec.actions.find(a => a.id === 'backup_restore')).toMatchObject({ kind: 'script', permission: 'docker.restore', job: true });
   });
 
-  it('offers a daily image update check as a schedule, on the dataset that compares digests', () => {
-    expect(spec.schedules).toEqual([expect.objectContaining({
-      id: 'image_updates', run: { dataset: 'image_updates' }, target: 'server',
+  it('offers the image update check and the new backup and update schedules', () => {
+    expect(spec.schedules?.map(s => s.id)).toEqual([
+      'image_updates', 'backup', 'image_update_container', 'image_update_stack', 'image_update_container_backup', 'image_update_stack_backup',
+    ]);
+    expect(spec.schedules?.find(s => s.id === 'image_updates')).toMatchObject({
+      run: { dataset: 'image_updates' }, target: 'server',
       notify: expect.objectContaining({ when: { field: 'update_available', equals: true } }),
-    })]);
+    });
+    expect(spec.schedules?.find(s => s.id === 'backup')).toMatchObject({
+      run: { action: 'backup_run' }, target: 'byKind',
+      notify: expect.objectContaining({ title: expect.stringContaining('Scheduled backup') }),
+    });
+    for (const id of ['image_update_container', 'image_update_stack', 'image_update_container_backup', 'image_update_stack_backup']) {
+      expect(spec.schedules?.find(s => s.id === id)?.notify, id).toBeDefined();
+    }
     expect(spec.datasets?.image_updates).toBeDefined();
+  });
+
+  it('gives the backup actions a per-kind target and the update actions a backup-first variant', () => {
+    expect(spec.actions.find(a => a.id === 'backup_run')?.target).toEqual({ byKind: 'kind', param: 'name' });
+    expect(spec.actions.find(a => a.id === 'backup_restore')?.target).toEqual({ byKind: 'kind', param: 'name' });
+    expect(spec.actions.find(a => a.id === 'backup_dialog')).toMatchObject({ kind: 'screen', screen: 'backup_target', permission: 'docker.backup' });
+    expect(spec.actions.find(a => a.id === 'backup_init')).toMatchObject({ kind: 'script', permission: 'docker.backup', job: true });
+    for (const id of ['container_update_backup', 'stack_update_images_backup']) {
+      const a = spec.actions.find(x => x.id === id)!;
+      expect(a.permission, id).toBe('docker.backup_update');
+      expect(a.variants?.[0].before, id).toMatchObject({ script: 'backup_run' });
+    }
+    const perm = manifest.permissions.find(p => p.id === 'docker.backup_update');
+    expect(perm?.implies.sort()).toEqual(['docker.backup', 'docker.manage']);
+  });
+
+  it('opens the backup dialog prefilled with the row and keeps the quick backup in the menus', () => {
+    const screen = spec.screens!.backup_target;
+    const editor = screen.blocks.find(b => b.type === 'editor') as Extract<Block, { type: 'editor' }>;
+    expect(editor.param).toBe('settings');
+    expect(editor.submits[0]).toMatchObject({ action: 'backup_run', params: { kind: 'values.kind', name: 'values.name' } });
+    expect(editor.fields.find(f => f.name === 'kind')).toMatchObject({ value: 'context.kind', transient: true });
+    expect(editor.fields.find(f => f.name === 'name')).toMatchObject({ value: 'context.name', transient: true });
+    expect(editor.fields.find(f => f.name === 'stack_files')?.when).toEqual({ field: 'values.kind', equals: 'stack' });
+    expect(editor.fields.find(f => f.name === 'keep_daily')).toBeDefined();
+
+    expect(spec.view.row?.actions).toContain('backup_run');
+    expect(spec.view.row?.actions).toContain('backup_dialog');
+    const manage = spec.screens!.manage;
+    const tabs = manage.blocks.find(b => b.type === 'tabs') as Extract<Block, { type: 'tabs' }>;
+    for (const id of ['containers', 'stacks']) {
+      const view = (tabs.tabs.find(t => t.id === id)!.blocks.find(b => b.type === 'view') as Extract<Block, { type: 'view' }>).view;
+      expect(view.rowActions, id).toContain('backup_run');
+      expect(view.rowActions, id).toContain('backup_dialog');
+    }
   });
 
   it('the Manage page offers bulk actions on its lists and stat tiles on Overview', () => {

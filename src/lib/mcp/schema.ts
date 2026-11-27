@@ -71,7 +71,7 @@ export function actionInputSchema(action: ActionSpec): ObjectJsonSchema {
       type: 'string',
       minLength: 1,
       maxLength: 128,
-      description: `The ${action.target?.kind ?? 'target'} to open the terminal in (its name or id).`,
+      description: `The ${action.target && 'kind' in action.target ? action.target.kind : 'container or stack'} to open the terminal in (its name or id).`,
     };
     required.push('ref');
   } else {

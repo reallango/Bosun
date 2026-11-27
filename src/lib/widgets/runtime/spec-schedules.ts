@@ -17,8 +17,13 @@ import { cond, fail, ID_RE, intIn, isObj, scalar, text, type Validated } from '.
 import type { DatasetSpec } from './spec-screens';
 import type { ScriptSpec } from './spec-v2';
 import { validateParamValues } from './script-run';
+import { fixedTargetKind, targetKindParam } from './resources';
 
-export type ScheduleTarget = 'server' | 'stack' | 'container';
+/**
+ * `server` runs for the whole server; `stack`/`container` for one of that kind; `byKind` for one container or stack,
+ * whose kind the schedule stores (the run declares `target.byKind`).
+ */
+export type ScheduleTarget = 'server' | 'stack' | 'container' | 'byKind';
 export type ScheduleArg = string | number | boolean;
 
 export interface ScheduleOptions {
@@ -65,16 +70,26 @@ function argObject(raw: unknown, where: string): Validated<Record<string, Schedu
 }
 
 function declaredParams(run: ScheduleRun, actions: ActionSpec[], datasets: Record<string, DatasetSpec>, scripts: Record<string, ScriptSpec>): {
-  params: Record<string, ParamSpec>; targetParam: string | null; targetKind: ScheduleTarget | null;
+  params: Record<string, ParamSpec>; targetParam: string | null; targetKind: 'stack' | 'container' | null; targetKindParam: string | null;
 } | null {
   if ('dataset' in run) {
     const ds = datasets[run.dataset];
     if (!ds) return null;
-    return { params: scripts[ds.script]?.params ?? {}, targetParam: ds.target?.param ?? null, targetKind: ds.target?.kind ?? null };
+    return {
+      params: scripts[ds.script]?.params ?? {},
+      targetParam: ds.target?.param ?? null,
+      targetKind: ds.target ? fixedTargetKind(ds.target) : null,
+      targetKindParam: ds.target ? targetKindParam(ds.target) : null,
+    };
   }
   const action = actions.find(a => a.id === run.action);
   if (!action) return null;
-  return { params: action.params, targetParam: action.target?.param ?? null, targetKind: action.target?.kind ?? null };
+  return {
+    params: action.params,
+    targetParam: action.target?.param ?? null,
+    targetKind: action.target ? fixedTargetKind(action.target) : null,
+    targetKindParam: action.target ? targetKindParam(action.target) : null,
+  };
 }
 
 function validateNotify(raw: unknown, where: string): Validated<ScheduleNotify | undefined> {
@@ -122,8 +137,8 @@ function validateOne(
     return fail(`${where}: description must be at most 300 characters`);
   }
   const target = raw.target;
-  if (target !== undefined && target !== 'server' && target !== 'stack' && target !== 'container') {
-    return fail(`${where}: target must be "server", "stack" or "container"`);
+  if (target !== undefined && target !== 'server' && target !== 'stack' && target !== 'container' && target !== 'byKind') {
+    return fail(`${where}: target must be "server", "stack", "container" or "byKind"`);
   }
   if (!isObj(raw.run)) return fail(`${where}: "run" must be an object`);
   const runRaw = raw.run;
@@ -149,7 +164,7 @@ function validateOne(
   if (!options.ok) return options;
   const notify = validateNotify(raw.notify, `${where}: notify`);
   if (!notify.ok) return notify;
-  if (notify.value && hasAction) return fail(`${where}: "notify" is only for dataset runs (an action reports its own outcome)`);
+  if (notify.value && hasAction && notify.value.when) return fail(`${where}: an action run's notify is raised when the run succeeds, so it takes no "when"`);
   if (hasAction && options.value?.args) return fail(`${where}: an action run takes its parameters in run.params, not options.args`);
 
   const declared = declaredParams(run, actions, datasets, scripts);
@@ -158,19 +173,31 @@ function validateOne(
   for (const name of Object.keys(fixed)) {
     if (!(name in declared.params) && name !== declared.targetParam) return fail(`${where}: the run has no parameter "${name}"`);
   }
-  const aimed = target === 'stack' || target === 'container';
-  if (aimed && declared.targetKind !== target) {
+  const aimed = target === 'stack' || target === 'container' || target === 'byKind';
+  if (target === 'byKind' && !declared.targetKindParam) {
+    return fail(`${where}: a "byKind" schedule needs a run that acts on a container or a stack (target.byKind)`);
+  }
+  if (aimed && declared.targetKindParam && target !== 'byKind') {
+    return fail(`${where}: a "${target}" schedule needs a run whose target is fixed, not taken from a parameter`);
+  }
+  if (aimed && target !== 'byKind' && declared.targetKind !== target) {
     return fail(`${where}: a "${target}" schedule needs a run that declares "${target}" as its target`);
   }
   if (declared.targetParam && !aimed && fixed[declared.targetParam] === undefined) {
-    return fail(`${where}: the run acts on one ${declared.targetKind}; set target to "${declared.targetKind}" or give "${declared.targetParam}" in its arguments`);
+    return fail(`${where}: the run acts on one ${declared.targetKind ?? 'container or stack'}; set target to "${declared.targetKind ?? 'byKind'}" or give "${declared.targetParam}" in its arguments`);
+  }
+  if (declared.targetKindParam && !aimed && fixed[declared.targetKindParam] === undefined) {
+    return fail(`${where}: the run needs "${declared.targetKindParam}" ("container" or "stack"); set target to "byKind" or give it in its arguments`);
   }
   if (aimed && declared.targetParam && fixed[declared.targetParam] !== undefined) {
     return fail(`${where}: "${declared.targetParam}" is filled from the schedule's target, so do not set it too`);
   }
+  if (aimed && declared.targetKindParam && fixed[declared.targetKindParam] !== undefined) {
+    return fail(`${where}: "${declared.targetKindParam}" is filled from the schedule's target, so do not set it too`);
+  }
   for (const name of Object.keys(declared.params)) {
     const satisfied = fixed[name] !== undefined
-      || (aimed && name === declared.targetParam)
+      || (aimed && (name === declared.targetParam || name === declared.targetKindParam))
       // A dataset script may rely on its own declared defaults (loadDataset fills them); an action may not,
       // because Bosun never fills in action parameter defaults.
       || (!hasAction && declared.params[name].default !== undefined);

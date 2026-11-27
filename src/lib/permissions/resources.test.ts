@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { grantsAllow, allowedServerIds, resourceCovers, type Grant } from './evaluate';
 import { validateGrants } from './validate';
 import type { PermissionDef } from './catalog';
-import { filterRows, rowResource } from '@/lib/widgets/runtime/resources';
+import { filterRows, rowResource, targetKindFor } from '@/lib/widgets/runtime/resources';
 
 const pkg = (id: string, over: Partial<PermissionDef> = {}): PermissionDef => ({
   id, label: id, description: '', group: 'Docker', defaultLevel: 'admin', risk: 'medium', scope: 'server', source: 'package:docker', ...over,
@@ -52,6 +52,18 @@ describe('grants limited to a stack or container', () => {
     expect(allowedServerIds(d, 'docker.manage', [nuc], defs)).toEqual(['nuc']);
     const all: Grant[] = [...d, { permission: 'docker.manage', scope: { type: 'server', id: 'nuc' }, effect: 'deny' }];
     expect(grantsAllow(all, 'docker.manage', nuc, defs, { resource: stack('web') })).toBe(false);
+  });
+
+  it('a byKind target takes its kind from a parameter, so limits apply to that kind', () => {
+    const t = { byKind: 'kind', param: 'name' } as const;
+    expect(targetKindFor(t, 'stack')).toBe('stack');
+    expect(targetKindFor(t, 'container')).toBe('container');
+    expect(targetKindFor(t, 'volume')).toBeNull();
+    expect(targetKindFor({ kind: 'stack', param: 'name' }, 'container')).toBe('stack');
+    const g: Grant[] = [{ permission: 'docker.manage', scope: { type: 'server', id: 'dock' }, resource: { kind: 'stack', name: 'test-ai' } }];
+    const kind = targetKindFor(t, 'stack')!;
+    expect(grantsAllow(g, 'docker.manage', dock, defs, { resource: { kind, name: 'test-ai' } })).toBe(true);
+    expect(grantsAllow(g, 'docker.manage', dock, defs, { resource: { kind, name: 'other' } })).toBe(false);
   });
 
   it('stop counting once expired', () => {

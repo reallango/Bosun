@@ -63,6 +63,17 @@ export async function runWidgetAction(
           });
           return ok({ jobId: job.id, status: job.status }, { status: 202 });
         }
+        if (prepared.before) {
+          const b = await runScript(serverId, loaded, prepared.before.scriptId, prepared.before.args);
+          if (!b.success || b.protocol.error) {
+            const message = b.protocol.error || b.stderr.trim().split('\n').pop() || 'The script that must run first failed';
+            await logAudit({
+              userId: auth.userId, serverId, action: AuditActions.WIDGET_ACTION, status: 'failure',
+              details: JSON.stringify({ widget: widgetType, action: actionId, ...(opts.approvedBy ? { approved_by: opts.approvedBy, request: opts.requestId } : {}), params: auditParams, before: prepared.before.scriptId, error: message.slice(0, 300) }).slice(0, 900), ipAddress: ip,
+            });
+            return fail(`The action did not run because "${prepared.before.scriptId}" failed: ${message}`, 500, 'BEFORE_FAILED');
+          }
+        }
         const r = await runScript(serverId, loaded, prepared.scriptId, prepared.args);
         if (r.success && !r.protocol.error && action.stores === 'data') await storeActionData(serverId, loaded.type, loaded.spec.data, instance?.id, r.stdout);
         // The action changed something on the host: have the poller look again now (state and data), not at its next period.

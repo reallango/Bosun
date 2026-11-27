@@ -64,7 +64,7 @@ describe('POST /api/widget-packages/install and the widget API level', () => {
     vi.stubGlobal('fetch', fakeGithub(manifest({ requires: { api: 99 } })));
     const res = await installRequest('a'.repeat(64));
     expect(res.status).toBe(422);
-    expect((await res.json()).error.message).toBe('This widget needs a newer Bosun (widget API level 99; this Bosun has 7). Update Bosun first.');
+    expect((await res.json()).error.message).toBe('This widget needs a newer Bosun (widget API level 99; this Bosun has 8). Update Bosun first.');
     expect(install).not.toHaveBeenCalled();
   });
 

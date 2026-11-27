@@ -48,7 +48,7 @@ export interface ScheduleKindDto {
   id: string;
   label: string;
   description?: string;
-  target: 'server' | 'stack' | 'container';
+  target: 'server' | 'stack' | 'container' | 'byKind';
   run: 'dataset' | 'action';
 }
 
@@ -131,15 +131,20 @@ async function normalize(
   const run = describeRun(loaded, kind);
   if (!run) throw new ScheduleError('That schedule kind no longer runs anything in this widget', 409, 'STALE_KIND');
 
-  const aimed = kind.target === 'stack' || kind.target === 'container';
+  const aimed = kind.target === 'stack' || kind.target === 'container' || kind.target === 'byKind';
   let resourceKind: '' | 'stack' | 'container' = '';
   let resourceName = '';
   if (aimed) {
     const wanted = raw.resource_kind ?? existing?.row.resource_kind;
     const wantedName = raw.resource_name ?? existing?.row.resource_name;
-    if (wanted !== kind.target) throw new ScheduleError(`This schedule kind is for one ${kind.target}: choose which one`);
-    if (typeof wantedName !== 'string' || !NAME_RE.test(wantedName)) throw new ScheduleError(`resource_name must name the ${kind.target}`);
-    resourceKind = kind.target as 'stack' | 'container';
+    if (kind.target === 'byKind') {
+      if (wanted !== 'stack' && wanted !== 'container') throw new ScheduleError('This schedule kind is for one container or stack: choose which one');
+      resourceKind = wanted;
+    } else {
+      if (wanted !== kind.target) throw new ScheduleError(`This schedule kind is for one ${kind.target}: choose which one`);
+      resourceKind = kind.target as 'stack' | 'container';
+    }
+    if (typeof wantedName !== 'string' || !NAME_RE.test(wantedName)) throw new ScheduleError(`resource_name must name the ${resourceKind}`);
     resourceName = wantedName;
   } else if ((raw.resource_kind ?? existing?.row.resource_kind) || (raw.resource_name ?? existing?.row.resource_name)) {
     throw new ScheduleError('This schedule kind runs on the whole server, so it takes no stack or container');
@@ -153,7 +158,10 @@ async function normalize(
   const fixed: Record<string, ScheduleArg> = 'dataset' in kind.run
     ? { ...(kind.options?.args ?? {}), ...(options.args ?? {}) }
     : { ...(kind.run.params ?? {}), ...(options.params ?? {}) };
-  if (aimed) fixed[run.targetParam as string] = resourceName;
+  if (aimed) {
+    fixed[run.targetParam as string] = resourceName;
+    if (run.targetKindParam) fixed[run.targetKindParam] = resourceKind;
+  }
   for (const [param, spec] of Object.entries(run.params)) {
     if (fixed[param] === undefined && 'dataset' in kind.run && spec.default !== undefined) fixed[param] = spec.default as ScheduleArg;
   }
@@ -164,9 +172,9 @@ async function normalize(
   }
 
   let ctx = null;
-  if (aimed && run.targetKind) {
+  if (aimed && run.targetParam) {
     try {
-      ctx = await resolveTarget(serverId, loaded, { kind: run.targetKind, param: run.targetParam ?? '' }, resourceName);
+      ctx = await resolveTarget(serverId, loaded, { kind: resourceKind as 'stack' | 'container', param: run.targetParam }, resourceName);
     } catch (err) {
       throw new ScheduleError(err instanceof Error ? err.message : String(err), 400, 'INVALID_TARGET');
     }
@@ -374,7 +382,7 @@ export async function listScheduleKinds(viewer: TokenPayload, serverId: string):
       const run = describeRun(loaded, kind);
       if (!run) continue;
       // A limited grant may still cover some stacks/containers; the dialog asks for one.
-      const resources = run.targetKind ? await permittedResources(viewer, run.permission, serverId) : [];
+      const resources = (run.targetKind || run.targetKindParam) ? await permittedResources(viewer, run.permission, serverId) : [];
       const allowed = await hasPermission(viewer, run.permission, serverId)
         || (Array.isArray(resources) && resources.length > 0);
       if (!allowed) continue;
