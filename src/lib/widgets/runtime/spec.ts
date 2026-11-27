@@ -24,6 +24,8 @@ import { validateLooks, type LooksSpec } from './looks';
 export type { LooksSpec, WidgetLook } from './looks';
 import { validateTrend, type TrendSpec } from './trends';
 export type { TrendSpec, TrendWindow } from './trends';
+import { validateDensity, type Density } from './sizing';
+export type { Density } from './sizing';
 import { validateLayout, validateLookups, validateScripts, validateState, validateVariants, type ActionVariant, type Block, type LookupSpec, type ScriptSpec, type StateSpec } from './spec-v2';
 export type { ActionVariant, Block, LookupSpec, ScriptSpec, StateSpec } from './spec-v2';
 import { validateSchedules, type ScheduleSpec } from './spec-schedules';
@@ -186,6 +188,8 @@ export interface WidgetSpec {
   metrics?: MetricSpec[];
   /** The named looks this widget offers (its settings dialog gets a "Look" choice; conditions read `config.look`). */
   looks?: LooksSpec;
+  /** Widget-level density of stat tiles and gauges; a short widget still switches to compact by itself. */
+  density?: Density;
   /** Version 2: host scripts of the package, the widget's state probe and its external lookups (see spec-v2.ts). */
   scripts?: Record<string, ScriptSpec>;
   state?: StateSpec;
@@ -868,6 +872,8 @@ export function validateWidgetSpec(raw: unknown, ownPermissions: readonly string
     if (!l.ok) return l;
     looks = l.value;
   }
+  const density = validateDensity(raw.density);
+  if (!density.ok) return density;
   const own = new Set(ownPermissions);
   const scripts = v2on ? validateScripts(raw.scripts) : { ok: true as const, value: {} as Record<string, ScriptSpec> };
   if (!scripts.ok) return scripts;
@@ -932,7 +938,7 @@ export function validateWidgetSpec(raw: unknown, ownPermissions: readonly string
   return {
     ok: true,
     value: {
-      version: raw.version, data: data.value, view: view.value, actions, ...(metrics ? { metrics } : {}), ...(looks ? { looks } : {}),
+      version: raw.version, data: data.value, view: view.value, actions, ...(metrics ? { metrics } : {}), ...(looks ? { looks } : {}), ...(density.value ? { density: density.value } : {}),
       ...(Object.keys(scripts.value).length ? { scripts: scripts.value } : {}),
       ...(state.value ? { state: state.value } : {}),
       ...(Object.keys(lookups.value).length ? { lookups: lookups.value } : {}),
@@ -1084,6 +1090,7 @@ export function publicSpec(spec: WidgetSpec): Omit<WidgetSpec, 'data' | 'actions
   return {
     version: spec.version,
     view: spec.view,
+    ...(spec.density ? { density: spec.density } : {}),
     ...(spec.screens ? { screens: spec.screens } : {}),
     ...(spec.menu ? { menu: spec.menu } : {}),
     data: { source: spec.data.source },

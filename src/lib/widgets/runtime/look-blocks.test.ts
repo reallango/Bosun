@@ -133,7 +133,7 @@ describe('the CPU/Memory reference adoption', () => {
 
   it('needs the new API level and a version past the one it ever had', () => {
     expect(manifest.value.requires).toEqual({ api: 7 });
-    expect(manifest.value.version).toBe('1.1.0');
+    expect(manifest.value.version).toBe('1.1.1');
   });
 
   it('offers Tiles and Gauges with Tiles as the default', () => {
@@ -167,5 +167,43 @@ describe('the CPU/Memory reference adoption', () => {
     expect(line?.text).toContain('{data.cpu.loadAvg1}');
     expect(line?.text).toContain('{data.cpu.temperature}');
     expect(line?.text).toContain('{data.memory.swapUsedMB}');
+  });
+});
+
+describe('sizing knobs on stat and gauges blocks', () => {
+  it('keeps block sizing and item emphasis and decimals', () => {
+    const r = layout([
+      { type: 'stat', size: 'lg', minItemWidth: 'sm', columns: 2, items: [
+        { label: 'CPU', value: '{cpu}', unit: '%', decimals: 2, emphasis: 'muted' },
+      ] },
+      { type: 'gauges', size: 'sm', minItemWidth: 'lg', columns: 3, thickness: 'thick', items: [
+        { label: 'Memory', value: '{mem}', unit: '%', decimals: 0, emphasis: 'normal', thickness: 'thin' },
+      ] },
+    ]);
+    if (!r.ok) throw new Error(r.error);
+    expect(r.value.view.blocks?.[0]).toMatchObject({ size: 'lg', minItemWidth: 'sm', columns: 2 });
+    expect(r.value.view.blocks?.[0]).toMatchObject({ items: [{ decimals: 2, emphasis: 'muted' }] });
+    expect(r.value.view.blocks?.[1]).toMatchObject({ size: 'sm', minItemWidth: 'lg', columns: 3, thickness: 'thick' });
+    expect(r.value.view.blocks?.[1]).toMatchObject({ items: [{ decimals: 0, emphasis: 'normal', thickness: 'thin' }] });
+  });
+
+  it('refuses an unknown size, minimum width, column count, emphasis, decimals or thickness', () => {
+    const items = [{ label: 'CPU', value: '{cpu}' }];
+    expect(layout([{ type: 'stat', size: 'xl', items }]).ok).toBe(false);
+    expect(layout([{ type: 'stat', minItemWidth: 'huge', items }]).ok).toBe(false);
+    expect(layout([{ type: 'stat', columns: 7, items }]).ok).toBe(false);
+    expect(layout([{ type: 'stat', items: [{ ...items[0], decimals: 4 }] }]).ok).toBe(false);
+    expect(layout([{ type: 'stat', items: [{ ...items[0], emphasis: 'loud' }] }]).ok).toBe(false);
+    expect(layout([{ type: 'gauges', thickness: 'wide', items }]).ok).toBe(false);
+    expect(layout([{ type: 'gauges', items: [{ ...items[0], thickness: 'wide' }] }]).ok).toBe(false);
+  });
+});
+
+describe('widget density', () => {
+  it('is kept and validated', () => {
+    const r = check(s => { s.density = 'compact'; });
+    if (!r.ok) throw new Error(r.error);
+    expect(r.value.density).toBe('compact');
+    expect(check(s => { s.density = 'dense'; }).ok).toBe(false);
   });
 });

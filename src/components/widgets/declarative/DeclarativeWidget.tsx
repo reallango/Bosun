@@ -19,12 +19,13 @@ import { WidgetError } from '@/components/widgets/WidgetError';
 import { useWidgetFrame } from '@/components/dashboard/widget-context';
 import { evalCond, fillTemplate, getPath, type ViewSpec } from '@/lib/widgets/runtime/spec';
 import type { Block } from '@/lib/widgets/runtime/spec-v2';
+import type { Density } from '@/lib/widgets/runtime/sizing';
 import type { MenuEntry, ScreenSpec } from '@/lib/widgets/runtime/spec-screens';
 import type { ViewContext } from '@/lib/widgets/runtime/layout';
 import { MetricsChartWidget } from '@/components/widgets/metrics-chart/MetricsChartWidget';
 import { Bar, DOT, Fields, formatValue, ICONS, IconBtn, type Row } from './parts';
 import { LayoutBlocks, type LayoutUi } from './LayoutView';
-import { WidgetFillContext } from './fill';
+import { WidgetDensityContext, WidgetFillContext } from './fill';
 import { TrendProvider } from './trends';
 import { inputClass, toolbarButtonClass } from './styles';
 import { ScreenDialog } from './ScreenDialog';
@@ -37,6 +38,7 @@ export interface PublicSpec {
   view: ViewSpec & { blocks?: Block[] };
   data: { source: string };
   actions: PublicAction[];
+  density?: Density;
   screens?: Record<string, ScreenSpec>;
   menu?: MenuEntry[];
 }
@@ -450,9 +452,11 @@ export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
         {extra.stateError && <div role="alert" className="mb-2 rounded-md border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">Checking this host failed: {extra.stateError}</div>}
         {/* A widget fills its body; its dialogs and pages do not. */}
         <WidgetFillContext.Provider value>
-          <TrendProvider serverId={serverId} source={view} refreshKey={data}>
-            <LayoutBlocks blocks={view.blocks ?? []} ctx={fullCtx} ui={ui} />
-          </TrendProvider>
+          <WidgetDensityContext.Provider value={spec.density ?? 'comfortable'}>
+            <TrendProvider serverId={serverId} source={view} refreshKey={data}>
+              <LayoutBlocks blocks={view.blocks ?? []} ctx={fullCtx} ui={ui} />
+            </TrendProvider>
+          </WidgetDensityContext.Provider>
         </WidgetFillContext.Provider>
       </div>
     )

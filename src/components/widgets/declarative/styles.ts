@@ -1,5 +1,6 @@
 /** Shared classes for the declarative widget renderer. Everything here uses theme
  * tokens so widgets follow the app shell in both light and dark mode. */
+import type { MinItemWidth } from '@/lib/widgets/runtime/sizing';
 
 /** Small text input and select used by forms, editors and the list filter. */
 export const inputClass =
@@ -52,27 +53,73 @@ export const NOTICE_CLASS = {
  * Stat tiles and ring gauges inside a widget fill its body: the grid grows columns and rows to use the width and
  * height, and the numbers scale with the tile (container query units) instead of the screen. In dialogs and pages the
  * blocks keep their normal reading size (see fill.ts).
+ *
+ * A block's `minItemWidth` picks one of these fixed classes; `columns` picks a fixed count instead (both are validated
+ * keys, never CSS from a package).
  */
-export const FILL_GRID = 'grid h-full min-h-0 auto-rows-fr gap-2 [grid-template-columns:repeat(auto-fit,minmax(min(100%,8.5rem),1fr))]';
+export const FILL_GRID_MIN: Record<MinItemWidth, string> = {
+  xs: 'grid h-full min-h-0 auto-rows-fr gap-2 [grid-template-columns:repeat(auto-fit,minmax(min(100%,5.5rem),1fr))]',
+  sm: 'grid h-full min-h-0 auto-rows-fr gap-2 [grid-template-columns:repeat(auto-fit,minmax(min(100%,7rem),1fr))]',
+  md: 'grid h-full min-h-0 auto-rows-fr gap-2 [grid-template-columns:repeat(auto-fit,minmax(min(100%,8.5rem),1fr))]',
+  lg: 'grid h-full min-h-0 auto-rows-fr gap-2 [grid-template-columns:repeat(auto-fit,minmax(min(100%,10.5rem),1fr))]',
+};
+
+/** The default filling grid (what a block gets when it does not name a `minItemWidth`). */
+export const FILL_GRID = FILL_GRID_MIN.md;
+
+/** A filling grid with a fixed number of columns (`columns`). */
+export const FILL_GRID_COLUMNS: Record<number, string> = {
+  1: 'grid h-full min-h-0 auto-rows-fr gap-2 grid-cols-1',
+  2: 'grid h-full min-h-0 auto-rows-fr gap-2 grid-cols-2',
+  3: 'grid h-full min-h-0 auto-rows-fr gap-2 grid-cols-3',
+  4: 'grid h-full min-h-0 auto-rows-fr gap-2 grid-cols-4',
+  5: 'grid h-full min-h-0 auto-rows-fr gap-2 grid-cols-5',
+  6: 'grid h-full min-h-0 auto-rows-fr gap-2 grid-cols-6',
+};
+
+/** A fixed column count outside a filling widget (a dialog or page). */
+export const STAT_GRID_COLUMNS: Record<number, string> = {
+  1: 'grid gap-2 grid-cols-1', 2: 'grid gap-2 grid-cols-2', 3: 'grid gap-2 grid-cols-3',
+  4: 'grid gap-2 grid-cols-4', 5: 'grid gap-2 grid-cols-5', 6: 'grid gap-2 grid-cols-6',
+};
 
 /** The same grid on the smallest widget: one compact row, so nothing overflows. */
 export const FILL_GRID_XS = 'grid h-full min-h-0 grid-flow-col auto-cols-fr grid-rows-1 gap-1.5';
 
-/** A tile or gauge card in a filling grid. `@container` makes its text scale with the card, not the screen. */
-export const FILL_CARD = 'flex min-w-0 flex-col justify-evenly gap-1 overflow-hidden rounded-lg border border-border bg-card p-2.5 text-left @container';
+/** A tile or gauge card in a filling grid: a size container, so its text scales with its width and its height. */
+const FILL_CARD_BASE = 'flex min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-card [container-type:size]';
 
-/** The main number of a tile or the value in a ring: scales with the card width within sensible bounds. */
-export const FILL_VALUE = 'truncate font-semibold leading-none tabular-nums [font-size:clamp(1.05rem,15cqw,6rem)]';
+export const FILL_CARD = `${FILL_CARD_BASE} justify-evenly gap-1 p-2.5 text-left`;
 
-/** The value inside a ring stays inside the circle, so it scales a little more gently than a tile's number. */
-export const FILL_GAUGE_VALUE = 'truncate font-semibold leading-none tabular-nums [font-size:clamp(0.8rem,11cqw,3.5rem)]';
+/** The same card on a short widget: less padding and gaps so the number and ring keep their room. */
+export const FILL_CARD_COMPACT = `${FILL_CARD_BASE} justify-center gap-0.5 p-1.5 text-left`;
 
-export const FILL_LABEL = 'truncate text-muted-foreground [font-size:clamp(0.6rem,3.4cqw,0.8rem)]';
+export const FILL_GAUGE_CARD = `${FILL_CARD_BASE} items-center justify-evenly gap-1 p-2.5 text-center`;
 
-export const FILL_SUB = 'truncate text-muted-foreground [font-size:clamp(0.55rem,3cqw,0.75rem)]';
+export const FILL_GAUGE_CARD_COMPACT = `${FILL_CARD_BASE} items-center justify-center gap-0.5 p-1.5 text-center`;
 
-/** A sparkline stretches to the tile width; its height grows a little with the card. */
-export const SPARKLINE = 'block w-full [height:clamp(0.9rem,16cqw,5rem)]';
+/**
+ * The main number of a tile: the renderer sets its size inline from the value's length (see sizing.ts), so it is never
+ * ellipsised for a typical value. The class keeps the fallback size for a card that has not been measured yet.
+ */
+export const FILL_VALUE = 'whitespace-nowrap font-semibold leading-none tabular-nums [font-size:clamp(1.05rem,max(15cqw,25cqmin),6rem)]';
+
+/** A three-row tile has no room for a number that fills a wide card; this keeps it and the label inside. */
+export const FILL_VALUE_COMPACT = 'whitespace-nowrap font-semibold leading-none tabular-nums [font-size:clamp(1.05rem,min(15cqw,22cqmin),6rem)]';
+
+/** The value inside a ring is a share of the ring area, so it stays inside the circle at every card size. */
+export const FILL_GAUGE_VALUE = 'whitespace-nowrap font-semibold leading-none tabular-nums [font-size:clamp(0.8rem,24cqmin,3.5rem)]';
+
+/** A tile's or gauge's label: never below 0.85rem, growing with the card up to 1.1rem. */
+export const FILL_LABEL = 'truncate text-muted-foreground [font-size:clamp(0.85rem,max(3.4cqw,5cqmin),1.1rem)]';
+
+/** The label under the value inside a ring, used when the card is too short to put it above the ring. */
+export const FILL_GAUGE_LABEL = 'truncate text-muted-foreground [font-size:clamp(0.75rem,15cqmin,1rem)]';
+
+export const FILL_SUB = 'truncate text-muted-foreground [font-size:clamp(0.7rem,max(3cqw,4.5cqmin),0.9rem)]';
+
+/** A sparkline stretches to the tile width; its height grows with the card but leaves the number room. */
+export const SPARKLINE = 'block w-full [height:clamp(0.9rem,min(16cqw,22cqh),5rem)]';
 
 /** The dialog shell shared by screen dialogs and forms that open behind a button. */
 export const DIALOG_OVERLAY = 'fixed inset-0 z-50 bg-black/50';

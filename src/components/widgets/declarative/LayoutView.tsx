@@ -1,6 +1,6 @@
 'use client';
 
-import { createContext, useContext, useEffect, useId, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useId, useRef, useState } from 'react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Dialog } from 'radix-ui';
 import { ChevronDown, ChevronRight, Loader2, X } from 'lucide-react';
@@ -11,15 +11,19 @@ import {
   type JobState, type PublicActionLike, type ViewContext,
 } from '@/lib/widgets/runtime/layout';
 import { Bar, Fields, Sparkline, type StatToneName } from './parts';
-import { fitsSize } from '@/lib/widgets/runtime/size';
+import { fitsSize, type WidgetSize } from '@/lib/widgets/runtime/size';
 import { statTone, withUnit } from '@/lib/widgets/runtime/stat';
 import { thresholdTone } from '@/lib/widgets/runtime/thresholds';
-import { gaugeGeometry, GAUGE_STROKE, GAUGE_VIEWBOX, type GaugeItem } from '@/lib/widgets/runtime/gauges';
+import { formatValueText } from '@/lib/widgets/runtime/number-format';
+import { gaugeLabelFontSize, labelFontSize, fitGaugeValues, fitTileValues, unitOnOwnLine, type BlockSize, type MinItemWidth, type ValueFit, type ValueText } from '@/lib/widgets/runtime/sizing';
+import { gaugeGeometry, gaugeStroke, GAUGE_VIEWBOX, type GaugeItem } from '@/lib/widgets/runtime/gauges';
 import { useWidgetSize } from '@/components/dashboard/widget-size';
-import { useWidgetFill } from './fill';
+import { useWidgetDensity, useWidgetFill } from './fill';
 import { CodeBlock, EditorBlock } from './EditorBlock';
 import {
-  buttonClass, DIALOG_CONTENT, DIALOG_FOOTER, DIALOG_HEADER, DIALOG_OVERLAY, DIALOG_TITLE, DIALOG_WIDTH, FILL_CARD, FILL_GAUGE_VALUE, FILL_GRID, FILL_GRID_XS, FILL_LABEL, FILL_SUB, FILL_VALUE,
+  buttonClass, DIALOG_CONTENT, DIALOG_FOOTER, DIALOG_HEADER, DIALOG_OVERLAY, DIALOG_TITLE, DIALOG_WIDTH, FILL_CARD, FILL_CARD_COMPACT, FILL_GAUGE_CARD,
+  FILL_GAUGE_CARD_COMPACT, FILL_GAUGE_LABEL, FILL_GAUGE_VALUE, FILL_GRID_COLUMNS, FILL_GRID_MIN, FILL_GRID_XS, FILL_LABEL, FILL_SUB, FILL_VALUE,
+  FILL_VALUE_COMPACT, STAT_GRID_COLUMNS,
   iconButtonClass, inputClass, NOTICE_CLASS as NOTICE, primarySubmitClass, toolbarButtonClass,
 } from './styles';
 
@@ -132,7 +136,7 @@ function BlockView({ block, ctx, ui, toolbar }: { block: Block; ctx: ViewContext
     case 'kv': return <Fields fields={block.items} data={ctx} />;
     case 'stat': return <StatBlock block={block} ctx={ctx} />;
     case 'gauges': return <GaugeBlock block={block} ctx={ctx} />;
-    case 'text': return <p className="whitespace-pre-wrap break-words text-xs text-foreground">{text(block.text, ctx)}</p>;
+    case 'text': return <TextBlock block={block} ctx={ctx} />;
     case 'notice': return <div role={block.level === 'error' ? 'alert' : 'status'} className={`rounded-md border px-2 py-1.5 text-xs ${NOTICE[block.level]}`}>{text(block.text, ctx)}</div>;
     case 'buttons': return <Buttons block={block} ctx={ctx} ui={ui} toolbar={toolbar} />;
     case 'form': return block.open === 'dialog' ? <DialogBlock block={block} ctx={ctx} ui={ui} toolbar={toolbar} /> : <Form block={block} ctx={ctx} ui={ui} />;
@@ -243,73 +247,200 @@ const STAT_TONE_STROKE: Record<StatToneName, string> = {
 const STAT_CARD = 'flex min-w-0 flex-col gap-0.5 rounded-lg border border-border bg-card p-3 text-left';
 const GAUGE_CARD = 'flex min-w-0 flex-col items-center gap-1 rounded-lg border border-border bg-card p-3 text-center';
 
+/** Below this measured widget body height (about three grid rows) tiles and gauges switch to their compact layout. */
+const COMPACT_HEIGHT = 160;
+
+/** The grid of a stat or gauge block: a fixed count, the auto-fit minimum of `minItemWidth`, or the size class outside a widget. */
+function itemGridClass(fill: boolean, widgetSize: WidgetSize, block: { columns?: number; minItemWidth?: MinItemWidth }): string {
+  if (block.columns) return fill ? FILL_GRID_COLUMNS[block.columns] : STAT_GRID_COLUMNS[block.columns];
+  if (fill) return widgetSize === 'xs' ? FILL_GRID_XS : FILL_GRID_MIN[block.minItemWidth ?? 'md'];
+  return `grid gap-2 ${STAT_COLUMNS[widgetSize] ?? STAT_COLUMNS.lg}`;
+}
+
+/** A block's `size` outside a widget (no container to scale with): the reading size of its number and label. */
+function tileValueClass(blockSize: BlockSize, widgetSize: WidgetSize): string {
+  if (blockSize === 'sm') return 'text-lg';
+  if (blockSize === 'lg') return 'text-3xl';
+  return widgetSize === 'xs' ? 'text-xl' : 'text-2xl';
+}
+
+function tileLabelClass(blockSize: BlockSize): string {
+  const textSize = blockSize === 'sm' ? 'text-[11px]' : blockSize === 'lg' ? 'text-sm' : 'text-xs';
+  return `truncate ${textSize} text-muted-foreground`;
+}
+
+/** The value inside a ring outside a filling widget. */
+function gaugeValueClass(blockSize: BlockSize): string {
+  if (blockSize === 'sm') return 'text-lg';
+  if (blockSize === 'lg') return 'text-3xl';
+  return 'text-xl';
+}
+
+/**
+ * The content box of a block's first item (a tile's card, or a gauge's ring wrapper), measured so the fit helper can
+ * decide when a value's unit must move to its own line. Every item in a block shares the same grid cell, so one
+ * measurement serves them all.
+ */
+function useCardSize() {
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  const elRef = useRef<HTMLElement | null>(null);
+  const ref = useCallback((el: HTMLElement | null) => {
+    elRef.current = el;
+  }, []);
+  useEffect(() => {
+    const el = elRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(entries => {
+      const box = entries[0]?.contentRect;
+      if (!box) return;
+      const width = Math.round(box.width * 10) / 10;
+      const height = Math.round(box.height * 10) / 10;
+      setSize(prev => (prev.width === width && prev.height === height ? prev : { width, height }));
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  return { ref, width: size.width, height: size.height };
+}
+
+/** A value in a filling card: one line normally, or the number and a smaller unit line when the fit says to split. */
+function ValueLines({ number, unit, fit, className, tone }: {
+  number: string; unit?: string; fit: ValueFit; className: string; tone: string;
+}) {
+  if (!fit.split) {
+    return <div className={`${className} ${tone}`} style={{ fontSize: fit.fontSize }}>{withUnit(number, unit)}</div>;
+  }
+  const attached = unit?.startsWith('%') && !fit.splitPercent ? unit : undefined;
+  return (
+    <div className={`${className} ${tone} flex flex-col`} style={{ fontSize: fit.fontSize }}>
+      <span className="block">{withUnit(number, attached)}</span>
+      {unitOnOwnLine(unit, fit) && <span className="block" style={{ fontSize: fit.unitFontSize }}>{unit}</span>}
+    </div>
+  );
+}
+
 /** A responsive grid of number cards; a card with a `tab` switches to that tab when it is inside a tab group. */
 function StatBlock({ block, ctx }: { block: Extract<Block, { type: 'stat' }>; ctx: ViewContext }) {
-  const { size } = useWidgetSize();
+  const { size: widgetSize, height } = useWidgetSize();
   const fill = useWidgetFill();
+  const density = useWidgetDensity();
+  const compact = fill && (density === 'compact' || (height > 0 && height < COMPACT_HEIGHT));
   const selectTab = useContext(TabSelectContext);
+  const blockSize = block.size ?? 'md';
+  const card = useCardSize();
+  const shown = block.items.map(item => {
+    const value = text(item.value, ctx);
+    return { item, number: formatValueText(value, item.unit, item.decimals) || '—', unit: item.unit };
+  });
+  // Every item in the block takes the same size and the same split decision, chosen from its widest value, so
+  // neighbours stay balanced.
+  const fit = fitTileValues(shown.map(({ number, unit }) => ({ number, unit })), {
+    size: blockSize, compact, width: card.width, height: card.height,
+  });
   return (
-    <div className={`grid gap-2 ${fill ? (size === 'xs' ? FILL_GRID_XS : FILL_GRID) : (STAT_COLUMNS[size] ?? STAT_COLUMNS.lg)}`}>
-      {block.items.map((item, i) => {
-        const value = text(item.value, ctx);
+    <div className={itemGridClass(fill, widgetSize, block)} style={fill && compact ? { gap: '0.375rem' } : undefined}>
+      {shown.map(({ item, number, unit }, i) => {
         const numeric = Number(fillTemplate(item.value, ctx));
         const tone = statTone(item.tone, ctx) ?? thresholdTone(numeric, item.thresholds);
         const bar = item.bar ? Number(fillTemplate(item.bar, ctx)) : NaN;
-        const card = fill ? FILL_CARD : STAT_CARD;
-        const valueText = withUnit(value || '—', item.unit);
-        const valueTone = tone ? STAT_TONE_CLASS[tone] : 'text-foreground';
+        const cardClass = fill ? (compact ? FILL_CARD_COMPACT : FILL_CARD) : STAT_CARD;
+        const valueTone = tone ? STAT_TONE_CLASS[tone] : item.emphasis === 'muted' ? 'text-muted-foreground' : 'text-foreground';
+        const valueSize = fill ? (compact ? FILL_VALUE_COMPACT : FILL_VALUE) : tileValueClass(blockSize, widgetSize);
         const content = (
           <>
-            <div className={fill ? FILL_LABEL : 'truncate text-xs text-muted-foreground'}>{item.label}</div>
-            <div className={`${fill ? FILL_VALUE : size === 'xs' ? 'text-xl' : 'text-2xl'} font-semibold tabular-nums ${valueTone}`}>{valueText}</div>
+            <div className={fill ? FILL_LABEL : tileLabelClass(blockSize)} style={fill ? { fontSize: labelFontSize(blockSize) } : undefined}>{item.label}</div>
+            {fill
+              ? <ValueLines number={number} unit={unit} fit={fit} className={valueSize} tone={valueTone} />
+              : <div className={`${valueSize} font-semibold tabular-nums ${valueTone}`}>{withUnit(number, unit)}</div>}
             {Number.isFinite(bar) && <Bar value={bar} tone={tone} />}
-            {item.trend && <Sparkline trend={item.trend} tone={tone} />}
-            {item.sub && <div className={fill ? FILL_SUB : 'truncate text-xs text-muted-foreground'}>{text(item.sub, ctx)}</div>}
+            {/* A three-row tile has no room for a trend line; the number and bar are the parts that must stay. */}
+            {!compact && item.trend && <Sparkline trend={item.trend} tone={tone} />}
+            {!compact && item.sub && <div className={fill ? FILL_SUB : 'truncate text-xs text-muted-foreground'}>{text(item.sub, ctx)}</div>}
           </>
         );
         return item.tab && selectTab
-          ? <button key={i} type="button" onClick={() => selectTab(item.tab!)} className={`${card} hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}>{content}</button>
-          : <div key={i} className={card}>{content}</div>;
+          ? <button key={i} type="button" ref={i === 0 ? card.ref : undefined} onClick={() => selectTab(item.tab!)} className={`${cardClass} hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}>{content}</button>
+          : <div key={i} ref={i === 0 ? card.ref : undefined} className={cardClass}>{content}</div>;
       })}
     </div>
   );
 }
 
 /** A ring gauge: the value in the middle of a circle that fills as it approaches `max`. */
-function Gauge({ item, ctx, fill }: { item: GaugeItem; ctx: ViewContext; fill: boolean }) {
+function Gauge({ item, ctx, fill, compact, fit, blockSize, thickness, cardRef }: {
+  item: GaugeItem; ctx: ViewContext; fill: boolean; compact: boolean; fit: ValueFit; blockSize: BlockSize;
+  thickness?: GaugeItem['thickness']; cardRef?: (el: HTMLElement | null) => void;
+}) {
   const value = text(item.value, ctx);
   const numeric = Number(fillTemplate(item.value, ctx));
   const tone = thresholdTone(numeric, item.thresholds);
-  const geometry = gaugeGeometry(numeric, item.max ?? 100);
-  const label = `${item.label}: ${withUnit(value || '—', item.unit)}`;
+  const stroke = gaugeStroke(item.thickness ?? thickness);
+  const geometry = gaugeGeometry(numeric, item.max ?? 100, GAUGE_VIEWBOX, stroke);
+  const number = formatValueText(value, item.unit, item.decimals) || '—';
+  const valueText = withUnit(number, item.unit);
+  const label = `${item.label}: ${valueText}`;
+  const valueTone = tone ? STAT_TONE_CLASS[tone] : item.emphasis === 'muted' ? 'text-muted-foreground' : 'text-foreground';
+  // A split value already has two lines; the in-ring label would make three, so it moves under the ring instead.
+  const split = fill && fit.split;
   return (
-    <div className={fill ? `${FILL_CARD} items-center text-center` : GAUGE_CARD}>
-      <div className={fill ? FILL_LABEL : 'truncate text-xs text-muted-foreground'}>{item.label}</div>
-      <div className={fill ? 'relative min-h-0 w-full flex-1' : 'relative mx-auto aspect-square w-full max-w-[9rem]'}>
+    <div className={fill ? (compact ? FILL_GAUGE_CARD_COMPACT : FILL_GAUGE_CARD) : GAUGE_CARD}>
+      {/* A short card puts the label inside the ring, under the value, so the ring can use the whole height. */}
+      {!compact && <div className={fill ? FILL_LABEL : tileLabelClass(blockSize)} style={fill ? { fontSize: labelFontSize(blockSize) } : undefined}>{item.label}</div>}
+      <div ref={cardRef} title={label} className={fill ? 'relative min-h-0 w-full flex-1 [container-type:size]' : 'relative mx-auto aspect-square w-full max-w-[9rem]'}>
         <svg viewBox={`0 0 ${GAUGE_VIEWBOX} ${GAUGE_VIEWBOX}`} preserveAspectRatio="xMidYMid meet" className="size-full" role="img" aria-label={label}>
-          <circle cx={geometry.cx} cy={geometry.cy} r={geometry.r} fill="none" strokeWidth={GAUGE_STROKE} className="stroke-muted" />
-          <circle cx={geometry.cx} cy={geometry.cy} r={geometry.r} fill="none" strokeWidth={GAUGE_STROKE} strokeLinecap="round"
+          <circle cx={geometry.cx} cy={geometry.cy} r={geometry.r} fill="none" strokeWidth={stroke} className="stroke-muted" />
+          <circle cx={geometry.cx} cy={geometry.cy} r={geometry.r} fill="none" strokeWidth={stroke} strokeLinecap="round"
             strokeDasharray={geometry.circumference} strokeDashoffset={geometry.dashOffset} transform={`rotate(-90 ${geometry.cx} ${geometry.cy})`}
             className={tone ? STAT_TONE_STROKE[tone] : 'stroke-primary'} />
         </svg>
-        <div className="absolute inset-0 flex items-center justify-center" aria-hidden="true">
-          <span className={`${fill ? FILL_GAUGE_VALUE : 'text-xl'} font-semibold tabular-nums ${tone ? STAT_TONE_CLASS[tone] : 'text-foreground'}`}>
-            {withUnit(value || '—', item.unit)}
-          </span>
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-0.5 overflow-hidden text-center leading-none" aria-hidden="true">
+          {fill
+            ? <ValueLines number={number} unit={item.unit} fit={fit} className={FILL_GAUGE_VALUE} tone={valueTone} />
+            : <span className={`${gaugeValueClass(blockSize)} font-semibold tabular-nums ${valueTone}`}>{valueText}</span>}
+          {compact && !split && <span className={FILL_GAUGE_LABEL} style={fill ? { fontSize: gaugeLabelFontSize(blockSize) } : undefined}>{item.label}</span>}
         </div>
       </div>
-      {item.sub && <div className={fill ? FILL_SUB : 'truncate text-xs text-muted-foreground'}>{text(item.sub, ctx)}</div>}
+      {compact && split && <div className={`${FILL_GAUGE_LABEL} w-full shrink-0`} style={{ fontSize: gaugeLabelFontSize(blockSize) }}>{item.label}</div>}
+      {!compact && item.sub && <div className={fill ? FILL_SUB : 'truncate text-xs text-muted-foreground'}>{text(item.sub, ctx)}</div>}
     </div>
   );
 }
 
 function GaugeBlock({ block, ctx }: { block: Extract<Block, { type: 'gauges' }>; ctx: ViewContext }) {
-  const { size } = useWidgetSize();
+  const { size: widgetSize, height } = useWidgetSize();
   const fill = useWidgetFill();
+  const density = useWidgetDensity();
+  const compact = fill && (density === 'compact' || (height > 0 && height < COMPACT_HEIGHT));
+  const blockSize = block.size ?? 'md';
+  const card = useCardSize();
+  const values: ValueText[] = block.items.map(item => {
+    const value = text(item.value, ctx);
+    return { number: formatValueText(value, item.unit, item.decimals) || '—', unit: item.unit };
+  });
+  // One size for the block, sized for its thickest ring so a mixed `thickness` still shares it.
+  const stroke = Math.max(...block.items.map(item => gaugeStroke(item.thickness ?? block.thickness)));
+  const fit = fitGaugeValues(values, { size: blockSize, stroke, width: card.width, height: card.height });
   return (
-    <div className={`grid gap-2 ${fill ? (size === 'xs' ? FILL_GRID_XS : FILL_GRID) : (STAT_COLUMNS[size] ?? STAT_COLUMNS.lg)}`}>
-      {block.items.map((item, i) => <Gauge key={i} item={item} ctx={ctx} fill={fill} />)}
+    <div className={itemGridClass(fill, widgetSize, block)} style={fill && compact ? { gap: '0.375rem' } : undefined}>
+      {block.items.map((item, i) => (
+        <Gauge key={i} item={item} ctx={ctx} fill={fill} compact={compact} fit={fit} blockSize={blockSize} thickness={block.thickness}
+          cardRef={fill && i === 0 ? card.ref : undefined} />
+      ))}
     </div>
+  );
+}
+
+/** A line of text. A short widget keeps it to one line (truncated), so it cannot push the tiles out of the body. */
+function TextBlock({ block, ctx }: { block: Extract<Block, { type: 'text' }>; ctx: ViewContext }) {
+  const { height } = useWidgetSize();
+  const fill = useWidgetFill();
+  const short = fill && height > 0 && height < COMPACT_HEIGHT;
+  return (
+    <p className={short
+      ? 'min-w-0 shrink-0 truncate text-xs text-foreground'
+      : 'whitespace-pre-wrap break-words text-xs text-foreground'}>
+      {text(block.text, ctx)}
+    </p>
   );
 }
 

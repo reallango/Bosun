@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { gaugeGeometry, validateGaugeItem } from './gauges';
+import { gaugeGeometry, gaugeStroke, GAUGE_STROKE, validateGaugeItem } from './gauges';
 
 describe('validateGaugeItem', () => {
   it('accepts a label, a value template and the optional keys', () => {
@@ -48,5 +48,27 @@ describe('gaugeGeometry', () => {
     expect(large.r).toBe(90);
     expect(large.circumference).toBeCloseTo(2 * Math.PI * 90);
     expect(large.dashOffset / large.circumference).toBeCloseTo(small.dashOffset / small.circumference);
+  });
+});
+
+describe('validateGaugeItem sizing keys', () => {
+  it('keeps decimals, emphasis and thickness', () => {
+    expect(validateGaugeItem({ label: 'CPU', value: '{v}', decimals: 2, emphasis: 'muted', thickness: 'thin' }, 'x')).toEqual({
+      ok: true, value: { label: 'CPU', value: '{v}', decimals: 2, emphasis: 'muted', thickness: 'thin' },
+    });
+  });
+
+  it('refuses an unknown decimals, emphasis or thickness', () => {
+    expect(validateGaugeItem({ label: 'CPU', value: '{v}', decimals: 4 }, 'x').ok).toBe(false);
+    expect(validateGaugeItem({ label: 'CPU', value: '{v}', emphasis: 'loud' }, 'x').ok).toBe(false);
+    expect(validateGaugeItem({ label: 'CPU', value: '{v}', thickness: 'wide' }, 'x').ok).toBe(false);
+  });
+});
+
+describe('gaugeStroke', () => {
+  it('maps the named thicknesses and defaults to normal', () => {
+    expect(gaugeStroke(undefined)).toBe(GAUGE_STROKE);
+    expect(gaugeStroke('thin')).toBeLessThan(GAUGE_STROKE);
+    expect(gaugeStroke('thick')).toBeGreaterThan(GAUGE_STROKE);
   });
 });

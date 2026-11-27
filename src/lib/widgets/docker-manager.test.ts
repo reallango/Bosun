@@ -45,7 +45,7 @@ describe('the Docker manager package', () => {
     expect(tab('images').blocks[0]).toMatchObject({ type: 'form', open: 'dialog', label: 'Pull image' });
     expect(tab('volumes').blocks[0]).toMatchObject({ type: 'editor', open: 'dialog', label: 'New volume' });
     expect(tab('networks').blocks[0]).toMatchObject({ type: 'editor', open: 'dialog', label: 'New network' });
-    expect(manifest.requires).toEqual({ api: 8 }); // level 8: a preparatory script before an action's own script
+    expect(manifest.requires).toEqual({ api: 9 }); // level 9: a preparatory script before an action's own script
   });
 
   it('has a Backups tab over the backups dataset, with the destination state and the pinned image', () => {
