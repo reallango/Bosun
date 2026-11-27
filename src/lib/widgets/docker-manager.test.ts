@@ -28,9 +28,9 @@ const RISKY_KEYS = ['privileged', 'pid', 'ipc', 'cap_add', 'device', 'security_o
 
 describe('the Docker manager package', () => {
   it('has screens, datasets and menu entries that exist, and a review that lists what runs', () => {
-    expect(Object.keys(spec.screens ?? {}).sort()).toEqual(['create', 'edit', 'manage', 'stack_edit', 'stack_new']);
+    expect(Object.keys(spec.screens ?? {}).sort()).toEqual(['create', 'edit', 'manage', 'restore_backup', 'stack_edit', 'stack_new']);
     expect(spec.menu?.map(m => m.id)).toEqual(['new_container', 'new_stack', 'manage']);
-    expect(Object.keys(spec.datasets ?? {}).sort()).toEqual(['convert', 'export_compose', 'export_run', 'exposed_ports', 'git_branches', 'git_files', 'git_services', 'host_detect', 'image_updates', 'image_updates_summary', 'images', 'inspect', 'networks', 'stack_get', 'stacks', 'system', 'volumes']);
+    expect(Object.keys(spec.datasets ?? {}).sort()).toEqual(['backups', 'convert', 'export_compose', 'export_run', 'exposed_ports', 'git_branches', 'git_files', 'git_services', 'host_detect', 'image_updates', 'image_updates_summary', 'images', 'inspect', 'networks', 'stack_get', 'stacks', 'system', 'volumes']);
     const review = reviewPackage(manifest);
     expect(review.runsAsService).toBe(true);
     expect(review.widgets[0].commands.some(c => /dataset "inspect"/.test(c.what))).toBe(true);
@@ -46,6 +46,31 @@ describe('the Docker manager package', () => {
     expect(tab('volumes').blocks[0]).toMatchObject({ type: 'editor', open: 'dialog', label: 'New volume' });
     expect(tab('networks').blocks[0]).toMatchObject({ type: 'editor', open: 'dialog', label: 'New network' });
     expect(manifest.requires).toEqual({ api: 5 }); // level 5: `schedules`
+  });
+
+  it('has a Backups tab over the backups dataset, with the destination state and the pinned image', () => {
+    const manage = spec.screens!.manage;
+    const tabs = manage.blocks.find(b => b.type === 'tabs') as Extract<Block, { type: 'tabs' }>;
+    const tab = tabs.tabs.find(t => t.id === 'backups')!;
+    expect(tab.count).toBe('datasets.backups.rows');
+    expect(manage.load['backups']).toEqual({ dataset: 'backups', args: {} });
+    expect(spec.datasets!.backups).toMatchObject({ script: 'backup_restore', permission: 'docker.backup', resources: { container: 'container', stack: 'stack' } });
+    const view = tab.blocks.find(b => b.type === 'view') as Extract<Block, { type: 'view' }>;
+    expect(view.path).toBe('datasets.backups.rows');
+    expect((view.view as { columns?: { title: string }[] }).columns?.map(c => c.title)).toEqual(['Target', 'Kind', 'Time', 'Size', 'Included', 'Pinned image', 'Snapshot']);
+    expect(view.view.open).toBe('restore_backup');
+    const facts = tab.blocks.find(b => b.type === 'kv') as Extract<Block, { type: 'kv' }>;
+    expect(facts.items.map(i => i.label)).toEqual(['Destination', 'State', 'Snapshots', 'Repository size']);
+    // The backup dialog sits on the container and stack tabs, with the inclusion and retention options.
+    for (const [id, label] of [['containers', 'Back up a container'], ['stacks', 'Back up a stack']] as const) {
+      const blocks = tabs.tabs.find(t => t.id === id)!.blocks;
+      const editor = blocks.find(b => b.type === 'editor' && b.open === 'dialog' && b.label === label) as Extract<Block, { type: 'editor' }>;
+      expect(editor.param, id).toBe('settings');
+      expect(editor.submits[0].action, id).toBe('backup_run');
+      expect(editor.fields.some(f => f.name === 'keep_daily'), id).toBe(true);
+    }
+    expect(spec.actions.find(a => a.id === 'backup_run')).toMatchObject({ kind: 'script', permission: 'docker.backup', job: true });
+    expect(spec.actions.find(a => a.id === 'backup_restore')).toMatchObject({ kind: 'script', permission: 'docker.restore', job: true });
   });
 
   it('offers a daily image update check as a schedule, on the dataset that compares digests', () => {
@@ -89,6 +114,9 @@ describe('the Docker manager package', () => {
     for (const id of ['create_privileged', 'recreate_privileged', 'stack_deploy_privileged']) expect(perms(id), id).toBe('docker.privileged');
     for (const id of ['create', 'recreate', 'stack_deploy', 'image_pull', 'volume_create', 'network_create']) expect(perms(id), id).toBe('docker.manage');
     for (const id of ['remove', 'image_remove', 'image_prune', 'volume_remove', 'volume_prune', 'network_remove', 'network_prune', 'stack_remove']) expect(perms(id), id).toBe('docker.delete');
+    // backups and restores are their own high-risk permissions
+    expect(perms('backup_run')).toBe('docker.backup');
+    expect(perms('backup_restore')).toBe('docker.restore');
     // the plain actions never pass allow_risky, the privileged ones always do
     const lit = (id: string) => spec.actions.find(a => a.id === id)!.variants?.length;
     expect(lit('create')).toBe(1);
@@ -102,7 +130,7 @@ describe('the Docker manager package', () => {
   });
 
   it('asks for confirmation before anything is removed or replaced', () => {
-    for (const id of ['remove', 'image_remove', 'image_prune', 'volume_remove', 'volume_prune', 'network_remove', 'network_prune', 'stack_remove', 'recreate', 'recreate_privileged', 'stack_deploy_privileged']) {
+    for (const id of ['remove', 'image_remove', 'image_prune', 'volume_remove', 'volume_prune', 'network_remove', 'network_prune', 'stack_remove', 'recreate', 'recreate_privileged', 'stack_deploy_privileged', 'backup_restore']) {
       expect(spec.actions.find(a => a.id === id)!.confirm, id).toBeTruthy();
     }
     for (const id of ['remove', 'volume_remove', 'stack_remove']) expect(spec.actions.find(a => a.id === id)!.confirm!.requireText, id).toBeTruthy();
@@ -150,8 +178,9 @@ describe('the Docker manager package', () => {
     expect(() => validateParamValues(params, { name: 'demo', source: 'git', yaml: '', env: '', repo: 'http://github.com/owner/repo', branch: 'main', file: 'a', pull: 'false', allow_risky: 'false', override: '' })).toThrow();   // https only
     expect(() => validateParamValues(params, { name: 'Bad Name', source: 'editor', yaml: '', env: '', repo: '-', branch: '-', file: '-', pull: 'false', allow_risky: 'false', override: '' })).toThrow();
     expect(() => validateParamValues(params, { name: 'demo', source: 'git', yaml: '', env: '', repo: 'https://github.com/owner/repo', branch: 'main', file: 'a.yml', pull: 'false', allow_risky: 'false', override: 'svc.web.volume=/etc:/etc\nrm -rf /' })).toThrow();   // an override line must be a svc.<service>.<setting>=value line
-    // only the stack and git scripts receive the GitHub token
+    // only the stack and git scripts receive the GitHub token; the backup scripts get only the backup secrets
     const withToken = ['stack_deploy', 'stack_action', 'git_branches', 'git_files', 'git_services'];
-    for (const [id, s] of Object.entries(spec.scripts!)) expect(Boolean(s.secrets?.length), id).toBe(withToken.includes(id));
+    for (const [id, s] of Object.entries(spec.scripts!)) expect(Boolean(s.secrets?.includes('git_credentials')), id).toBe(withToken.includes(id));
+    for (const id of ['backup_run', 'backup_restore']) expect(spec.scripts![id].secrets, id).toEqual(['backup_repository', 'backup_password', 'backup_credentials']);
   });
 });

@@ -40,6 +40,6 @@ awk -F '\t' '
     for (n in names) {
       st = (run[n] > 0) ? ((other[n] > 0) ? "partial" : "running") : "stopped"
       s = (n in src) ? src[n] : "external"
-      printf "%s\t{\"name\":\"%s\",\"status\":\"%s\",\"services\":%d,\"source\":\"%s\",\"repo\":\"%s\",\"branch\":\"%s\",\"file\":\"%s\",\"updated\":\"%s\"}\n", n, esc(n), st, svc[n] + 0, s, esc(repo[n]), esc(branch[n]), esc(file[n]), esc(upd[n])
+      printf "%s\t{\"name\":\"%s\",\"kind\":\"stack\",\"status\":\"%s\",\"services\":%d,\"source\":\"%s\",\"repo\":\"%s\",\"branch\":\"%s\",\"file\":\"%s\",\"updated\":\"%s\"}\n", n, esc(n), st, svc[n] + 0, s, esc(repo[n]), esc(branch[n]), esc(file[n]), esc(upd[n])
     }
   }' "$in" | sort | cut -f2- | awk 'BEGIN { printf "[" } { if (NR > 1) printf ","; printf "%s", $0 } END { print "]" }'
