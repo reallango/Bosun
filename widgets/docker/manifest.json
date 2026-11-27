@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "docker",
   "name": "Docker Containers",
-  "version": "1.0.19",
+  "version": "1.0.20",
   "description": "Containers on the host with logs, a shell, start, stop and restart; edit a container, create containers and stacks (a compose file, or one from a Git repository), and a Manage page for images, volumes and networks.",
   "author": "Bosun",
   "requires": {
@@ -178,6 +178,22 @@
             "timeoutSec": 60,
             "linux": "scripts/images.sh",
             "params": {}
+          },
+          "image_updates": {
+            "as": "service",
+            "timeoutSec": 600,
+            "linux": "scripts/image_updates.sh",
+            "params": {
+              "mode": {
+                "type": "string",
+                "values": [
+                  "list",
+                  "summary"
+                ],
+                "maxLength": 10,
+                "default": "list"
+              }
+            }
           },
           "volumes": {
             "as": "service",
@@ -2077,6 +2093,16 @@
             "cacheSec": 5,
             "permission": "docker.view"
           },
+          "image_updates": {
+            "script": "image_updates",
+            "cacheSec": 300,
+            "permission": "docker.view"
+          },
+          "image_updates_summary": {
+            "script": "image_updates",
+            "cacheSec": 300,
+            "permission": "docker.view"
+          },
           "volumes": {
             "script": "volumes",
             "cacheSec": 5,
@@ -3839,6 +3865,16 @@
               "stacks": {
                 "dataset": "stacks",
                 "args": {}
+              },
+              "updates": {
+                "dataset": "image_updates",
+                "args": {}
+              },
+              "updates_summary": {
+                "dataset": "image_updates_summary",
+                "args": {
+                  "mode": "literal:summary"
+                }
               }
             },
             "blocks": [
@@ -3877,6 +3913,18 @@
                             "tone": {
                               "warning": {
                                 "field": "datasets.system.containers.stopped",
+                                "gt": 0
+                              }
+                            },
+                            "tab": "containers"
+                          },
+                          {
+                            "label": "Updates available",
+                            "value": "{datasets.updates_summary.available}",
+                            "sub": "of {datasets.updates_summary.total} containers",
+                            "tone": {
+                              "warning": {
+                                "field": "datasets.updates_summary.available",
                                 "gt": 0
                               }
                             },
@@ -4014,6 +4062,53 @@
                             "remove"
                           ]
                         }
+                      },
+                      {
+                        "type": "section",
+                        "title": "Image updates",
+                        "defaultOpen": true,
+                        "summary": "{datasets.updates_summary.available} available",
+                        "blocks": [
+                          {
+                            "type": "view",
+                            "path": "datasets.updates",
+                            "view": {
+                              "type": "table",
+                              "empty": "No containers to check",
+                              "filter": {
+                                "fields": [
+                                  "container",
+                                  "image",
+                                  "note"
+                                ],
+                                "placeholder": "Filter"
+                              },
+                              "columns": [
+                                {
+                                  "title": "Container",
+                                  "value": "{container}",
+                                  "format": "text",
+                                  "sort": "container"
+                                },
+                                {
+                                  "title": "Image",
+                                  "value": "{image}",
+                                  "format": "text"
+                                },
+                                {
+                                  "title": "Update",
+                                  "value": "{update}",
+                                  "format": "text"
+                                },
+                                {
+                                  "title": "Note",
+                                  "value": "{note}",
+                                  "format": "text"
+                                }
+                              ]
+                            }
+                          }
+                        ]
                       }
                     ]
                   },

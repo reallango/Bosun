@@ -30,7 +30,7 @@ describe('the Docker manager package', () => {
   it('has screens, datasets and menu entries that exist, and a review that lists what runs', () => {
     expect(Object.keys(spec.screens ?? {}).sort()).toEqual(['create', 'edit', 'manage', 'stack_edit', 'stack_new']);
     expect(spec.menu?.map(m => m.id)).toEqual(['new_container', 'new_stack', 'manage']);
-    expect(Object.keys(spec.datasets ?? {}).sort()).toEqual(['convert', 'export_compose', 'export_run', 'exposed_ports', 'git_branches', 'git_files', 'git_services', 'host_detect', 'images', 'inspect', 'networks', 'stack_get', 'stacks', 'system', 'volumes']);
+    expect(Object.keys(spec.datasets ?? {}).sort()).toEqual(['convert', 'export_compose', 'export_run', 'exposed_ports', 'git_branches', 'git_files', 'git_services', 'host_detect', 'image_updates', 'image_updates_summary', 'images', 'inspect', 'networks', 'stack_get', 'stacks', 'system', 'volumes']);
     const review = reviewPackage(manifest);
     expect(review.runsAsService).toBe(true);
     expect(review.widgets[0].commands.some(c => /dataset "inspect"/.test(c.what))).toBe(true);
@@ -61,10 +61,17 @@ describe('the Docker manager package', () => {
 
     const overview = tab('overview').blocks;
     const stat = overview.find(b => b.type === 'stat') as Extract<Block, { type: 'stat' }>;
-    expect(stat.items.map(i => i.label)).toEqual(['Running', 'Stopped', 'Images', 'Volumes', 'Build cache']);
+    expect(stat.items.map(i => i.label)).toEqual(['Running', 'Stopped', 'Updates available', 'Images', 'Volumes', 'Build cache']);
     expect(stat.items.find(i => i.label === 'Stopped')).toMatchObject({ tab: 'containers', tone: { warning: { field: 'datasets.system.containers.stopped', gt: 0 } } });
+    expect(stat.items.find(i => i.label === 'Updates available')).toMatchObject({ tab: 'containers', value: '{datasets.updates_summary.available}', tone: { warning: { field: 'datasets.updates_summary.available', gt: 0 } } });
     expect(stat.items.find(i => i.label === 'Images')).toMatchObject({ tab: 'images', sub: '{datasets.system.disk.images}' });
     expect(stat.items.find(i => i.label === 'Build cache')).toMatchObject({ tab: 'images', value: '{datasets.system.disk.cache}' });
+    // a join is not part of the view spec, so the Containers tab has a small table over the image_updates dataset
+    const section = tab('containers').blocks.find(b => b.type === 'section') as Extract<Block, { type: 'section' }>;
+    expect(section.title).toBe('Image updates');
+    const updates = section.blocks.find(b => b.type === 'view') as Extract<Block, { type: 'view' }>;
+    expect(updates.path).toBe('datasets.updates');
+    expect((updates.view as { columns?: { title: string }[] }).columns?.map(c => c.title)).toEqual(['Container', 'Image', 'Update', 'Note']);
     const facts = overview.find(b => b.type === 'kv') as Extract<Block, { type: 'kv' }>;
     expect(facts.items.map(i => i.label)).toEqual(['Docker version', 'Compose', 'Compose', 'Volume drivers', 'Network drivers', 'Disk used by containers']);
   });
