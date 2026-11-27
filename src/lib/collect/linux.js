@@ -336,6 +336,7 @@ function buildSnapshot(raw, prev, now = Date.now()) {
     for (const g of gpus) {
       metrics[`gpu${g.index}.util`] = g.utilization_percent;
       metrics[`gpu${g.index}.vram_mb`] = g.vram_used_mb;
+      metrics[`gpu${g.index}.vram_pct`] = g.vram_percent;
       metrics[`gpu${g.index}.temp`] = g.temperature_c;
       metrics[`gpu${g.index}.power_w`] = g.power_watts;
     }

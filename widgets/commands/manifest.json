@@ -2,9 +2,12 @@
   "schema": 1,
   "id": "commands",
   "name": "Custom Command",
-  "version": "1.0.1",
+  "version": "1.1.1",
   "description": "Run a command on the host as its non-admin account (PowerShell on Windows) and show its output, repeated at the interval you choose.",
   "author": "Bosun",
+  "requires": {
+    "api": 10
+  },
   "permissions": [
     {
       "id": "commands.view",
@@ -32,18 +35,32 @@
       "description": "Run a command on the host as its non-admin account (PowerShell on Windows) and show its output, repeated at the interval you choose",
       "icon": "terminal",
       "category": "utility",
-      "default_size": { "w": 8, "h": 5 },
-      "min_size": { "w": 6, "h": 4 },
+      "default_size": {
+        "w": 8,
+        "h": 4
+      },
+      "min_size": {
+        "w": 6,
+        "h": 3
+      },
       "refresh_interval": 30,
       "supports_linux": true,
       "supports_windows": true,
       "config_schema": [
         {
-          "key": "command", "label": "Command", "type": "string", "placeholder": "uptime", "default": "uptime", "requires_permission": "commands.run",
+          "key": "command",
+          "label": "Command",
+          "type": "string",
+          "placeholder": "uptime",
+          "default": "uptime",
+          "requires_permission": "commands.run",
           "description": "Runs as the non-admin shell account of the host (no sudo or Docker access) each time the widget repeats. On Windows the untouched default shows how long the machine has been up. Only people with the permission to run commands can change it."
         },
         {
-          "key": "interval", "label": "Repeat every (seconds)", "type": "number", "default": 30,
+          "key": "interval",
+          "label": "Repeat every (seconds)",
+          "type": "number",
+          "default": 30,
           "description": "How often the command runs, from 10 to 3600 seconds. The result is shared by everyone viewing the widget."
         }
       ],
@@ -56,7 +73,13 @@
             "linux": "scripts/run.sh",
             "windows": "scripts/run.ps1",
             "params": {
-              "command": { "type": "string", "pattern": "^[^\\u0000-\\u001f]{1,2000}$", "maxLength": 2000, "default": "uptime", "description": "The command line to run" }
+              "command": {
+                "type": "string",
+                "pattern": "^[^\\u0000-\\u001f]{1,2000}$",
+                "maxLength": 2000,
+                "default": "uptime",
+                "description": "The command line to run"
+              }
             }
           }
         },
@@ -65,7 +88,9 @@
           "as": "shell",
           "command": "",
           "script": "run",
-          "args": { "command": "config.command" },
+          "args": {
+            "command": "config.command"
+          },
           "parse": "text",
           "cacheSec": 30,
           "cacheSecFrom": "config.interval",
@@ -75,8 +100,19 @@
         "view": {
           "type": "layout",
           "blocks": [
-            { "type": "view", "view": { "type": "text", "text": "{text}", "empty": "(no output)" } },
-            { "type": "text", "text": "Runs as the non-admin account of the host, every {config.interval} s." }
+            {
+              "type": "text",
+              "text": "$ {config.command}",
+              "hideBelow": "sm"
+            },
+            {
+              "type": "view",
+              "view": {
+                "type": "text",
+                "text": "{text}",
+                "empty": "(no output)"
+              }
+            }
           ]
         },
         "actions": []

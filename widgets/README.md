@@ -51,6 +51,8 @@ newer Bosun is still listed under Available (so the reason is visible) but canno
 | 6 | Up to 64 actions per widget (40 before). |
 | 7 | `looks` (and the "Look" choice Bosun adds to the widget's settings), `trend` on stat tiles and fields, the stat tile keys `bar`, `unit` and `thresholds`, and the `gauges` block. |
 | 8 | The bounded sizing keys: `size`, `minItemWidth` and `columns` on `stat` and `gauges`, `thickness` on gauges, `emphasis` and `decimals` on their items, and the widget-level `density`. A `%` value (and the `percent` format) now shows at most one decimal and a whole number from 100 up. |
+| 9 | Taken by an open package change (Docker Containers); this Bosun adds no level 9 keys of its own. |
+| 10 | The `meters` block (a compact bar or small ring per row of a data list), `count` and `format` on a stat tile, `format` on a ring gauge, the `rate` value format on fields, tables, tiles and gauges, and dotted data keys (a metric named `cpu.usage` is reached as `{data.metrics.cpu.usage}`). |
 
 New spec keys that an older Bosun cannot honour raise the level in `src/lib/widgets/api-level.ts`; keys an older
 Bosun can safely ignore (because it renders the widget sensibly without them) do not.
@@ -147,6 +149,7 @@ its manifest, scripts and declarative screen; Bosun has no code of its own for a
 - `data.filter` keeps the rows whose `field` equals the widget setting `config` (a key of the widget's `config_schema`).
 - `data.unavailable` shows a message instead of rows when the collected data matches (for example Docker is not installed).
 - `data.also` and `data.server` combine several sections and the server row; templates reach them by name (`{system.prettyName}`, `{server.name}`, `{metrics.cpu.usage}`). The `metrics` section holds the latest value of every tracked number.
+- In a version 2 `layout` view, the widget's data is under `data` (`{data.system.prettyName}`, `{data.metrics.cpu.usage}`); the server row is also at the top level (`{server.name}`). A data key that itself contains dots, such as a metric named `cpu.usage`, is reached by its full path: the longest key that matches wins, so `{data.metrics.cpu.usage}` reads `metrics["cpu.usage"]`.
 - `metrics` lists the statistics the widget tracks. A name the built-in collectors produce (`cpu.usage`, `mem.used_pct`, `net.rx_bps`, `disk.root_used_pct`, `gpu*.util`, ...) only sets how long its history is kept. A name that starts with the package id and has `from` is computed from the widget's data on every collection (`count`, `sum`, `avg`, `min`, `max` or `first`, optionally over the rows matching `where`). `rawHours` (up to 2160), `rollup5mDays` (up to 365) and `rollup1hDays` (up to 3650) override the global retention; when several widgets name one metric the longest wins. Computed metrics are recorded for the servers that have the widget on a dashboard.
 - View types: `list`, `table` (columns may use `bar`, `mb`, `duration`, `temp` formats), `fields` (labelled values, optional gauges), `text`, and `chart` (history lines of `chart.metrics`). List rows can carry `fields` too.
 
@@ -350,6 +353,12 @@ A tile can also carry a thin bar, a unit, a small trend line and thresholds (lev
 - `trend` is also accepted on a `fields` item (a `fields` view or a `kv` block); it draws the line under the value.
 - `decimals` (0-3) and `emphasis` (`normal` or `muted`) tune the number and its weight; `size`, `minItemWidth` and
   `columns` tune the block. See [Tuning sizes](#tuning-sizes) (level 8).
+- `count` makes the number the size of a list instead of a value: `{ "path": "data.models", "where": { "field": "state", "equals": "running" } }`.
+  `path` is a dotted path into the widget's data (default: the data itself) and `where` is optional. A missing list
+  counts as zero. Use it for "3 running" when the data is a list of rows rather than a number (level 10).
+- `format` writes the value the way a list column does: `bytes`, `rate` (bytes per second), `mb`, `temp`, `duration`,
+  `percent`, `ago` or `until` (level 10). A `percent` format honours `decimals`; the others choose their own precision.
+  The `bar` and thresholds still read the raw number.
 
 ```jsonc
 "blocks": [
@@ -399,15 +408,42 @@ conditions and size classes.
 
 - `value` is a template; `max` is what a full ring stands for (default 100).
 - `unit`, `thresholds`, `sub`, `decimals` and `emphasis` work as they do on a stat tile.
+- `format` writes the value as a byte count, a rate, MB, °C or a duration (level 10), while `max` and the thresholds
+  still read the raw number.
 - `thickness` (`thin`, `normal` or `thick`) sets the ring stroke, on the block or on one item. See
   [Tuning sizes](#tuning-sizes) (level 8).
 - The ring uses theme tokens only and is announced to assistive technology as an image (`role="img"` with the label and
   value as its `aria-label`).
 
+### Meter rows
+
+A `meters` block draws one compact row per item of a data list: a bar, or a small ring, with the label and value on the
+same line. It is for a list of similar things where each has its own share (mounts, GPUs, interfaces) and a grid of
+large tiles would waste the room.
+
+```jsonc
+{ "type": "meters", "path": "mounts", "shape": "bar", "empty": "No mounts",
+  "item": { "label": "{mount}", "value": "{used_percent}", "unit": "%", "sub": "{filesystem} · {size}",
+            "thresholds": { "warning": 80, "danger": 90 } } }
+```
+
+- `path` is a dotted path into the widget's data; the block draws one row per array item. An object is one row and a
+  missing list draws the `empty` text.
+- `shape` is `bar` (default) or `ring` (a small ring at the left of each row).
+- `item` is the row template: `label` and `value` are templates over the row (like a list row's fields), `max` is what
+  a full bar or ring stands for (default 100), and `unit`, `sub`, `thresholds`, `decimals` and `emphasis` work as they
+  do on a stat tile.
+- A `meters` block is a list, so it takes the room the other blocks leave and scrolls; it does not use the filling
+  tile grid. In a widget of about three rows it tightens its gaps and drops the `sub` line, keeping every row's label
+  and value.
+- The rows are plain text and theme tokens; the bar is the same one a stat tile uses and the ring is the same
+  geometry, at a fixed small size.
+
 ### Filling the widget
 
 Inside a widget on a dashboard, `stat` tiles and `gauges` flow into a grid that grows its columns and rows to use the
-whole body. Each card is a size container: the number in a tile, the value in a ring and the label above them scale
+whole body. A `meters` block, and a `view` block that draws a list, table or chart, takes the room the other blocks
+leave instead (it scrolls inside it). Each card is a size container: the number in a tile, the value in a ring and the label above them scale
 with the card's width and height (container query units), not with the screen, within a sensible minimum and maximum.
 The renderer also shortens a number for its own length: it counts the characters of the value and its unit and picks a
 size whose text stays inside the card (about 70% of the ring's inner circle). Every tile or gauge in one block takes

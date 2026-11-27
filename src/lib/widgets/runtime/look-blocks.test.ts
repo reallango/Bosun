@@ -125,6 +125,53 @@ describe('gauges block', () => {
   });
 });
 
+describe('count and format on stat tiles', () => {
+  it('takes a count instead of a value, with an optional path and condition', () => {
+    const r = stat({ label: 'Models', count: { path: 'data.tags.models', where: { field: 'state', equals: 'running' } } });
+    if (!r.ok) throw new Error(r.error);
+    const block = (r.value.view.blocks?.[0] ?? null) as { items: unknown[] } | null;
+    expect(block?.items[0]).toEqual({ label: 'Models', count: { path: 'data.tags.models', where: { field: 'state', equals: 'running' } } });
+  });
+
+  it('needs a value or a count, and refuses a bad path or condition', () => {
+    expect(stat({ label: 'A' }).ok).toBe(false);
+    expect(stat({ label: 'A', count: { path: 'data[0]' } }).ok).toBe(false);
+    expect(stat({ label: 'A', count: { where: { field: 'x' } } }).ok).toBe(false);
+    expect(stat({ label: 'A', count: 'data' }).ok).toBe(false);
+  });
+
+  it('keeps a value format, and refuses an unknown one', () => {
+    const r = stat({ label: 'Traffic', value: '{rate}', format: 'rate' });
+    if (!r.ok) throw new Error(r.error);
+    expect((r.value.view.blocks?.[0] as { items: { format?: string }[] }).items[0].format).toBe('rate');
+    expect(stat({ label: 'A', value: '{a}', format: 'nope' }).ok).toBe(false);
+    expect(layout([{ type: 'gauges', items: [{ label: 'VRAM', value: '{v}', max: 12288, format: 'mb' }] }]).ok).toBe(true);
+    expect(layout([{ type: 'gauges', items: [{ label: 'VRAM', value: '{v}', format: 'nope' }] }]).ok).toBe(false);
+  });
+});
+
+describe('meters block', () => {
+  it('keeps a path, shape, row template and empty text', () => {
+    const r = layout([{ type: 'meters', path: 'data.mounts', shape: 'bar', empty: 'No mounts', item: { label: '{mount}', value: '{used_pct}', unit: '%', sub: '{fs}', thresholds: { warning: 80, danger: 90 } } }]);
+    if (!r.ok) throw new Error(r.error);
+    const block = r.value.view.blocks?.[0] as { type: string; path?: string; shape?: string; empty?: string; item: unknown };
+    expect(block.type).toBe('meters');
+    expect(block.path).toBe('data.mounts');
+    expect(block.shape).toBe('bar');
+    expect(block.empty).toBe('No mounts');
+    expect(block.item).toEqual({ label: '{mount}', value: '{used_pct}', unit: '%', sub: '{fs}', thresholds: { warning: 80, danger: 90 } });
+  });
+
+  it('defaults to a bar and refuses a bad shape, item or path', () => {
+    const r = layout([{ type: 'meters', item: { label: '{name}', value: '{pct}' } }]);
+    if (!r.ok) throw new Error(r.error);
+    expect((r.value.view.blocks?.[0] as { shape?: string }).shape).toBe('bar');
+    expect(layout([{ type: 'meters', shape: 'pie', item: { label: '{x}', value: '{y}' } }]).ok).toBe(false);
+    expect(layout([{ type: 'meters', item: { label: '{x}' } }]).ok).toBe(false);
+    expect(layout([{ type: 'meters', path: 'data[0]', item: { label: '{x}', value: '{y}' } }]).ok).toBe(false);
+  });
+});
+
 describe('the CPU/Memory reference adoption', () => {
   const raw = JSON.parse(fs.readFileSync(path.join(process.cwd(), 'widgets', 'cpu_memory', 'manifest.json'), 'utf8'));
   const manifest = validateManifest(raw);

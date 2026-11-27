@@ -2,9 +2,12 @@
   "schema": 1,
   "id": "metrics_chart",
   "name": "Metrics History",
-  "version": "1.0.1",
-  "description": "Charts the recorded history of a server's statistics: CPU, memory, network, disks, GPUs and anything a widget tracks.",
+  "version": "1.2.0",
+  "description": "Charts the recorded history of a server's statistics, or shows their current values as tiles.",
   "author": "Bosun",
+  "requires": {
+    "api": 10
+  },
   "permissions": [
     {
       "id": "metrics_chart.view",
@@ -23,15 +26,129 @@
       "description": "Charts recorded CPU, memory, network, disk and GPU history for a server",
       "icon": "line-chart",
       "category": "system",
-      "default_size": { "w": 12, "h": 6 },
-      "min_size": { "w": 6, "h": 5 },
+      "default_size": {
+        "w": 12,
+        "h": 6
+      },
+      "min_size": {
+        "w": 6,
+        "h": 4
+      },
       "refresh_interval": 60,
       "supports_linux": true,
       "supports_windows": true,
       "spec": {
-        "version": 1,
-        "data": { "source": "snapshot", "section": "metrics", "permission": "metrics_chart.view" },
-        "view": { "type": "chart", "chart": { "metrics": ["cpu.usage", "mem.used_pct"] } }
+        "version": 2,
+        "data": {
+          "source": "snapshot",
+          "section": "metrics",
+          "permission": "metrics_chart.view"
+        },
+        "looks": {
+          "default": "chart",
+          "options": [
+            {
+              "id": "chart",
+              "label": "Chart"
+            },
+            {
+              "id": "tiles",
+              "label": "Tiles"
+            }
+          ]
+        },
+        "view": {
+          "type": "layout",
+          "blocks": [
+            {
+              "type": "view",
+              "when": {
+                "field": "config.look",
+                "equals": "chart"
+              },
+              "view": {
+                "type": "chart",
+                "chart": {
+                  "metrics": [
+                    "cpu.usage",
+                    "mem.used_pct"
+                  ]
+                }
+              }
+            },
+            {
+              "type": "stat",
+              "when": {
+                "field": "config.look",
+                "equals": "tiles"
+              },
+              "minItemWidth": "xs",
+              "items": [
+                {
+                  "label": "CPU",
+                  "value": "{data.cpu.usage}",
+                  "unit": "%",
+                  "bar": "{data.cpu.usage}",
+                  "trend": {
+                    "metric": "cpu.usage",
+                    "window": "24h"
+                  },
+                  "thresholds": {
+                    "warning": 75,
+                    "danger": 90
+                  }
+                },
+                {
+                  "label": "Memory",
+                  "value": "{data.mem.used_pct}",
+                  "unit": "%",
+                  "bar": "{data.mem.used_pct}",
+                  "trend": {
+                    "metric": "mem.used_pct",
+                    "window": "24h"
+                  },
+                  "thresholds": {
+                    "warning": 80,
+                    "danger": 90
+                  }
+                },
+                {
+                  "label": "Disk",
+                  "value": "{data.disk.root_used_pct}",
+                  "unit": "%",
+                  "bar": "{data.disk.root_used_pct}",
+                  "trend": {
+                    "metric": "disk.root_used_pct",
+                    "window": "24h"
+                  },
+                  "thresholds": {
+                    "warning": 80,
+                    "danger": 90
+                  }
+                },
+                {
+                  "label": "Net in",
+                  "value": "{data.net.rx_bps}",
+                  "format": "rate",
+                  "trend": {
+                    "metric": "net.rx_bps",
+                    "window": "6h"
+                  }
+                },
+                {
+                  "label": "Net out",
+                  "value": "{data.net.tx_bps}",
+                  "format": "rate",
+                  "trend": {
+                    "metric": "net.tx_bps",
+                    "window": "6h"
+                  }
+                }
+              ],
+              "size": "lg"
+            }
+          ]
+        }
       }
     }
   ]

@@ -2,9 +2,12 @@
   "schema": 1,
   "id": "gpu_monitoring",
   "name": "GPU Monitoring",
-  "version": "1.0.1",
+  "version": "1.2.0",
   "description": "NVIDIA GPU utilisation, memory, temperature and power. Tracks each GPU as history.",
   "author": "Bosun",
+  "requires": {
+    "api": 10
+  },
   "permissions": [
     {
       "id": "gpu_monitoring.view",
@@ -23,34 +26,240 @@
       "description": "NVIDIA GPU stats (VRAM, utilization, temperature)",
       "icon": "cpu",
       "category": "system",
-      "default_size": { "w": 8, "h": 6 },
-      "min_size": { "w": 6, "h": 4 },
+      "default_size": {
+        "w": 8,
+        "h": 6
+      },
+      "min_size": {
+        "w": 6,
+        "h": 4
+      },
       "refresh_interval": 10,
       "supports_linux": true,
       "supports_windows": true,
       "spec": {
-        "version": 1,
-        "data": { "source": "snapshot", "section": "gpus", "permission": "gpu_monitoring.view" },
+        "version": 2,
+        "data": {
+          "source": "snapshot",
+          "section": "gpus",
+          "also": [
+            "metrics"
+          ],
+          "permission": "gpu_monitoring.view"
+        },
         "metrics": [
-          { "name": "gpu*.util", "label": "GPU utilisation", "unit": "%" },
-          { "name": "gpu*.vram_mb", "label": "VRAM used", "unit": "MB" },
-          { "name": "gpu*.temp", "label": "GPU temperature", "unit": "°C" },
-          { "name": "gpu*.power_w", "label": "GPU power", "unit": "W" }
-        ],
-        "view": {
-          "type": "list",
-          "empty": "No GPUs detected on this host",
-          "row": {
-            "title": "#{index} {name}",
-            "fields": [
-              { "label": "Utilisation", "value": "{utilization_percent}", "format": "percent", "bar": "{utilization_percent}" },
-              { "label": "VRAM used", "value": "{vram_used_mb}", "format": "mb", "bar": "{vram_percent}" },
-              { "label": "VRAM total", "value": "{vram_total_mb}", "format": "mb" },
-              { "label": "Temperature", "value": "{temperature_c}", "format": "temp" },
-              { "label": "Power (W)", "value": "{power_watts}", "format": "text" }
-            ],
-            "actions": []
+          {
+            "name": "gpu*.util",
+            "label": "GPU utilisation",
+            "unit": "%"
+          },
+          {
+            "name": "gpu*.vram_mb",
+            "label": "VRAM used (MB)",
+            "unit": "MB"
+          },
+          {
+            "name": "gpu*.vram_pct",
+            "label": "VRAM used (%)",
+            "unit": "%"
+          },
+          {
+            "name": "gpu*.temp",
+            "label": "GPU temperature",
+            "unit": "°C"
+          },
+          {
+            "name": "gpu*.power_w",
+            "label": "GPU power",
+            "unit": "W"
           }
+        ],
+        "looks": {
+          "default": "gauges",
+          "options": [
+            {
+              "id": "gauges",
+              "label": "Gauges"
+            },
+            {
+              "id": "tiles",
+              "label": "Tiles"
+            },
+            {
+              "id": "gpus",
+              "label": "Per GPU"
+            },
+            {
+              "id": "list",
+              "label": "List"
+            }
+          ]
+        },
+        "view": {
+          "type": "layout",
+          "blocks": [
+            {
+              "type": "gauges",
+              "when": {
+                "field": "config.look",
+                "equals": "gauges"
+              },
+              "thickness": "normal",
+              "items": [
+                {
+                  "label": "Utilisation",
+                  "value": "{data.metrics.gpu0.util}",
+                  "max": 100,
+                  "unit": "%",
+                  "thresholds": {
+                    "warning": 75,
+                    "danger": 90
+                  },
+                  "sub": "GPU 0"
+                },
+                {
+                  "label": "VRAM",
+                  "value": "{data.metrics.gpu0.vram_pct}",
+                  "max": 100,
+                  "unit": "%",
+                  "thresholds": {
+                    "warning": 80,
+                    "danger": 90
+                  },
+                  "sub": "{data.metrics.gpu0.vram_mb} MB used"
+                },
+                {
+                  "label": "Temperature",
+                  "value": "{data.metrics.gpu0.temp}",
+                  "max": 100,
+                  "format": "temp",
+                  "thresholds": {
+                    "warning": 75,
+                    "danger": 85
+                  }
+                }
+              ],
+              "minItemWidth": "xs"
+            },
+            {
+              "type": "stat",
+              "when": {
+                "field": "config.look",
+                "equals": "tiles"
+              },
+              "minItemWidth": "xs",
+              "items": [
+                {
+                  "label": "Utilisation",
+                  "value": "{data.metrics.gpu0.util}",
+                  "unit": "%",
+                  "bar": "{data.metrics.gpu0.util}",
+                  "trend": {
+                    "metric": "gpu0.util",
+                    "window": "1h"
+                  },
+                  "thresholds": {
+                    "warning": 75,
+                    "danger": 90
+                  },
+                  "sub": "GPU 0"
+                },
+                {
+                  "label": "VRAM",
+                  "value": "{data.metrics.gpu0.vram_pct}",
+                  "unit": "%",
+                  "bar": "{data.metrics.gpu0.vram_pct}",
+                  "trend": {
+                    "metric": "gpu0.vram_pct",
+                    "window": "1h"
+                  },
+                  "thresholds": {
+                    "warning": 80,
+                    "danger": 90
+                  },
+                  "sub": "{data.metrics.gpu0.vram_mb} MB used"
+                },
+                {
+                  "label": "Temperature",
+                  "value": "{data.metrics.gpu0.temp}",
+                  "format": "temp",
+                  "trend": {
+                    "metric": "gpu0.temp",
+                    "window": "1h"
+                  },
+                  "thresholds": {
+                    "warning": 75,
+                    "danger": 85
+                  }
+                }
+              ]
+            },
+            {
+              "type": "meters",
+              "when": {
+                "field": "config.look",
+                "equals": "gpus"
+              },
+              "path": "gpus",
+              "shape": "ring",
+              "empty": "No GPUs detected on this host",
+              "item": {
+                "label": "#{index} {name}",
+                "value": "{utilization_percent}",
+                "unit": "%",
+                "sub": "{vram_percent}% VRAM · {temperature_c}°C · {power_watts} W",
+                "thresholds": {
+                  "warning": 75,
+                  "danger": 90
+                }
+              }
+            },
+            {
+              "type": "view",
+              "when": {
+                "field": "config.look",
+                "equals": "list"
+              },
+              "path": "gpus",
+              "view": {
+                "type": "list",
+                "empty": "No GPUs detected on this host",
+                "row": {
+                  "title": "#{index} {name}",
+                  "fields": [
+                    {
+                      "label": "Utilisation",
+                      "value": "{utilization_percent}",
+                      "format": "percent",
+                      "bar": "{utilization_percent}"
+                    },
+                    {
+                      "label": "VRAM used",
+                      "value": "{vram_used_mb}",
+                      "format": "mb",
+                      "bar": "{vram_percent}"
+                    },
+                    {
+                      "label": "VRAM total",
+                      "value": "{vram_total_mb}",
+                      "format": "mb"
+                    },
+                    {
+                      "label": "Temperature",
+                      "value": "{temperature_c}",
+                      "format": "temp"
+                    },
+                    {
+                      "label": "Power (W)",
+                      "value": "{power_watts}",
+                      "format": "text"
+                    }
+                  ],
+                  "actions": []
+                }
+              }
+            }
+          ]
         }
       }
     }

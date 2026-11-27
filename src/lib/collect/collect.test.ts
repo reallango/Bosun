@@ -66,6 +66,8 @@ describe('linux collector', () => {
 
     expect(b.sections.gpus[0]).toMatchObject({ index: 0, name: 'NVIDIA GeForce RTX 3060', vram_total_mb: 12288, utilization_percent: 37, power_limit_watts: 170 });
     expect(b.metrics['gpu0.util']).toBe(37);
+    expect(b.metrics['gpu0.vram_mb']).toBe(1024);
+    expect(b.metrics['gpu0.vram_pct']).toBe(8);
 
     expect(b.sections.docker).toBeUndefined();   // what a widget needs about Docker is collected by the widget's own package
     expect(b.metrics['docker.running']).toBeUndefined();

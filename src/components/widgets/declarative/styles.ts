@@ -121,6 +121,19 @@ export const FILL_SUB = 'truncate text-muted-foreground [font-size:clamp(0.7rem,
 /** A sparkline stretches to the tile width; its height grows with the card but leaves the number room. */
 export const SPARKLINE = 'block w-full [height:clamp(0.9rem,min(16cqw,22cqh),5rem)]';
 
+/**
+ * A `meters` block: one compact row per item of a list, with a bar or a small ring. The list scrolls inside the room the
+ * widget leaves; a short widget tightens the gaps and drops the sub-line (the label and value stay).
+ */
+export const METER_LIST = 'space-y-1.5 overflow-auto';
+export const METER_LIST_COMPACT = 'space-y-1 overflow-auto';
+export const METER_ROW = 'flex min-w-0 items-center gap-2';
+export const METER_VALUE = 'shrink-0 text-xs tabular-nums';
+export const METER_SUB = 'truncate text-[11px] text-muted-foreground';
+export const METER_RING = 'relative size-9 shrink-0';
+export const METER_RING_COMPACT = 'relative size-7 shrink-0';
+export const METER_RING_TRACK = 'stroke-muted';
+
 /** The dialog shell shared by screen dialogs and forms that open behind a button. */
 export const DIALOG_OVERLAY = 'fixed inset-0 z-50 bg-black/50';
 

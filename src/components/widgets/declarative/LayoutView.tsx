@@ -12,9 +12,10 @@ import {
 } from '@/lib/widgets/runtime/layout';
 import { Bar, Fields, Sparkline, type StatToneName } from './parts';
 import { fitsSize, type WidgetSize } from '@/lib/widgets/runtime/size';
-import { statTone, withUnit } from '@/lib/widgets/runtime/stat';
+import { countRows, statTone, withUnit } from '@/lib/widgets/runtime/stat';
 import { thresholdTone } from '@/lib/widgets/runtime/thresholds';
-import { formatValueText } from '@/lib/widgets/runtime/number-format';
+import { formatStatValue } from '@/lib/widgets/runtime/number-format';
+import { meterRowView, meterRows } from '@/lib/widgets/runtime/meters';
 import { gaugeLabelFontSize, labelFontSize, fitGaugeValues, fitTileValues, unitOnOwnLine, type BlockSize, type MinItemWidth, type ValueFit, type ValueText } from '@/lib/widgets/runtime/sizing';
 import { gaugeGeometry, gaugeStroke, GAUGE_VIEWBOX, type GaugeItem } from '@/lib/widgets/runtime/gauges';
 import { useWidgetSize } from '@/components/dashboard/widget-size';
@@ -23,7 +24,8 @@ import { CodeBlock, EditorBlock } from './EditorBlock';
 import {
   buttonClass, DIALOG_CONTENT, DIALOG_FOOTER, DIALOG_HEADER, DIALOG_OVERLAY, DIALOG_TITLE, DIALOG_WIDTH, FILL_CARD, FILL_CARD_COMPACT, FILL_GAUGE_CARD,
   FILL_GAUGE_CARD_COMPACT, FILL_GAUGE_LABEL, FILL_GAUGE_VALUE, FILL_GRID_COLUMNS, FILL_GRID_MIN, FILL_GRID_XS, FILL_LABEL, FILL_SUB, FILL_VALUE,
-  FILL_VALUE_COMPACT, STAT_GRID_COLUMNS,
+  FILL_VALUE_COMPACT, METER_LIST, METER_LIST_COMPACT, METER_RING, METER_RING_COMPACT, METER_RING_TRACK, METER_ROW, METER_SUB, METER_VALUE,
+  STAT_GRID_COLUMNS,
   iconButtonClass, inputClass, NOTICE_CLASS as NOTICE, primarySubmitClass, toolbarButtonClass,
 } from './styles';
 
@@ -62,6 +64,14 @@ export interface LayoutUi {
   page?: boolean;
 }
 
+/**
+ * Blocks that take the room the other blocks leave inside a widget: a grid of numbers, a meter list, and a list, table
+ * or chart. A text line, a notice, a key/value list or a toolbar keeps its natural height instead.
+ */
+const fillsBody = (b: Block): boolean =>
+  b.type === 'stat' || b.type === 'gauges' || b.type === 'meters'
+  || (b.type === 'view' && (b.view.type === 'list' || b.view.type === 'table' || b.view.type === 'chart'));
+
 export function LayoutBlocks({ blocks, ctx, ui, groupToolbar }: { blocks: Block[]; ctx: ViewContext; ui: LayoutUi; groupToolbar?: boolean }) {
   // Blocks with `hideBelow` drop out while the widget is smaller (dialogs and pages count as the largest size).
   const { size } = useWidgetSize();
@@ -77,11 +87,11 @@ export function LayoutBlocks({ blocks, ctx, ui, groupToolbar }: { blocks: Block[
       </div>
     );
   }
-  // Inside a widget the blocks share the whole body; a tile or gauge grid takes the space the other blocks leave.
+  // Inside a widget the blocks share the whole body; a grid of numbers or a list takes the space the others leave.
   return (
     <div className={fill ? 'flex h-full min-h-0 flex-col gap-2' : 'space-y-2'}>
       {shown.map((b, i) => (
-        <div key={i} className={fill && (b.type === 'stat' || b.type === 'gauges') ? 'min-h-0 flex-1' : undefined}>
+        <div key={i} className={fill && fillsBody(b) ? 'min-h-0 flex-1' : undefined}>
           <BlockView block={b} ctx={ctx} ui={ui} />
         </div>
       ))}
@@ -136,6 +146,7 @@ function BlockView({ block, ctx, ui, toolbar }: { block: Block; ctx: ViewContext
     case 'kv': return <Fields fields={block.items} data={ctx} />;
     case 'stat': return <StatBlock block={block} ctx={ctx} />;
     case 'gauges': return <GaugeBlock block={block} ctx={ctx} />;
+    case 'meters': return <MetersBlock block={block} ctx={ctx} />;
     case 'text': return <TextBlock block={block} ctx={ctx} />;
     case 'notice': return <div role={block.level === 'error' ? 'alert' : 'status'} className={`rounded-md border px-2 py-1.5 text-xs ${NOTICE[block.level]}`}>{text(block.text, ctx)}</div>;
     case 'buttons': return <Buttons block={block} ctx={ctx} ui={ui} toolbar={toolbar} />;
@@ -329,8 +340,8 @@ function StatBlock({ block, ctx }: { block: Extract<Block, { type: 'stat' }>; ct
   const blockSize = block.size ?? 'md';
   const card = useCardSize();
   const shown = block.items.map(item => {
-    const value = text(item.value, ctx);
-    return { item, number: formatValueText(value, item.unit, item.decimals) || '—', unit: item.unit };
+    const raw = item.count ? String(countRows(item.count, ctx)) : text(item.value ?? '', ctx);
+    return { item, ...formatStatValue(raw, item.format, item.unit, item.decimals) };
   });
   // Every item in the block takes the same size and the same split decision, chosen from its widest value, so
   // neighbours stay balanced.
@@ -340,7 +351,7 @@ function StatBlock({ block, ctx }: { block: Extract<Block, { type: 'stat' }>; ct
   return (
     <div className={itemGridClass(fill, widgetSize, block)} style={fill && compact ? { gap: '0.375rem' } : undefined}>
       {shown.map(({ item, number, unit }, i) => {
-        const numeric = Number(fillTemplate(item.value, ctx));
+        const numeric = item.count ? countRows(item.count, ctx) : Number(fillTemplate(item.value ?? '', ctx));
         const tone = statTone(item.tone, ctx) ?? thresholdTone(numeric, item.thresholds);
         const bar = item.bar ? Number(fillTemplate(item.bar, ctx)) : NaN;
         const cardClass = fill ? (compact ? FILL_CARD_COMPACT : FILL_CARD) : STAT_CARD;
@@ -376,8 +387,8 @@ function Gauge({ item, ctx, fill, compact, fit, blockSize, thickness, cardRef }:
   const tone = thresholdTone(numeric, item.thresholds);
   const stroke = gaugeStroke(item.thickness ?? thickness);
   const geometry = gaugeGeometry(numeric, item.max ?? 100, GAUGE_VIEWBOX, stroke);
-  const number = formatValueText(value, item.unit, item.decimals) || '—';
-  const valueText = withUnit(number, item.unit);
+  const { number, unit } = formatStatValue(value, item.format, item.unit, item.decimals);
+  const valueText = withUnit(number, unit);
   const label = `${item.label}: ${valueText}`;
   const valueTone = tone ? STAT_TONE_CLASS[tone] : item.emphasis === 'muted' ? 'text-muted-foreground' : 'text-foreground';
   // A split value already has two lines; the in-ring label would make three, so it moves under the ring instead.
@@ -395,7 +406,7 @@ function Gauge({ item, ctx, fill, compact, fit, blockSize, thickness, cardRef }:
         </svg>
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-0.5 overflow-hidden text-center leading-none" aria-hidden="true">
           {fill
-            ? <ValueLines number={number} unit={item.unit} fit={fit} className={FILL_GAUGE_VALUE} tone={valueTone} />
+            ? <ValueLines number={number} unit={unit} fit={fit} className={FILL_GAUGE_VALUE} tone={valueTone} />
             : <span className={`${gaugeValueClass(blockSize)} font-semibold tabular-nums ${valueTone}`}>{valueText}</span>}
           {compact && !split && <span className={FILL_GAUGE_LABEL} style={fill ? { fontSize: gaugeLabelFontSize(blockSize) } : undefined}>{item.label}</span>}
         </div>
@@ -415,7 +426,7 @@ function GaugeBlock({ block, ctx }: { block: Extract<Block, { type: 'gauges' }>;
   const card = useCardSize();
   const values: ValueText[] = block.items.map(item => {
     const value = text(item.value, ctx);
-    return { number: formatValueText(value, item.unit, item.decimals) || '—', unit: item.unit };
+    return formatStatValue(value, item.format, item.unit, item.decimals);
   });
   // One size for the block, sized for its thickest ring so a mixed `thickness` still shares it.
   const stroke = Math.max(...block.items.map(item => gaugeStroke(item.thickness ?? block.thickness)));
@@ -427,6 +438,58 @@ function GaugeBlock({ block, ctx }: { block: Extract<Block, { type: 'gauges' }>;
           cardRef={fill && i === 0 ? card.ref : undefined} />
       ))}
     </div>
+  );
+}
+
+/** A small ring for a meter row: the row's share, drawn at a fixed size so a list of them stays aligned. */
+function MeterRing({ pct, tone, label, compact }: { pct: number; tone: ReturnType<typeof thresholdTone>; label: string; compact: boolean }) {
+  const stroke = 12;
+  const geometry = gaugeGeometry(pct, 100, GAUGE_VIEWBOX, stroke);
+  return (
+    <span className={compact ? METER_RING_COMPACT : METER_RING} title={label}>
+      <svg viewBox={`0 0 ${GAUGE_VIEWBOX} ${GAUGE_VIEWBOX}`} preserveAspectRatio="xMidYMid meet" className="size-full" role="img" aria-label={label}>
+        <circle cx={geometry.cx} cy={geometry.cy} r={geometry.r} fill="none" strokeWidth={stroke} className={METER_RING_TRACK} />
+        <circle cx={geometry.cx} cy={geometry.cy} r={geometry.r} fill="none" strokeWidth={stroke} strokeLinecap="round"
+          strokeDasharray={geometry.circumference} strokeDashoffset={geometry.dashOffset} transform={`rotate(-90 ${geometry.cx} ${geometry.cy})`}
+          className={tone ? STAT_TONE_STROKE[tone] : 'stroke-primary'} />
+      </svg>
+    </span>
+  );
+}
+
+/**
+ * A compact list of one bar or small ring per row of a data list (mounts, GPUs, interfaces). The block names the list and
+ * one template per row field, so a widget never needs code for its own list.
+ */
+function MetersBlock({ block, ctx }: { block: Extract<Block, { type: 'meters' }>; ctx: ViewContext }) {
+  const { height } = useWidgetSize();
+  const fill = useWidgetFill();
+  const density = useWidgetDensity();
+  const compact = fill && (density === 'compact' || (height > 0 && height < COMPACT_HEIGHT));
+  const source = block.path ? (/^(datasets|context)\./.test(block.path) ? pathOf(ctx, block.path) : pathOf(ctx.data, block.path)) : ctx.data;
+  const rows = meterRows(source);
+  if (!rows.length) return <div className="py-4 text-center text-xs text-muted-foreground">{block.empty || 'Nothing to show'}</div>;
+  const views = rows.map(row => meterRowView(block.item, row));
+  const ring = block.shape === 'ring';
+  return (
+    <ul className={fill ? (compact ? METER_LIST_COMPACT : METER_LIST) : 'space-y-2'}>
+      {views.map((v, i) => {
+        const toneClass = v.tone ? STAT_TONE_CLASS[v.tone] : v.emphasis === 'muted' ? 'text-muted-foreground' : 'text-foreground';
+        return (
+          <li key={i} className={METER_ROW}>
+            {ring && <MeterRing pct={v.pct} tone={v.tone} label={`${v.label}: ${v.valueText}`} compact={compact} />}
+            <div className="min-w-0 flex-1">
+              <div className="flex items-baseline justify-between gap-2">
+                <span className="truncate text-foreground">{v.label}</span>
+                <span className={`${METER_VALUE} ${toneClass}`}>{v.valueText}</span>
+              </div>
+              {!ring && <Bar value={v.pct} tone={v.tone} />}
+              {!compact && v.sub && <div className={METER_SUB}>{v.sub}</div>}
+            </div>
+          </li>
+        );
+      })}
+    </ul>
   );
 }
 

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import path from 'path';
-import { validateWidgetSpec, publicSpec, evalCond, isNewerVersion } from './spec';
+import { validateWidgetSpec, publicSpec, evalCond, getPath, isNewerVersion } from './spec';
 import { cond } from './spec-util';
 import type { Block } from './spec-v2';
 import { validateManifest, scriptFilesOf, validateScriptFiles, manifestToJson } from '@/lib/widgets/package-manifest';
@@ -357,5 +357,19 @@ describe('tracked metrics from a list inside the data', () => {
     const metrics = [{ name: 'ollama.loaded', from: { agg: 'count', path: 'ps.models' } }];
     expect(extractMetrics(metrics, { ps: { models: [{ name: 'a' }, { name: 'b' }] } })).toEqual({ 'ollama.loaded': 2 });
     expect(extractMetrics(metrics, { ps: {} })).toEqual({ 'ollama.loaded': 0 });
+  });
+});
+
+describe('paths into the data', () => {
+  it('reaches a key that contains dots, such as a metric name', () => {
+    const data = { metrics: { 'cpu.usage': 89.9, 'disk.root_used_pct': 100 } };
+    expect(getPath({ data }, 'data.metrics.cpu.usage')).toBe(89.9);
+    expect(getPath({ data }, 'data.metrics.disk.root_used_pct')).toBe(100);
+  });
+  it('still follows nested keys and returns undefined for a missing one', () => {
+    const data = { cpu: { usagePercent: 42 }, 'cpu.usage': 7 };
+    expect(getPath({ data }, 'data.cpu.usagePercent')).toBe(42);
+    expect(getPath({ data }, 'data.cpu.usage')).toBe(7);
+    expect(getPath({ data }, 'data.cpu.nope')).toBeUndefined();
   });
 });
