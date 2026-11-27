@@ -50,6 +50,7 @@ newer Bosun is still listed under Available (so the reason is visible) but canno
 | 5 | `schedules`: the runs a package offers under Settings → Schedules. |
 | 6 | Up to 64 actions per widget (40 before). |
 | 7 | `looks` (and the "Look" choice Bosun adds to the widget's settings), `trend` on stat tiles and fields, the stat tile keys `bar`, `unit` and `thresholds`, and the `gauges` block. |
+| 8 | The bounded sizing keys: `size`, `minItemWidth` and `columns` on `stat` and `gauges`, `thickness` on gauges, `emphasis` and `decimals` on their items, and the widget-level `density`. A `%` value (and the `percent` format) now shows at most one decimal and a whole number from 100 up. |
 
 New spec keys that an older Bosun cannot honour raise the level in `src/lib/widgets/api-level.ts`; keys an older
 Bosun can safely ignore (because it renders the widget sensibly without them) do not.
@@ -347,6 +348,8 @@ A tile can also carry a thin bar, a unit, a small trend line and thresholds (lev
 - `thresholds` colours the number and the bar: `{ "warning": 75, "danger": 90 }` for "high is bad", or
   `{ "below": { "warning": 20, "danger": 10 } }` for "low is bad". A fixed `tone` or a tone condition wins over it.
 - `trend` is also accepted on a `fields` item (a `fields` view or a `kv` block); it draws the line under the value.
+- `decimals` (0-3) and `emphasis` (`normal` or `muted`) tune the number and its weight; `size`, `minItemWidth` and
+  `columns` tune the block. See [Tuning sizes](#tuning-sizes) (level 8).
 
 ```jsonc
 "blocks": [
@@ -395,7 +398,9 @@ conditions and size classes.
 ```
 
 - `value` is a template; `max` is what a full ring stands for (default 100).
-- `unit`, `thresholds` and `sub` work as they do on a stat tile.
+- `unit`, `thresholds`, `sub`, `decimals` and `emphasis` work as they do on a stat tile.
+- `thickness` (`thin`, `normal` or `thick`) sets the ring stroke, on the block or on one item. See
+  [Tuning sizes](#tuning-sizes) (level 8).
 - The ring uses theme tokens only and is announced to assistive technology as an image (`role="img"` with the label and
   value as its `aria-label`).
 
@@ -404,18 +409,61 @@ conditions and size classes.
 Inside a widget on a dashboard, `stat` tiles and `gauges` flow into a grid that grows its columns and rows to use the
 whole body. Each card is a size container: the number in a tile, the value in a ring and the label above them scale
 with the card's width and height (container query units), not with the screen, within a sensible minimum and maximum.
-The value inside a ring is a share of the ring area, so it stays inside the circle at every size. A sparkline stretches
-to the tile's width and its height follows the card. At the smallest size class (`xs`) the tiles stay in one compact
-row so nothing overflows. In a dialog, a sheet or a full page the same blocks keep their normal reading size.
+The renderer also shortens a number for its own length: it counts the characters of the value and its unit and picks a
+size whose text stays inside the card (about 70% of the ring's inner circle). Every tile or gauge in one block takes
+the size chosen from that block's longest value, so "8%" and "89.9%" sit at the same size instead of one being huge.
+The number never drops below a readable floor (0.9rem in a tile, 0.75rem in a ring). When the number and its unit
+cannot both fit at that floor, they are split: the number keeps the first line and the unit follows on a smaller line
+under it. A `%` is part of the number and stays attached ("89.9%") unless even the bare number cannot reach the floor.
+The decision is made once for the whole block from its widest value, so every tile or gauge in it has the same shape.
+A number with a `%` unit (and the `percent` format) shows at most one decimal and a whole number from 100 up, so a full
+ring reads "100%", never "100.0%"; this works whether the data arrives as a number or as a numeric string. A sparkline
+stretches to the tile's width and its height follows the card. At the smallest size class (`xs`) the tiles stay in one
+compact row so nothing overflows. In a dialog, a sheet or a full page the same blocks keep their normal reading size.
 
 A widget of about three grid rows switches these blocks to a compact layout: the padding and gaps shrink, a tile drops
 its sparkline and sub-line (the number and bar stay), a gauge moves its label inside the ring under the value, and a
-`text` block is kept to one truncated line. The result must fit without clipping the ring or the footer. Lowering a
-package's `min_size` in an upgrade also lowers the stored minimum of the widgets already on dashboards, so they can be
-made smaller without removing and adding them again.
+`text` block is kept to one truncated line. When a compact gauge's value has split its unit, the label moves below the
+ring instead, so the ring keeps two lines; the ring's `title` and `aria-label` still name it. The result must fit
+without clipping the ring or the footer. Lowering a package's `min_size` in an upgrade also lowers the stored minimum
+of the widgets already on dashboards, so they can be made smaller without removing and adding them again.
 
 Bosun applies these rules for every widget (they are not per widget). A spec only chooses the look and what each block
 shows; it does not need any layout CSS of its own.
+
+#### Tuning sizes
+
+A widget author can adjust the sizes without CSS or class names. Every key below is validated like the rest of the
+spec: an unknown value fails with a clear message, and each one maps to a fixed, theme-token class in Bosun. The sizes
+still scale with the card (container query units) and keep their minimum and maximum, so nothing can overflow. A
+package that uses any of these keys must declare `"requires": { "api": 8 }`.
+
+| Key | Where | Values (default first) | What it does |
+| --- | --- | --- | --- |
+| `size` | `stat`, `gauges` | `"md"` (default), `"sm"`, `"lg"` | Scales the value and the label together. |
+| `minItemWidth` | `stat`, `gauges` | `"md"` (default), `"xs"`, `"sm"`, `"lg"` | The smallest width of a tile or gauge in the filling grid; a smaller value puts more items in one row. |
+| `columns` | `stat`, `gauges` | auto-fit (default), or a whole number 1-6 | A fixed number of columns instead of auto-fit. |
+| `thickness` | `gauges` block or item | `"normal"` (default), `"thin"`, `"thick"` | The width of the ring stroke. An item overrides its block. |
+| `emphasis` | `stat` or `gauges` item | `"normal"` (default), `"muted"` | Dims the value of a secondary item. A tone still wins on the number. |
+| `decimals` | `stat` or `gauges` item | `%`: 1 (default); other values: as given; 0-3 | The most decimals the value shows; trailing zeros are dropped and a `%` value from 100 up is whole. |
+| `density` | the widget's `spec` | `"comfortable"` (default), `"compact"` | Shrinks paddings and gaps. A short widget still switches to compact by itself. |
+
+```jsonc
+"spec": {
+  "version": 2,
+  "density": "compact",
+  "data": { "source": "snapshot", "section": "cpu_memory", "permission": "cpu_memory.view" },
+  "view": { "type": "layout", "blocks": [
+    { "type": "gauges", "size": "lg", "minItemWidth": "lg", "thickness": "thick", "items": [
+      { "label": "CPU", "value": "{data.cpu.usagePercent}", "unit": "%", "decimals": 1, "thresholds": { "warning": 75, "danger": 90 } },
+      { "label": "Memory", "value": "{data.memory.usagePercent}", "unit": "%", "emphasis": "muted" }
+    ] },
+    { "type": "stat", "size": "sm", "columns": 2, "items": [
+      { "label": "Disk used", "value": "{data.disk.usedGb}", "unit": "GB", "decimals": 1 }
+    ] }
+  ] }
+}
+```
 
 ## Docker Containers: backups and restore
 

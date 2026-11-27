@@ -15,8 +15,4 @@ export function statTone(tone: StatItem['tone'], ctx: ViewContext): StatTone | n
   return null;
 }
 
-/** A value with its unit: "%" and "°C" sit tight, other units take a space. */
-export function withUnit(value: string, unit: string | undefined): string {
-  if (!unit || !value) return value;
-  return unit.startsWith('%') || unit.startsWith('°') ? `${value}${unit}` : `${value} ${unit}`;
-}
+export { withUnit } from './number-format';
