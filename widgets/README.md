@@ -48,6 +48,7 @@ newer Bosun is still listed under Available (so the reason is visible) but canno
 | 3 | `stacks.retag`, `stacks.deployLater` and `stacks.deployPrivilegedLater` (which replaced the earlier `stacks.startLater`), `setup`, and the widget-size keys `hideBelow`, `row.inline` and `row.subtitleHideBelow`. |
 | 4 | `bulk` on table views, the `stat` block, and the Manage-page keys of the earlier work: tab `count`, `open: "dialog"` on forms and editors, column `sort`, view `defaultSort`, and view `open` for row details. |
 | 5 | `schedules`: the runs a package offers under Settings → Schedules. |
+| 6 | Up to 64 actions per widget (40 before). |
 
 New spec keys that an older Bosun cannot honour raise the level in `src/lib/widgets/api-level.ts`; keys an older
 Bosun can safely ignore (because it renders the widget sensibly without them) do not.
@@ -425,3 +426,37 @@ already has (no pull) with the same ports, volumes, GPU access and restart polic
 variable. Values are whole numbers (context length 512 to 4194304, loaded models 0 to 64) and are checked on the
 server; the API action is `{ "action": "set_setting", "name": "OLLAMA_CONTEXT_LENGTH", "value": "16384", "confirm": true }`
 (an empty value resets it).
+
+## Docker Containers: manual updates
+
+The Docker Containers package (1.0.24) can install a newer image by hand, one container or all at once, with a
+health check and an automatic rollback. On the Manage page, the Containers tab lists every container whose registry has
+a newer image for the tag it runs; each row with an update has an **Update** action, and the table's selection offers the
+same action as a bulk update (select the rows, or the header checkbox for all of them). The Stacks tab has **Update
+images** for a Bosun-managed stack.
+
+What the update does:
+
+- Pulls the image reference the container (or the stack's services) already runs; the tag is not changed.
+- Compares the pulled image id with the one the container runs. If they are the same, nothing is touched.
+- Otherwise rebuilds the container with the same settings on the new image (the same reconstruction `export_run` uses:
+  command, entrypoint, environment, ports, volumes, labels, restart policy, resources, network, healthcheck and the
+  preserved options), renames the old container to `<name>-bosun-old` while it works, and removes it only after the new
+  one is healthy. The previous image is kept; the self-update clean-up keeps one, and general image clean-up stays with
+  the person.
+- Waits up to `health_timeout` seconds (default 180) for every updated container to be running and, where it defines a
+  Docker healthcheck, healthy. A container without a healthcheck only has to keep running.
+- On a timeout, an unhealthy container or a failed create/start, removes the new container, renames the old one back,
+  starts it when it was running, and fails the job with `rolled back: <reason>`.
+
+For a stack, only the services whose image id changed are recreated (`docker compose up -d --no-deps <services>`); the
+others are left alone. A stack Bosun did not create has no stored compose file and is refused ("import it first").
+Bosun's own container or stack is refused ("use Settings → Updates"), so the self-update path keeps owning that.
+
+Both actions need `docker.manage`, the same permission as editing a container and redeploying a stack; no new
+permission is introduced. Over the API:
+`POST /api/servers/:serverId/widget-actions/docker/container_update` with
+`{ "params": { "name": "<container>", "stack": "", "service": "", "health_timeout": 180 }, "confirm": true }` (for a
+compose service, `stack` and `service` are the service's values), and
+`POST /api/servers/:serverId/widget-actions/docker/stack_update_images` with
+`{ "params": { "name": "<stack>", "health_timeout": 180 }, "confirm": true }`.

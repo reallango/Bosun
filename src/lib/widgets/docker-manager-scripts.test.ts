@@ -349,6 +349,132 @@ exit 0`;
   });
 });
 
+describe('container_update', () => {
+  const facts = (image: string) => [
+    `ID "sha256:${ID}"`,
+    'NAME "/web"',
+    `IMAGE "${image}"`,
+    `IMGID sha256:${ID}`,
+    'ENV "A=1"',
+    'CMDJ ["nginx"]',
+    'EPJ null',
+    'CMD "nginx"',
+    'LABEL "mine=1"',
+    'PORT "" "8080" "80/tcp"',
+    'MNT "volume" "data" "data" "/data" true',
+    'NETMODE "bridge"',
+    'RP "always"',
+    `HOSTNAME "${'c'.repeat(12)}"`,
+    'MEM 0',
+    'NANO 0',
+    'LOGT "json-file"',
+    'STOPTO 0',
+    'TTY false',
+    'OPEN false',
+    'INIT false',
+    'RO false',
+    'HEALTHJ null',
+    'PRIV false',
+    'IPCM "private"',
+    'RT "runc"',
+    'CPUSHARES 0',
+    'MEMRES 0',
+  ].join('\n');
+  const IFACTS = ['ENV "PATH=/usr/bin"', 'CMDJ null', 'EPJ null', 'USER null', 'WORKDIR "/"', 'STOPSIG null', 'HEALTHJ null'].join('\n');
+  const updateFake = (opts: { image?: string; newId?: string; health?: string; backup?: boolean; createFails?: boolean } = {}) => {
+    const image = opts.image ?? 'nginx:1';
+    const newId = opts.newId ?? NEW;
+    fs.writeFileSync(path.join(bin, 'facts.txt'), facts(image));
+    fs.writeFileSync(path.join(bin, 'ifacts.txt'), IFACTS);
+    fake(`
+case "$*" in
+  *'ID {{json .Id}}'*) cat "${sp(path.join(bin, 'facts.txt'))}"; exit 0 ;;
+  *'{{.Config.Image}}'*) printf '%s\\n' '${image}'; exit 0 ;;
+  *'{{.Image}}'*) printf 'sha256:%s\\n' '${ID}'; exit 0 ;;
+  *'State.Health'*) printf '%s\\n' '${opts.health ?? 'true healthy'}'; exit 0 ;;
+  *'{{.State.Running}}'*) printf 'true\\n'; exit 0 ;;
+  *'{{.Id}}'*) case "$*" in *web-bosun-old*) ${opts.backup ? 'echo x; exit 0' : 'exit 1'} ;; *) printf 'sha256:%s\\n' '${newId}'; exit 0 ;; esac ;;
+esac
+case "$1 $2" in
+  "image inspect") case "$*" in *'{{.Id}}'*) printf 'sha256:%s\\n' '${newId}' ;; *) cat "${sp(path.join(bin, 'ifacts.txt'))}" ;; esac; exit 0 ;;
+  "volume ls") exit 0 ;;
+  "network ls") echo bridge; exit 0 ;;
+esac
+case "$1" in
+  create) ${opts.createFails ? "echo 'bad config' >&2; exit 1" : `printf 'sha256:%s\\n' '${newId}'`} ;;
+esac
+exit 0`);
+  };
+  const P = { name: 'web', health_timeout: '5' };
+  const E = { BOSUN_UPDATE_POLL: '0' };
+
+  it.skipIf(!hasSh)('does nothing when the pulled image is the one the container already runs', () => {
+    updateFake({ newId: ID });
+    const r = out('container_update.sh', P, E);
+    expect(r.error).toBeNull();
+    expect(r.done).toBe('already up to date: web');
+    expect(verbs()).toContain('pull nginx:1');
+    expect(dockerCalls().some((c) => ['rename', 'create', 'rm', 'start'].includes(c[0]))).toBe(false);
+  });
+
+  it.skipIf(!hasSh)('recreates the container on the new image with its settings, waits for health and removes the old one', () => {
+    updateFake();
+    const r = out('container_update.sh', P, E);
+    expect(r.error).toBeNull();
+    expect(r.done).toBe('updated web');
+    const c = dockerCalls();
+    expect(c.find((x) => x[0] === 'rename')).toEqual(['rename', 'web', 'web-bosun-old']);
+    const create = c.find((x) => x[0] === 'create')!;
+    expect(create).toEqual(expect.arrayContaining(['--name', 'web', '--restart', 'always', '--hostname', 'cccccccccccc', '-p', '8080:80', '-v', 'data:/data', '-e', 'A=1', '--label', 'mine=1', 'nginx:1']));
+    expect(c.find((x) => x[0] === 'stop')).toEqual(['stop', 'web-bosun-old']);
+    expect(c.find((x) => x[0] === 'start')).toEqual(['start', `sha256:${NEW}`]);
+    expect(c.find((x) => x[0] === 'rm')).toEqual(['rm', '-f', 'web-bosun-old']);
+    expect(c.some((x) => x[0] === 'tag' || x[0] === 'rmi')).toBe(false);
+  });
+
+  it.skipIf(!hasSh)('rolls back when the new container is unhealthy and starts the old one again', () => {
+    updateFake({ health: 'true unhealthy' });
+    const r = out('container_update.sh', P, E);
+    expect(r.error).toMatch(/rolled back: the new container is unhealthy/);
+    const c = dockerCalls();
+    expect(c.find((x) => x[0] === 'rm' && x.includes(`sha256:${NEW}`))).toBeTruthy();
+    expect(c.find((x) => x[0] === 'rename' && x[1] === 'web-bosun-old')).toEqual(['rename', 'web-bosun-old', 'web']);
+    expect(c.at(-1)).toEqual(['start', 'web']);
+    expect(c.some((x) => x[0] === 'tag' || x[0] === 'rmi')).toBe(false);
+  });
+
+  it.skipIf(!hasSh)('a container without a healthcheck only has to keep running', () => {
+    updateFake({ health: 'true none' });
+    const r = out('container_update.sh', P, E);
+    expect(r.error).toBeNull();
+    expect(r.done).toBe('updated web');
+  });
+
+  it.skipIf(!hasSh)('a create that fails restores the old container and never removes it', () => {
+    updateFake({ createFails: true });
+    const r = out('container_update.sh', P, E);
+    expect(r.error).toMatch(/rolled back: creating the new container failed: bad config/);
+    const c = dockerCalls();
+    expect(c.find((x) => x[0] === 'rename' && x[1] === 'web-bosun-old')).toEqual(['rename', 'web-bosun-old', 'web']);
+    expect(c.at(-1)).toEqual(['start', 'web']);
+    expect(c.some((x) => x[0] === 'rm' && x.includes('web-bosun-old'))).toBe(false);
+  });
+
+  it.skipIf(!hasSh)('refuses Bosun itself, a leftover backup and a bad timeout before pulling', () => {
+    updateFake({ image: 'ghcr.io/o/bosun:1' });
+    expect(out('container_update.sh', P, E).error).toMatch(/Bosun's own container; update it from Settings → Updates/);
+    expect(dockerCalls().some((x) => x[0] === 'pull')).toBe(false);
+    fake('exit 0');
+    fs.writeFileSync(log, '');
+    expect(out('container_update.sh', { name: 'bosun', health_timeout: '5' }, E).error).toMatch(/Bosun's own container/);
+    expect(out('container_update.sh', { name: 'web', health_timeout: 'x' }, E).error).toMatch(/health_timeout must be a number/);
+    expect(out('container_update.sh', { name: 'web', health_timeout: '4000' }, E).error).toMatch(/at most 600/);
+    expect(dockerCalls()).toEqual([]);
+    updateFake({ backup: true });
+    expect(out('container_update.sh', P, E).error).toMatch(/web-bosun-old exists/);
+  });
+});
+
 describe('inspect (dataset)', () => {
   // What the real templates print: one line per fact, strings as JSON. (The templates themselves are checked against real Docker by hand.)
   const containerFacts = [
@@ -1020,6 +1146,92 @@ exit 0`);
     expect(dockerCalls().filter(c => c[0] === 'image' && c[1] === 'rm')).toEqual([]);
   }, 20000);
 
+  describe('update images', () => {
+    const stackUpdateFake = (opts: { health?: string; newWeb?: string; newDb?: string } = {}) => {
+      const marker = sp(path.join(bin, 'up'));
+      fake(`
+case "$*" in
+  *' config --services'*) printf '%s\\n' web db ;;
+  *' ps -aq web'*) if [ -f "${marker}" ]; then echo cweb2; else echo cweb; fi ;;
+  *' ps -aq db'*) if [ -f "${marker}" ]; then echo cdb2; else echo cdb; fi ;;
+  *' up -d --no-deps web'*) : > "${marker}"; exit 0 ;;
+  *' up -d --force-recreate --no-deps web'*) exit 0 ;;
+  *' pull'*) exit 0 ;;
+esac
+case "$*" in
+  *'{{.Config.Image}}'*) case "$*" in *cweb*) echo nginx:1 ;; *cdb*) echo postgres:16 ;; esac; exit 0 ;;
+  *'{{.Image}}'*) case "$*" in *cweb*) echo sha256:oldweb ;; *cdb*) echo sha256:olddb ;; esac; exit 0 ;;
+  *'State.Health'*) printf '%s\\n' '${opts.health ?? 'true healthy'}'; exit 0 ;;
+esac
+case "$1 $2" in
+  "image inspect") case "$*" in *nginx:1*) printf 'sha256:%s\\n' '${opts.newWeb ?? NEW}' ;; *postgres:16*) printf 'sha256:%s\\n' '${opts.newDb ?? 'olddb'}' ;; esac; exit 0 ;;
+esac
+exit 0`);
+    };
+    const P = { name: 'shop', op: 'update_images', service: '-', health_timeout: '5' };
+    const E = { BOSUN_UPDATE_POLL: '0' };
+
+    it.skipIf(!hasSh)('pulls, recreates only the service whose image changed and waits for its health', () => {
+      seed('shop', { 'compose.yaml': 'x', 'bosun.meta': 'source=editor\n' });
+      stackUpdateFake();
+      const r = out('stack_action.sh', P, E);
+      expect(r.error).toBeNull();
+      expect(r.done).toBe('updated images: shop');
+      const c = dockerCalls();
+      const compose = c.filter((x) => x[1] === '-p');
+      expect(compose.find((x) => x.includes('pull'))!.slice(-3)).toEqual(['pull', 'web', 'db']);
+      expect(compose.find((x) => x.includes('up'))).toEqual(expect.arrayContaining(['up', '-d', '--no-deps', 'web']));
+      expect(compose.some((x) => x.includes('up') && x.includes('db'))).toBe(false);
+      expect(c.some((x) => x[0] === 'tag' || x[0] === 'rmi')).toBe(false);
+    });
+
+    it.skipIf(!hasSh)('does nothing when no service has a newer image', () => {
+      seed('shop', { 'compose.yaml': 'x', 'bosun.meta': 'source=editor\n' });
+      stackUpdateFake({ newWeb: 'oldweb' });
+      const r = out('stack_action.sh', P, E);
+      expect(r.error).toBeNull();
+      expect(r.done).toBe('no newer images: shop');
+      expect(dockerCalls().some((x) => x[1] === '-p' && x.includes('up'))).toBe(false);
+    });
+
+    it.skipIf(!hasSh)('an unhealthy service is put back on the recorded previous image and the action fails', () => {
+      seed('shop', { 'compose.yaml': 'x', 'bosun.meta': 'source=editor\n' });
+      stackUpdateFake({ health: 'true unhealthy' });
+      const r = out('stack_action.sh', P, E);
+      expect(r.error).toMatch(/rolled back: the service web is unhealthy/);
+      const c = dockerCalls();
+      expect(c.find((x) => x[0] === 'tag')).toEqual(['tag', 'sha256:oldweb', 'nginx:1']);
+      expect(c.find((x) => x[1] === '-p' && x.includes('--force-recreate'))).toEqual(expect.arrayContaining(['up', '-d', '--force-recreate', '--no-deps', 'web']));
+      expect(c.some((x) => x[0] === 'rmi')).toBe(false);
+    });
+
+    it.skipIf(!hasSh)('one named service is pulled and updated on its own', () => {
+      seed('shop', { 'compose.yaml': 'x', 'bosun.meta': 'source=editor\n' });
+      stackUpdateFake();
+      const r = out('stack_action.sh', { ...P, service: 'web' }, E);
+      expect(r.done).toBe('updated images: shop');
+      const compose = dockerCalls().filter((x) => x[1] === '-p');
+      expect(compose.find((x) => x.includes('pull'))!.slice(-2)).toEqual(['pull', 'web']);
+      expect(compose.some((x) => x.includes('up') && x.includes('db'))).toBe(false);
+      expect(dockerCalls().some((x) => x.join(' ').includes('config --services'))).toBe(false);
+    });
+
+    it.skipIf(!hasSh)('refuses a stack Bosun does not manage (import it first) and Bosun itself', () => {
+      fake('exit 0');
+      expect(out('stack_action.sh', { ...P, name: 'ext' }, E).error).toMatch(/not created by Bosun .*import it first/);
+      seed('bosun', { 'compose.yaml': 'x', 'bosun.meta': 'source=editor\n' });
+      expect(out('stack_action.sh', { ...P, name: 'bosun' }, E).error).toMatch(/Bosun's own stack; update it from Settings → Updates/);
+      seed('shop', { 'compose.yaml': 'x', 'bosun.meta': 'source=editor\n' });
+      fake(`case "$*" in
+  *' config --services'*) printf '%s\\n' bosun ;;
+  *' ps -aq bosun'*) echo cbosun ;;
+  *'{{.Config.Image}}'*) echo ghcr.io/o/bosun:1 ;;
+esac
+exit 0`);
+      expect(out('stack_action.sh', P, E).error).toMatch(/runs Bosun itself; update it from Settings → Updates/);
+    });
+  });
+
   it.skipIf(!hasSh)('stack_deploy also catches shared namespaces, volumes_from, build settings and host files used as secrets', () => {
     const risky: [string, string, RegExp][] = [
       ['      "volumes_from": [\n        "db"\n      ]', '', /volumes of db/],
@@ -1358,12 +1570,14 @@ esac`);
     '--log-driver', 'json-file', '--log-opt', 'max-size=1m', '--stop-signal', 'SIGINT', '--stop-timeout', '7', '-t', '-i', '--init', '--read-only', '--health-cmd', 'true', '--health-interval', '30s',
     '--cap-add', 'NET_ADMIN', '--cap-drop', 'MKNOD', '--security-opt', 'no-new-privileges', '--sysctl', 'net.ipv4.ip_unprivileged_port_start=0', '--entrypoint', 'sh', 'alpine:3.20', '-c', 'sleep 600'];
 
-  it.skipIf(!hasSh)('the collector and the reader are the very same text in both scripts', () => {
-    const block = (f: string, name: string) => new RegExp(`# >>> export ${name}[\\s\\S]*# <<< export ${name}`).exec(script(f))![0];
-    for (const name of ['collector', 'reader']) {
-      expect(block('export_run.sh', name)).toBe(block('export_compose.sh', name));
+  it.skipIf(!hasSh)('the collector and the reader are the very same text in every script that rebuilds a container; the run writer too', () => {
+    const block = (f: string, name: string) => new RegExp(`# >>> ${name}[\\s\\S]*# <<< ${name}`).exec(script(f))![0];
+    for (const name of ['export collector', 'export reader']) {
+      for (const f of ['export_run.sh', 'export_compose.sh', 'container_update.sh']) expect(block(f, name), f).toBe(block('export_run.sh', name));
       expect(block('export_run.sh', name).length).toBeGreaterThan(1500);
     }
+    for (const f of ['export_run.sh', 'container_update.sh']) expect(block(f, 'export run writer'), f).toBe(block('export_run.sh', 'export run writer'));
+    expect(block('export_run.sh', 'export run writer').length).toBeGreaterThan(1500);
   });
 
   it.skipIf(!hasSh)('export_run: a docker run -d command, one option per line with \\ continuations, what the image provides left out', () => {

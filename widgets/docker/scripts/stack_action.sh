@@ -41,6 +41,10 @@ git_auth() {
 name=$BOSUN_PARAM_name; op=$BOSUN_PARAM_op
 case "$name" in ''|[!a-z0-9]*|*[!a-z0-9_-]*) fail 'invalid stack name' ;; esac
 [ "${#name}" -le 63 ] || fail 'invalid stack name'
+ht=${BOSUN_PARAM_health_timeout:-180}
+case "$ht" in ''|*[!0-9]*) fail 'health_timeout must be a number of seconds' ;; esac
+[ "$ht" -le 600 ] || fail 'health_timeout must be at most 600 seconds'
+POLL=${BOSUN_UPDATE_POLL:-2}; case "$POLL" in ''|*[!0-9]*) POLL=2 ;; esac
 case "$op" in
   up) set -- up -d --remove-orphans ;;
   down) set -- down ;;
@@ -51,7 +55,8 @@ case "$op" in
   start) set -- start ;;
   guard_up) set -- up -d --remove-orphans ;;
   retag) ;;
-  *) fail 'op must be up, down, restart, pull, update, stop, start, guard_up or retag' ;;
+  update_images) ;;
+  *) fail 'op must be up, down, restart, pull, update, stop, start, guard_up, retag or update_images' ;;
 esac
 case "$HOME" in /*) ;; *) fail 'HOME is not set' ;; esac
 D=docker; $D ps >/dev/null 2>&1 || { command -v sudo >/dev/null 2>&1 && sudo -n docker ps >/dev/null 2>&1 && D='sudo -n docker'; }
@@ -70,7 +75,7 @@ if [ -d "$DIR" ]; then
   PD=$(dirname "$CF")
   [ ! -f "$DIR/.env" ] || EF="$DIR/.env"
 else
-  case "$op" in up|pull|update|guard_up|retag) fail "the stack $name was not created by Bosun (no stored compose file), so $op is not possible" ;; esac
+  case "$op" in up|pull|update|guard_up|retag|update_images) fail "the stack $name was not created by Bosun (no stored compose file), so $op is not possible; import it first" ;; esac
 fi
 errf=$(mktemp) || fail 'cannot create a temporary file'
 # One operation per stack at a time: deploy, update, remove and the compose operations all take this lock, so two of them
@@ -97,6 +102,85 @@ dc() { # the compose file, the override file when there is one, the .env file wh
   elif [ -n "$OF" ]; then $D compose -p "$name" --project-directory "$PD" -f "$CF" -f "$OF" "$@"
   else $D compose -p "$name" --project-directory "$PD" -f "$CF" "$@"; fi
 }
+
+# update_images: pull the images, recreate only the services whose image changed, then wait for each new container to be
+# running and (when it defines one) healthy. A failure re-tags the recorded previous image and recreates that service, so the
+# stack goes back to what it ran, and the action fails with "rolled back: <reason>". The previous images are never removed.
+if [ "$op" = update_images ]; then
+  case "$name" in bosun) fail "this is Bosun's own stack; update it from Settings → Updates" ;; esac
+  svc=${BOSUN_PARAM_service:--}
+  case "$svc" in -) ;; [!A-Za-z0-9]*|*[!A-Za-z0-9_.-]*) fail 'invalid service name' ;; esac
+  [ "${#svc}" -le 63 ] || fail 'invalid service name'
+  repo_of() { r=${1%%@*}; case "${r##*/}" in *:*) r=${r%:*} ;; esac; printf '%s' "$r"; }
+  if [ "$svc" = "-" ]; then
+    services=$(dc config --services 2>"$errf") || fail "the compose file of the stack $name could not be read: $(lastline)"
+  else
+    services=$svc
+  fi
+  [ -n "$services" ] || fail "the stack $name has no services"
+  tmpd=$(mktemp -d) || fail 'cannot create a temporary folder'
+  trap 'rm -f "$errf"; rm -rf "$LOCK" "$tmpd"' EXIT
+  : > "$tmpd/rows"
+  for s in $services; do
+    case "$s" in ''|[!A-Za-z0-9]*|*[!A-Za-z0-9_.-]*) fail "the compose file names an invalid service: $s" ;; esac
+    cid=$(dc ps -aq "$s" 2>/dev/null | head -n 1)
+    if [ -n "$cid" ]; then
+      ref=$($D inspect --type container --format '{{.Config.Image}}' "$cid" 2>/dev/null)
+      case "$ref" in ''|*[!A-Za-z0-9._/:@-]*) fail "the image of the service $s could not be read" ;; esac
+      case "$(repo_of "$ref")" in bosun|*/bosun) fail "the stack $name runs Bosun itself; update it from Settings → Updates" ;; esac
+      prev=$($D inspect --type container --format '{{.Image}}' "$cid" 2>/dev/null)
+      case "$prev" in ''|*[!0-9a-zA-Z:]*) fail "the running image id of the service $s could not be read" ;; esac
+      printf '%s|%s|%s\n' "$s" "$ref" "$prev" >> "$tmpd/rows"
+    fi
+  done
+  [ -s "$tmpd/rows" ] || fail "the stack $name has no containers to update"
+  echo 'PROGRESS 1/4'; echo "[step] Pulling the images of $name"
+  dc pull $services >/dev/null 2>"$errf" || fail "pulling the images of $name failed (nothing was changed): $(lastline)"
+  changed=''
+  while IFS='|' read -r s ref prev; do
+    new=$($D image inspect --format '{{.Id}}' "$ref" 2>/dev/null)
+    case "$new" in ''|*[!0-9a-zA-Z:]*) fail "the image $ref of the service $s could not be read" ;; esac
+    [ "$new" = "$prev" ] || changed="$changed $s"
+  done < "$tmpd/rows"
+  if [ -z "$changed" ]; then
+    echo 'PROGRESS 4/4'; echo "DONE no newer images: $name"; exit 0
+  fi
+  echo 'PROGRESS 2/4'; echo "[step] Recreating the changed services:$changed"
+  dc up -d --no-deps $changed >/dev/null 2>"$errf" || fail "recreating the changed services of $name failed: $(lastline)"
+  echo 'PROGRESS 3/4'; echo '[step] Waiting for the updated containers to be healthy'
+  why=''
+  deadline=$(( $(date +%s) + ht ))
+  health_ok() { # $1 = container id, $2 = service name
+    sleep "$POLL"
+    while :; do
+      st=$($D inspect --type container --format '{{.State.Running}} {{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' "$1" 2>/dev/null)
+      running=${st%% *}; health=${st#* }
+      case "$running" in true) ;; *) why="the service $2 is not running"; return 1 ;; esac
+      case "$health" in none|healthy) return 0 ;; unhealthy) why="the service $2 is unhealthy"; return 1 ;; esac
+      [ "$(date +%s)" -lt "$deadline" ] || { why="the service $2 did not become healthy within ${ht}s"; return 1; }
+      sleep "$POLL"
+    done
+  }
+  bad=''
+  for s in $changed; do
+    cid=$(dc ps -aq "$s" 2>/dev/null | head -n 1)
+    if [ -z "$cid" ]; then why="the service $s has no container after the update"; bad=$s; break; fi
+    if ! health_ok "$cid" "$s"; then bad=$s; break; fi
+  done
+  if [ -n "$bad" ]; then
+    echo "[step] Rolling back the stack $name"
+    for s in $changed; do
+      ref=$(awk -F '|' -v s="$s" '$1 == s { print $2; exit }' "$tmpd/rows")
+      prev=$(awk -F '|' -v s="$s" '$1 == s { print $3; exit }' "$tmpd/rows")
+      [ -n "$ref" ] || continue
+      if [ -n "$prev" ]; then $D tag "$prev" "$ref" >/dev/null 2>&1 || true; fi
+      dc up -d --force-recreate --no-deps "$s" >/dev/null 2>&1 || true
+    done
+    fail "rolled back: $why"
+  fi
+  echo 'PROGRESS 4/4'; echo "DONE updated images: $name"
+  exit 0
+fi
 
 # ---- risky options (the same check as stack_deploy.sh; keep the two in step) ----
 RISKY=''
