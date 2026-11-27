@@ -56,7 +56,7 @@ interface ScheduleKind {
   id: string;
   label: string;
   description?: string;
-  target: 'server' | 'stack' | 'container';
+  target: 'server' | 'stack' | 'container' | 'byKind';
   run: 'dataset' | 'action';
 }
 
@@ -137,6 +137,7 @@ function ScheduleDialog({ open, schedule, servers, onClose, onSaved }: {
   const [serverId, setServerId] = useState(schedule?.server_id ?? servers[0]?.id ?? '');
   const [kindId, setKindId] = useState(schedule ? `${schedule.widget_type}:${schedule.schedule_kind}` : '');
   const [resourceName, setResourceName] = useState(schedule?.resource?.name ?? '');
+  const [resourceKind, setResourceKind] = useState<'container' | 'stack'>(schedule?.resource?.kind ?? 'container');
   const [preset, setPreset] = useState<Preset>(initial.preset);
   const [time, setTime] = useState(initial.time);
   const [weekday, setWeekday] = useState(initial.weekday);
@@ -187,10 +188,10 @@ function ScheduleDialog({ open, schedule, servers, onClose, onSaved }: {
     try {
       if (!kind) throw new Error('Choose what should run');
       if (!name.trim()) throw new Error('Give the schedule a name');
-      if (kind.target !== 'server' && !resourceName.trim()) throw new Error(`Name the ${kind.target} this schedule is for`);
+      if (kind.target !== 'server' && !resourceName.trim()) throw new Error(`Name the ${kind.target === 'byKind' ? resourceKind : kind.target} this schedule is for`);
       const body = {
         name: name.trim(), widget_type: kind.widget_type, schedule_kind: kind.id, server_id: serverId,
-        resource_kind: kind.target === 'server' ? '' : kind.target,
+        resource_kind: kind.target === 'server' ? '' : kind.target === 'byKind' ? resourceKind : kind.target,
         resource_name: kind.target === 'server' ? '' : resourceName.trim(),
         cron: effectiveCron, timezone: timezone.trim(), enabled,
       };
@@ -239,8 +240,17 @@ function ScheduleDialog({ open, schedule, servers, onClose, onSaved }: {
           </div>
           {kind && kind.target !== 'server' && (
             <div className="space-y-2">
-              <Label htmlFor="schedule-resource">{kind.target === 'stack' ? 'Stack' : 'Container'}</Label>
-              <Input id="schedule-resource" value={resourceName} onChange={e => setResourceName(e.target.value)} placeholder={kind.target === 'stack' ? 'my-stack' : 'my-container'} />
+              {kind.target === 'byKind' && (
+                <div className="space-y-2">
+                  <Label htmlFor="schedule-resource-kind">Kind</Label>
+                  <select id="schedule-resource-kind" className="form-select" value={resourceKind} onChange={e => setResourceKind(e.target.value === 'stack' ? 'stack' : 'container')}>
+                    <option value="container">Container</option>
+                    <option value="stack">Stack</option>
+                  </select>
+                </div>
+              )}
+              <Label htmlFor="schedule-resource">{kind.target === 'stack' ? 'Stack' : kind.target === 'container' ? 'Container' : 'Name'}</Label>
+              <Input id="schedule-resource" value={resourceName} onChange={e => setResourceName(e.target.value)} placeholder={kind.target === 'stack' ? 'my-stack' : kind.target === 'container' ? 'my-container' : resourceKind === 'stack' ? 'my-stack' : 'my-container'} />
             </div>
           )}
           <TimeFields preset={preset} setPreset={setPreset} time={time} setTime={setTime} weekday={weekday} setWeekday={setWeekday} cron={cron} setCron={setCron} />

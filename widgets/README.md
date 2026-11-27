@@ -51,6 +51,7 @@ newer Bosun is still listed under Available (so the reason is visible) but canno
 | 6 | Up to 64 actions per widget (40 before). |
 | 7 | `looks` (and the "Look" choice Bosun adds to the widget's settings), `trend` on stat tiles and fields, the stat tile keys `bar`, `unit` and `thresholds`, and the `gauges` block. |
 | 8 | The bounded sizing keys: `size`, `minItemWidth` and `columns` on `stat` and `gauges`, `thickness` on gauges, `emphasis` and `decimals` on their items, and the widget-level `density`. A `%` value (and the `percent` format) now shows at most one decimal and a whole number from 100 up. |
+| 9 | `before` on an action variant: a package script that runs first, and the action does not run when it fails (used to take a backup before an update); and `target.byKind` on actions and datasets (a target whose kind comes from one of its parameters, so one action can act on a container or a stack), with `"byKind"` as a schedule target. |
 
 New spec keys that an older Bosun cannot honour raise the level in `src/lib/widgets/api-level.ts`; keys an older
 Bosun can safely ignore (because it renders the widget sensibly without them) do not.
@@ -467,7 +468,7 @@ package that uses any of these keys must declare `"requires": { "api": 8 }`.
 
 ## Docker Containers: backups and restore
 
-Docker Containers 1.0.23 can back up a container or a Bosun-managed stack with [restic](https://restic.net/), run
+Docker Containers 1.0.28 can back up a container or a Bosun-managed stack with [restic](https://restic.net/), run
 as a short-lived `restic/restic` container with the data mounted read-only; nothing is installed on the host. Choose
 the destination once per server in the widget's settings: a folder on the host (a mounted NAS counts), SFTP
 (`sftp:user@host:/path`) or an S3-compatible endpoint (`s3:https://endpoint/bucket/prefix`). The destination and the
@@ -476,6 +477,13 @@ key or the S3 credentials). They reach the script only as `BOSUN_SECRET_*` envir
 credentials are written to mode-0600 temporary files, never to a command line, the output or a log. Initialise the
 repository once from the Backups tab (the password reminder is shown there) and keep that password somewhere else:
 without it the backups cannot be read.
+
+The repository is created as restic format version 2, so it compresses data (`--compression auto`, the default for
+version 2). A repository created by an older Bosun can stay version 1; it works, but it stores uncompressed. To
+compress it, stop the backups and run `restic migrate upgrade_repo_v2` once against the repository. Bosun does not
+migrate it automatically. An image saved with `docker save` is a plain tar, written uncompressed (restic then chunks
+and compresses it like any other data), so restic's content-defined chunking can still skip the unchanged parts of a
+later image.
 
 A backup can include, per run: the container's named volumes (default on), its bind-mounted host folders ("mapped
 drives", default on; sensitive paths such as `/`, `/etc` and `/var/run/docker.sock` are refused), the stored compose
@@ -492,18 +500,42 @@ also on failure) and the retention: `keep_last`, `keep_daily` (default 7), `keep
 applied with `restic forget --prune` only to that container's or stack's snapshots (tagged `bosun:container=<name>`
 or `bosun:stack=<name>`).
 
-The Backups tab of the Manage page shows the destination, the snapshots with time, size, what was included and the
-pinned version; open a snapshot to restore its data (stopping the container or stack first and starting it after),
-optionally pin the image to that snapshot's version — a standalone container is recreated with the pinned image, a
-Bosun-managed stack is redeployed with an extra `compose.backup-pin.yaml` override (the stored compose file is not
+Backups are incremental. Restic stores each file once as content-defined chunks and a later snapshot references the
+chunks it already has, so every backup after the first stores only the data that changed. The widget also tells restic
+which snapshot to use as the parent: it looks up the latest snapshot of the same container or stack
+(`restic snapshots --json --latest 1 --tag bosun:container=<name>`) and passes its id as `--parent`. Without that,
+restic would pick a parent by host and paths, and since every target uses `--host bosun` and the same `/bosun` paths,
+it would often compare against another target's snapshot and read and hash all of this target's unchanged files
+again. When there is no earlier snapshot, or the lookup fails, the backup runs without `--parent`.
+
+Restic's summary says how much this run actually added (`data_added`, or `data_added_packed` when present), and the
+widget records it as `bosun:added=<bytes>` next to the file counts (`bosun:added_files=new/changed/unchanged`). The
+Backups tab shows both the full size of a snapshot and what it added (for example "4.2 GB · added 38 MB"), and the
+repository's real size on disk comes from `restic stats --mode raw-data` and is shown next to the destination, so the
+space the backups really use is visible. Retention frees space: `restic forget --prune` drops the snapshots that are
+older than the keep rules and then removes the data no remaining snapshot needs. Until that runs, deleting a snapshot
+alone does not free its data.
+
+The Backups tab of the Manage page shows the destination and the repository size on disk, the snapshots with time,
+full size, added size and file counts, what was included and the pinned version; open a snapshot to restore its data
+(stopping the container or stack first and starting it after), optionally pin the image to that snapshot's version — a
+standalone container is recreated with the pinned image, a Bosun-managed stack is redeployed with an extra
+`compose.backup-pin.yaml` override (the stored compose file is not
 edited) — or restore into new volumes to inspect the data first, and to delete the snapshot. Container and stack row
-menus also have "Back up", which runs with the defaults; the dialog with the inclusion and retention options is on
-the Containers and Stacks tabs (the package already uses all 40 actions the spec allows, so a separate row-menu
-dialog would need a core change). The new permissions are `docker.backup` ("Back up containers and stacks") and
-`docker.restore` ("Restore backups"), both high and admin by default. The row actions take the container or stack
-from the row and the Backups dataset declares its container/stack resources; because one action cannot name both a
-container and a stack target, the actions themselves are checked at server scope (a core `target.byKind`, or a second
-action per kind, would allow limiting them).
+menus have **Back up** (one click with the defaults) and **Back up…**, which opens the same inclusion and retention
+options in a dialog, prefilled with the row's container or stack. The dialog's submit (`backup_run`), the quick
+action and the Backups dataset declare their container or stack target with `target.byKind`, so a grant limited to one
+stack or container covers them. The permissions are `docker.backup` ("Back up containers and stacks") and
+`docker.restore` ("Restore backups"); both are high and admin by default and can be limited to a stack or container
+like the other Docker permissions.
+
+Settings → Schedules offers **Back up a container or stack** with the standard options (volumes, mapped folders,
+stack files, live consistency, daily/weekly/monthly retention). It runs as an ordinary job and re-checks
+`docker.backup` on the target every time; a failure raises a bell notice, and a success raises one too. The backup
+settings are stored with the schedule (`options.params.settings`), so an API caller can override them per schedule.
+The package also offers **Back up, then update** for a container and for a stack, and the matching schedules; they
+need `docker.backup_update` (which implies `docker.backup` and `docker.manage`) and take a restic backup first,
+stopping before the update when the backup fails.
 
 ## Managing the Ollama installation
 
@@ -549,7 +581,7 @@ server; the API action is `{ "action": "set_setting", "name": "OLLAMA_CONTEXT_LE
 
 ## Docker Containers: manual updates
 
-The Docker Containers package (1.0.24) can install a newer image by hand, one container or all at once, with a
+The Docker Containers package (1.0.28) can install a newer image by hand, one container or all at once, with a
 health check and an automatic rollback. On the Manage page, the Containers tab lists every container whose registry has
 a newer image for the tag it runs; each row with an update has an **Update** action, and the table's selection offers the
 same action as a bulk update (select the rows, or the header checkbox for all of them). The Stacks tab has **Update
@@ -574,9 +606,17 @@ others are left alone. A stack Bosun did not create has no stored compose file a
 Bosun's own container or stack is refused ("use Settings → Updates"), so the self-update path keeps owning that.
 
 Both actions need `docker.manage`, the same permission as editing a container and redeploying a stack; no new
-permission is introduced. Over the API:
+permission is introduced. The row menus also offer **Back up, then update** (and **Back up, then update images** for a
+stack): the same update path after a restic backup of the container or stack, and the update does not start when the
+backup fails. Those actions need `docker.backup_update`, which implies `docker.backup` and `docker.manage`; they are
+off by default because they are a separate choice, not a checkbox on the ordinary update. Settings → Schedules can
+apply an image update to a chosen container or stack (**Update a container's image**, **Update a stack's images**) or
+the same with a backup first. Each run re-checks `docker.manage` (or `docker.backup_update`) on the target and raises a
+bell notice with what was updated, rolled back or failed. Over the API:
 `POST /api/servers/:serverId/widget-actions/docker/container_update` with
 `{ "params": { "name": "<container>", "stack": "", "service": "", "health_timeout": 180 }, "confirm": true }` (for a
 compose service, `stack` and `service` are the service's values), and
 `POST /api/servers/:serverId/widget-actions/docker/stack_update_images` with
-`{ "params": { "name": "<stack>", "health_timeout": 180 }, "confirm": true }`.
+`{ "params": { "name": "<stack>", "health_timeout": 180 }, "confirm": true }`. For the backup-first actions use
+`container_update_backup` and `stack_update_images_backup` with the same parameters plus `settings` (the backup
+settings blob).

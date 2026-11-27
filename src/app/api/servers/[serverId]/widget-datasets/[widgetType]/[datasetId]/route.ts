@@ -25,9 +25,13 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     try { body = await request.json(); } catch { body = {}; }
     if (ds.target) {
       // About one stack/container (inspect, the files of a stack): checked against that one.
-      const value = body.args && typeof body.args === 'object' ? (body.args as Record<string, unknown>)[ds.target.param] : undefined;
+      const args = body.args && typeof body.args === 'object' ? body.args as Record<string, unknown> : undefined;
+      const value = args?.[ds.target.param];
+      const kindValue = 'byKind' in ds.target
+        ? (args?.[ds.target.byKind] ?? loaded.spec.scripts?.[ds.script]?.params[ds.target.byKind]?.default)
+        : undefined;
       let resource;
-      try { resource = await resolveTarget(serverId, loaded, ds.target, value); } catch (e) {
+      try { resource = await resolveTarget(serverId, loaded, ds.target, value, kindValue); } catch (e) {
         if (e instanceof TargetError) return fail(e.message, e.status, e.code);
         throw e;
       }

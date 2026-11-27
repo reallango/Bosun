@@ -77,5 +77,6 @@ describe('arguments a run sends', () => {
     const actionKind: ScheduleSpec = { id: 'a', label: 'A', run: { action: 'restart', params: { name: 'web' } } };
     expect(actionParams(actionKind, { params: { name: 'api' } }, 'web', 'name')).toEqual({ name: 'web' });
     expect(actionParams(actionKind, { params: { name: 'api' } }, null, null)).toEqual({ name: 'api' });
+    expect(actionParams(actionKind, {}, 'demo', 'name', 'stack', 'kind')).toEqual({ name: 'demo', kind: 'stack' });
   });
 });

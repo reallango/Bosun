@@ -11,16 +11,24 @@ const base = (): any => ({
     { id: 'restart', label: 'Restart', as: 'service', command: 'echo {{name}}', permission: 'pkg.control',
       params: { name: { type: 'string', pattern: '^[a-z]+$' } } },
     { id: 'noop', label: 'Noop', as: 'service', command: 'echo hi', permission: 'pkg.view' },
+    { id: 'move', label: 'Move', as: 'service', command: 'echo {{kind}} {{name}}', permission: 'pkg.control',
+      params: { kind: { type: 'string', values: ['container', 'stack'] }, name: { type: 'string', pattern: '^[a-z]+$' } },
+      target: { byKind: 'kind', param: 'name' } },
   ],
   scripts: {
     check: { as: 'service', linux: 'scripts/check.sh', params: {
       name: { type: 'string', pattern: '^[a-z]+$' },
       all: { type: 'boolean', default: false },
     } },
+    check_kind: { as: 'service', linux: 'scripts/check.sh', params: {
+      kind: { type: 'string', values: ['container', 'stack'] },
+      name: { type: 'string', pattern: '^[a-z]+$' },
+    } },
   },
   datasets: {
     findings: { script: 'check', permission: 'pkg.view' },
     stack_findings: { script: 'check', permission: 'pkg.view', target: { kind: 'stack', param: 'name' } },
+    any_findings: { script: 'check_kind', permission: 'pkg.view', target: { byKind: 'kind', param: 'name' } },
   },
 });
 
@@ -58,6 +66,21 @@ describe('the schedules a widget declares', () => {
     expect(ok(s).schedules?.[0].run).toEqual({ action: 'restart', params: { name: 'web' } });
   });
 
+  it('accepts a notice on an action run (raised on success) and refuses a "when" there', () => {
+    const s = base();
+    s.schedules = [{
+      id: 'restart_web', label: 'Restart web', run: { action: 'restart', params: { name: 'web' } },
+      notify: { title: 'Restarted {resource} on {server}', message: 'Schedule {schedule}: {message}' },
+    }];
+    expect(ok(s).schedules?.[0].notify).toMatchObject({ title: 'Restarted {resource} on {server}', message: 'Schedule {schedule}: {message}' });
+    const withWhen = base();
+    withWhen.schedules = [{
+      id: 'restart_web', label: 'Restart web', run: { action: 'restart', params: { name: 'web' } },
+      notify: { when: { field: 'ok', equals: true }, title: 'Restarted', message: 'Done' },
+    }];
+    expect(errorOf(withWhen)).toContain('takes no "when"');
+  });
+
   it('does not let an action omit a required parameter, even one with a default', () => {
     const s = base();
     s.actions[1].params = { name: { type: 'string', pattern: '^[a-z]+$', default: 'web' } };
@@ -86,6 +109,36 @@ describe('the schedules a widget declares', () => {
     expect(errorOf(both)).toContain('filled from the schedule\'s target');
   });
 
+  it('accepts a byKind schedule for a container or a stack, and fills both parameters', () => {
+    const s = base();
+    s.schedules = [{ id: 'any_check', label: 'Any check', run: { dataset: 'any_findings' }, target: 'byKind' }];
+    expect(ok(s).schedules?.[0].target).toBe('byKind');
+    const action = base();
+    action.schedules = [{ id: 'move_it', label: 'Move it', run: { action: 'move' }, target: 'byKind' }];
+    expect(ok(action).schedules?.[0].run).toEqual({ action: 'move' });
+    const both = base();
+    both.schedules = [{ id: 'any_check', label: 'Any check', run: { dataset: 'any_findings' }, target: 'byKind', options: { args: { kind: 'stack' } } }];
+    expect(errorOf(both)).toContain('filled from the schedule\'s target');
+  });
+
+  it('refuses a byKind schedule for a fixed target, and a fixed schedule for a byKind run', () => {
+    const fixed = base();
+    fixed.schedules = [{ id: 'stack_check', label: 'Stack check', run: { dataset: 'any_findings' }, target: 'stack' }];
+    expect(errorOf(fixed)).toContain('needs a run whose target is fixed');
+    const any = base();
+    any.schedules = [{ id: 'any_check', label: 'Any check', run: { dataset: 'stack_findings' }, target: 'byKind' }];
+    expect(errorOf(any)).toContain('needs a run that acts on a container or a stack');
+  });
+
+  it('a server schedule for a byKind run needs both the kind and the name', () => {
+    const s = base();
+    s.schedules = [{ id: 'any_check', label: 'Any check', run: { dataset: 'any_findings' }, options: { args: { kind: 'stack', name: 'web' } } }];
+    expect(ok(s).schedules?.[0].options).toEqual({ args: { kind: 'stack', name: 'web' } });
+    const noKind = base();
+    noKind.schedules = [{ id: 'any_check', label: 'Any check', run: { dataset: 'any_findings' }, options: { args: { name: 'web' } } }];
+    expect(errorOf(noKind)).toContain('needs "kind"');
+  });
+
   it('refuses a stack target when the run is not for a stack, or no target is set', () => {
     const wrongRun = base();
     wrongRun.schedules = [{ id: 'stack_check', label: 'Stack check', run: { dataset: 'findings' }, target: 'stack', options: { args: { name: 'web' } } }];
@@ -95,10 +148,7 @@ describe('the schedules a widget declares', () => {
     expect(errorOf(noTarget)).toContain('set target to "stack"');
   });
 
-  it('refuses notify on an action run and unknown datasets or actions', () => {
-    const withNotify = base();
-    withNotify.schedules = [{ id: 'restart_web', label: 'Restart', run: { action: 'restart', params: { name: 'web' } }, notify: { title: 'x', message: 'y' } }];
-    expect(errorOf(withNotify)).toContain('only for dataset runs');
+  it('refuses unknown datasets or actions', () => {
     const noDataset = base();
     noDataset.schedules = [{ id: 'nope', label: 'Nope', run: { dataset: 'nope' } }];
     expect(errorOf(noDataset)).toContain('must name one of the widget\'s datasets');

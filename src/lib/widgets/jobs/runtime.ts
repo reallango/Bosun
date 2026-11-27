@@ -103,6 +103,16 @@ async function run(job: JobRecord, input: StartJobInput, controller: AbortContro
   let status: Exclude<JobStatus, 'running'> = 'error';
   let message = 'Failed';
   try {
+    if (prepared.before) {
+      const b = await runScript(serverId, loaded, prepared.before.scriptId, prepared.before.args, {
+        jobId: job.id,
+        signal: controller.signal,
+        onData: (text, isErr) => { if (out.length < MAX_BUFFER) { out += isErr ? `[error output] ${text}` : text; dirty = true; } },
+      });
+      if (!b.success || b.protocol.error) {
+        throw new Error(`"${prepared.before.scriptId}" failed, so the action did not run: ${b.protocol.error || b.stderr.trim().split('\n').pop() || `exit ${b.exitCode}`}`);
+      }
+    }
     const r = await runScript(serverId, loaded, prepared.scriptId, prepared.args, {
       jobId: job.id,
       signal: controller.signal,

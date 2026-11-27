@@ -11,20 +11,61 @@
 import type { GrantResource, ResourceContext, ResourceKind } from '@/lib/permissions/evaluate';
 import { nameMatches } from '@/lib/permissions/evaluate';
 
-export interface ResourceTarget { kind: ResourceKind; param: string }
+/**
+ * What an action or dataset acts on. A fixed target names its kind; `byKind` takes the kind from another parameter
+ * (whose values are "container" and "stack"), so one action can act on either.
+ */
+export type ResourceTarget =
+  | { kind: ResourceKind; param: string }
+  | { byKind: string; param: string };
 export interface ResourceFields { container?: string; stack?: string }
 
 const FIELD = /^[A-Za-z_][A-Za-z0-9_]{0,63}$/;
 
 type V<T> = { ok: true; value: T | undefined } | { ok: false; error: string };
 
+/** The fixed kind of a target, or null when the kind comes from a parameter. */
+export function fixedTargetKind(t: ResourceTarget): ResourceKind | null {
+  return 'kind' in t ? t.kind : null;
+}
+
+/** The parameter that names the kind, or null for a fixed target. */
+export function targetKindParam(t: ResourceTarget): string | null {
+  return 'byKind' in t ? t.byKind : null;
+}
+
+/** A short description of what a target acts on, for docs and tool descriptions. */
+export function targetLabel(t: ResourceTarget): string {
+  return 'kind' in t ? `one ${t.kind}` : `one container or stack (pass "${t.byKind}" as "container" or "stack")`;
+}
+
+/** The kind a target acts on, from the fixed kind or the `byKind` parameter's value; null when that value is invalid. */
+export function targetKindFor(t: ResourceTarget, kindValue: unknown): ResourceKind | null {
+  if ('kind' in t) return t.kind;
+  return kindValue === 'stack' || kindValue === 'container' ? kindValue : null;
+}
+
 export function validateTarget(raw: unknown, where: string, params: readonly string[]): V<ResourceTarget> {
   if (raw === undefined) return { ok: true, value: undefined };
   const t = raw as Record<string, unknown>;
-  if (!t || typeof t !== 'object' || (t.kind !== 'stack' && t.kind !== 'container') || typeof t.param !== 'string') {
-    return { ok: false, error: `${where}: "target" must be { "kind": "stack" | "container", "param": <a parameter name> }` };
+  if (!t || typeof t !== 'object') return { ok: false, error: `${where}: "target" must be { "kind": "stack" | "container", "param": <a parameter name> } or { "byKind": <a parameter name>, "param": <a parameter name> }` };
+  const hasKind = t.kind !== undefined;
+  const hasByKind = t.byKind !== undefined;
+  if (hasKind === hasByKind) return { ok: false, error: `${where}: "target" needs exactly one of "kind" and "byKind"` };
+  for (const k of Object.keys(t)) if (k !== 'kind' && k !== 'byKind' && k !== 'param') return { ok: false, error: `${where}: "target" only knows "kind", "byKind" and "param"` };
+  if (typeof t.param !== 'string' || !params.includes(t.param)) {
+    return { ok: false, error: `${where}: "target.param" must be one of its parameters (${params.join(', ') || 'none'})` };
   }
-  if (!params.includes(t.param)) return { ok: false, error: `${where}: "target.param" must be one of its parameters (${params.join(', ') || 'none'})` };
+  if (hasByKind) {
+    if (typeof t.byKind !== 'string' || !params.includes(t.byKind)) {
+      return { ok: false, error: `${where}: "target.byKind" must be one of its parameters (${params.join(', ') || 'none'})` };
+    }
+    if (t.byKind === t.param) return { ok: false, error: `${where}: "target.byKind" and "target.param" must name different parameters` };
+    return { ok: true, value: { byKind: t.byKind, param: t.param } };
+  }
+  if (t.kind !== 'stack' && t.kind !== 'container') {
+    return { ok: false, error: `${where}: "target.kind" must be "stack" or "container"` };
+  }
   return { ok: true, value: { kind: t.kind, param: t.param } };
 }
 

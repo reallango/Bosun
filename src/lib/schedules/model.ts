@@ -7,6 +7,7 @@ import type { ActionSpec, Cond, ParamSpec } from '@/lib/widgets/runtime/spec';
 import type { DatasetSpec } from '@/lib/widgets/runtime/spec-screens';
 import type { LoadedSpec } from '@/lib/widgets/runtime/execute';
 import type { ScheduleNotify, ScheduleSpec } from '@/lib/widgets/runtime/spec-schedules';
+import { fixedTargetKind, targetKindParam } from '@/lib/widgets/runtime/resources';
 import { intervalAfter, missedRunDecision, nextRun } from './cron';
 
 export type ScheduleArg = string | number | boolean;
@@ -109,6 +110,8 @@ export interface RunKindInfo {
   params: Record<string, ParamSpec>;
   targetParam: string | null;
   targetKind: 'stack' | 'container' | null;
+  /** The parameter that names the kind, for a run whose target is not fixed. */
+  targetKindParam: string | null;
   dataset: DatasetSpec | null;
   action: ActionSpec | null;
 }
@@ -123,14 +126,23 @@ export function describeRun(loaded: LoadedSpec, kind: ScheduleSpec): RunKindInfo
       permission: ds.permission,
       params: loaded.spec.scripts?.[ds.script]?.params ?? {},
       targetParam: ds.target?.param ?? null,
-      targetKind: ds.target?.kind ?? null,
+      targetKind: ds.target ? fixedTargetKind(ds.target) : null,
+      targetKindParam: ds.target ? targetKindParam(ds.target) : null,
       dataset: ds,
       action: null,
     };
   }
   const action = loaded.spec.actions.find(a => a.id === declared.action);
   if (!action) return null;
-  return { permission: action.permission, params: action.params, targetParam: action.target?.param ?? null, targetKind: action.target?.kind ?? null, dataset: null, action };
+  return {
+    permission: action.permission,
+    params: action.params,
+    targetParam: action.target?.param ?? null,
+    targetKind: action.target ? fixedTargetKind(action.target) : null,
+    targetKindParam: action.target ? targetKindParam(action.target) : null,
+    dataset: null,
+    action,
+  };
 }
 
 /** The values a dataset run loads with: the stored arguments plus the target's name. */
@@ -140,10 +152,14 @@ export function datasetArgs(kind: ScheduleSpec, stored: StoredOptions, resourceN
   return out;
 }
 
-/** The parameters an action run calls with: the kind's own, then the stored ones, then the target's name. */
-export function actionParams(kind: ScheduleSpec, stored: StoredOptions, resourceName: string | null, targetParam: string | null): Record<string, ScheduleArg> {
+/** The parameters an action run calls with: the kind's own, then the stored ones, then the target's name and kind. */
+export function actionParams(
+  kind: ScheduleSpec, stored: StoredOptions, resourceName: string | null, targetParam: string | null,
+  resourceKind?: 'stack' | 'container' | null, targetKindParam?: string | null,
+): Record<string, ScheduleArg> {
   const out: Record<string, ScheduleArg> = { ...('action' in kind.run ? kind.run.params ?? {} : {}), ...(stored.params ?? {}) };
   if (resourceName && targetParam) out[targetParam] = resourceName;
+  if (resourceKind && targetKindParam) out[targetKindParam] = resourceKind;
   return out;
 }
 
@@ -190,19 +206,19 @@ export interface ScheduleNotice {
   dedupeKey: string;
 }
 
-/** Fill `{count}`, `{server}` and `{schedule}` in a notice template. */
-export function fillNotice(template: string, vars: { count: number; server: string; schedule: string }): string {
+/** Fill `{count}`, `{server}`, `{schedule}`, `{resource}`, `{status}` and `{message}` in a notice template. */
+export function fillNotice(template: string, vars: { count: number; server: string; schedule: string; resource?: string; status?: string; message?: string }): string {
   return fillTemplate(template, vars);
 }
 
 /** The one bell notice a dataset run raises (deduped per schedule per UTC day). */
-export function noticeFor(schedule: { id: string; name: string }, notify: ScheduleNotify, count: number, serverName: string, at: Date): ScheduleNotice {
-  const vars = { count, server: serverName, schedule: schedule.name };
+export function noticeFor(schedule: { id: string; name: string }, notify: ScheduleNotify, count: number, serverName: string, at: Date, extra: { resource?: string; status?: string; message?: string; dedupeKey?: string } = {}): ScheduleNotice {
+  const vars = { count, server: serverName, schedule: schedule.name, ...extra };
   return {
     title: fillNotice(notify.title, vars).slice(0, 200),
     message: fillNotice(notify.message, vars).slice(0, 2000),
     severity: notify.severity ?? 'info',
-    dedupeKey: `schedule-notice:${schedule.id}:${at.toISOString().slice(0, 10)}`,
+    dedupeKey: extra.dedupeKey ?? `schedule-notice:${schedule.id}:${at.toISOString().slice(0, 10)}`,
   };
 }
 

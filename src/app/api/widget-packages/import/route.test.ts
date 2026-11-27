@@ -42,7 +42,7 @@ describe('POST /api/widget-packages/import and the widget API level', () => {
     const res = await importZip(manifest({ requires: { api: 99 } }));
     expect(res.status).toBe(422);
     expect(await res.json()).toEqual({
-      error: { message: 'This widget needs a newer Bosun (widget API level 99; this Bosun has 8). Update Bosun first.', code: 'NEWER_BOSUN_REQUIRED' },
+      error: { message: 'This widget needs a newer Bosun (widget API level 99; this Bosun has 9). Update Bosun first.', code: 'NEWER_BOSUN_REQUIRED' },
     });
     expect(install).not.toHaveBeenCalled();
   });
