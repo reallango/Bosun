@@ -660,6 +660,25 @@ const V17_ACCESS_REQUESTS: string[] = [
     `CREATE INDEX IF NOT EXISTS idx_access_requests_status ON access_requests(status, created_at)`,
     `CREATE INDEX IF NOT EXISTS idx_access_requests_requester ON access_requests(requester_type, requester_id)`,
 ];
+
+// V18: per-person task dismissal. The bell is shared by everyone, but a finished task can be hidden from one person's
+// bell without affecting anyone else's. The Activity page still lists it (and can restore it).
+const V18_TASK_DISMISSALS: string[] = [
+    `CREATE TABLE IF NOT EXISTS task_dismissals (
+        job_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        dismissed_at INTEGER NOT NULL,
+        PRIMARY KEY (job_id, user_id)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_task_dismissals_user ON task_dismissals(user_id)`,
+];
+
+// V19: optional widget size hints. `max_size` caps a widget's size (base columns/rows, scaled per breakpoint like
+// `min_size`); `phone_height` is the row count used when widgets stack on phones. NULL = the old behaviour.
+const V19_WIDGET_SIZE_HINTS: string[] = [
+    `ALTER TABLE custom_widgets ADD COLUMN max_size TEXT`,
+    `ALTER TABLE custom_widgets ADD COLUMN phone_height INTEGER`,
+];
 export const MIGRATIONS: Migration[] = [
     {
         version: 1,
@@ -686,6 +705,8 @@ export const MIGRATIONS: Migration[] = [
     { version: 15, name: 'notification_kinds', statements: V15_NOTIFICATION_KINDS },
     { version: 16, name: 'resource_grants', statements: V16_RESOURCE_GRANTS },
     { version: 17, name: 'access_requests', statements: V17_ACCESS_REQUESTS },
+    { version: 18, name: 'task_dismissals', statements: V18_TASK_DISMISSALS },
+    { version: 19, name: 'widget_size_hints', statements: V19_WIDGET_SIZE_HINTS },
 ];
 
 /** The schema version this build expects. */
@@ -724,6 +745,7 @@ export const CORE_TABLES: string[] = [
     'permission_definitions',
     'widget_packages',
     'metric_definitions',
+    'task_dismissals',
 ];
 
 export class LegacySchemaError extends Error {

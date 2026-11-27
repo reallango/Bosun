@@ -19,7 +19,7 @@ function StatusIcon({ status }: { status: Task['status'] }) {
 }
 
 /** Everything a task did, in a pop-up: its steps and the log of the script (secrets are never in it). */
-function LogDialog({ task, onClose }: { task: Task | null; onClose: () => void }) {
+export function LogDialog({ task, onClose }: { task: Task | null; onClose: () => void }) {
   const [log, setLog] = useState<{ id: string; steps: string[]; text: string; message: string | null } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -55,7 +55,7 @@ function LogDialog({ task, onClose }: { task: Task | null; onClose: () => void }
           </div>
           {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : !log ? <p className="text-sm text-muted-foreground">Loading…</p> : (
             <>
-              <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded bg-gray-950 p-3 font-mono text-[11px] leading-snug text-gray-100">{text || '(no output)'}</pre>
+              <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words rounded bg-muted p-3 font-mono text-[11px] leading-snug text-foreground">{text || '(no output)'}</pre>
               <div className="mt-2 flex justify-end">
                 <button type="button" className="inline-flex items-center gap-1 rounded-md border px-2 py-1 text-xs hover:bg-accent"
                   onClick={async () => { try { await navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* select by hand */ } }}>
@@ -70,53 +70,71 @@ function LogDialog({ task, onClose }: { task: Task | null; onClose: () => void }
   );
 }
 
-/** The tasks at the top of the notification list: what is running, what finished, with its log and the way back to its screen. */
-export function TasksSection({ tasks: all, seen, markSeen, onNavigate, reload, which = 'all' }: { tasks: Task[]; seen: Set<string>; markSeen: (ids: string[]) => void; onNavigate: () => void; which?: 'all' | 'running' | 'finished'; reload: () => void }) {
+/**
+ * One task row for the bell and the Activity page: what is running, what finished, with its log and
+ * the way back to its screen. A finished task can be dismissed from the bell.
+ */
+export function TaskItem({
+  task,
+  seen,
+  onSeen,
+  onNavigate,
+  onDismiss,
+  onChanged,
+  quiet = false,
+}: {
+  task: Task;
+  seen: boolean;
+  onSeen: (ids: string[]) => void;
+  onNavigate?: () => void;
+  onDismiss?: (id: string) => void;
+  onChanged?: () => void;
+  quiet?: boolean;
+}) {
   const router = useRouter();
-  const [logOf, setLogOf] = useState<Task | null>(null);
-  // The bell shows running tasks near the top and finished ones below the notifications.
-  const tasks = which === 'all' ? all : all.filter(t => (t.status === 'running') === (which === 'running'));
-  if (!tasks.length) return null;
-  const cancel = async (t: Task) => {
-    await fetchWithAuth(`/api/servers/${t.serverId}/widget-jobs/${encodeURIComponent(t.widgetType)}/${t.id}/cancel`, { method: 'POST' }).catch(() => undefined);
-    reload();
+  const [logOpen, setLogOpen] = useState(false);
+  const cancel = async () => {
+    await fetchWithAuth(`/api/servers/${task.serverId}/widget-jobs/${encodeURIComponent(task.widgetType)}/${task.id}/cancel`, { method: 'POST' }).catch(() => undefined);
+    onChanged?.();
   };
   return (
-    <div className="border-b">
-      <div className="flex items-center justify-between px-3 pb-1 pt-2">
-        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{which === 'running' ? 'Running' : which === 'finished' ? 'Finished tasks' : 'Tasks'}</span>
-        {tasks.some(t => t.status !== 'running' && !seen.has(t.id)) && (
-          <button type="button" className="text-xs text-primary hover:underline" onClick={() => markSeen(tasks.filter(t => t.status !== 'running').map(t => t.id))}>Mark all seen</button>
+    <div className={cn(
+      'group relative flex items-start gap-2 border-b px-3 py-2 last:border-b-0',
+      !seen && task.status !== 'running' && !quiet && 'bg-primary/5',
+      quiet && 'opacity-75',
+    )}>
+      <StatusIcon status={task.status} />
+      <div className="min-w-0 flex-1 pr-6">
+        <div className="truncate text-sm font-medium">{task.actionLabel} <span className="font-normal text-muted-foreground">on {task.serverName}</span></div>
+        <div className="line-clamp-2 break-words text-xs text-muted-foreground">
+          {task.status === 'running' ? (task.steps[task.steps.length - 1] || 'Starting…') : `${STATUS_TEXT[task.status]}${task.message ? `: ${task.message}` : ''}`}
+        </div>
+        {task.status === 'running' && task.percent !== null && (
+          <div className="mt-1 h-1 w-full overflow-hidden rounded bg-muted"><div className="h-full bg-primary" style={{ width: `${task.percent}%` }} /></div>
         )}
+        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-muted-foreground/80">{task.startedBy ? `${task.startedBy} · ` : ''}{formatDistanceToNow(new Date(task.finishedAt ?? task.startedAt))}</span>
+          <button type="button" className="text-primary hover:underline" onClick={() => { setLogOpen(true); if (task.status !== 'running') onSeen([task.id]); }}>Log</button>
+          {task.screenId && task.widgetId && (
+            <button type="button" className="inline-flex items-center gap-0.5 text-primary hover:underline"
+              onClick={() => { onSeen([task.id]); onNavigate?.(); router.push(`/widgets/${encodeURIComponent(task.widgetId!)}/${encodeURIComponent(task.screenId!)}?job=${encodeURIComponent(task.id)}`); }}>
+              Open the screen <SquareArrowOutUpRight className="size-3" aria-hidden />
+            </button>
+          )}
+          {task.status === 'running' && !task.cancelRequested && <button type="button" className="text-destructive hover:underline" onClick={cancel}>Cancel</button>}
+        </div>
       </div>
-      <ul>
-        {tasks.slice(0, 6).map(t => (
-          <li key={t.id} className={cn('flex items-start gap-2 border-t px-3 py-2', t.status !== 'running' && !seen.has(t.id) && 'bg-primary/5')}>
-            <StatusIcon status={t.status} />
-            <div className="min-w-0 flex-1">
-              <div className="truncate text-sm font-medium">{t.actionLabel} <span className="font-normal text-muted-foreground">on {t.serverName}</span></div>
-              <div className="line-clamp-2 break-words text-xs text-muted-foreground">
-                {t.status === 'running' ? (t.steps[t.steps.length - 1] || 'Starting…') : `${STATUS_TEXT[t.status]}${t.message ? `: ${t.message}` : ''}`}
-              </div>
-              {t.status === 'running' && t.percent !== null && (
-                <div className="mt-1 h-1 w-full overflow-hidden rounded bg-muted"><div className="h-full bg-primary" style={{ width: `${t.percent}%` }} /></div>
-              )}
-              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs">
-                <span className="text-muted-foreground/80">{t.startedBy ? `${t.startedBy} · ` : ''}{formatDistanceToNow(new Date(t.finishedAt ?? t.startedAt))}</span>
-                <button type="button" className="text-primary hover:underline" onClick={() => { setLogOf(t); markSeen([t.id]); }}>Log</button>
-                {t.screenId && t.widgetId && (
-                  <button type="button" className="inline-flex items-center gap-0.5 text-primary hover:underline"
-                    onClick={() => { markSeen([t.id]); onNavigate(); router.push(`/widgets/${encodeURIComponent(t.widgetId!)}/${encodeURIComponent(t.screenId!)}?job=${encodeURIComponent(t.id)}`); }}>
-                    Open the screen <SquareArrowOutUpRight className="size-3" aria-hidden />
-                  </button>
-                )}
-                {t.status === 'running' && !t.cancelRequested && <button type="button" className="text-destructive hover:underline" onClick={() => cancel(t)}>Cancel</button>}
-              </div>
-            </div>
-          </li>
-        ))}
-      </ul>
-      <LogDialog task={logOf} onClose={() => setLogOf(null)} />
+      {onDismiss && task.status !== 'running' && (
+        <button
+          type="button"
+          onClick={() => onDismiss(task.id)}
+          aria-label={`Dismiss: ${task.actionLabel}`}
+          className="absolute right-1.5 top-2 inline-flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-60 hover:bg-accent hover:text-foreground hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <X className="size-3.5" />
+        </button>
+      )}
+      <LogDialog task={logOpen ? task : null} onClose={() => setLogOpen(false)} />
     </div>
   );
 }

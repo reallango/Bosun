@@ -7,6 +7,7 @@ import {
   House,
   LayoutDashboard,
   LineChart,
+  History,
   ChevronsLeft,
   ChevronsRight,
   Plus,
@@ -28,6 +29,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { DASHBOARDS_CHANGED, SERVERS_CHANGED, notifyDashboardsChanged } from '@/lib/dashboards/events';
 import { DashboardNameDialog } from '@/components/dashboard/DashboardNameDialog';
 import { EditableDashboardRow } from './EditableDashboardRow';
+import { CommandPalette, PaletteTrigger } from './CommandPalette';
 
 interface Server {
   id: string;
@@ -56,6 +58,7 @@ interface NavItem {
 const MAIN_NAV: NavItem[] = [
   { href: '/', label: 'Home', icon: House, exact: true },
   { href: '/stats', label: 'Statistics', icon: LineChart },
+  { href: '/activity', label: 'Activity', icon: History },
 ];
 
 function isActive(pathname: string, href: string, exact?: boolean) {
@@ -446,6 +449,7 @@ function RailToggle({ collapsed, onToggle }: { collapsed: boolean; onToggle: () 
 export default function Sidebar() {
   const pathname = usePathname();
   const { collapsed, toggleCollapsed, mobileOpen, setMobileOpen } = useShell();
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
   // Close the mobile drawer on route change
   useEffect(() => {
@@ -473,6 +477,9 @@ export default function Sidebar() {
             <RailToggle collapsed={collapsed} onToggle={toggleCollapsed} />
           </div>
         )}
+        <div className="border-b border-sidebar-border px-2 py-2">
+          <PaletteTrigger collapsed={collapsed} onClick={() => setPaletteOpen(true)} />
+        </div>
         <SidebarNav collapsed={collapsed} />
         <SettingsLink collapsed={collapsed} />
       </aside>
@@ -499,10 +506,15 @@ export default function Sidebar() {
               <X className="size-5" />
             </SheetClose>
           </div>
+          <div className="border-b border-sidebar-border px-2 py-2">
+            <PaletteTrigger collapsed={false} onClick={() => { setMobileOpen(false); setPaletteOpen(true); }} />
+          </div>
           <SidebarNav collapsed={false} onNavigate={() => setMobileOpen(false)} />
           <SettingsLink collapsed={false} onNavigate={() => setMobileOpen(false)} />
         </SheetContent>
       </Sheet>
+
+      <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
     </>
   );
 }

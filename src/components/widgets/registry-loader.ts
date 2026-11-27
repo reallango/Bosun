@@ -23,6 +23,8 @@ export interface CustomWidgetRow {
   category: string | null;
   default_size: string | null;
   min_size: string | null;
+  max_size: string | null;
+  phone_height: number | null;
   refresh_interval: number | null;
   supports_linux: number;
   supports_windows: number;
@@ -50,8 +52,16 @@ function parseJson<T>(raw: unknown, fallback: T): T {
   }
 }
 
+function optionalSize(raw: unknown): { w: number; h: number } | undefined {
+  const v = parseJson<{ w?: unknown; h?: unknown } | null>(raw, null);
+  const w = Math.round(Number(v?.w));
+  const h = Math.round(Number(v?.h));
+  return w >= 1 && h >= 1 ? { w, h } : undefined;
+}
+
 /** Convert a `custom_widgets` row into the shared WidgetDefinition shape. */
 export function customRowToDefinition(row: CustomWidgetRow): WidgetDefinition {
+  const phoneHeight = Math.round(Number(row.phone_height));
   return {
     type: row.type,
     displayName: row.display_name,
@@ -60,6 +70,8 @@ export function customRowToDefinition(row: CustomWidgetRow): WidgetDefinition {
     category: (row.category as WidgetDefinition['category']) || 'custom',
     defaultSize: parseJson(row.default_size, { w: 8, h: 6 }),
     minSize: parseJson(row.min_size, { w: 4, h: 4 }),
+    maxSize: optionalSize(row.max_size),
+    phoneHeight: phoneHeight >= 1 ? phoneHeight : undefined,
     refreshInterval: row.refresh_interval ?? 30,
     backgroundPollable: true,
     isCustom: true,

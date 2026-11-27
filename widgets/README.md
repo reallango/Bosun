@@ -13,9 +13,9 @@ Rules the manifest is checked against (a package that fails is listed as "skippe
 - `schema` is `1`; `id` is 2-40 characters of `a-z`, `0-9`, `_`, starts with a letter, and equals the folder name.
 - `version` is `major.minor.patch` (for example `0.0.1`). A higher version shows as an upgrade.
 - `widgets` lists 1-10 widget types. Their fields are the ones on the Custom Widgets page
-  (`display_name`, `description`, `icon`, `category`, `default_size`, `min_size`, `refresh_interval`,
-  `supports_linux`, `supports_windows`, `config_schema`). An optional `spec` object holds the declarative
-  definition interpreted by the widget runtime.
+  (`display_name`, `description`, `icon`, `category`, `default_size`, `min_size`, `max_size`, `phone_height`,
+  `refresh_interval`, `supports_linux`, `supports_windows`, `config_schema`). An optional `spec` object holds the
+  declarative definition interpreted by the widget runtime.
 - `permissions` lists the permissions the package adds. Ids must start with `<package id>.`, and a package may
   not imply a built-in high-risk permission. `defaultLevel` is `viewer` (everybody, including Read only), `operator` or `admin`.
 - A package cannot use the id or widget type of a System widget (only the SSH Terminal is one now).
@@ -167,6 +167,27 @@ as `lg`. A spec can say what to drop on small widgets; older Bosun versions igno
 
 - `hideBelow` (`sm`, `md` or `lg`) works on every layout block (version 2), on `fields` items, table `columns`, `summary` entries, `filter` and `toggles`.
 - `row.inline` sets how many row actions show as buttons at each size (a size it leaves out takes the nearest smaller one it names). Without it, a row shows 1 button on `xs`, 3 on `sm`, 5 on `md` and all of them on `lg`; the rest are in the row's ⋯ menu, in the order of `actions`.
+
+The widget entry in the manifest can also say how large it may grow and how tall it should be when the dashboard
+stacks widgets on a phone:
+
+```jsonc
+"widgets": [{
+  "type": "my_package_widget",
+  "display_name": "My widget",
+  "default_size": { "w": 6, "h": 4 },
+  "min_size": { "w": 4, "h": 3 },
+  "max_size": { "w": 12, "h": 8 },     // optional cap, in base columns and rows
+  "phone_height": 6                    // optional rows when stacked on a phone
+}]
+```
+
+- `max_size` is scaled per breakpoint like `min_size`; the dashboard grid stops a resize at that size. Without it a
+  widget may grow to the whole grid.
+- `phone_height` replaces the 3-12 row clamp for widgets stacked on phones, so a stat tile can ask for 2 rows and a
+  chart for 8. A phone arrangement the person saved still wins. `max_size` still caps the height when both are set.
+- Both keys are optional and older packages keep their old behaviour. Older Bosun versions ignore them and use their
+  own limits, so a widget that sets them must still look sensible there.
 
 ### Tabs, counts and create dialogs
 

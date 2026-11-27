@@ -30,6 +30,8 @@ export interface Task {
   cancelRequested: boolean;
   /** Who started it: the person's name, "<key name> (API key)", or null when nobody did (Bosun itself) or the account is gone. */
   startedBy: string | null;
+  /** Hidden from this person's bell; the Activity page still lists it. */
+  dismissed: boolean;
 }
 
 export async function mayUse(auth: TokenPayload, j: JobRecord): Promise<boolean> {
@@ -52,7 +54,7 @@ export function starterName(userId: string | null, names: Pick<NameMaps, 'users'
   return names.users.get(userId) ?? 'a deleted user';
 }
 
-export async function toTask(j: JobRecord, auth: TokenPayload, names: NameMaps): Promise<Task> {
+export async function toTask(j: JobRecord, auth: TokenPayload, names: NameMaps, dismissed = false): Promise<Task> {
   const loaded = await loadWidgetSpec(j.widgetType);
   const action = loaded?.spec.actions.find(a => a.id === j.actionId);
   let screenId: string | null = null;
@@ -64,7 +66,7 @@ export async function toTask(j: JobRecord, auth: TokenPayload, names: NameMaps):
     id: j.id, widgetType: j.widgetType, widgetName: names.widgets.get(j.widgetType) ?? j.widgetType, actionId: j.actionId, actionLabel: action?.label ?? j.actionId,
     serverId: j.serverId, serverName: names.servers.get(j.serverId) ?? 'a server', widgetId: j.widgetId, status: j.status, steps: j.steps.slice(-4), percent: j.percent,
     message: j.message, startedAt: j.startedAt, finishedAt: j.finishedAt, screenId, cancelRequested: j.cancelRequested,
-    startedBy: starterName(j.userId, names),
+    startedBy: starterName(j.userId, names), dismissed,
   };
 }
 

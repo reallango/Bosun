@@ -11,6 +11,9 @@ const read = (name: string) => fs.readFileSync(path.join(dir, name), 'utf8');
 // Docker build), not Git Bash on Windows, where a Windows temp path cannot be put in PATH.
 const hasSh = process.platform !== 'win32' && spawnSync('sh', ['-c', 'exit 0']).status === 0;
 const hasAwk = hasSh && spawnSync('sh', ['-c', 'command -v awk >/dev/null 2>&1']).status === 0;
+// The dnf case only makes sense when the host has no apt-get: the script checks apt first, so a
+// developer machine with apt always answers as apt. The Docker builder (Alpine) has no apt-get.
+const hasApt = hasSh && spawnSync('sh', ['-c', 'command -v apt-get >/dev/null 2>&1']).status === 0;
 
 /** Runs a script with a folder of fake package managers first on the PATH. */
 function runWith(bin: string, script: string, env: Record<string, string> = {}) {
@@ -45,7 +48,7 @@ EOF`);
     expect(j.packages[2]).toEqual({ name: 'newpkg', current_version: '', new_version: '1.0', is_security: false });
   });
 
-  it.skipIf(!hasAwk)('reads dnf check-update output', () => {
+  it.skipIf(!hasAwk || hasApt)('reads dnf check-update output', () => {
     clear();
     fake('dnf', `printf 'kernel.x86_64  6.8.1-1.fc40  updates\\nopenssl.x86_64  3.2.1-2.fc40  updates-security\\n'`);
     const j = JSON.parse(runWith(bin, read('check.sh')).stdout);
