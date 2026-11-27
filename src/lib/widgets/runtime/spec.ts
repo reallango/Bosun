@@ -22,6 +22,8 @@ import { validateHideBelow, validateInline, type InlineActions, type WidgetSize 
 export type { WidgetSize } from './size';
 import { validateLayout, validateLookups, validateScripts, validateState, validateVariants, type ActionVariant, type Block, type LookupSpec, type ScriptSpec, type StateSpec } from './spec-v2';
 export type { ActionVariant, Block, LookupSpec, ScriptSpec, StateSpec } from './spec-v2';
+import { validateSchedules, type ScheduleSpec } from './spec-schedules';
+export type { ScheduleNotify, ScheduleOptions, ScheduleRun, ScheduleSpec, ScheduleTarget } from './spec-schedules';
 
 export const SPEC_VERSION = 1;
 /** Versions the validators accept. Version 2 adds scripts, state, lookups, script actions and layout views (spec-v2.ts). */
@@ -189,6 +191,8 @@ export interface WidgetSpec {
   stacks?: StacksSpec;
   /** Version 2: software this widget can install on a host, offered under "Set up this server" (see SetupSpec). */
   setup?: SetupSpec;
+  /** Version 2: runs this widget offers under Settings → Schedules (see spec-schedules.ts). */
+  schedules?: ScheduleSpec[];
 }
 
 
@@ -899,6 +903,10 @@ export function validateWidgetSpec(raw: unknown, ownPermissions: readonly string
     if (!s.ok) return s;
     setup = s.value;
   }
+  const schedules = raw.schedules !== undefined && !v2on
+    ? fail('"schedules" needs spec version 2')
+    : validateSchedules(raw.schedules, actions, datasets.value, scripts.value);
+  if (!schedules.ok) return schedules;
   let metrics: MetricSpec[] | undefined;
   if (raw.metrics !== undefined) {
     const m = validateMetrics(raw.metrics, packageId);
@@ -917,6 +925,7 @@ export function validateWidgetSpec(raw: unknown, ownPermissions: readonly string
       ...(menu.value.length ? { menu: menu.value } : {}),
       ...(stacks ? { stacks } : {}),
       ...(setup ? { setup } : {}),
+      ...(schedules.value.length ? { schedules: schedules.value } : {}),
     },
   };
 }

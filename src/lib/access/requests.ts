@@ -12,8 +12,7 @@
  */
 import crypto from 'crypto';
 import type { TokenPayload } from '@/lib/auth/jwt';
-import { hasRole, isRole, minRole, type Role } from '@/lib/auth/levels';
-import { getUserStatus } from '@/lib/auth/user-status';
+import { hasRole } from '@/lib/auth/levels';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { logAudit } from '@/lib/audit/logger';
 import { hasPermission } from '@/lib/permissions/authorize';
@@ -24,6 +23,7 @@ import { invalidatePermissionCache, registeredPermissionDefs } from '@/lib/permi
 import { notify, resolveByKeyPrefix } from '@/lib/notifications/store';
 import { redactParams } from '@/lib/widgets/jobs/store';
 import { audienceFor, describeRequest, MAX_PENDING_PER_REQUESTER, REQUEST_TTL_HOURS, type RequestInput } from './validate';
+import { requesterPayload } from './requester';
 
 export class RequestError extends Error {
   constructor(message: string, readonly status = 400, readonly code = 'INVALID_REQUEST') { super(message); }
@@ -231,22 +231,7 @@ export async function cancelRequest(viewer: TokenPayload, id: string): Promise<b
 }
 
 /** The requester as a principal again (for running a one-time action as them), or null if it can no longer act. */
-async function requesterPayload(type: string, id: string): Promise<TokenPayload | null> {
-  if (type === 'user') {
-    const u = rowsToObjects(await rqlite.query('SELECT id, username, role, disabled FROM users WHERE id = ?', [id]))[0];
-    if (!u || Number(u.disabled) === 1 || !isRole(u.role)) return null;
-    return { userId: String(u.id), username: String(u.username), role: u.role, authType: 'session' };
-  }
-  const k = rowsToObjects(await rqlite.query('SELECT id, name, role, revoked_at, expires_at, created_by FROM api_keys WHERE id = ?', [id]))[0];
-  if (!k || k.revoked_at || (k.expires_at && Date.parse(String(k.expires_at)) <= Date.now()) || !isRole(k.role)) return null;
-  let role: Role = k.role;
-  if (k.created_by) {
-    const creator = await getUserStatus(String(k.created_by));
-    if (!creator || creator.disabled || !isRole(creator.role)) return null;
-    role = minRole(role, creator.role);
-  }
-  return { userId: `apikey:${k.id}`, username: String(k.name), role, authType: 'api_key', apiKeyId: String(k.id) };
-}
+export { requesterPayload };
 
 /** The permission group that holds a requester's approved grants (made on first use). */
 async function approvedGroupFor(type: 'user' | 'api_key', id: string, name: string): Promise<string> {

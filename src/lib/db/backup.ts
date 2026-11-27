@@ -61,6 +61,8 @@ export const BACKUP_TABLES: string[] = [
   'metric_definitions',
   'access_requests',
   'task_dismissals',
+  'schedules',
+  'schedule_runs',
 ];
 
 // Tables excluded by default because they can grow very large.

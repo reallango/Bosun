@@ -679,6 +679,50 @@ const V19_WIDGET_SIZE_HINTS: string[] = [
     `ALTER TABLE custom_widgets ADD COLUMN max_size TEXT`,
     `ALTER TABLE custom_widgets ADD COLUMN phone_height INTEGER`,
 ];
+
+// V20: schedules. A schedule is one run a widget package declares (`schedule_kind`), kept for one server (and
+// optionally one stack/container), with the person or API key that made it (`created_by_*`, like an access request's
+// requester). `options` is the JSON the kind declares (dataset arguments and history size). `next_run_at` is the
+// compare-and-set token the cluster leader claims a due run with; `paused_reason` says why it stopped (a removed
+// requester, a revoked permission, a missing widget). Each attempt is one `schedule_runs` row.
+const V20_SCHEDULES: string[] = [
+    `CREATE TABLE IF NOT EXISTS schedules (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        widget_type TEXT NOT NULL,
+        schedule_kind TEXT NOT NULL,
+        server_id TEXT NOT NULL REFERENCES servers(id) ON DELETE CASCADE,
+        resource_kind TEXT NOT NULL DEFAULT '' CHECK (resource_kind IN ('', 'stack', 'container')),
+        resource_name TEXT NOT NULL DEFAULT '',
+        cron TEXT NOT NULL,
+        timezone TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        options TEXT NOT NULL DEFAULT '{}',
+        created_by_type TEXT NOT NULL CHECK (created_by_type IN ('user', 'api_key')),
+        created_by_id TEXT NOT NULL,
+        created_by_name TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        last_run_at TEXT,
+        next_run_at TEXT,
+        paused_reason TEXT
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_schedules_server ON schedules(server_id)`,
+    `CREATE INDEX IF NOT EXISTS idx_schedules_due ON schedules(enabled, next_run_at)`,
+    `CREATE TABLE IF NOT EXISTS schedule_runs (
+        id TEXT PRIMARY KEY,
+        schedule_id TEXT NOT NULL REFERENCES schedules(id) ON DELETE CASCADE,
+        started_at TEXT NOT NULL,
+        finished_at TEXT,
+        status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'success', 'failed', 'skipped')),
+        message TEXT,
+        job_id TEXT,
+        matched_count INTEGER
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_schedule_runs_schedule ON schedule_runs(schedule_id, started_at)`,
+    // One run per schedule at a time, enforced by the database as well as by startRunRow.
+    `CREATE UNIQUE INDEX IF NOT EXISTS idx_schedule_runs_one_running ON schedule_runs(schedule_id) WHERE status = 'running'`,
+];
 export const MIGRATIONS: Migration[] = [
     {
         version: 1,
@@ -707,6 +751,7 @@ export const MIGRATIONS: Migration[] = [
     { version: 17, name: 'access_requests', statements: V17_ACCESS_REQUESTS },
     { version: 18, name: 'task_dismissals', statements: V18_TASK_DISMISSALS },
     { version: 19, name: 'widget_size_hints', statements: V19_WIDGET_SIZE_HINTS },
+    { version: 20, name: 'schedules', statements: V20_SCHEDULES },
 ];
 
 /** The schema version this build expects. */
@@ -746,6 +791,8 @@ export const CORE_TABLES: string[] = [
     'widget_packages',
     'metric_definitions',
     'task_dismissals',
+    'schedules',
+    'schedule_runs',
 ];
 
 export class LegacySchemaError extends Error {

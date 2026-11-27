@@ -58,6 +58,10 @@ export const CATALOG: readonly PermissionDef[] = [
   { id: 'power.shutdown', label: 'Shut down a server', group: 'Power', source: 'core', defaultLevel: 'operator', risk: 'high', scope: 'server',
     description: 'Power the host off. It stays off until it is woken or started at the machine.' },
 
+  // ---- Schedules ---------------------------------------------------------
+  { id: 'schedules.manage', label: 'Manage schedules', group: 'Schedules', source: 'core', defaultLevel: 'operator', risk: 'medium', scope: 'server',
+    description: 'Create, change, pause, run now and delete schedules for this server. A schedule also needs the permission of the widget action or dataset it runs, and it re-checks that permission on every run.' },
+
   // The permissions of the widgets are provided by the bundled
   // widget packages in widgets/ and registered when they install.
 
