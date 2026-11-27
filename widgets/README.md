@@ -412,6 +412,10 @@ with the card's width and height (container query units), not with the screen, w
 The renderer also shortens a number for its own length: it counts the characters of the value and its unit and picks a
 size whose text stays inside the card (about 70% of the ring's inner circle). Every tile or gauge in one block takes
 the size chosen from that block's longest value, so "8%" and "89.9%" sit at the same size instead of one being huge.
+The number never drops below a readable floor (0.9rem in a tile, 0.75rem in a ring). When the number and its unit
+cannot both fit at that floor, they are split: the number keeps the first line and the unit follows on a smaller line
+under it. A `%` is part of the number and stays attached ("89.9%") unless even the bare number cannot reach the floor.
+The decision is made once for the whole block from its widest value, so every tile or gauge in it has the same shape.
 A number with a `%` unit (and the `percent` format) shows at most one decimal and a whole number from 100 up, so a full
 ring reads "100%", never "100.0%"; this works whether the data arrives as a number or as a numeric string. A sparkline
 stretches to the tile's width and its height follows the card. At the smallest size class (`xs`) the tiles stay in one
@@ -419,9 +423,10 @@ compact row so nothing overflows. In a dialog, a sheet or a full page the same b
 
 A widget of about three grid rows switches these blocks to a compact layout: the padding and gaps shrink, a tile drops
 its sparkline and sub-line (the number and bar stay), a gauge moves its label inside the ring under the value, and a
-`text` block is kept to one truncated line. The result must fit without clipping the ring or the footer. Lowering a
-package's `min_size` in an upgrade also lowers the stored minimum of the widgets already on dashboards, so they can be
-made smaller without removing and adding them again.
+`text` block is kept to one truncated line. When a compact gauge's value has split its unit, the label moves below the
+ring instead, so the ring keeps two lines; the ring's `title` and `aria-label` still name it. The result must fit
+without clipping the ring or the footer. Lowering a package's `min_size` in an upgrade also lowers the stored minimum
+of the widgets already on dashboards, so they can be made smaller without removing and adding them again.
 
 Bosun applies these rules for every widget (they are not per widget). A spec only chooses the look and what each block
 shows; it does not need any layout CSS of its own.

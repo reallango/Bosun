@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
-  gaugeFitCqmin, gaugeLabelFontSize, gaugeValueFontSize, labelFontSize, longestValueLength, textLength, tileFitCqw, tileValueFontSize,
+  GAUGE_VALUE_FLOOR_REM, TILE_VALUE_FLOOR_REM, fitGaugeValues, fitTileValues, gaugeFitCqmin, gaugeLabelFontSize, gaugeValueFontSize,
+  labelFontSize, longestValueLength, textLength, tileFitCqw, tileValueFontSize, unitOnOwnLine,
   validateBlockSizing, validateDecimals, validateDensity, validateEmphasis, validateGaugeThickness,
 } from './sizing';
 
@@ -19,8 +20,8 @@ describe('textLength and longestValueLength', () => {
 
 describe('the fit calculation', () => {
   it('leaves a short value at the container size', () => {
-    expect(tileValueFontSize(2)).toContain('min(max(15cqw,25cqmin), calc(70cqw))');
-    expect(gaugeValueFontSize(2)).toContain('min(24cqmin, calc(46cqmin))');
+    expect(tileValueFontSize(2)).toContain('min(max(15cqw,25cqmin), calc(70cqw), 6rem)');
+    expect(gaugeValueFontSize(2)).toContain('min(24cqmin, calc(46cqmin), 3.5rem)');
   });
 
   it('shrinks a longer value', () => {
@@ -49,6 +50,77 @@ describe('the fit calculation', () => {
     expect(labelFontSize('sm')).toContain('calc(0.85 *');
     expect(labelFontSize('md')).toContain('calc(1 *');
     expect(gaugeLabelFontSize('lg')).toContain('calc(1.2 *');
+  });
+});
+
+describe('the readable floor and the split decision', () => {
+  const smallTile = { width: 56, height: 60 };
+  const largeTile = { width: 156, height: 154 };
+  const smallRing = { width: 56, height: 60, stroke: 10 };
+  const largeRing = { width: 154, height: 154, stroke: 10 };
+
+  it('never goes below the readable floor', () => {
+    const tile = fitTileValues([{ number: '1234567890', unit: 'MB' }], { width: 10, height: 10 });
+    expect(tile.fontSize).toContain(`${TILE_VALUE_FLOOR_REM}rem`);
+    expect(tile.fontSize).toContain('14.4px');
+    const gauge = fitGaugeValues([{ number: '1234567890', unit: 'MB' }], { width: 10, height: 10 });
+    expect(gauge.fontSize).toContain(`${GAUGE_VALUE_FLOOR_REM}rem`);
+    expect(gauge.fontSize).toContain('12px');
+  });
+
+  it('splits a long unit in a small tile and keeps one line in a large one', () => {
+    const small = fitTileValues([{ number: '1023', unit: 'MB' }], smallTile);
+    expect(small.split).toBe(true);
+    expect(unitOnOwnLine('MB', small)).toBe(true);
+    expect(small.fontSize).toContain('14.4px');
+    expect(small.unitFontSize).toContain('10.08px');
+
+    const large = fitTileValues([{ number: '1023', unit: 'MB' }], largeTile);
+    expect(large.split).toBe(false);
+    expect(unitOnOwnLine('MB', large)).toBe(false);
+    expect(large.fontSize).toContain('31.2px');
+  });
+
+  it('splits a gauge value only where the ring is too small for it', () => {
+    const small = fitGaugeValues([{ number: '1023', unit: 'MB' }], smallRing);
+    expect(small.split).toBe(true);
+    expect(small.fontSize).toContain('12.88px');
+    expect(unitOnOwnLine('MB', small)).toBe(true);
+
+    const large = fitGaugeValues([{ number: '1023', unit: 'MB' }], largeRing);
+    expect(large.split).toBe(false);
+    expect(unitOnOwnLine('MB', large)).toBe(false);
+  });
+
+  it('keeps % on the number line unless the bare number cannot reach the floor', () => {
+    const attached = fitTileValues([{ number: '89.9', unit: '%' }], { width: 44, height: 50 });
+    expect(attached.split).toBe(true);
+    expect(attached.splitPercent).toBe(false);
+    expect(unitOnOwnLine('%', attached)).toBe(false);
+
+    const moved = fitTileValues([{ number: '89.9', unit: '%' }], { width: 30, height: 40 });
+    expect(moved.split).toBe(true);
+    expect(moved.splitPercent).toBe(true);
+    expect(unitOnOwnLine('%', moved)).toBe(true);
+  });
+
+  it('shares one decision across a block', () => {
+    const values = [
+      { number: '1023', unit: 'MB' }, { number: '12.5', unit: 'GB' }, { number: '45', unit: '°C' },
+      { number: '89.9', unit: '%' }, { number: '100', unit: '%' },
+    ];
+    const fit = fitTileValues(values, smallTile);
+    expect(fit.split).toBe(true);
+    expect(unitOnOwnLine('MB', fit)).toBe(true);
+    expect(unitOnOwnLine('°C', fit)).toBe(true);
+    expect(unitOnOwnLine('%', fit)).toBe(false);
+    expect(unitOnOwnLine(undefined, fit)).toBe(false);
+  });
+
+  it('uses the CSS fallback before the card has been measured', () => {
+    const fit = fitTileValues([{ number: '1023', unit: 'MB' }], { width: 0, height: 0 });
+    expect(fit.split).toBe(false);
+    expect(fit.fontSize).toBe(tileValueFontSize(7));
   });
 });
 

@@ -43,3 +43,9 @@ export function formatValueText(raw: string, unit: string | undefined, decimals:
   if (percent) return formatPercent(n, decimals ?? 1);
   return decimals === undefined ? raw : formatNumber(n, decimals);
 }
+
+/** A value with its unit: "%" and "°C" sit tight, other units take a space. */
+export function withUnit(value: string, unit: string | undefined): string {
+  if (!unit || !value) return value;
+  return unit.startsWith('%') || unit.startsWith('°') ? `${value}${unit}` : `${value} ${unit}`;
+}
