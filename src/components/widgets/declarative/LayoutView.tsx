@@ -5,19 +5,22 @@ import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Dialog } from 'radix-ui';
 import { ChevronDown, ChevronRight, Loader2, X } from 'lucide-react';
 import type { Block, FormField } from '@/lib/widgets/runtime/spec-v2';
-import type { ViewSpec } from '@/lib/widgets/runtime/spec';
+import { fillTemplate, type ViewSpec } from '@/lib/widgets/runtime/spec';
 import {
   actionApplies, activeTabId, formInitial, formParams, jobHeadline, layoutRows, opensInDialog, primaryToolbarEntry, selectCurrent, selectParams, tabCount, text, visible, visibleBadges,
   type JobState, type PublicActionLike, type ViewContext,
 } from '@/lib/widgets/runtime/layout';
-import { Bar, Fields } from './parts';
+import { Bar, Fields, Sparkline, type StatToneName } from './parts';
 import { fitsSize } from '@/lib/widgets/runtime/size';
-import { statTone } from '@/lib/widgets/runtime/stat';
+import { statTone, withUnit } from '@/lib/widgets/runtime/stat';
+import { thresholdTone } from '@/lib/widgets/runtime/thresholds';
+import { gaugeGeometry, GAUGE_STROKE, GAUGE_VIEWBOX, type GaugeItem } from '@/lib/widgets/runtime/gauges';
 import { useWidgetSize } from '@/components/dashboard/widget-size';
+import { useWidgetFill } from './fill';
 import { CodeBlock, EditorBlock } from './EditorBlock';
 import {
-  buttonClass, DIALOG_CONTENT, DIALOG_FOOTER, DIALOG_HEADER, DIALOG_OVERLAY, DIALOG_TITLE, DIALOG_WIDTH, iconButtonClass, inputClass, NOTICE_CLASS as NOTICE, primarySubmitClass,
-  toolbarButtonClass,
+  buttonClass, DIALOG_CONTENT, DIALOG_FOOTER, DIALOG_HEADER, DIALOG_OVERLAY, DIALOG_TITLE, DIALOG_WIDTH, FILL_CARD, FILL_GAUGE_VALUE, FILL_GRID, FILL_GRID_XS, FILL_LABEL, FILL_SUB, FILL_VALUE,
+  iconButtonClass, inputClass, NOTICE_CLASS as NOTICE, primarySubmitClass, toolbarButtonClass,
 } from './styles';
 
 const BADGE: Record<string, string> = {
@@ -58,6 +61,7 @@ export interface LayoutUi {
 export function LayoutBlocks({ blocks, ctx, ui, groupToolbar }: { blocks: Block[]; ctx: ViewContext; ui: LayoutUi; groupToolbar?: boolean }) {
   // Blocks with `hideBelow` drop out while the widget is smaller (dialogs and pages count as the largest size).
   const { size } = useWidgetSize();
+  const fill = useWidgetFill();
   const shown = blocks.filter(b => fitsSize(b, size) && visible(b, ctx));
   if (groupToolbar) {
     // A tab's create buttons and actions share one row above the list they belong to.
@@ -69,9 +73,14 @@ export function LayoutBlocks({ blocks, ctx, ui, groupToolbar }: { blocks: Block[
       </div>
     );
   }
+  // Inside a widget the blocks share the whole body; a tile or gauge grid takes the space the other blocks leave.
   return (
-    <div className="space-y-2">
-      {shown.map((b, i) => <BlockView key={i} block={b} ctx={ctx} ui={ui} />)}
+    <div className={fill ? 'flex h-full min-h-0 flex-col gap-2' : 'space-y-2'}>
+      {shown.map((b, i) => (
+        <div key={i} className={fill && (b.type === 'stat' || b.type === 'gauges') ? 'min-h-0 flex-1' : undefined}>
+          <BlockView block={b} ctx={ctx} ui={ui} />
+        </div>
+      ))}
     </div>
   );
 }
@@ -122,6 +131,7 @@ function BlockView({ block, ctx, ui, toolbar }: { block: Block; ctx: ViewContext
     case 'section': return <Section block={block} ctx={ctx} ui={ui} />;
     case 'kv': return <Fields fields={block.items} data={ctx} />;
     case 'stat': return <StatBlock block={block} ctx={ctx} />;
+    case 'gauges': return <GaugeBlock block={block} ctx={ctx} />;
     case 'text': return <p className="whitespace-pre-wrap break-words text-xs text-foreground">{text(block.text, ctx)}</p>;
     case 'notice': return <div role={block.level === 'error' ? 'alert' : 'status'} className={`rounded-md border px-2 py-1.5 text-xs ${NOTICE[block.level]}`}>{text(block.text, ctx)}</div>;
     case 'buttons': return <Buttons block={block} ctx={ctx} ui={ui} toolbar={toolbar} />;
@@ -220,32 +230,85 @@ function TabsView({ block, ctx, ui, active, onSelect }: {
 }
 
 const STAT_COLUMNS: Record<string, string> = { xs: 'grid-cols-1', sm: 'grid-cols-2', md: 'grid-cols-3', lg: 'grid-cols-4' };
-const STAT_TONE_CLASS: Record<string, string> = {
+const STAT_TONE_CLASS: Record<StatToneName, string> = {
   danger: 'text-destructive',
   warning: 'text-warning',
   success: 'text-success',
 };
+const STAT_TONE_STROKE: Record<StatToneName, string> = {
+  danger: 'stroke-destructive',
+  warning: 'stroke-warning',
+  success: 'stroke-success',
+};
+const STAT_CARD = 'flex min-w-0 flex-col gap-0.5 rounded-lg border border-border bg-card p-3 text-left';
+const GAUGE_CARD = 'flex min-w-0 flex-col items-center gap-1 rounded-lg border border-border bg-card p-3 text-center';
 
 /** A responsive grid of number cards; a card with a `tab` switches to that tab when it is inside a tab group. */
 function StatBlock({ block, ctx }: { block: Extract<Block, { type: 'stat' }>; ctx: ViewContext }) {
   const { size } = useWidgetSize();
+  const fill = useWidgetFill();
   const selectTab = useContext(TabSelectContext);
   return (
-    <div className={`grid gap-2 ${STAT_COLUMNS[size] ?? STAT_COLUMNS.lg}`}>
+    <div className={`grid gap-2 ${fill ? (size === 'xs' ? FILL_GRID_XS : FILL_GRID) : (STAT_COLUMNS[size] ?? STAT_COLUMNS.lg)}`}>
       {block.items.map((item, i) => {
-        const tone = statTone(item.tone, ctx);
-        const card = `flex min-w-0 flex-col gap-0.5 rounded-lg border border-border bg-card p-3 text-left`;
+        const value = text(item.value, ctx);
+        const numeric = Number(fillTemplate(item.value, ctx));
+        const tone = statTone(item.tone, ctx) ?? thresholdTone(numeric, item.thresholds);
+        const bar = item.bar ? Number(fillTemplate(item.bar, ctx)) : NaN;
+        const card = fill ? FILL_CARD : STAT_CARD;
+        const valueText = withUnit(value || '—', item.unit);
+        const valueTone = tone ? STAT_TONE_CLASS[tone] : 'text-foreground';
         const content = (
           <>
-            <div className="truncate text-xs text-muted-foreground">{item.label}</div>
-            <div className={`${size === 'xs' ? 'text-xl' : 'text-2xl'} font-semibold tabular-nums ${tone ? STAT_TONE_CLASS[tone] : 'text-foreground'}`}>{text(item.value, ctx) || '—'}</div>
-            {item.sub && <div className="truncate text-xs text-muted-foreground">{text(item.sub, ctx)}</div>}
+            <div className={fill ? FILL_LABEL : 'truncate text-xs text-muted-foreground'}>{item.label}</div>
+            <div className={`${fill ? FILL_VALUE : size === 'xs' ? 'text-xl' : 'text-2xl'} font-semibold tabular-nums ${valueTone}`}>{valueText}</div>
+            {Number.isFinite(bar) && <Bar value={bar} tone={tone} />}
+            {item.trend && <Sparkline trend={item.trend} tone={tone} />}
+            {item.sub && <div className={fill ? FILL_SUB : 'truncate text-xs text-muted-foreground'}>{text(item.sub, ctx)}</div>}
           </>
         );
         return item.tab && selectTab
           ? <button key={i} type="button" onClick={() => selectTab(item.tab!)} className={`${card} hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}>{content}</button>
           : <div key={i} className={card}>{content}</div>;
       })}
+    </div>
+  );
+}
+
+/** A ring gauge: the value in the middle of a circle that fills as it approaches `max`. */
+function Gauge({ item, ctx, fill }: { item: GaugeItem; ctx: ViewContext; fill: boolean }) {
+  const value = text(item.value, ctx);
+  const numeric = Number(fillTemplate(item.value, ctx));
+  const tone = thresholdTone(numeric, item.thresholds);
+  const geometry = gaugeGeometry(numeric, item.max ?? 100);
+  const label = `${item.label}: ${withUnit(value || '—', item.unit)}`;
+  return (
+    <div className={fill ? `${FILL_CARD} items-center text-center` : GAUGE_CARD}>
+      <div className={fill ? FILL_LABEL : 'truncate text-xs text-muted-foreground'}>{item.label}</div>
+      <div className={fill ? 'relative min-h-0 w-full flex-1' : 'relative mx-auto aspect-square w-full max-w-[9rem]'}>
+        <svg viewBox={`0 0 ${GAUGE_VIEWBOX} ${GAUGE_VIEWBOX}`} preserveAspectRatio="xMidYMid meet" className="size-full" role="img" aria-label={label}>
+          <circle cx={geometry.cx} cy={geometry.cy} r={geometry.r} fill="none" strokeWidth={GAUGE_STROKE} className="stroke-muted" />
+          <circle cx={geometry.cx} cy={geometry.cy} r={geometry.r} fill="none" strokeWidth={GAUGE_STROKE} strokeLinecap="round"
+            strokeDasharray={geometry.circumference} strokeDashoffset={geometry.dashOffset} transform={`rotate(-90 ${geometry.cx} ${geometry.cy})`}
+            className={tone ? STAT_TONE_STROKE[tone] : 'stroke-primary'} />
+        </svg>
+        <div className="absolute inset-0 flex items-center justify-center" aria-hidden="true">
+          <span className={`${fill ? FILL_GAUGE_VALUE : 'text-xl'} font-semibold tabular-nums ${tone ? STAT_TONE_CLASS[tone] : 'text-foreground'}`}>
+            {withUnit(value || '—', item.unit)}
+          </span>
+        </div>
+      </div>
+      {item.sub && <div className={fill ? FILL_SUB : 'truncate text-xs text-muted-foreground'}>{text(item.sub, ctx)}</div>}
+    </div>
+  );
+}
+
+function GaugeBlock({ block, ctx }: { block: Extract<Block, { type: 'gauges' }>; ctx: ViewContext }) {
+  const { size } = useWidgetSize();
+  const fill = useWidgetFill();
+  return (
+    <div className={`grid gap-2 ${fill ? (size === 'xs' ? FILL_GRID_XS : FILL_GRID) : (STAT_COLUMNS[size] ?? STAT_COLUMNS.lg)}`}>
+      {block.items.map((item, i) => <Gauge key={i} item={item} ctx={ctx} fill={fill} />)}
     </div>
   );
 }

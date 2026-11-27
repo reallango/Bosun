@@ -15,6 +15,9 @@
  */
 import type { ActionSpec, Cond, FieldSpec, ParamSpec, RunAs, ViewSpec } from './spec';
 import { validateHideBelow, type WidgetSize } from './size';
+import { validateThresholds, type Thresholds } from './thresholds';
+import { validateTrend, type TrendSpec } from './trends';
+import { validateGaugeItem, type GaugeItem } from './gauges';
 import { cond, fail, FIELD_RE, ID_RE, intIn, isObj, PARAM_RE, text, validateParam, type Obj, type Validated } from './spec-util';
 
 export const SCRIPT_FILE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*(\/[A-Za-z0-9][A-Za-z0-9._-]*)*$/;
@@ -83,7 +86,9 @@ export type StatTone = (typeof STAT_TONES)[number];
 /**
  * One card of a `stat` block. `value` and `sub` are templates over the screen's context (like other blocks). `tone` is
  * a fixed tone, or a map of tones to conditions whose first matching entry colours the number. `tab` names a tab of the
- * same screen: clicking the card switches to it (and updates `?tab=` on a page).
+ * same screen: clicking the card switches to it (and updates `?tab=` on a page). `bar` is a template that gives 0-100
+ * for a thin bar under the number, `unit` is appended to it, `trend` draws a small line of the metric's history and
+ * `thresholds` colour the number and bar.
  */
 export interface StatItem {
   label: string;
@@ -91,6 +96,10 @@ export interface StatItem {
   sub?: string;
   tone?: StatTone | Partial<Record<StatTone, Cond>>;
   tab?: string;
+  bar?: string;
+  unit?: string;
+  trend?: TrendSpec;
+  thresholds?: Thresholds;
 }
 
 export const EDITOR_INPUTS = ['text', 'number', 'select', 'checkbox', 'textarea', 'lines', 'pairs', 'rows', 'button', 'heading'] as const;
@@ -187,6 +196,7 @@ export type Block = (
   | { type: 'section'; title: string; defaultOpen: boolean; badges: Badge[]; summary?: string; blocks: Block[]; when?: Cond }
   | { type: 'kv'; items: FieldSpec[]; when?: Cond }
   | { type: 'stat'; items: StatItem[]; when?: Cond }
+  | { type: 'gauges'; items: GaugeItem[]; when?: Cond }
   | { type: 'text'; text: string; when?: Cond }
   | { type: 'notice'; level: 'info' | 'warning' | 'error'; text: string; when?: Cond }
   | { type: 'buttons'; actions: string[]; when?: Cond }
@@ -606,9 +616,31 @@ export function validateLayout(
               tab = raw.tab;
               statTabs.push({ tab, where: `${w} stat "${label}"` });
             }
-            items.push({ label, value, ...(sub ? { sub } : {}), ...(tone ? { tone } : {}), ...(tab ? { tab } : {}) });
+            const bar = raw.bar === undefined ? undefined : text(raw.bar, 200);
+            if (bar === null) return fail(`${w}: stat "${label}": "bar" must be a template that gives a number from 0 to 100`);
+            const unit = raw.unit === undefined ? undefined : text(raw.unit, 8);
+            if (unit === null) return fail(`${w}: stat "${label}": "unit" must be short text`);
+            const trend = validateTrend(raw.trend, `${w} stat "${label}"`);
+            if (!trend.ok) return trend;
+            const thresholds = validateThresholds(raw.thresholds, `${w} stat "${label}"`);
+            if (!thresholds.ok) return thresholds;
+            items.push({
+              label, value, ...(sub ? { sub } : {}), ...(tone ? { tone } : {}), ...(tab ? { tab } : {}),
+              ...(bar ? { bar } : {}), ...(unit ? { unit } : {}), ...(trend.value ? { trend: trend.value } : {}), ...(thresholds.value ? { thresholds: thresholds.value } : {}),
+            });
           }
           out.push({ type: 'stat', items, ...base });
+          break;
+        }
+        case 'gauges': {
+          if (!Array.isArray(b.items) || b.items.length < 1 || b.items.length > 12) return fail(`${w}: "items" must list 1-12 ring gauges`);
+          const items: GaugeItem[] = [];
+          for (const item of b.items as unknown[]) {
+            const g = validateGaugeItem(item, w);
+            if (!g.ok) return g;
+            items.push(g.value);
+          }
+          out.push({ type: 'gauges', items, ...base });
           break;
         }
         case 'text': {
@@ -741,7 +773,7 @@ export function validateLayout(
           break;
         }
         default:
-          return fail(`${w}: unknown block type "${b.type}" (section, tabs, kv, stat, text, code, notice, buttons, form, editor, select, jobProgress or view)`);
+          return fail(`${w}: unknown block type "${b.type}" (section, tabs, kv, stat, gauges, text, code, notice, buttons, form, editor, select, jobProgress or view)`);
       }
     }
     return { ok: true, value: out };

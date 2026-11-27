@@ -4,8 +4,10 @@ import { forwardRef } from 'react';
 import { Copy, Download, ExternalLink, Info, Layers, Pause, Pencil, Play, Plus, Power, RefreshCw, RotateCw, ScrollText, Settings, Square, TerminalSquare, Trash2, Upload } from 'lucide-react';
 import { evalCond, fillTemplate, type FieldSpec } from '@/lib/widgets/runtime/spec';
 import { fitsSize } from '@/lib/widgets/runtime/size';
+import { shapeSparkline, sparklinePath, trendWindowSec, type TrendSpec } from '@/lib/widgets/runtime/trends';
 import { useWidgetSize } from '@/components/dashboard/widget-size';
-import { iconButtonClass } from './styles';
+import { useTrendData } from './trends';
+import { iconButtonClass, SPARKLINE } from './styles';
 
 /** Small pieces shared by the version 1 views and the layout blocks of the declarative widget. */
 
@@ -66,12 +68,29 @@ function barColor(pct: number): string {
   return pct >= 90 ? 'bg-red-500' : pct >= 75 ? 'bg-amber-500' : 'bg-green-500';
 }
 
-export function Bar({ value, color }: { value: number; color?: string }) {
+export type StatToneName = 'warning' | 'danger' | 'success';
+
+const TONE_BAR: Record<StatToneName, string> = { danger: 'bg-destructive', warning: 'bg-warning', success: 'bg-success' };
+
+export function Bar({ value, color, tone }: { value: number; color?: string; tone?: StatToneName | null }) {
   const pct = Math.max(0, Math.min(100, value));
   return (
     <div className="h-1.5 w-full overflow-hidden rounded bg-muted" role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
-      <div className={`h-full ${color ?? barColor(pct)}`} style={{ width: `${pct}%` }} />
+      <div className={`h-full ${color ?? (tone ? TONE_BAR[tone] : barColor(pct))}`} style={{ width: `${pct}%` }} />
     </div>
+  );
+}
+
+/** A small line of a metric's recent history. It draws nothing when the host has no history for it. */
+export function Sparkline({ trend, tone }: { trend: TrendSpec; tone?: StatToneName | null }) {
+  const data = useTrendData();
+  const points = data ? shapeSparkline(data.series[trend.metric] ?? [], trendWindowSec(trend.window), data.to) : [];
+  if (points.length < 2) return null;
+  const stroke = tone === 'danger' ? 'stroke-destructive' : tone === 'warning' ? 'stroke-warning' : tone === 'success' ? 'stroke-success' : 'stroke-primary';
+  return (
+    <svg viewBox="0 0 100 30" preserveAspectRatio="none" className={SPARKLINE} aria-hidden="true">
+      <path d={sparklinePath(points)} fill="none" strokeWidth={1.5} vectorEffect="non-scaling-stroke" className={stroke} />
+    </svg>
   );
 }
 
@@ -91,6 +110,7 @@ export function Fields({ fields, data }: { fields: FieldSpec[]; data: unknown })
               <span className="truncate font-medium text-foreground">{text || '—'}</span>
             </div>
             {Number.isFinite(bar) && <Bar value={bar} />}
+            {f.trend && <Sparkline trend={f.trend} />}
           </div>
         );
       })}

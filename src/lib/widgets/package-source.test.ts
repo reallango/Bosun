@@ -74,7 +74,7 @@ describe('listRemotePackages', () => {
     expect(r.skipped).toEqual([]);
     const future = r.packages.find(p => p.id === 'future');
     expect(future?.installable).toBe(false);
-    expect(future?.blockedReason).toBe('This widget needs a newer Bosun (widget API level 99; this Bosun has 6). Update Bosun first.');
+    expect(future?.blockedReason).toBe('This widget needs a newer Bosun (widget API level 99; this Bosun has 7). Update Bosun first.');
     expect(r.packages.find(p => p.id === 'current')).toMatchObject({ installable: true, blockedReason: null });
     expect(r.packages.find(p => p.id === 'plain')).toMatchObject({ installable: true, blockedReason: null });
   });
@@ -103,7 +103,7 @@ describe('fetchRemotePackage', () => {
   it('refuses a package that needs a newer Bosun, and fetches one this Bosun can honour', async () => {
     const future = fakeGithub({ 'widgets/future/manifest.json': manifest('future', { requires: { api: 99 } }) });
     await expect(fetchRemotePackage('main', 'future', future.f)).rejects.toThrow(
-      'This widget needs a newer Bosun (widget API level 99; this Bosun has 6). Update Bosun first.',
+      'This widget needs a newer Bosun (widget API level 99; this Bosun has 7). Update Bosun first.',
     );
     const current = fakeGithub({ 'widgets/current/manifest.json': manifest('current', { requires: { api: 3 } }) });
     const p = await fetchRemotePackage('main', 'current', current.f);
