@@ -47,6 +47,7 @@ newer Bosun is still listed under Available (so the reason is visible) but canno
 | 2 | Spec version 2 as it was before the additions below: `scripts` and package secrets, `state`, `lookups`, script actions with variants and jobs, `layout` views and editor blocks, screens, datasets, menu entries, multi-line text parameters, and stack import (`stacks` without its later keys); also `resources` on data and `target` on actions. |
 | 3 | `stacks.retag`, `stacks.deployLater` and `stacks.deployPrivilegedLater` (which replaced the earlier `stacks.startLater`), `setup`, and the widget-size keys `hideBelow`, `row.inline` and `row.subtitleHideBelow`. |
 | 4 | `bulk` on table views, the `stat` block, and the Manage-page keys of the earlier work: tab `count`, `open: "dialog"` on forms and editors, column `sort`, view `defaultSort`, and view `open` for row details. |
+| 5 | `schedules`: the runs a package offers under Settings → Schedules. |
 
 New spec keys that an older Bosun cannot honour raise the level in `src/lib/widgets/api-level.ts`; keys an older
 Bosun can safely ignore (because it renders the widget sensibly without them) do not.
@@ -143,6 +144,46 @@ its manifest, scripts and declarative screen; Bosun has no code of its own for a
 - `data.also` and `data.server` combine several sections and the server row; templates reach them by name (`{system.prettyName}`, `{server.name}`, `{metrics.cpu.usage}`). The `metrics` section holds the latest value of every tracked number.
 - `metrics` lists the statistics the widget tracks. A name the built-in collectors produce (`cpu.usage`, `mem.used_pct`, `net.rx_bps`, `disk.root_used_pct`, `gpu*.util`, ...) only sets how long its history is kept. A name that starts with the package id and has `from` is computed from the widget's data on every collection (`count`, `sum`, `avg`, `min`, `max` or `first`, optionally over the rows matching `where`). `rawHours` (up to 2160), `rollup5mDays` (up to 365) and `rollup1hDays` (up to 3650) override the global retention; when several widgets name one metric the longest wins. Computed metrics are recorded for the servers that have the widget on a dashboard.
 - View types: `list`, `table` (columns may use `bar`, `mb`, `duration`, `temp` formats), `fields` (labelled values, optional gauges), `text`, and `chart` (history lines of `chart.metrics`). List rows can carry `fields` too.
+
+### Schedules
+
+A package can offer runs under Settings → Schedules. Bosun knows nothing about Docker or backups: it runs the
+dataset or action a widget declares, on the timetable a user picks, with that user's permissions.
+
+```jsonc
+"spec": {
+  "schedules": [
+    {
+      "id": "find_findings",
+      "label": "Check for updates",
+      "description": "Reads the image list and warns about newer tags.",
+      "run": { "dataset": "updates" },        // or { "action": "update", "params": { "service": "web" } }
+      "target": "server",                      // "server" (default), "stack" or "container"
+      "options": { "args": { "all": true }, "keepRuns": 200 },
+      "notify": {                              // dataset runs only
+        "when": { "field": "available", "equals": true },
+        "title": "{count} update(s) on {server}",
+        "message": "The schedule {schedule} found {count} update(s) on {server}.",
+        "severity": "warning"                  // "info" (default) or "warning"
+      }
+    }
+  ]
+}
+```
+
+- `id` is the kind's stable name (lowercase letters, digits and underscores); `label` is what the dialog shows.
+- `run` names exactly one dataset or one runnable action (`script` or `command`). Action parameters are fixed here or
+  come from the target; Bosun never fills in action parameter defaults, so every required parameter must be present.
+  A dataset script may rely on its own declared defaults.
+- `target` says the schedule is for the whole server, or for one stack/container. A `stack`/`container` kind must run a
+  dataset or action that declares the same `target`; the dialog asks which one. `target` defaults to `server`.
+- `options.args` are the dataset script's fixed arguments; `options.params` are action parameters (they override the kind's own `run.params`). `options.keepRuns` keeps 10–1000 finished runs (default 200).
+- `notify` is for dataset runs only. Bosun counts the rows matching `when` (every row when it is absent) and raises one
+  bell notice when the count is above zero, at most once per schedule per day. `{count}`, `{server}` and `{schedule}` are
+  available in `title` and `message`.
+- Every run re-checks the creator's permission for the server (and stack/container) plus the permission of the dataset or
+  action. If a user is removed or disabled, an API key is revoked or expires, or a grant is withdrawn, the schedule pauses
+  and one notice explains why. Only the cluster's database leader runs schedules.
 
 ### Widget sizes
 

@@ -27,6 +27,7 @@ export const SETTINGS_NAV: SettingsNavGroup[] = [
     label: 'Servers',
     items: [
       { href: '/settings/servers', label: 'Servers' },
+      { href: '/settings/schedules', label: 'Schedules' },
       { href: '/settings/cluster', label: 'Cluster' },
       { href: '/settings/alerts', label: 'Alerts' },
     ],
