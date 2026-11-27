@@ -115,11 +115,12 @@ function Inner({ widget, screenId }: { widget: WidgetRow; screenId: string }) {
     allowed: runner.allowed, busy: runner.busy,
     onAction: (a, params) => runner.start(a, null, params),
     renderView: (v, d) => <V1View view={v} data={d} widgetId={widget.id} serverId={widget.server_id} actions={new Map((spec?.actions ?? []).map(a => [a.id, a]))} allowed={runner.allowed} busy={runner.busy} start={runner.start}
+      run={runner.run} waitForJob={runner.waitForJob} refresh={reloadScreen} notify={runner.setNotice} page
       openRow={(id, row) => { if (spec?.screens?.[id]) setDetail({ id, row }); }} />,
     onCancelJob: () => { void runner.cancelJob(); },
     submit: runner.submit,
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [spec, runner.allowed, runner.busy, runner.start, runner.submit, runner.cancelJob]);
+  }), [spec, runner.allowed, runner.busy, runner.start, runner.run, runner.setNotice, runner.submit, runner.cancelJob, reloadScreen]);
 
   const title = screen ? fillTemplate(screen.title, full) : 'Widget';
   const dashboardName = currentInstance?.dashboard_name ?? 'Dashboard';

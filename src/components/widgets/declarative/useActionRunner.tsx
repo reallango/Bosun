@@ -7,6 +7,7 @@ import { X } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { useWidgetJob } from '@/hooks/useWidgetJob';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
+import { readJson } from '@/lib/api/readJson';
 import { WidgetLoading } from '@/components/widgets/WidgetLoading';
 import { ConfirmActionDialog, apiAction } from '@/components/widgets/shared/ConfirmActionDialog';
 import { fillTemplate, getPath, type ParamSpec } from '@/lib/widgets/runtime/spec';
@@ -81,24 +82,39 @@ export function useActionRunner(o: Options) {
   // A web terminal asks for the person's own login and is only available to Full access; the action's permission still applies.
   const allowed = useCallback((a: PublicAction) => can(a.permission, o.serverId) && (a.kind !== 'terminal' || hasRole(user?.role, 'admin')), [can, o.serverId, user?.role]);
 
-  /** Runs the action; throws when it fails (a confirmation dialog shows the message). */
-  const run = useCallback(async (action: PublicAction, row: Row | null, override?: Record<string, unknown>, extra?: SubmitExtra) => {
+  /** Runs the action; throws when it fails (a confirmation dialog shows the message). Resolves with the job id for a background job. */
+  const run = useCallback(async (action: PublicAction, row: Row | null, override?: Record<string, unknown>, extra?: SubmitExtra): Promise<{ jobId?: string }> => {
     setBusy(action.id);
     try {
       const d = await apiAction(fetchWithAuth, `/api/servers/${o.serverId}/widget-actions/${encodeURIComponent(o.widgetType)}/${encodeURIComponent(action.id)}`, 'POST', {
         params: override ?? paramsFor(action, row), ...(action.confirm ? { confirm: true } : {}), ...(o.version >= 2 ? { widgetId: o.widgetId } : {}),
         ...(extra?.origin ? { origin: extra.origin } : {}), ...(extra?.savedFrom ? { savedFrom: extra.savedFrom } : {}),
       }) as { success?: boolean; output?: string; error?: string; exitCode?: number; timedOut?: boolean; message?: string; jobId?: string };
-      if (d.jobId) { setNotice(`${action.label} started. Follow it with the bell at the top (Tasks): its steps, its log, and the way back to this screen.`); await refreshJob(); return; }   // started in the background
+      if (d.jobId) { setNotice(`${action.label} started. Follow it with the bell at the top (Tasks): its steps, its log, and the way back to this screen.`); await refreshJob(); return { jobId: d.jobId }; }   // started in the background
       const text = [d.output, d.error].filter(s => s && s.trim()).join('\n').trim();
       if (!d.success) throw new Error((d.message || text).slice(0, 300) || (d.timedOut ? 'The command timed out' : `The command failed (exit ${d.exitCode})`));
       if (action.result === 'text') setOutput({ title: `${action.label}${row && o.rowTitle ? `: ${o.rowTitle(row)}` : ''}`, text: text || '(no output)' });
       else if (action.result === 'toast') setNotice(`${action.label}: ${d.message || (text ? text.split('\n')[0].slice(0, 120) : 'done')}`);
       if (action.after === 'refresh') setTimeout(o.changed, 2500);
+      return {};
     } finally {
       setBusy(null);
     }
   }, [o.serverId, o.widgetType, o.widgetId, o.version, o.rowTitle, o.changed, refreshJob]);
+
+  /** Wait until a background job ends; throws when it failed, was cancelled or disappeared. */
+  const waitForJob = useCallback(async (jobId: string): Promise<void> => {
+    for (;;) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      const res = await fetchWithAuth(`/api/servers/${o.serverId}/widget-jobs/${encodeURIComponent(o.widgetType)}?id=${encodeURIComponent(jobId)}`);
+      const json = await readJson<{ data?: { job?: { status?: string; message?: string | null } | null } }>(res);
+      const job = json.data?.job;
+      if (!job) throw new Error('The task disappeared before it finished');
+      if (job.status === 'running') continue;
+      if (job.status !== 'success') throw new Error(job.message || (job.status === 'cancelled' ? 'The task was cancelled' : `The task ${job.status || 'failed'}`));
+      return;
+    }
+  }, [o.serverId, o.widgetType]);
 
   /** Start an action from a row, a button or a form. Asks for confirmation first when the action does. */
   const start = useCallback((action: PublicAction, row: Row | null, params?: Record<string, unknown>) => {
@@ -184,5 +200,5 @@ export function useActionRunner(o: Options) {
     </>
   );
 
-  return { busy, notice, setNotice, job, cancelJob: cancel, allowed, run, start, submit, dialogs };
+  return { busy, notice, setNotice, job, cancelJob: cancel, allowed, run, waitForJob, start, submit, dialogs };
 }

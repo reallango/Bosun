@@ -11,7 +11,7 @@
  */
 
 /** The widget API level of this Bosun. Raise it when a widget package gains a spec key that older Bosun versions cannot honour. */
-export const WIDGET_API_LEVEL = 3;
+export const WIDGET_API_LEVEL = 4;
 
 /** The optional `requires` object of a package manifest. */
 export interface WidgetApiRequires { api: number }

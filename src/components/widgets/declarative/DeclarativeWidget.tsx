@@ -1,12 +1,14 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ChevronDown, ChevronUp, Ellipsis, Info, Loader2, Search, X } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { useWidgetSize } from '@/components/dashboard/widget-size';
 import { fitsSize, splitActions, splitRowActions } from '@/lib/widgets/runtime/size';
 import { nextSortDir, sortRows, type SortState } from '@/lib/widgets/runtime/sort';
+import { bulkCandidates, bulkNames, rowKey, rowLabel, selectAll, selectedRows, toggleSelected, type BulkCandidate } from '@/lib/widgets/runtime/bulk';
+import { ConfirmActionDialog } from '@/components/widgets/shared/ConfirmActionDialog';
 import { LayoutGrid, List, Package, Plus, RefreshCw, Settings, SquareTerminal } from 'lucide-react';
 import { useWidgetData } from '@/hooks/useWidgetData';
 import { useAuth } from '@/hooks/useAuth';
@@ -22,7 +24,7 @@ import type { ViewContext } from '@/lib/widgets/runtime/layout';
 import { MetricsChartWidget } from '@/components/widgets/metrics-chart/MetricsChartWidget';
 import { Bar, DOT, Fields, formatValue, ICONS, IconBtn, type Row } from './parts';
 import { LayoutBlocks, type LayoutUi } from './LayoutView';
-import { inputClass } from './styles';
+import { inputClass, toolbarButtonClass } from './styles';
 import { ScreenDialog } from './ScreenDialog';
 import { RowSheet } from './RowSheet';
 import { useActionRunner, type PublicAction } from './useActionRunner';
@@ -63,6 +65,15 @@ const MENU_ICONS: Record<string, React.ComponentType<{ className?: string }>> = 
   plus: Plus, settings: Settings, 'layout-grid': LayoutGrid, list: List, package: Package, download: ICONS.download, terminal: SquareTerminal, 'refresh-cw': RefreshCw, info: Info,
 };
 
+/** The header checkbox of a bulk-selectable table: checked when every visible row is selected, mixed when only some are. */
+function SelectAllCheckbox({ checked, indeterminate, onChange, label }: {
+  checked: boolean; indeterminate: boolean; onChange: (on: boolean) => void; label: string;
+}) {
+  const ref = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (ref.current) ref.current.indeterminate = indeterminate; }, [indeterminate]);
+  return <input ref={ref} type="checkbox" checked={checked} onChange={e => onChange(e.target.checked)} aria-label={label} className="size-3.5 accent-primary" />;
+}
+
 export interface V1Props {
   view: ViewSpec;
   data: unknown;
@@ -72,12 +83,22 @@ export interface V1Props {
   allowed: (a: PublicAction) => boolean;
   busy: string | null;
   start: (a: PublicAction, row: Row | null) => void;
+  /** Run an action on a row without asking first (a bulk run sends one request per row through the same path). */
+  run?: (a: PublicAction, row: Row) => Promise<{ jobId?: string }>;
+  /** Wait for a background job a bulk run started, so the next row does not race it. */
+  waitForJob?: (jobId: string) => Promise<void>;
+  /** Reload after a bulk run. */
+  refresh?: () => void;
+  /** Show a message in the widget's or page's notice area (the result of a bulk run). */
+  notify?: (message: string) => void;
+  /** A full-page table offers bulk selection; a widget on a dashboard does not. */
+  page?: boolean;
   /** Open the screen named by `view.open` in a side sheet, with the clicked row as its context. */
   openRow?: (screenId: string, row: Row) => void;
 }
 
 /** A version 1 view (list, table, fields, text, chart) over some data, with its filter, toggles, summary and row actions. */
-export function V1View({ view, data, widgetId, serverId, actions, allowed, busy, start, openRow }: V1Props) {
+export function V1View({ view, data, widgetId, serverId, actions, allowed, busy, start, run, waitForJob, refresh, notify, page, openRow }: V1Props) {
   const [query, setQuery] = useState('');
   const [toggles, setToggles] = useState<Record<string, boolean>>(() => Object.fromEntries((view.toggles ?? []).map(t => [t.key, t.default])));
   const defaultSort = useMemo<SortState | null>(() => {
@@ -100,10 +121,48 @@ export function V1View({ view, data, widgetId, serverId, actions, allowed, busy,
     return sort ? sortRows(filtered, sort.field, sort.dir) : filtered;
   }, [data, view, query, toggles, sort]);
   const { size } = useWidgetSize();
+  const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
+  const [bulkConfirm, setBulkConfirm] = useState<BulkCandidate<PublicAction> | null>(null);
+  const [bulkProgress, setBulkProgress] = useState<{ done: number; total: number; failed: number } | null>(null);
 
   if (view.type === 'chart') return <MetricsChartWidget widgetId={widgetId} serverId={serverId} defaultMetrics={view.chart?.metrics} />;
   if (data === null || data === undefined) return <div className="p-2 text-sm text-muted-foreground">Waiting for the first data from this host…</div>;
   const all: Row[] = Array.isArray(data) ? (data as Row[]) : [];
+
+  // Bulk selection is for page-size tables: a dashboard widget keeps its compact row actions.
+  const bulkEnabled = page === true && view.type === 'table' && (view.bulk?.length ?? 0) > 0 && !!run;
+  const picked = selectedRows(rows, selected);
+  const candidates = bulkEnabled ? bulkCandidates(view, rows, selected, actions, allowed) : [];
+  const allSelected = rows.length > 0 && rows.every(row => selected.has(rowKey(row)));
+  const someSelected = !allSelected && rows.some(row => selected.has(rowKey(row)));
+
+  const openBulk = (candidate: BulkCandidate<PublicAction>) => {
+    setBulkProgress(null);
+    setBulkConfirm(candidate);
+  };
+
+  /** One request per row, sequentially, through the same `run` path a single row action uses. */
+  const runBulk = async () => {
+    if (!bulkConfirm || !run) return;
+    const { action, rows: targets, skipped } = bulkConfirm;
+    let succeeded = 0;
+    let failed = 0;
+    setBulkProgress({ done: 0, total: targets.length, failed: 0 });
+    for (let i = 0; i < targets.length; i++) {
+      try {
+        const { jobId } = await run(action, targets[i]);
+        // A job action answers before its work is done; finish it before the next row, or the two jobs collide.
+        if (jobId && waitForJob) await waitForJob(jobId);
+        succeeded++;
+      } catch {
+        failed++;
+      }
+      setBulkProgress({ done: i + 1, total: targets.length, failed });
+    }
+    setSelected(new Set());
+    refresh?.();
+    notify?.(`${action.label}: ${succeeded} done${failed ? `, ${failed} failed` : ''}${skipped ? `, ${skipped} skipped` : ''}`);
+  };
 
   // The row's actions that apply: as many as the widget has room for are buttons, the rest sit in a "more" menu.
   // A page-size table shows at most two icons and keeps the rest (destructive ones last) in that menu.
@@ -193,6 +252,11 @@ export function V1View({ view, data, widgetId, serverId, actions, allowed, busy,
         <table className="w-full text-left text-xs">
           <thead className="sticky top-0 bg-card text-muted-foreground">
             <tr>
+              {bulkEnabled && (
+                <th className="w-0 px-2 py-1">
+                  <SelectAllCheckbox checked={allSelected} indeterminate={someSelected} onChange={on => setSelected(s => selectAll(s, rows, on))} label="Select all rows" />
+                </th>
+              )}
               {cols.map(c => (
                 <th key={c.title} className="px-2 py-1 font-medium"
                   aria-sort={c.sort ? (sort?.field === c.sort ? (sort.dir === 'asc' ? 'ascending' : 'descending') : 'none') : undefined}>
@@ -214,6 +278,12 @@ export function V1View({ view, data, widgetId, serverId, actions, allowed, busy,
           <tbody className="divide-y divide-border">
             {rows.map((row, i) => (
               <tr key={i} {...rowProps(row)} className={clickable ? 'cursor-pointer hover:bg-muted' : undefined}>
+                {bulkEnabled && (
+                  <td className="px-2 py-1" onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>
+                    <input type="checkbox" checked={selected.has(rowKey(row))} onChange={e => setSelected(s => toggleSelected(s, rowKey(row), e.target.checked))}
+                      aria-label={`Select ${rowLabel(view, row) || 'row'}`} className="size-3.5 accent-primary" />
+                  </td>
+                )}
                 {cols.map(c => {
                   const text = formatValue(fillTemplate(c.value, row), c.format);
                   const bar = c.format === 'bar' ? Number(fillTemplate(c.value, row)) : NaN;
@@ -251,7 +321,41 @@ export function V1View({ view, data, widgetId, serverId, actions, allowed, busy,
           ))}
         </div>
       ) : null}
+      {bulkEnabled && picked.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded-md border border-border bg-muted px-2 py-1 text-xs">
+          <span className="font-medium">{picked.length} selected</span>
+          <div className="ml-auto flex flex-wrap items-center gap-1.5">
+            {candidates.map(candidate => (
+              <button key={candidate.action.id} type="button" className={toolbarButtonClass('small', candidate.action.confirm?.destructive ? 'destructive' : 'outline')}
+                onClick={() => openBulk(candidate)}>
+                {candidate.action.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
       {content()}
+      {bulkConfirm && (
+        <ConfirmActionDialog
+          open
+          onOpenChange={open => { if (!open) { setBulkConfirm(null); setBulkProgress(null); } }}
+          title={`${bulkConfirm.action.label} ${bulkConfirm.rows.length} ${bulkConfirm.rows.length === 1 ? 'row' : 'rows'}?`}
+          confirmLabel={bulkConfirm.action.label}
+          destructive={!!bulkConfirm.action.confirm?.destructive}
+          description={(() => {
+            const names = bulkNames(view, bulkConfirm.rows);
+            return (
+              <div className="space-y-2">
+                {names.names.length > 0 && <ul className="max-h-40 list-disc overflow-auto pl-4">{names.names.map((name, i) => <li key={i}>{name || '—'}</li>)}</ul>}
+                {names.more > 0 && <p>and {names.more} more</p>}
+                {bulkConfirm.skipped > 0 && <p>{bulkConfirm.skipped} selected {bulkConfirm.skipped === 1 ? 'row does' : 'rows do'} not apply and will be skipped.</p>}
+                {bulkProgress && <p role="status">{bulkProgress.done} of {bulkProgress.total}{bulkProgress.failed ? `, ${bulkProgress.failed} failed` : ''}</p>}
+              </div>
+            );
+          })()}
+          onConfirm={runBulk}
+        />
+      )}
     </div>
   );
 }
@@ -324,6 +428,7 @@ export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
 
   const v1 = (v: ViewSpec, d: unknown) => (
     <V1View view={v} data={d} widgetId={widgetId} serverId={serverId} actions={actionsById} allowed={allowed} busy={busy} start={start}
+      run={runner.run} waitForJob={runner.waitForJob} refresh={refresh} notify={setNotice} page={false}
       openRow={(id, row) => { if (spec.screens?.[id]) setDetail({ id, row }); }} />
   );
 

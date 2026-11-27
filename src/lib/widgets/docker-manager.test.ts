@@ -45,6 +45,28 @@ describe('the Docker manager package', () => {
     expect(tab('images').blocks[0]).toMatchObject({ type: 'form', open: 'dialog', label: 'Pull image' });
     expect(tab('volumes').blocks[0]).toMatchObject({ type: 'editor', open: 'dialog', label: 'New volume' });
     expect(tab('networks').blocks[0]).toMatchObject({ type: 'editor', open: 'dialog', label: 'New network' });
+    expect(manifest.requires).toEqual({ api: 4 });
+  });
+
+  it('the Manage page offers bulk actions on its lists and stat tiles on Overview', () => {
+    const manage = spec.screens!.manage;
+    const tabs = manage.blocks.find(b => b.type === 'tabs') as Extract<Block, { type: 'tabs' }>;
+    const tab = (id: string) => tabs.tabs.find(t => t.id === id)!;
+    const view = (id: string) => (tab(id).blocks.find(b => b.type === 'view') as Extract<Block, { type: 'view' }>).view;
+    expect(view('images').bulk).toEqual(['image_remove']);
+    expect(view('containers').bulk).toEqual(['stop', 'start', 'remove']);
+    expect(view('volumes').bulk).toEqual(['volume_remove']);
+    expect(view('stacks').bulk).toEqual(['stack_remove']);
+    expect(view('networks').bulk).toBeUndefined();
+
+    const overview = tab('overview').blocks;
+    const stat = overview.find(b => b.type === 'stat') as Extract<Block, { type: 'stat' }>;
+    expect(stat.items.map(i => i.label)).toEqual(['Running', 'Stopped', 'Images', 'Volumes', 'Build cache']);
+    expect(stat.items.find(i => i.label === 'Stopped')).toMatchObject({ tab: 'containers', tone: { warning: { field: 'datasets.system.containers.stopped', gt: 0 } } });
+    expect(stat.items.find(i => i.label === 'Images')).toMatchObject({ tab: 'images', sub: '{datasets.system.disk.images}' });
+    expect(stat.items.find(i => i.label === 'Build cache')).toMatchObject({ tab: 'images', value: '{datasets.system.disk.cache}' });
+    const facts = overview.find(b => b.type === 'kv') as Extract<Block, { type: 'kv' }>;
+    expect(facts.items.map(i => i.label)).toEqual(['Docker version', 'Compose', 'Compose', 'Volume drivers', 'Network drivers', 'Disk used by containers']);
   });
 
   it('keeps risky things behind their own permissions', () => {
