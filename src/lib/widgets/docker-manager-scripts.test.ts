@@ -1573,10 +1573,10 @@ esac`);
   it.skipIf(!hasSh)('the collector and the reader are the very same text in every script that rebuilds a container; the run writer too', () => {
     const block = (f: string, name: string) => new RegExp(`# >>> ${name}[\\s\\S]*# <<< ${name}`).exec(script(f))![0];
     for (const name of ['export collector', 'export reader']) {
-      for (const f of ['export_run.sh', 'export_compose.sh', 'container_update.sh']) expect(block(f, name), f).toBe(block('export_run.sh', name));
+      for (const f of ['export_run.sh', 'export_compose.sh', 'container_update.sh', 'backup_restore.sh']) expect(block(f, name), f).toBe(block('export_run.sh', name));
       expect(block('export_run.sh', name).length).toBeGreaterThan(1500);
     }
-    for (const f of ['export_run.sh', 'container_update.sh']) expect(block(f, 'export run writer'), f).toBe(block('export_run.sh', 'export run writer'));
+    for (const f of ['export_run.sh', 'container_update.sh', 'backup_restore.sh']) expect(block(f, 'export run writer'), f).toBe(block('export_run.sh', 'export run writer'));
     expect(block('export_run.sh', 'export run writer').length).toBeGreaterThan(1500);
   });
 
@@ -3116,18 +3116,22 @@ for a in "$@"; do [ "$prev" = -v ] && case "$a" in *:/bosun/meta:ro) meta=\${a%:
   /** A fake docker for a standalone container; `backup` is the body of the restic backup call. */
   const backupDocker = (opts: {
     label?: string; mounts?: string; backup?: string; facts?: string;
-    save?: string; onBackup?: string; pinned?: string;
+    save?: string; onBackup?: string; pinned?: string; exportFacts?: string; ifacts?: string;
   } = {}) => {
     const label = opts.label ?? '1.2.3';
     const mounts = opts.mounts ?? 'volume\\tdata\\t/var/lib/docker/volumes/data/_data\\t/data\\ttrue\\nbind\\t-\\t/srv/app\\t/app\\tfalse';
     const backup = opts.backup ?? `echo '{"snapshot_id":"${SNAP}"}'`;
     const facts = opts.facts ?? `printf 'ID %s\\nRUN true\\nREF nginx:latest\\nIMGID ${IMGID}\\nPROJ \\nSVC \\n' ${CID}`;
+    const exportFacts = opts.exportFacts ?? `ID "${CID}"\nNAME "/web"\nIMAGE "nginx:latest"\nIMGID ${IMGID}\n`;
+    const ifacts = opts.ifacts ?? '';
+    fs.writeFileSync(path.join(bin, 'export-facts.txt'), exportFacts);
+    fs.writeFileSync(path.join(bin, 'image-facts.txt'), ifacts);
     return fake(`case "$1" in
   ps) case "$*" in *-aq*) echo ${CID} ;; esac; exit 0 ;;
-  image) case "$2" in inspect) case "$*" in *RepoDigests*) echo '["nginx@sha256:${DIG}"]' ;; *opencontainers*) echo '${label}' ;; *) exit 0 ;; esac ;; *) exit 0 ;; esac ;;
+  image) case "$2" in inspect) case "$*" in *RepoDigests*) echo '["nginx@sha256:${DIG}"]' ;; *opencontainers*) echo '${label}' ;; *'{{$c := .Config}}'*) cat "${sp(path.join(bin, 'image-facts.txt'))}" ;; *) exit 0 ;; esac ;; *) exit 0 ;; esac ;;
   inspect) case "$*" in
     *web-bosun-old*) exit 1 ;;
-    *'{{$c := .Config}}'*) printf 'ID\\t%s\\nRUN\\ttrue\\nREF\\tnginx:latest\\nIMGID\\t${IMGID}\\n' ${CID} ;;
+    *'{{$c := .Config}}'*) cat "${sp(path.join(bin, 'export-facts.txt'))}" ;;
     *'{{range .Mounts}}'*) printf '${mounts}\\n' ;;
     *'{{json .Config.Labels}}'*) echo '{"com.docker.compose.project":"","com.docker.compose.service":""}' ;;
     *'{{.Name}}'*) echo /web ;;
@@ -3265,6 +3269,20 @@ esac`);
     expect(verbs()).toEqual(expect.arrayContaining(['start ' + NEWID, 'rename web', 'rm -f']));
   });
 
+  it.skipIf(!hasSh)('keeps an anonymous volume by its name when it pins the image', () => {
+    const anon = 'e'.repeat(64);
+    backupDocker({
+      exportFacts: `ID "${CID}"\nNAME "/web"\nIMAGE "nginx:latest"\nIMGID ${IMGID}\nMNT "volume" "${anon}" "/var/lib/docker/volumes/${anon}/_data" "/anon" true\n`,
+    });
+    const r = run('backup_restore.sh', {
+      mode: 'restore', kind: 'container', name: 'web', snapshot: CID,
+      settings: 'pin_image=true\nrestore_mode=replace\nmode=restore',
+    }, env(repoPath()));
+    expect(r.stdout).not.toContain('ERROR:');
+    const create = dockerCalls().find(c => c[0] === 'create')!;
+    expect(create.join(' ')).toContain(`-v ${anon}:/anon`);
+  });
+
   it.skipIf(!hasSh)('pins a Bosun-managed stack with an extra override file, leaving the compose file alone', () => {
     backupDocker({ pinned: 'web\\tweb\\tnginx:1.2.3\\t1.2.3' });
     const stackDir = path.join(home, 'bosun-stacks', 'demo');
@@ -3342,5 +3360,167 @@ esac`);
     const backup = dockerCalls().find(c => c[0] === 'run' && c.includes('backup'))!;
     expect(backup.join(' ')).not.toContain(creds);
     expect(backup.join(' ')).toContain('/bosun/secret/id');
+  });
+});
+
+describe('container rebuild: one implementation for every caller', () => {
+  // A container with the settings an edit must preserve, in the shape the shared collector prints.
+  const FACTS = lines([
+    `ID "${'a'.repeat(64)}"`,
+    'NAME "/web"',
+    'IMAGE "nginx:1.2.3"',
+    `IMGID sha256:${'2'.repeat(64)}`,
+    'ENV "A=1"', 'ENV "B=a b"',
+    'CMDJ ["-c","sleep 600"]',
+    'EPJ ["sh"]',
+    'CMD "-c"', 'CMD "sleep 600"',
+    'EP "sh"',
+    'LABEL "mine=1"',
+    'PORT "127.0.0.1" "18080" "80/tcp"',
+    'PORT "" "8443" "443/tcp"',
+    'MNT "volume" "data" "/var/lib/docker/volumes/data/_data" "/data" true',
+    'MNT "bind" null "/srv/app" "/app" false',
+    'TMPFS "/run:size=10m"',
+    'NETMODE "shop"',
+    'NETN "shop"',
+    'ALIAS "shop" "web1"',
+    'RP "on-failure"',
+    'RPN 3',
+    'HOSTNAME "webhost"',
+    'USER "1000:1000"',
+    'WORKDIR "/srv"',
+    'MEM 268435456',
+    'NANO 500000000',
+    'DNS "1.1.1.1"',
+    'EXTRAHOST "db:10.0.0.2"',
+    'LOGT "json-file"',
+    'LOGO "max-size=1m"',
+    'STOPSIG "SIGINT"',
+    'STOPTO 7',
+    'TTY true',
+    'OPEN true',
+    'INIT true',
+    'RO true',
+    'HEALTHJ {"Interval":30000000000,"Test":["CMD-SHELL","true"]}',
+    'HKIND "CMD-SHELL"',
+    'HARG "true"',
+    'HINT 30000000000',
+    'HTO <no value>',
+    'HRET <no value>',
+    'HSTART <no value>',
+    'PRIV false',
+    'PIDM ""',
+    'IPCM "private"',
+    'CAPADD "CAP_NET_ADMIN"',
+    'CAPDROP "CAP_MKNOD"',
+    'DEVICE "/dev/sda:/dev/xvda:rwm"',
+    'SECOPT "no-new-privileges"',
+    'SYSCTL "net.ipv4.ip_unprivileged_port_start=0"',
+    'DCR "c 1:3 rwm"',
+    'GPU -1',
+    'ULIM "nofile" 1024 2048',
+    'SHM 134217728',
+    'OOM 0',
+    'CGP ""',
+    'RT "runc"',
+    'SOPT "size=10G"',
+    'CPUSET ""',
+    'CPUSHARES 0',
+    'PIDSLIM <no value>',
+    'MEMRES 0',
+    'UTS ""',
+    'USERNS ""',
+  ]);
+  const IFACTS = lines([
+    'ENV "PATH=/usr/bin"',
+    'CMDJ ["/bin/sh"]',
+    'EPJ null',
+    'USER null',
+    'WORKDIR "/"',
+    'STOPSIG null',
+    'HEALTHJ null',
+  ]);
+
+  const rebuildFake = () => {
+    fs.writeFileSync(path.join(bin, 'facts.txt'), FACTS);
+    fs.writeFileSync(path.join(bin, 'ifacts.txt'), IFACTS);
+    fake(`
+case "$1" in
+  image) case "$*" in
+    *'{{.Id}}'*) printf 'sha256:%s\\n' '${'3'.repeat(64)}' ;;
+    *'{{$c := .Config}}'*) cat "${sp(path.join(bin, 'ifacts.txt'))}" ;;
+    *) exit 0 ;;
+  esac ;;
+  inspect) case "$*" in
+    *'{{$c := .Config}}{{$h := .HostConfig}}'*) cat "${sp(path.join(bin, 'facts.txt'))}" ;;
+    *'{{.Config.Image}}'*) printf '%s\\n' 'nginx:1.2.3' ;;
+    *'{{.Image}}'*) printf 'sha256:%s\\n' '${'2'.repeat(64)}' ;;
+    *'State.Health'*) printf '%s\\n' 'true healthy' ;;
+    *'{{.State.Running}}'*) printf '%s\\n' 'true' ;;
+    *'web-bosun-old'*) exit 1 ;;
+    *'{{.Id}}'*) printf '%s\\n' '${ID}' ;;
+    *) exit 0 ;;
+  esac ;;
+  create) printf '%s\\n' '${NEW}' ;;
+  volume) exit 0 ;;
+  network) exit 0 ;;
+  run) case "$*" in
+    *'/bosun/meta/restore_map'*) printf 'web\\tvolume\\tdata\\t/data\\ttrue\\t/bosun/data/0-v1\\n' ;;
+    *'/bosun/meta/pinned_map'*) printf 'web\\t-\\tnginx:1.2.3\\t1.2.3\\n' ;;
+    *) exit 0 ;;
+  esac ;;
+  *) exit 0 ;;
+esac`);
+  };
+
+  /** Run a `docker run -d` command text (what export_run prints) through the fake docker and return its arguments. */
+  const runText = (text: string) => {
+    fs.writeFileSync(log, '');
+    const r = spawnSync('sh', ['-c', text], {
+      cwd: bin, encoding: 'utf8',
+      env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, LOG: log, HOME: home },
+    });
+    expect(r.status, r.stderr).toBe(0);
+    const call = dockerCalls().find((c) => c[0] === 'run');
+    expect(call).toBeTruthy();
+    return call!;
+  };
+
+  it.skipIf(!hasSh)('export_run, container_update and the pinned-image restore build the same command', () => {
+    rebuildFake();
+    const text = json('export_run.sh', { name: 'web' }).text as string;
+    const fromExport = runText(text);
+
+    rebuildFake();
+    fs.writeFileSync(log, '');
+    const update = out('container_update.sh', { name: 'web', health_timeout: '5' }, { BOSUN_UPDATE_POLL: '0' });
+    expect(update.error).toBeNull();
+    expect(update.done).toBe('updated web');
+    const fromUpdate = dockerCalls().find((c) => c[0] === 'create')!;
+
+    rebuildFake();
+    fs.writeFileSync(log, '');
+    const restore = out('backup_restore.sh', {
+      mode: 'restore', kind: 'container', name: 'web', snapshot: 'c'.repeat(64),
+      settings: 'pin_image=true\nrestore_mode=replace\nmode=restore',
+    }, {
+      BOSUN_SECRET_backup_repository: path.join(bin, 'repo'), BOSUN_SECRET_backup_password: 'pw',
+    });
+    expect(restore.error).toBeNull();
+    const fromRestore = dockerCalls().find((c) => c[0] === 'create')!;
+
+    // export_run prints `docker run -d`, container_update runs `docker create` with the rest.
+    expect(fromUpdate.slice(1)).toEqual(fromExport.slice(2));
+    // backup_restore asks the shared writer for `--name=web` (its own spelling); everything else is identical.
+    const normalised = fromRestore.slice(1).flatMap((a) => (a === '--name=web' ? ['--name', 'web'] : [a]));
+    expect(normalised).toEqual(fromUpdate.slice(1));
+    expect(fromUpdate).toEqual(expect.arrayContaining([
+      '--restart', 'on-failure:3', '--network', 'shop', '--network-alias', 'web1',
+      '-p', '127.0.0.1:18080:80', '-p', '8443:443', '-v', 'data:/data', '-v', '/srv/app:/app:ro',
+      '-e', 'A=1', '-e', 'B=a b', '--label', 'mine=1',
+      '--health-cmd', 'true', '--health-interval', '30s',
+      '--device', '/dev/sda:/dev/xvda:rwm', '--cap-add', 'NET_ADMIN', '--cap-drop', 'MKNOD', '--gpus', 'all',
+      'nginx:1.2.3',
+    ]));
   });
 });

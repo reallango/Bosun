@@ -12,7 +12,7 @@
  */
 
 const macs = require('./macs');
-const { metricsSection } = require('./metrics-section');
+const { metricsSection, withSlowMetrics } = require('./metrics-section');
 
 const MARK = '@@BOSUN ';
 
@@ -357,7 +357,7 @@ function buildSnapshot(raw, prev, now = Date.now()) {
     state.system = s;
   }
 
-  sections.metrics = metricsSection(metrics, state.uptimeSeconds);
+  sections.metrics = metricsSection(withSlowMetrics(metrics, state), state.uptimeSeconds);
   return { sections, metrics, state };
 }
 

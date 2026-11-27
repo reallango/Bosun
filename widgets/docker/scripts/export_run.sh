@@ -11,7 +11,7 @@ case "$name" in ''|[!a-zA-Z0-9]*|*[!a-zA-Z0-9_.-]*) fail 'invalid container name
 [ "${#name}" -le 128 ] || fail 'invalid container name'
 D=docker; $D ps >/dev/null 2>&1 || { command -v sudo >/dev/null 2>&1 && sudo -n docker ps >/dev/null 2>&1 && D='sudo -n docker'; }
 $D ps >/dev/null 2>&1 || fail 'Docker is not available to this account'
-# >>> export collector (the same text in export_run.sh and export_compose.sh; a test compares them)
+# >>> export collector (the same text in export_run.sh, export_compose.sh, container_update.sh and backup_restore.sh; a test compares them)
 # Docker's own `json` template function prints every string as JSON, so nothing a container contains can break the lines.
 fmt='{{$c := .Config}}{{$h := .HostConfig}}ID {{json .Id}}
 NAME {{json .Name}}
@@ -111,7 +111,7 @@ collect "$name" "$tmp/in" || fail "container $name not found or could not be ins
 
 # The program: the reader above and the writer of the command below (awk, POSIX; the data only ever reaches it as input lines).
 cat > "$tmp/prog.awk" <<'BOSUN_AWK_END'
-# >>> export reader (the same text in export_run.sh and export_compose.sh; a test compares them)
+# >>> export reader (the same text in export_run.sh, export_compose.sh, container_update.sh and backup_restore.sh; a test compares them)
 # Input: lines "C TAG values" (the container), "I TAG values" (its image's own defaults), "X vol|net name" (what exists on the host).
 # Values are JSON strings (Docker's own `json` template function) or plain numbers/booleans.
 function hexval(h,   i, n, c) { n = 0; h = tolower(h); for (i = 1; i <= length(h); i++) { c = index("0123456789abcdef", substr(h, i, 1)); if (c == 0) return -1; n = n * 16 + c - 1 } return n }
@@ -281,12 +281,13 @@ function pubport(i,   p, h) {
   return p
 }
 # <<< export reader
-# >>> export run writer (the same text in export_run.sh and container_update.sh; a test compares them)
+# >>> export run writer (the same text in export_run.sh, container_update.sh and backup_restore.sh; a test compares them)
 function add(s) { L[++nl] = s }
 function opt(flag, v) { add(flag " " shq(v)) }
 END {
   derive()
-  add("--name " shq(cname))
+  if (nameoverride != "") { if (nameeq != "") add("--name=" shq(nameoverride)); else add("--name " shq(nameoverride)) }
+  else if (nameeq != "") add("--name=" shq(cname)); else add("--name " shq(cname))
   if (restart != "") opt("--restart", restart)
   if (out_host != "") opt("--hostname", out_host)
   if (out_user != "") opt("--user", out_user)
@@ -300,9 +301,11 @@ END {
   for (i = 1; i <= np; i++) opt("-p", pubport(i))
   for (i = 1; i <= nm; i++) {
     if (mtype[i] != "bind" && mtype[i] != "volume") continue
-    if (mskip[i]) continue
-    if (manon[i]) { opt("-v", mdst[i]); continue }
-    if (mtype[i] == "bind") v = msrc[i] ":" mdst[i]; else v = mname[i] ":" mdst[i]
+    if (mskip[i] && keepvols == "") continue
+    if (manon[i] && keepvols == "") { opt("-v", mdst[i]); continue }
+    if (mtype[i] == "bind") v = msrc[i] ":" mdst[i]
+    else if (mname[i] == "") { opt("-v", mdst[i]); continue }
+    else v = mname[i] ":" mdst[i]
     if (mrw[i] == "false") v = v ":ro"
     opt("-v", v)
   }
@@ -359,7 +362,7 @@ END {
   if (out_ep) { if (epclear) opt("--entrypoint", ""); else opt("--entrypoint", ep[1]) }
   s = "docker run -d"
   for (i = 1; i <= nl; i++) s = s " \\\n  " L[i]
-  s = s " \\\n  " shq(image)
+  s = s " \\\n  " shq(newimage != "" ? newimage : image)
   args = ""
   if (out_ep) for (i = 2; i <= nep; i++) args = args " " shq(ep[i])
   if (out_cmd) for (i = 1; i <= ncmd; i++) args = args " " shq(cmd[i])
