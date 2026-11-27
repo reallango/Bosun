@@ -344,6 +344,11 @@ export default function ApiAccessPage() {
                   (<code>{'{ "data": … }'}</code> or <code>{'{ "error": { "message", "code" } }'}</code>). Each key is limited to
                   300 requests per minute. Keys cannot sign in to the web UI, open terminals, or manage users and API keys.
                 </p>
+                <p className="text-muted-foreground">
+                  <span className="font-medium text-foreground">MCP endpoint:</span>{' '}
+                  <code>{origin}/api/mcp</code> — connect Claude Code, Claude Desktop or any MCP client with an API key.
+                  Open <code>{origin}/api/mcp</code> in a browser for the protocol versions and copy-ready client snippets.
+                </p>
                 <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                   <pre className="min-w-0 flex-1 overflow-x-auto rounded-md bg-muted p-3 font-mono text-xs">{curl}</pre>
                   <CopyButton text={curl} />

@@ -82,13 +82,20 @@ export async function permissionMap(payload: TokenPayload): Promise<Record<strin
   return out;
 }
 
-function forbidden(permission: string, label: string, resource?: ResourceContext | null, serverId?: string | null) {
-  const on = resource ? ` for the ${resource.kind} "${resource.name}"` : '';
-  // What to send to POST /api/access-requests to ask for exactly this (GET /api/access explains the rest).
-  const request = {
+/**
+ * What to send to POST /api/access-requests to ask for exactly this permission (GET /api/access explains the rest).
+ * Shared by the REST 403 body and the MCP tool error, so both give the same hint.
+ */
+export function permissionRequestBody(permission: string, resource?: ResourceContext | null, serverId?: string | null) {
+  return {
     endpoint: 'POST /api/access-requests',
     body: { kind: 'grant', permission, ...(serverId ? { server_id: serverId } : {}), ...(resource ? { resource: { kind: resource.kind, name: resource.name } } : {}), reason: '<why>' },
   };
+}
+
+function forbidden(permission: string, label: string, resource?: ResourceContext | null, serverId?: string | null) {
+  const on = resource ? ` for the ${resource.kind} "${resource.name}"` : '';
+  const request = permissionRequestBody(permission, resource, serverId);
   return NextResponse.json(
     { data: null, error: { message: `Not permitted: requires the "${label}" permission${on}`, code: 'FORBIDDEN', permission, ...(resource ? { resource } : {}), request } },
     { status: 403 },
