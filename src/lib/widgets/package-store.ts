@@ -18,6 +18,7 @@ import { markBundledRemoved, unmarkBundledRemoved, isBundledId } from '@/lib/wid
 import { packageSecretRows } from '@/lib/widgets/package-secrets';
 import { cancelJob } from '@/lib/widgets/jobs/runtime';
 import { finishJob, getJob } from '@/lib/widgets/jobs/store';
+import { minSizeStatements, parseMinSize, type MinSizeRow } from '@/lib/widgets/instance-min-size';
 
 export class PackageError extends Error {
   status: number;
@@ -258,6 +259,15 @@ export async function installPackage(opts: InstallOptions): Promise<InstallResul
       params: [p.id, source, p.label, p.description, p.group, p.defaultLevel, p.risk, p.scope, JSON.stringify(p.implies)],
     });
   }
+
+  // A new version can lower a widget's smallest size. Lower the floor stored on the instances already on dashboards
+  // too, so they can be made smaller without being removed and added again.
+  const declaredMin = new Map(manifest.widgets.map(w => [w.type, parseMinSize(w.columns.min_size)]));
+  const instances = await rqlite.query(
+    `SELECT id, widget_type, grid_min_w, grid_min_h FROM widgets WHERE widget_type IN (${placeholders(newTypes.length)})`,
+    newTypes,
+  );
+  stmts.push(...minSizeStatements(rowsToObjects(instances) as unknown as MinSizeRow[], declaredMin));
 
   await rqlite.executeBatch(stmts as { sql: string; params?: never[] }[], { transaction: true });
   await unmarkBundledRemoved(manifest.id).catch(() => {});

@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "cpu_memory",
   "name": "CPU/Memory",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "CPU and memory usage with load averages, swap and temperature. Tracks CPU, load, temperature, memory and swap as history.",
   "author": "Bosun",
   "requires": {
@@ -28,11 +28,11 @@
       "category": "system",
       "default_size": {
         "w": 8,
-        "h": 6
+        "h": 4
       },
       "min_size": {
         "w": 4,
-        "h": 5
+        "h": 3
       },
       "refresh_interval": 5,
       "supports_linux": true,
