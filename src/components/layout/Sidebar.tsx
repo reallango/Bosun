@@ -7,6 +7,7 @@ import {
   House,
   LayoutDashboard,
   LineChart,
+  History,
   ChevronsLeft,
   ChevronsRight,
   Plus,
@@ -56,6 +57,7 @@ interface NavItem {
 const MAIN_NAV: NavItem[] = [
   { href: '/', label: 'Home', icon: House, exact: true },
   { href: '/stats', label: 'Statistics', icon: LineChart },
+  { href: '/activity', label: 'Activity', icon: History },
 ];
 
 function isActive(pathname: string, href: string, exact?: boolean) {

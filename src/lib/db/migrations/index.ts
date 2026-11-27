@@ -660,6 +660,18 @@ const V17_ACCESS_REQUESTS: string[] = [
     `CREATE INDEX IF NOT EXISTS idx_access_requests_status ON access_requests(status, created_at)`,
     `CREATE INDEX IF NOT EXISTS idx_access_requests_requester ON access_requests(requester_type, requester_id)`,
 ];
+
+// V18: per-person task dismissal. The bell is shared by everyone, but a finished task can be hidden from one person's
+// bell without affecting anyone else's. The Activity page still lists it (and can restore it).
+const V18_TASK_DISMISSALS: string[] = [
+    `CREATE TABLE IF NOT EXISTS task_dismissals (
+        job_id TEXT NOT NULL,
+        user_id TEXT NOT NULL,
+        dismissed_at INTEGER NOT NULL,
+        PRIMARY KEY (job_id, user_id)
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_task_dismissals_user ON task_dismissals(user_id)`,
+];
 export const MIGRATIONS: Migration[] = [
     {
         version: 1,
@@ -686,6 +698,7 @@ export const MIGRATIONS: Migration[] = [
     { version: 15, name: 'notification_kinds', statements: V15_NOTIFICATION_KINDS },
     { version: 16, name: 'resource_grants', statements: V16_RESOURCE_GRANTS },
     { version: 17, name: 'access_requests', statements: V17_ACCESS_REQUESTS },
+    { version: 18, name: 'task_dismissals', statements: V18_TASK_DISMISSALS },
 ];
 
 /** The schema version this build expects. */
@@ -724,6 +737,7 @@ export const CORE_TABLES: string[] = [
     'permission_definitions',
     'widget_packages',
     'metric_definitions',
+    'task_dismissals',
 ];
 
 export class LegacySchemaError extends Error {
