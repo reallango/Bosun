@@ -2681,3 +2681,161 @@ exit 0
     });
   });
 });
+
+describe('image_updates (dataset)', () => {
+  type ImageRow = { cid: string; name: string; ref: string; stack?: string; service?: string; imageId: string; repoDigests: string };
+  // A fake Docker for image_updates.sh: the containers, their image ids and RepoDigests, and the registry lookup (buildx
+  // when `buildx`, docker manifest inspect otherwise). A reference in `failures` makes the lookup fail with that message.
+  const imageFake = (list: ImageRow[], remote: Record<string, string>, buildx = true, failures: Record<string, string> = {}) => {
+    const lines = (xs: string[]) => xs.join('\\n');
+    const ps = lines(list.map((r) => `${r.cid}|${r.name}|${r.ref}|${r.stack ?? ''}|${r.service ?? ''}`));
+    const cids = lines(list.map((r) => r.cid));
+    const cid = lines(list.map((r) => `${r.cid}|${r.imageId}`));
+    const imgs = lines([...new Map(list.map((r) => [r.imageId, r.repoDigests])).entries()].map(([id, d]) => `${id}|${d}`));
+    const cases = [
+      ...Object.entries(remote).map(([ref, json]) => `    ${ref}) printf '%s\\n' '${json}' ;;`),
+      ...Object.entries(failures).map(([ref, msg]) => `    ${ref}) printf '%s\\n' '${msg}' >&2; exit 1 ;;`),
+    ].join('\n');
+    const buildxBody = buildx ? `if [ "$2" = version ]; then exit 0; fi\n  case "$6" in\n${cases}\n  esac` : 'exit 1';
+    fake(`case "$1" in
+  ps)
+    if [ "$2" = "-a" ] && [ "$3" = "--no-trunc" ]; then printf '%b\\n' '${ps}';
+    elif [ "$2" = "-aq" ]; then printf '%b\\n' '${cids}'; fi ;;
+  inspect) printf '%b\\n' '${cid}' ;;
+  image) printf '%b\\n' '${imgs}' ;;
+  buildx)
+    ${buildxBody} ;;
+  manifest)
+    case "$4" in
+${cases}
+    esac ;;
+esac`);
+  };
+  const jsonRows = (r: { stdout: string }) => JSON.parse(r.stdout) as Array<Record<string, unknown>>;
+
+  it.skipIf(!hasSh)('marks a tag that still points to the local image up to date and one that moved as available', () => {
+    imageFake([
+      { cid: 'c1', name: 'web', ref: 'nginx:latest', stack: 'shop', service: 'web', imageId: 'sha256:i1', repoDigests: `["nginx@sha256:${ID}"]` },
+      { cid: 'c2', name: 'db', ref: 'postgres:16', imageId: 'sha256:i2', repoDigests: `["postgres@sha256:${NEW}"]` },
+    ], {
+      'nginx:latest': `{"digest":"sha256:${ID}"}`,
+      'postgres:16': `{"digest":"sha256:${ID}"}`,
+    });
+    expect(jsonRows(run('image_updates.sh'))).toEqual([
+      { container: 'web', stack: 'shop', service: 'web', image: 'nginx:latest', local_digest: `sha256:${ID}`, remote_digest: `sha256:${ID}`, update_available: false, update: 'up to date', note: '' },
+      { container: 'db', stack: '', service: '', image: 'postgres:16', local_digest: `sha256:${NEW}`, remote_digest: `sha256:${ID}`, update_available: true, update: 'available', note: '' },
+    ]);
+  });
+
+  it.skipIf(!hasSh)('matches a Docker Hub reference written with docker.io/library/', () => {
+    imageFake([{ cid: 'c1', name: 'web', ref: 'docker.io/library/nginx:latest', imageId: 'sha256:i1', repoDigests: `["nginx@sha256:${ID}"]` }], {
+      'docker.io/library/nginx:latest': `{"digest":"sha256:${ID}"}`,
+    });
+    expect(jsonRows(run('image_updates.sh'))[0]).toMatchObject({ image: 'docker.io/library/nginx:latest', local_digest: `sha256:${ID}`, remote_digest: `sha256:${ID}`, update_available: false, note: '' });
+  });
+
+  it.skipIf(!hasSh)('compares the index digest of a multi-architecture tag', () => {
+    const idx = 'c'.repeat(64);
+    imageFake([{ cid: 'c1', name: 'web', ref: 'ghcr.io/o/app:1.2', imageId: 'sha256:i1', repoDigests: `["ghcr.io/o/app@sha256:${idx}"]` }], {
+      'ghcr.io/o/app:1.2': `{"digest":"sha256:${idx}"}`,
+    });
+    expect(jsonRows(run('image_updates.sh'))[0]).toMatchObject({ image: 'ghcr.io/o/app:1.2', local_digest: `sha256:${idx}`, remote_digest: `sha256:${idx}`, update_available: false, note: '' });
+  });
+
+  it.skipIf(!hasSh)('leaves a locally built image unknown with a note', () => {
+    imageFake([{ cid: 'c1', name: 'app', ref: 'myapp:latest', imageId: 'sha256:i1', repoDigests: '[]' }], {});
+    expect(jsonRows(run('image_updates.sh'))[0]).toMatchObject({ local_digest: '', remote_digest: '', update_available: null, update: '', note: 'locally built' });
+    expect(dockerCalls().some((c) => c[0] === 'buildx' && c[1] === 'imagetools')).toBe(false);
+  });
+
+  it.skipIf(!hasSh)('leaves a digest-pinned reference unknown with a note', () => {
+    imageFake([{ cid: 'c1', name: 'app', ref: `ghcr.io/o/app@sha256:${ID}`, imageId: 'sha256:i1', repoDigests: `["ghcr.io/o/app@sha256:${ID}"]` }], {});
+    expect(jsonRows(run('image_updates.sh'))[0]).toMatchObject({ image: `ghcr.io/o/app@sha256:${ID}`, local_digest: `sha256:${ID}`, remote_digest: '', update_available: null, note: 'pinned by digest' });
+    expect(dockerCalls().some((c) => c[0] === 'buildx' && c[1] === 'imagetools')).toBe(false);
+  });
+
+  it.skipIf(!hasSh)('records a registry failure in the note and still succeeds', () => {
+    imageFake([{ cid: 'c1', name: 'app', ref: 'private/app:1', imageId: 'sha256:i1', repoDigests: `["private/app@sha256:${ID}"]` }], {}, true, {
+      'private/app:1': 'Error response from daemon: Get "https://registry.example/v2/": dial tcp: lookup registry.example: no such host',
+    });
+    const r = run('image_updates.sh');
+    expect(r.status).toBe(0);
+    expect(jsonRows(r)[0]).toMatchObject({ update_available: null, update: '', note: 'registry unreachable' });
+  });
+
+  it.skipIf(!hasSh)('records a registry that needs credentials', () => {
+    imageFake([{ cid: 'c1', name: 'app', ref: 'private/app:1', imageId: 'sha256:i1', repoDigests: `["private/app@sha256:${ID}"]` }], {}, true, {
+      'private/app:1': 'Error response from daemon: unauthorized: authentication required',
+    });
+    expect(jsonRows(run('image_updates.sh'))[0]).toMatchObject({ update_available: null, note: 'needs credentials' });
+  });
+
+  it.skipIf(!hasSh)('looks a reference up once for two containers', () => {
+    imageFake([
+      { cid: 'c1', name: 'a', ref: 'nginx:latest', imageId: 'sha256:i1', repoDigests: `["nginx@sha256:${ID}"]` },
+      { cid: 'c2', name: 'b', ref: 'nginx:latest', imageId: 'sha256:i1', repoDigests: `["nginx@sha256:${ID}"]` },
+    ], { 'nginx:latest': `{"digest":"sha256:${ID}"}` });
+    expect(jsonRows(run('image_updates.sh')).map((x) => x.container)).toEqual(['a', 'b']);
+    expect(dockerCalls().filter((c) => c[0] === 'buildx' && c[1] === 'imagetools')).toHaveLength(1);
+    expect(dockerCalls().filter((c) => c[0] === 'image' && c[1] === 'inspect')).toHaveLength(1);
+  });
+
+  it.skipIf(!hasSh)("leaves Bosun's own image to the self-update", () => {
+    imageFake([
+      { cid: 'c1', name: 'bosun', ref: 'bosun:latest', imageId: 'sha256:i1', repoDigests: `["bosun@sha256:${ID}"]` },
+      { cid: 'c2', name: 'bosun2', ref: 'ghcr.io/o/bosun:1.2', imageId: 'sha256:i2', repoDigests: `["ghcr.io/o/bosun@sha256:${NEW}"]` },
+    ], {});
+    const j = jsonRows(run('image_updates.sh'));
+    expect(j.map((x) => x.note)).toEqual(["updated by Bosun's self-update", "updated by Bosun's self-update"]);
+    expect(j.every((x) => x.update_available === null)).toBe(true);
+    expect(dockerCalls().some((c) => c[0] === 'buildx' && c[1] === 'imagetools')).toBe(false);
+  });
+
+  it.skipIf(!hasSh)('falls back to docker manifest inspect -v when buildx is not installed', () => {
+    imageFake([{ cid: 'c1', name: 'web', ref: 'nginx:latest', imageId: 'sha256:i1', repoDigests: `["nginx@sha256:${ID}"]` }], {
+      'nginx:latest': `{"Ref":"nginx:latest","Descriptor":{"mediaType":"application/vnd.oci.image.manifest.v1+json","digest":"sha256:${NEW}","size":1}}`,
+    }, false);
+    expect(jsonRows(run('image_updates.sh'))[0]).toMatchObject({ local_digest: `sha256:${ID}`, remote_digest: `sha256:${NEW}`, update_available: true, update: 'available', note: '' });
+    expect(dockerCalls().some((c) => c[0] === 'manifest' && c[1] === 'inspect')).toBe(true);
+  });
+
+  it.skipIf(!hasSh)('compares a multi-architecture tag by its platform manifests when buildx is not installed', () => {
+    const idx = 'c'.repeat(64);
+    const p1 = 'd'.repeat(64);
+    const p2 = 'e'.repeat(64);
+    imageFake([{ cid: 'c1', name: 'web', ref: 'multi:1', imageId: 'sha256:i1', repoDigests: `["multi@sha256:${idx}"]` }], {
+      'multi:1': `[{"Descriptor":{"digest":"sha256:${ID}"}},{"Descriptor":{"digest":"sha256:${NEW}"}}]`,
+      [`multi@sha256:${idx}`]: `[{"Descriptor":{"digest":"sha256:${p1}"}},{"Descriptor":{"digest":"sha256:${p2}"}}]`,
+    }, false);
+    expect(jsonRows(run('image_updates.sh'))[0]).toMatchObject({ local_digest: `sha256:${idx}`, remote_digest: '', update_available: true, update: 'available', note: 'compared by platform manifests (docker buildx is not installed)' });
+  });
+
+  it.skipIf(!hasSh)('prints the one-line summary for the Overview tile', () => {
+    imageFake([
+      { cid: 'c1', name: 'a', ref: 'nginx:latest', imageId: 'sha256:i1', repoDigests: `["nginx@sha256:${ID}"]` },
+      { cid: 'c2', name: 'b', ref: 'postgres:16', imageId: 'sha256:i2', repoDigests: `["postgres@sha256:${NEW}"]` },
+      { cid: 'c3', name: 'c', ref: 'myapp:latest', imageId: 'sha256:i3', repoDigests: '[]' },
+    ], {
+      'nginx:latest': `{"digest":"sha256:${ID}"}`,
+      'postgres:16': `{"digest":"sha256:${ID}"}`,
+    });
+    expect(JSON.parse(run('image_updates.sh', { mode: 'summary' }).stdout)).toEqual({ available: 1, total: 3, unknown: 1 });
+  });
+
+  it.skipIf(!hasSh)('leaves out a container whose image is referenced only by id', () => {
+    imageFake([
+      { cid: 'c1', name: 'web', ref: 'nginx:latest', imageId: 'sha256:i1', repoDigests: `["nginx@sha256:${ID}"]` },
+      { cid: 'c2', name: 'tmp', ref: `sha256:${'f'.repeat(64)}`, imageId: 'sha256:i2', repoDigests: '[]' },
+    ], { 'nginx:latest': `{"digest":"sha256:${ID}"}` });
+    expect(jsonRows(run('image_updates.sh')).map((x) => x.container)).toEqual(['web']);
+  });
+
+  it.skipIf(!hasSh)('says when Docker is not available', () => {
+    noDocker();
+    const r = run('image_updates.sh');
+    expect(r.status).toBe(3);
+    expect(r.stdout).toBe('');
+    expect(r.stderr).toMatch(/Docker is not available/);
+  });
+});
+
