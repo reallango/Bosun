@@ -468,7 +468,7 @@ package that uses any of these keys must declare `"requires": { "api": 8 }`.
 
 ## Docker Containers: backups and restore
 
-Docker Containers 1.0.27 can back up a container or a Bosun-managed stack with [restic](https://restic.net/), run
+Docker Containers 1.0.28 can back up a container or a Bosun-managed stack with [restic](https://restic.net/), run
 as a short-lived `restic/restic` container with the data mounted read-only; nothing is installed on the host. Choose
 the destination once per server in the widget's settings: a folder on the host (a mounted NAS counts), SFTP
 (`sftp:user@host:/path`) or an S3-compatible endpoint (`s3:https://endpoint/bucket/prefix`). The destination and the
@@ -477,6 +477,13 @@ key or the S3 credentials). They reach the script only as `BOSUN_SECRET_*` envir
 credentials are written to mode-0600 temporary files, never to a command line, the output or a log. Initialise the
 repository once from the Backups tab (the password reminder is shown there) and keep that password somewhere else:
 without it the backups cannot be read.
+
+The repository is created as restic format version 2, so it compresses data (`--compression auto`, the default for
+version 2). A repository created by an older Bosun can stay version 1; it works, but it stores uncompressed. To
+compress it, stop the backups and run `restic migrate upgrade_repo_v2` once against the repository. Bosun does not
+migrate it automatically. An image saved with `docker save` is a plain tar, written uncompressed (restic then chunks
+and compresses it like any other data), so restic's content-defined chunking can still skip the unchanged parts of a
+later image.
 
 A backup can include, per run: the container's named volumes (default on), its bind-mounted host folders ("mapped
 drives", default on; sensitive paths such as `/`, `/etc` and `/var/run/docker.sock` are refused), the stored compose
@@ -493,10 +500,27 @@ also on failure) and the retention: `keep_last`, `keep_daily` (default 7), `keep
 applied with `restic forget --prune` only to that container's or stack's snapshots (tagged `bosun:container=<name>`
 or `bosun:stack=<name>`).
 
-The Backups tab of the Manage page shows the destination, the snapshots with time, size, what was included and the
-pinned version; open a snapshot to restore its data (stopping the container or stack first and starting it after),
-optionally pin the image to that snapshot's version — a standalone container is recreated with the pinned image, a
-Bosun-managed stack is redeployed with an extra `compose.backup-pin.yaml` override (the stored compose file is not
+Backups are incremental. Restic stores each file once as content-defined chunks and a later snapshot references the
+chunks it already has, so every backup after the first stores only the data that changed. The widget also tells restic
+which snapshot to use as the parent: it looks up the latest snapshot of the same container or stack
+(`restic snapshots --json --latest 1 --tag bosun:container=<name>`) and passes its id as `--parent`. Without that,
+restic would pick a parent by host and paths, and since every target uses `--host bosun` and the same `/bosun` paths,
+it would often compare against another target's snapshot and read and hash all of this target's unchanged files
+again. When there is no earlier snapshot, or the lookup fails, the backup runs without `--parent`.
+
+Restic's summary says how much this run actually added (`data_added`, or `data_added_packed` when present), and the
+widget records it as `bosun:added=<bytes>` next to the file counts (`bosun:added_files=new/changed/unchanged`). The
+Backups tab shows both the full size of a snapshot and what it added (for example "4.2 GB · added 38 MB"), and the
+repository's real size on disk comes from `restic stats --mode raw-data` and is shown next to the destination, so the
+space the backups really use is visible. Retention frees space: `restic forget --prune` drops the snapshots that are
+older than the keep rules and then removes the data no remaining snapshot needs. Until that runs, deleting a snapshot
+alone does not free its data.
+
+The Backups tab of the Manage page shows the destination and the repository size on disk, the snapshots with time,
+full size, added size and file counts, what was included and the pinned version; open a snapshot to restore its data
+(stopping the container or stack first and starting it after), optionally pin the image to that snapshot's version — a
+standalone container is recreated with the pinned image, a Bosun-managed stack is redeployed with an extra
+`compose.backup-pin.yaml` override (the stored compose file is not
 edited) — or restore into new volumes to inspect the data first, and to delete the snapshot. Container and stack row
 menus have **Back up** (one click with the defaults) and **Back up…**, which opens the same inclusion and retention
 options in a dialog, prefilled with the row's container or stack. The dialog's submit (`backup_run`), the quick
@@ -557,7 +581,7 @@ server; the API action is `{ "action": "set_setting", "name": "OLLAMA_CONTEXT_LE
 
 ## Docker Containers: manual updates
 
-The Docker Containers package (1.0.27) can install a newer image by hand, one container or all at once, with a
+The Docker Containers package (1.0.28) can install a newer image by hand, one container or all at once, with a
 health check and an automatic rollback. On the Manage page, the Containers tab lists every container whose registry has
 a newer image for the tag it runs; each row with an update has an **Update** action, and the table's selection offers the
 same action as a bulk update (select the rows, or the header checkbox for all of them). The Stacks tab has **Update

@@ -3116,7 +3116,8 @@ for a in "$@"; do [ "$prev" = -v ] && case "$a" in *:/bosun/meta:ro) meta=\${a%:
   /** A fake docker for a standalone container; `backup` is the body of the restic backup call. */
   const backupDocker = (opts: {
     label?: string; mounts?: string; backup?: string; facts?: string;
-    save?: string; onBackup?: string; pinned?: string; exportFacts?: string; ifacts?: string;
+    save?: string; onBackup?: string; pinned?: string; exportFacts?: string; ifacts?: string; snapshots?: string;
+    snapshotsFail?: boolean; stats?: string;
   } = {}) => {
     const label = opts.label ?? '1.2.3';
     const mounts = opts.mounts ?? 'volume\\tdata\\t/var/lib/docker/volumes/data/_data\\t/data\\ttrue\\nbind\\t-\\t/srv/app\\t/app\\tfalse';
@@ -3149,7 +3150,8 @@ for a in "$@"; do [ "$prev" = -v ] && case "$a" in *:/bosun/meta:ro) meta=\${a%:
     *' backup '*) ${CAPTURE_META}${opts.onBackup ? `; ${opts.onBackup}` : ''}; ${backup} ;;
     *' forget '*) echo forgot ;;
     *' cat config'*) exit 0 ;;
-    *' snapshots --json'*) echo '[]' ;;
+    *' snapshots --json'*) ${opts.snapshotsFail ? 'exit 1' : `echo '${opts.snapshots ?? '[]'}'`} ;;
+    *' stats '*) echo '${opts.stats ?? '{"total_size":0}'}' ;;
     *' dump '*) case "$*" in
       *'/bosun/meta/restore_map'*) printf 'web\\tvolume\\tdata\\t/data\\ttrue\\t/bosun/data/0-v1\\nweb\\tbind\\t${bin}/app\\t/app\\tfalse\\t/bosun/data/0-b1\\n' ;;
       *'/bosun/meta/pinned_map'*) printf '${opts.pinned ?? 'web\\t-\\tnginx:1.2.3\\t1.2.3'}\\n' ;;
@@ -3360,6 +3362,63 @@ esac`);
     const backup = dockerCalls().find(c => c[0] === 'run' && c.includes('backup'))!;
     expect(backup.join(' ')).not.toContain(creds);
     expect(backup.join(' ')).toContain('/bosun/secret/id');
+  });
+
+  it.skipIf(!hasSh)('uses this target\'s latest snapshot as the parent, so unchanged files are skipped', () => {
+    backupDocker({ snapshots: `[{"id":"${SNAP}","short_id":"${SNAP.slice(0, 8)}"}]` });
+    const r = run('backup_run.sh', { mode: 'run', kind: 'container', name: 'web', settings: 'volumes=true\nbinds=false\nimage=false' }, env(repoPath()));
+    expect(r.stdout).not.toContain('ERROR:');
+    const lookup = dockerCalls().find(c => c[0] === 'run' && c.includes('snapshots'))!;
+    expect(lookup).toEqual(expect.arrayContaining(['snapshots', '--json', '--latest', '1', '--tag', 'bosun:container=web']));
+    const backup = dockerCalls().find(c => c[0] === 'run' && c.includes('backup'))!;
+    expect(backup).toEqual(expect.arrayContaining(['--parent', SNAP]));
+  });
+
+  it.skipIf(!hasSh)('backs up without a parent when the target has none or the lookup fails', () => {
+    backupDocker({ snapshots: '[]' });
+    let r = run('backup_run.sh', { mode: 'run', kind: 'container', name: 'web', settings: 'volumes=true\nbinds=false\nimage=false' }, env(repoPath()));
+    expect(r.stdout).not.toContain('ERROR:');
+    expect(dockerCalls().find(c => c[0] === 'run' && c.includes('backup'))).not.toContain('--parent');
+
+    backupDocker({ snapshotsFail: true });
+    r = run('backup_run.sh', { mode: 'run', kind: 'container', name: 'web', settings: 'volumes=true\nbinds=false\nimage=false' }, env(repoPath()));
+    expect(r.stdout).not.toContain('ERROR:');
+    expect(dockerCalls().find(c => c[0] === 'run' && c.includes('backup'))).not.toContain('--parent');
+  });
+
+  it.skipIf(!hasSh)('records what this backup added and its file counts, not the full size', () => {
+    backupDocker({
+      backup: `echo '{"message_type":"summary","files_new":12,"files_changed":3,"files_unmodified":480,"data_added":39845888,"data_added_packed":40000000,"snapshot_id":"${SNAP}"}'`,
+    });
+    const r = run('backup_run.sh', { mode: 'run', kind: 'container', name: 'web', settings: 'volumes=true\nbinds=false\nimage=false' }, env(repoPath()));
+    expect(r.stdout).not.toContain('ERROR:');
+    const tag = dockerCalls().find(c => c[0] === 'run' && c.includes('tag'))!;
+    expect(tag).toEqual(expect.arrayContaining([SNAP, '--add', 'bosun:added=39845888', '--add', 'bosun:added_files=12/3/480']));
+    expect(tag).not.toContain('bosun:added=40000000');
+  });
+
+  it.skipIf(!hasSh)('falls back to data_added_packed when restic reports no data_added', () => {
+    backupDocker({ backup: `echo '{"data_added_packed":1234,"snapshot_id":"${SNAP}"}'` });
+    const r = run('backup_run.sh', { mode: 'run', kind: 'container', name: 'web', settings: 'volumes=true\nbinds=false\nimage=false' }, env(repoPath()));
+    expect(r.stdout).not.toContain('ERROR:');
+    const tag = dockerCalls().find(c => c[0] === 'run' && c.includes('tag'))!;
+    expect(tag).toEqual(expect.arrayContaining(['--add', 'bosun:added=1234']));
+  });
+
+  it.skipIf(!hasSh)('shows the added size, the file counts and the repository on disk in the backups dataset', () => {
+    const snap = {
+      id: SNAP, short_id: SNAP.slice(0, 8), time: '2026-11-27T00:00:00Z', hostname: 'bosun',
+      tags: ['bosun:kind=container', 'bosun:container=web', 'bosun:bytes=4509715660', 'bosun:added=39845888', 'bosun:added_files=12/3/480'],
+    };
+    backupDocker({ snapshots: JSON.stringify([snap]), stats: '{"total_size":4294967296}' });
+    const r = run('backup_restore.sh', { mode: 'list', kind: 'all', name: '-' }, env(repoPath()));
+    expect(r.stdout).not.toContain('ERROR:');
+    const data = JSON.parse(r.stdout);
+    expect(data.status.size_bytes).toBe(4294967296);
+    expect(data.rows[0]).toMatchObject({
+      size_bytes: 4509715660, added_bytes: 39845888, added: '38.0 MiB',
+      size_added: '4.2 GiB · added 38.0 MiB', files: '12 new, 3 changed, 480 unchanged',
+    });
   });
 });
 

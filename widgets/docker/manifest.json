@@ -5327,7 +5327,7 @@
                             "format": "text"
                           },
                           {
-                            "label": "Repository size",
+                            "label": "Repository on disk",
                             "value": "{datasets.backups.status.size}",
                             "format": "text"
                           }
@@ -5408,6 +5408,11 @@
                               "format": "bytes"
                             },
                             {
+                              "title": "Added",
+                              "value": "{added}",
+                              "format": "text"
+                            },
+                            {
                               "title": "Included",
                               "value": "{included}",
                               "format": "text"
@@ -5465,8 +5470,13 @@
                   },
                   {
                     "label": "Size",
-                    "value": "{context.size_bytes}",
-                    "format": "bytes"
+                    "value": "{context.size_added}",
+                    "format": "text"
+                  },
+                  {
+                    "label": "Files",
+                    "value": "{context.files}",
+                    "format": "text"
                   },
                   {
                     "label": "Included",
