@@ -3,6 +3,7 @@
 import { forwardRef } from 'react';
 import { Copy, Download, ExternalLink, Info, Layers, Pause, Pencil, Play, Plus, Power, RefreshCw, RotateCw, ScrollText, Settings, Square, TerminalSquare, Trash2, Upload } from 'lucide-react';
 import { evalCond, fillTemplate, type FieldSpec } from '@/lib/widgets/runtime/spec';
+import { formatPercent } from '@/lib/widgets/runtime/number-format';
 import { fitsSize } from '@/lib/widgets/runtime/size';
 import { shapeSparkline, sparklinePath, trendWindowSec, type TrendSpec } from '@/lib/widgets/runtime/trends';
 import { useWidgetSize } from '@/components/dashboard/widget-size';
@@ -33,7 +34,7 @@ export function formatValue(v: unknown, format: string): string {
     while (x >= 1024 && i < units.length - 1) { x /= 1024; i++; }
     return `${x >= 10 || i === 0 ? Math.round(x) : x.toFixed(1)} ${units[i]}`;
   }
-  if ((format === 'percent' || format === 'bar') && Number.isFinite(n)) return `${Math.round(n * 10) / 10}%`;
+  if ((format === 'percent' || format === 'bar') && Number.isFinite(n)) return `${formatPercent(n)}%`;
   if (format === 'mb' && Number.isFinite(n)) return n >= 1024 ? `${(n / 1024).toFixed(1)} GB` : `${Math.round(n)} MB`;
   if (format === 'temp' && Number.isFinite(n)) return `${Math.round(n)}°C`;
   if (format === 'duration' && Number.isFinite(n)) {

@@ -1,5 +1,6 @@
 /** Shared classes for the declarative widget renderer. Everything here uses theme
  * tokens so widgets follow the app shell in both light and dark mode. */
+import type { MinItemWidth } from '@/lib/widgets/runtime/sizing';
 
 /** Small text input and select used by forms, editors and the list filter. */
 export const inputClass =
@@ -52,8 +53,35 @@ export const NOTICE_CLASS = {
  * Stat tiles and ring gauges inside a widget fill its body: the grid grows columns and rows to use the width and
  * height, and the numbers scale with the tile (container query units) instead of the screen. In dialogs and pages the
  * blocks keep their normal reading size (see fill.ts).
+ *
+ * A block's `minItemWidth` picks one of these fixed classes; `columns` picks a fixed count instead (both are validated
+ * keys, never CSS from a package).
  */
-export const FILL_GRID = 'grid h-full min-h-0 auto-rows-fr gap-2 [grid-template-columns:repeat(auto-fit,minmax(min(100%,8.5rem),1fr))]';
+export const FILL_GRID_MIN: Record<MinItemWidth, string> = {
+  xs: 'grid h-full min-h-0 auto-rows-fr gap-2 [grid-template-columns:repeat(auto-fit,minmax(min(100%,5.5rem),1fr))]',
+  sm: 'grid h-full min-h-0 auto-rows-fr gap-2 [grid-template-columns:repeat(auto-fit,minmax(min(100%,7rem),1fr))]',
+  md: 'grid h-full min-h-0 auto-rows-fr gap-2 [grid-template-columns:repeat(auto-fit,minmax(min(100%,8.5rem),1fr))]',
+  lg: 'grid h-full min-h-0 auto-rows-fr gap-2 [grid-template-columns:repeat(auto-fit,minmax(min(100%,10.5rem),1fr))]',
+};
+
+/** The default filling grid (what a block gets when it does not name a `minItemWidth`). */
+export const FILL_GRID = FILL_GRID_MIN.md;
+
+/** A filling grid with a fixed number of columns (`columns`). */
+export const FILL_GRID_COLUMNS: Record<number, string> = {
+  1: 'grid h-full min-h-0 auto-rows-fr gap-2 grid-cols-1',
+  2: 'grid h-full min-h-0 auto-rows-fr gap-2 grid-cols-2',
+  3: 'grid h-full min-h-0 auto-rows-fr gap-2 grid-cols-3',
+  4: 'grid h-full min-h-0 auto-rows-fr gap-2 grid-cols-4',
+  5: 'grid h-full min-h-0 auto-rows-fr gap-2 grid-cols-5',
+  6: 'grid h-full min-h-0 auto-rows-fr gap-2 grid-cols-6',
+};
+
+/** A fixed column count outside a filling widget (a dialog or page). */
+export const STAT_GRID_COLUMNS: Record<number, string> = {
+  1: 'grid gap-2 grid-cols-1', 2: 'grid gap-2 grid-cols-2', 3: 'grid gap-2 grid-cols-3',
+  4: 'grid gap-2 grid-cols-4', 5: 'grid gap-2 grid-cols-5', 6: 'grid gap-2 grid-cols-6',
+};
 
 /** The same grid on the smallest widget: one compact row, so nothing overflows. */
 export const FILL_GRID_XS = 'grid h-full min-h-0 grid-flow-col auto-cols-fr grid-rows-1 gap-1.5';
@@ -70,14 +98,17 @@ export const FILL_GAUGE_CARD = `${FILL_CARD_BASE} items-center justify-evenly ga
 
 export const FILL_GAUGE_CARD_COMPACT = `${FILL_CARD_BASE} items-center justify-center gap-0.5 p-1.5 text-center`;
 
-/** The main number of a tile: grows with the card's width or height, whichever gives it more room. */
-export const FILL_VALUE = 'truncate font-semibold leading-none tabular-nums [font-size:clamp(1.05rem,max(15cqw,25cqmin),6rem)]';
+/**
+ * The main number of a tile: the renderer sets its size inline from the value's length (see sizing.ts), so it is never
+ * ellipsised for a typical value. The class keeps the fallback size for a card that has not been measured yet.
+ */
+export const FILL_VALUE = 'whitespace-nowrap font-semibold leading-none tabular-nums [font-size:clamp(1.05rem,max(15cqw,25cqmin),6rem)]';
 
 /** A three-row tile has no room for a number that fills a wide card; this keeps it and the label inside. */
-export const FILL_VALUE_COMPACT = 'truncate font-semibold leading-none tabular-nums [font-size:clamp(1.05rem,min(15cqw,22cqmin),6rem)]';
+export const FILL_VALUE_COMPACT = 'whitespace-nowrap font-semibold leading-none tabular-nums [font-size:clamp(1.05rem,min(15cqw,22cqmin),6rem)]';
 
 /** The value inside a ring is a share of the ring area, so it stays inside the circle at every card size. */
-export const FILL_GAUGE_VALUE = 'truncate font-semibold leading-none tabular-nums [font-size:clamp(0.8rem,24cqmin,3.5rem)]';
+export const FILL_GAUGE_VALUE = 'whitespace-nowrap font-semibold leading-none tabular-nums [font-size:clamp(0.8rem,24cqmin,3.5rem)]';
 
 /** A tile's or gauge's label: never below 0.85rem, growing with the card up to 1.1rem. */
 export const FILL_LABEL = 'truncate text-muted-foreground [font-size:clamp(0.85rem,max(3.4cqw,5cqmin),1.1rem)]';

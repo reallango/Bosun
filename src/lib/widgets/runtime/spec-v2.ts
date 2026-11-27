@@ -15,6 +15,10 @@
  */
 import type { ActionSpec, Cond, FieldSpec, ParamSpec, RunAs, ViewSpec } from './spec';
 import { validateHideBelow, type WidgetSize } from './size';
+import {
+  validateBlockSizing, validateDecimals, validateEmphasis, validateGaugeThickness,
+  type BlockSize, type Emphasis, type GaugeThickness, type MinItemWidth,
+} from './sizing';
 import { validateThresholds, type Thresholds } from './thresholds';
 import { validateTrend, type TrendSpec } from './trends';
 import { validateGaugeItem, type GaugeItem } from './gauges';
@@ -100,6 +104,10 @@ export interface StatItem {
   unit?: string;
   trend?: TrendSpec;
   thresholds?: Thresholds;
+  /** How many decimals the value shows (0-3); a `%` value defaults to at most one. */
+  decimals?: number;
+  /** `muted` dims a secondary item's value. */
+  emphasis?: Emphasis;
 }
 
 export const EDITOR_INPUTS = ['text', 'number', 'select', 'checkbox', 'textarea', 'lines', 'pairs', 'rows', 'button', 'heading'] as const;
@@ -195,8 +203,8 @@ export type Block = (
   | { type: 'editor'; fields: EditorField[]; /** The text parameter of the submit actions that receives the settings blob (none: the fields are mapped one by one in each submit's params). */ param?: string; submits: EditorSubmit[]; open?: 'dialog'; label?: string; when?: Cond }
   | { type: 'section'; title: string; defaultOpen: boolean; badges: Badge[]; summary?: string; blocks: Block[]; when?: Cond }
   | { type: 'kv'; items: FieldSpec[]; when?: Cond }
-  | { type: 'stat'; items: StatItem[]; when?: Cond }
-  | { type: 'gauges'; items: GaugeItem[]; when?: Cond }
+  | { type: 'stat'; items: StatItem[]; size?: BlockSize; minItemWidth?: MinItemWidth; columns?: number; when?: Cond }
+  | { type: 'gauges'; items: GaugeItem[]; size?: BlockSize; minItemWidth?: MinItemWidth; columns?: number; thickness?: GaugeThickness; when?: Cond }
   | { type: 'text'; text: string; when?: Cond }
   | { type: 'notice'; level: 'info' | 'warning' | 'error'; text: string; when?: Cond }
   | { type: 'buttons'; actions: string[]; when?: Cond }
@@ -581,6 +589,8 @@ export function validateLayout(
         }
         case 'stat': {
           if (!Array.isArray(b.items) || b.items.length < 1 || b.items.length > 12) return fail(`${w}: "items" must list 1-12 stat tiles`);
+          const sizing = validateBlockSizing(b, w);
+          if (!sizing.ok) return sizing;
           const items: StatItem[] = [];
           for (const raw of b.items as unknown[]) {
             if (!isObj(raw)) return fail(`${w}: each stat item must be an object`);
@@ -624,23 +634,32 @@ export function validateLayout(
             if (!trend.ok) return trend;
             const thresholds = validateThresholds(raw.thresholds, `${w} stat "${label}"`);
             if (!thresholds.ok) return thresholds;
+            const decimals = validateDecimals(raw.decimals, `${w} stat "${label}"`);
+            if (!decimals.ok) return decimals;
+            const emphasis = validateEmphasis(raw.emphasis, `${w} stat "${label}"`);
+            if (!emphasis.ok) return emphasis;
             items.push({
               label, value, ...(sub ? { sub } : {}), ...(tone ? { tone } : {}), ...(tab ? { tab } : {}),
               ...(bar ? { bar } : {}), ...(unit ? { unit } : {}), ...(trend.value ? { trend: trend.value } : {}), ...(thresholds.value ? { thresholds: thresholds.value } : {}),
+              ...(decimals.value !== undefined ? { decimals: decimals.value } : {}), ...(emphasis.value ? { emphasis: emphasis.value } : {}),
             });
           }
-          out.push({ type: 'stat', items, ...base });
+          out.push({ type: 'stat', items, ...sizing.value, ...base });
           break;
         }
         case 'gauges': {
           if (!Array.isArray(b.items) || b.items.length < 1 || b.items.length > 12) return fail(`${w}: "items" must list 1-12 ring gauges`);
+          const sizing = validateBlockSizing(b, w);
+          if (!sizing.ok) return sizing;
+          const thickness = validateGaugeThickness(b.thickness, w);
+          if (!thickness.ok) return thickness;
           const items: GaugeItem[] = [];
           for (const item of b.items as unknown[]) {
             const g = validateGaugeItem(item, w);
             if (!g.ok) return g;
             items.push(g.value);
           }
-          out.push({ type: 'gauges', items, ...base });
+          out.push({ type: 'gauges', items, ...sizing.value, ...(thickness.value ? { thickness: thickness.value } : {}), ...base });
           break;
         }
         case 'text': {

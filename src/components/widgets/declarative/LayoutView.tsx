@@ -11,16 +11,19 @@ import {
   type JobState, type PublicActionLike, type ViewContext,
 } from '@/lib/widgets/runtime/layout';
 import { Bar, Fields, Sparkline, type StatToneName } from './parts';
-import { fitsSize } from '@/lib/widgets/runtime/size';
+import { fitsSize, type WidgetSize } from '@/lib/widgets/runtime/size';
 import { statTone, withUnit } from '@/lib/widgets/runtime/stat';
 import { thresholdTone } from '@/lib/widgets/runtime/thresholds';
-import { gaugeGeometry, GAUGE_STROKE, GAUGE_VIEWBOX, type GaugeItem } from '@/lib/widgets/runtime/gauges';
+import { formatValueText } from '@/lib/widgets/runtime/number-format';
+import { gaugeLabelFontSize, gaugeValueFontSize, labelFontSize, longestValueLength, tileValueFontSize, type BlockSize, type MinItemWidth } from '@/lib/widgets/runtime/sizing';
+import { gaugeGeometry, gaugeStroke, GAUGE_VIEWBOX, type GaugeItem } from '@/lib/widgets/runtime/gauges';
 import { useWidgetSize } from '@/components/dashboard/widget-size';
-import { useWidgetFill } from './fill';
+import { useWidgetDensity, useWidgetFill } from './fill';
 import { CodeBlock, EditorBlock } from './EditorBlock';
 import {
   buttonClass, DIALOG_CONTENT, DIALOG_FOOTER, DIALOG_HEADER, DIALOG_OVERLAY, DIALOG_TITLE, DIALOG_WIDTH, FILL_CARD, FILL_CARD_COMPACT, FILL_GAUGE_CARD,
-  FILL_GAUGE_CARD_COMPACT, FILL_GAUGE_LABEL, FILL_GAUGE_VALUE, FILL_GRID, FILL_GRID_XS, FILL_LABEL, FILL_SUB, FILL_VALUE, FILL_VALUE_COMPACT,
+  FILL_GAUGE_CARD_COMPACT, FILL_GAUGE_LABEL, FILL_GAUGE_VALUE, FILL_GRID_COLUMNS, FILL_GRID_MIN, FILL_GRID_XS, FILL_LABEL, FILL_SUB, FILL_VALUE,
+  FILL_VALUE_COMPACT, STAT_GRID_COLUMNS,
   iconButtonClass, inputClass, NOTICE_CLASS as NOTICE, primarySubmitClass, toolbarButtonClass,
 } from './styles';
 
@@ -247,27 +250,60 @@ const GAUGE_CARD = 'flex min-w-0 flex-col items-center gap-1 rounded-lg border b
 /** Below this measured widget body height (about three grid rows) tiles and gauges switch to their compact layout. */
 const COMPACT_HEIGHT = 160;
 
+/** The grid of a stat or gauge block: a fixed count, the auto-fit minimum of `minItemWidth`, or the size class outside a widget. */
+function itemGridClass(fill: boolean, widgetSize: WidgetSize, block: { columns?: number; minItemWidth?: MinItemWidth }): string {
+  if (block.columns) return fill ? FILL_GRID_COLUMNS[block.columns] : STAT_GRID_COLUMNS[block.columns];
+  if (fill) return widgetSize === 'xs' ? FILL_GRID_XS : FILL_GRID_MIN[block.minItemWidth ?? 'md'];
+  return `grid gap-2 ${STAT_COLUMNS[widgetSize] ?? STAT_COLUMNS.lg}`;
+}
+
+/** A block's `size` outside a widget (no container to scale with): the reading size of its number and label. */
+function tileValueClass(blockSize: BlockSize, widgetSize: WidgetSize): string {
+  if (blockSize === 'sm') return 'text-lg';
+  if (blockSize === 'lg') return 'text-3xl';
+  return widgetSize === 'xs' ? 'text-xl' : 'text-2xl';
+}
+
+function tileLabelClass(blockSize: BlockSize): string {
+  const textSize = blockSize === 'sm' ? 'text-[11px]' : blockSize === 'lg' ? 'text-sm' : 'text-xs';
+  return `truncate ${textSize} text-muted-foreground`;
+}
+
+/** The value inside a ring outside a filling widget. */
+function gaugeValueClass(blockSize: BlockSize): string {
+  if (blockSize === 'sm') return 'text-lg';
+  if (blockSize === 'lg') return 'text-3xl';
+  return 'text-xl';
+}
+
 /** A responsive grid of number cards; a card with a `tab` switches to that tab when it is inside a tab group. */
 function StatBlock({ block, ctx }: { block: Extract<Block, { type: 'stat' }>; ctx: ViewContext }) {
-  const { size, height } = useWidgetSize();
+  const { size: widgetSize, height } = useWidgetSize();
   const fill = useWidgetFill();
-  const compact = fill && height > 0 && height < COMPACT_HEIGHT;
+  const density = useWidgetDensity();
+  const compact = fill && (density === 'compact' || (height > 0 && height < COMPACT_HEIGHT));
   const selectTab = useContext(TabSelectContext);
+  const blockSize = block.size ?? 'md';
+  const shown = block.items.map(item => {
+    const value = text(item.value, ctx);
+    return { item, value: withUnit(formatValueText(value, item.unit, item.decimals) || '—', item.unit) };
+  });
+  // Every item in the block takes the same size, chosen from its longest value, so neighbours stay balanced.
+  const chars = longestValueLength(shown.map(s => s.value));
   return (
-    <div className={`grid gap-2 ${fill ? (size === 'xs' ? FILL_GRID_XS : FILL_GRID) : (STAT_COLUMNS[size] ?? STAT_COLUMNS.lg)}`}>
-      {block.items.map((item, i) => {
-        const value = text(item.value, ctx);
+    <div className={itemGridClass(fill, widgetSize, block)} style={fill && compact ? { gap: '0.375rem' } : undefined}>
+      {shown.map(({ item, value: valueText }, i) => {
         const numeric = Number(fillTemplate(item.value, ctx));
         const tone = statTone(item.tone, ctx) ?? thresholdTone(numeric, item.thresholds);
         const bar = item.bar ? Number(fillTemplate(item.bar, ctx)) : NaN;
         const card = fill ? (compact ? FILL_CARD_COMPACT : FILL_CARD) : STAT_CARD;
-        const valueText = withUnit(value || '—', item.unit);
-        const valueTone = tone ? STAT_TONE_CLASS[tone] : 'text-foreground';
-        const valueSize = fill ? (compact ? FILL_VALUE_COMPACT : FILL_VALUE) : size === 'xs' ? 'text-xl' : 'text-2xl';
+        const valueTone = tone ? STAT_TONE_CLASS[tone] : item.emphasis === 'muted' ? 'text-muted-foreground' : 'text-foreground';
+        const valueSize = fill ? (compact ? FILL_VALUE_COMPACT : FILL_VALUE) : tileValueClass(blockSize, widgetSize);
+        const valueStyle = fill ? { fontSize: tileValueFontSize(chars, blockSize, compact) } : undefined;
         const content = (
           <>
-            <div className={fill ? FILL_LABEL : 'truncate text-xs text-muted-foreground'}>{item.label}</div>
-            <div className={`${valueSize} font-semibold tabular-nums ${valueTone}`}>{valueText}</div>
+            <div className={fill ? FILL_LABEL : tileLabelClass(blockSize)} style={fill ? { fontSize: labelFontSize(blockSize) } : undefined}>{item.label}</div>
+            <div className={`${valueSize} font-semibold tabular-nums ${valueTone}`} style={valueStyle}>{valueText}</div>
             {Number.isFinite(bar) && <Bar value={bar} tone={tone} />}
             {/* A three-row tile has no room for a trend line; the number and bar are the parts that must stay. */}
             {!compact && item.trend && <Sparkline trend={item.trend} tone={tone} />}
@@ -283,30 +319,33 @@ function StatBlock({ block, ctx }: { block: Extract<Block, { type: 'stat' }>; ct
 }
 
 /** A ring gauge: the value in the middle of a circle that fills as it approaches `max`. */
-function Gauge({ item, ctx, fill }: { item: GaugeItem; ctx: ViewContext; fill: boolean }) {
-  const { height } = useWidgetSize();
-  const compact = fill && height > 0 && height < COMPACT_HEIGHT;
+function Gauge({ item, ctx, fill, compact, chars, blockSize, thickness }: {
+  item: GaugeItem; ctx: ViewContext; fill: boolean; compact: boolean; chars: number; blockSize: BlockSize; thickness?: GaugeItem['thickness'];
+}) {
   const value = text(item.value, ctx);
   const numeric = Number(fillTemplate(item.value, ctx));
   const tone = thresholdTone(numeric, item.thresholds);
-  const geometry = gaugeGeometry(numeric, item.max ?? 100);
-  const label = `${item.label}: ${withUnit(value || '—', item.unit)}`;
+  const stroke = gaugeStroke(item.thickness ?? thickness);
+  const geometry = gaugeGeometry(numeric, item.max ?? 100, GAUGE_VIEWBOX, stroke);
+  const valueText = withUnit(formatValueText(value, item.unit, item.decimals) || '—', item.unit);
+  const label = `${item.label}: ${valueText}`;
+  const valueTone = tone ? STAT_TONE_CLASS[tone] : item.emphasis === 'muted' ? 'text-muted-foreground' : 'text-foreground';
   return (
     <div className={fill ? (compact ? FILL_GAUGE_CARD_COMPACT : FILL_GAUGE_CARD) : GAUGE_CARD}>
       {/* A short card puts the label inside the ring, under the value, so the ring can use the whole height. */}
-      {!compact && <div className={fill ? FILL_LABEL : 'truncate text-xs text-muted-foreground'}>{item.label}</div>}
+      {!compact && <div className={fill ? FILL_LABEL : tileLabelClass(blockSize)} style={fill ? { fontSize: labelFontSize(blockSize) } : undefined}>{item.label}</div>}
       <div className={fill ? 'relative min-h-0 w-full flex-1 [container-type:size]' : 'relative mx-auto aspect-square w-full max-w-[9rem]'}>
         <svg viewBox={`0 0 ${GAUGE_VIEWBOX} ${GAUGE_VIEWBOX}`} preserveAspectRatio="xMidYMid meet" className="size-full" role="img" aria-label={label}>
-          <circle cx={geometry.cx} cy={geometry.cy} r={geometry.r} fill="none" strokeWidth={GAUGE_STROKE} className="stroke-muted" />
-          <circle cx={geometry.cx} cy={geometry.cy} r={geometry.r} fill="none" strokeWidth={GAUGE_STROKE} strokeLinecap="round"
+          <circle cx={geometry.cx} cy={geometry.cy} r={geometry.r} fill="none" strokeWidth={stroke} className="stroke-muted" />
+          <circle cx={geometry.cx} cy={geometry.cy} r={geometry.r} fill="none" strokeWidth={stroke} strokeLinecap="round"
             strokeDasharray={geometry.circumference} strokeDashoffset={geometry.dashOffset} transform={`rotate(-90 ${geometry.cx} ${geometry.cy})`}
             className={tone ? STAT_TONE_STROKE[tone] : 'stroke-primary'} />
         </svg>
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-0.5 overflow-hidden text-center leading-none" aria-hidden="true">
-          <span className={`${fill ? FILL_GAUGE_VALUE : 'text-xl'} font-semibold tabular-nums ${tone ? STAT_TONE_CLASS[tone] : 'text-foreground'}`}>
-            {withUnit(value || '—', item.unit)}
+          <span className={`${fill ? FILL_GAUGE_VALUE : gaugeValueClass(blockSize)} font-semibold tabular-nums ${valueTone}`} style={fill ? { fontSize: gaugeValueFontSize(chars, blockSize, stroke) } : undefined}>
+            {valueText}
           </span>
-          {compact && <span className={FILL_GAUGE_LABEL}>{item.label}</span>}
+          {compact && <span className={FILL_GAUGE_LABEL} style={fill ? { fontSize: gaugeLabelFontSize(blockSize) } : undefined}>{item.label}</span>}
         </div>
       </div>
       {!compact && item.sub && <div className={fill ? FILL_SUB : 'truncate text-xs text-muted-foreground'}>{text(item.sub, ctx)}</div>}
@@ -315,11 +354,21 @@ function Gauge({ item, ctx, fill }: { item: GaugeItem; ctx: ViewContext; fill: b
 }
 
 function GaugeBlock({ block, ctx }: { block: Extract<Block, { type: 'gauges' }>; ctx: ViewContext }) {
-  const { size } = useWidgetSize();
+  const { size: widgetSize, height } = useWidgetSize();
   const fill = useWidgetFill();
+  const density = useWidgetDensity();
+  const compact = fill && (density === 'compact' || (height > 0 && height < COMPACT_HEIGHT));
+  const blockSize = block.size ?? 'md';
+  const values = block.items.map(item => {
+    const value = text(item.value, ctx);
+    return withUnit(formatValueText(value, item.unit, item.decimals) || '—', item.unit);
+  });
+  const chars = longestValueLength(values);
   return (
-    <div className={`grid gap-2 ${fill ? (size === 'xs' ? FILL_GRID_XS : FILL_GRID) : (STAT_COLUMNS[size] ?? STAT_COLUMNS.lg)}`}>
-      {block.items.map((item, i) => <Gauge key={i} item={item} ctx={ctx} fill={fill} />)}
+    <div className={itemGridClass(fill, widgetSize, block)} style={fill && compact ? { gap: '0.375rem' } : undefined}>
+      {block.items.map((item, i) => (
+        <Gauge key={i} item={item} ctx={ctx} fill={fill} compact={compact} chars={chars} blockSize={blockSize} thickness={block.thickness} />
+      ))}
     </div>
   );
 }

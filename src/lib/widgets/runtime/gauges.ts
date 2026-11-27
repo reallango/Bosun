@@ -3,10 +3,17 @@
  * the renderer only needs a radius and a dash offset. Pure (no I/O).
  */
 import { fail, isObj, text, type Validated } from './spec-util';
+import { validateDecimals, validateEmphasis, validateGaugeThickness, type Emphasis, type GaugeThickness } from './sizing';
 import { validateThresholds, type Thresholds } from './thresholds';
 
 export const GAUGE_VIEWBOX = 100;
 export const GAUGE_STROKE = 10;
+
+/** Ring stroke widths in the 100-unit viewBox. */
+export const GAUGE_STROKES: Record<GaugeThickness, number> = { thin: 6, normal: GAUGE_STROKE, thick: 16 };
+
+/** The stroke a ring draws with (normal when it does not say). */
+export const gaugeStroke = (thickness: GaugeThickness | undefined): number => GAUGE_STROKES[thickness ?? 'normal'];
 
 export interface GaugeItem {
   label: string;
@@ -17,6 +24,12 @@ export interface GaugeItem {
   unit?: string;
   thresholds?: Thresholds;
   sub?: string;
+  /** How many decimals the value shows (0-3); a `%` value defaults to at most one. */
+  decimals?: number;
+  /** `muted` dims a secondary item's value. */
+  emphasis?: Emphasis;
+  /** The ring stroke, overriding the block's `thickness`. */
+  thickness?: GaugeThickness;
 }
 
 /** Validate one item of a `gauges` block. */
@@ -36,11 +49,20 @@ export function validateGaugeItem(raw: unknown, where: string): Validated<GaugeI
   if (sub === null) return fail(`${where}: gauge "${label}": "sub" must be text`);
   const thresholds = validateThresholds(raw.thresholds, `${where} gauge "${label}"`);
   if (!thresholds.ok) return thresholds;
+  const decimals = validateDecimals(raw.decimals, `${where} gauge "${label}"`);
+  if (!decimals.ok) return decimals;
+  const emphasis = validateEmphasis(raw.emphasis, `${where} gauge "${label}"`);
+  if (!emphasis.ok) return emphasis;
+  const thickness = validateGaugeThickness(raw.thickness, `${where} gauge "${label}"`);
+  if (!thickness.ok) return thickness;
   return {
     ok: true,
     value: {
       label, value, ...(max !== undefined ? { max } : {}), ...(unit ? { unit } : {}),
       ...(thresholds.value ? { thresholds: thresholds.value } : {}), ...(sub ? { sub } : {}),
+      ...(decimals.value !== undefined ? { decimals: decimals.value } : {}),
+      ...(emphasis.value ? { emphasis: emphasis.value } : {}),
+      ...(thickness.value ? { thickness: thickness.value } : {}),
     },
   };
 }
