@@ -2686,15 +2686,18 @@ exit 0
 });
 
 describe('image_updates (dataset)', () => {
-  type ImageRow = { cid: string; name: string; ref: string; stack?: string; service?: string; imageId: string; repoDigests: string };
-  // A fake Docker for image_updates.sh: the containers, their image ids and RepoDigests, and the registry lookup (buildx
-  // when `buildx`, docker manifest inspect otherwise). A reference in `failures` makes the lookup fail with that message.
+  // `identity` is what the containerd image store says the image came from: "pull" (pulled), "build" (built here), or
+  // undefined (nothing recorded: a classic image store, or an imported image).
+  type ImageRow = { cid: string; name: string; ref: string; stack?: string; service?: string; imageId: string; repoDigests: string; identity?: 'pull' | 'build' };
+  // A fake Docker for image_updates.sh: the containers, their image ids, RepoDigests and origin, and the registry lookup
+  // (buildx when `buildx`, docker manifest inspect otherwise). A reference in `failures` makes the lookup fail with that message.
   const imageFake = (list: ImageRow[], remote: Record<string, string>, buildx = true, failures: Record<string, string> = {}) => {
     const lines = (xs: string[]) => xs.join('\\n');
     const ps = lines(list.map((r) => `${r.cid}|${r.name}|${r.ref}|${r.stack ?? ''}|${r.service ?? ''}`));
     const cids = lines(list.map((r) => r.cid));
     const cid = lines(list.map((r) => `${r.cid}|${r.imageId}`));
-    const imgs = lines([...new Map(list.map((r) => [r.imageId, r.repoDigests])).entries()].map(([id, d]) => `${id}|${d}`));
+    const ident = (r: ImageRow) => (r.identity === 'pull' ? '{"Pull":[{"Repository":"o/app"}]}' : r.identity === 'build' ? '{"Build":[{"Ref":"abc"}]}' : 'null');
+    const imgs = lines([...new Map(list.map((r) => [r.imageId, `${r.repoDigests}|${ident(r)}`])).entries()].map(([id, d]) => `${id}|${d}`));
     const cases = [
       ...Object.entries(remote).map(([ref, json]) => `    ${ref}) printf '%s\\n' '${json}' ;;`),
       ...Object.entries(failures).map(([ref, msg]) => `    ${ref}) printf '%s\\n' '${msg}' >&2; exit 1 ;;`),
@@ -2715,6 +2718,8 @@ ${cases}
 esac`);
   };
   const jsonRows = (r: { stdout: string }) => JSON.parse(r.stdout) as Array<Record<string, unknown>>;
+  const lookups = () => dockerCalls().filter((c) => (c[0] === 'buildx' && c[1] === 'imagetools') || (c[0] === 'manifest' && c[1] === 'inspect'));
+  const LOCAL = 'c'.repeat(64);
 
   it.skipIf(!hasSh)('marks a tag that still points to the local image up to date and one that moved as available', () => {
     imageFake([
@@ -2745,10 +2750,33 @@ esac`);
     expect(jsonRows(run('image_updates.sh'))[0]).toMatchObject({ image: 'ghcr.io/o/app:1.2', local_digest: `sha256:${idx}`, remote_digest: `sha256:${idx}`, update_available: false, note: '' });
   });
 
-  it.skipIf(!hasSh)('leaves a locally built image unknown with a note', () => {
+  it.skipIf(!hasSh)('reports an image with no repo digests as built locally, without a lookup', () => {
     imageFake([{ cid: 'c1', name: 'app', ref: 'myapp:latest', imageId: 'sha256:i1', repoDigests: '[]' }], {});
-    expect(jsonRows(run('image_updates.sh'))[0]).toMatchObject({ local_digest: '', remote_digest: '', update_available: null, update: '', note: 'locally built' });
-    expect(dockerCalls().some((c) => c[0] === 'buildx' && c[1] === 'imagetools')).toBe(false);
+    expect(jsonRows(run('image_updates.sh'))[0]).toMatchObject({ local_digest: '', remote_digest: '', update_available: null, update: '', note: 'built locally' });
+    expect(lookups()).toHaveLength(0);
+  });
+
+  it.skipIf(!hasSh)('reports an image the containerd store gives its own digest as built locally, without a lookup', () => {
+    const own = (repo: string, id: string) => `["${repo}@sha256:${id}"]`;
+    imageFake([
+      { cid: 'c1', name: 'audio', ref: 'audiobook-studio-audiobook-studio', imageId: `sha256:${ID}`, repoDigests: own('audiobook-studio-audiobook-studio', ID), identity: 'build' },
+      { cid: 'c2', name: 'orch', ref: 'langgraph-orchestrator:api', imageId: `sha256:${NEW}`, repoDigests: own('langgraph-orchestrator', NEW), identity: 'build' },
+      { cid: 'c3', name: 'whisper', ref: 'local/faster-whisper:latest', imageId: `sha256:${LOCAL}`, repoDigests: own('local/faster-whisper', LOCAL), identity: 'build' },
+    ], {});
+    expect(jsonRows(run('image_updates.sh'))).toMatchObject([
+      { container: 'audio', image: 'audiobook-studio-audiobook-studio', local_digest: '', remote_digest: '', update_available: null, update: '', note: 'built locally' },
+      { container: 'orch', image: 'langgraph-orchestrator:api', local_digest: '', remote_digest: '', update_available: null, update: '', note: 'built locally' },
+      { container: 'whisper', image: 'local/faster-whisper:latest', local_digest: '', remote_digest: '', update_available: null, update: '', note: 'built locally' },
+    ]);
+    expect(lookups()).toHaveLength(0);
+  });
+
+  it.skipIf(!hasSh)('still compares a pulled Docker Hub image whose digest is its own id', () => {
+    imageFake([{ cid: 'c1', name: 'web', ref: 'nginx:latest', imageId: `sha256:${ID}`, repoDigests: `["nginx@sha256:${ID}"]`, identity: 'pull' }], {
+      'nginx:latest': `{"digest":"sha256:${NEW}"}`,
+    });
+    expect(jsonRows(run('image_updates.sh'))[0]).toMatchObject({ local_digest: `sha256:${ID}`, remote_digest: `sha256:${NEW}`, update_available: true, update: 'available', note: '' });
+    expect(lookups()).toHaveLength(1);
   });
 
   it.skipIf(!hasSh)('leaves a digest-pinned reference unknown with a note', () => {
@@ -2770,7 +2798,16 @@ esac`);
     imageFake([{ cid: 'c1', name: 'app', ref: 'private/app:1', imageId: 'sha256:i1', repoDigests: `["private/app@sha256:${ID}"]` }], {}, true, {
       'private/app:1': 'Error response from daemon: unauthorized: authentication required',
     });
-    expect(jsonRows(run('image_updates.sh'))[0]).toMatchObject({ update_available: null, note: 'needs credentials' });
+    expect(jsonRows(run('image_updates.sh'))[0]).toMatchObject({ local_digest: `sha256:${ID}`, update_available: null, note: 'needs credentials' });
+    expect(lookups()).toHaveLength(1);
+  });
+
+  it.skipIf(!hasSh)('reports a refused Docker Hub name as built locally when Docker records no pull for the image', () => {
+    imageFake([{ cid: 'c1', name: 'app', ref: 'myapp:api', imageId: `sha256:${ID}`, repoDigests: `["myapp@sha256:${ID}"]` }], {}, true, {
+      'myapp:api': 'Error response from daemon: unauthorized: authentication required',
+    });
+    expect(jsonRows(run('image_updates.sh'))[0]).toMatchObject({ local_digest: '', remote_digest: '', update_available: null, update: '', note: 'built locally' });
+    expect(lookups()).toHaveLength(1);
   });
 
   it.skipIf(!hasSh)('looks a reference up once for two containers', () => {
