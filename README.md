@@ -533,6 +533,62 @@ parameters. Each action names a permission the package declares and is also an A
 package's data and actions. Installing a package shows every command it can run and the account it runs as, and asks for
 confirmation. The spec format is documented in `widgets/README.md`.
 
+### MCP (for AI agents)
+
+Bosun has a built-in [Model Context Protocol](https://modelcontextprotocol.io/) endpoint at `POST /api/mcp`
+(Streamable HTTP, JSON-RPC 2.0, stateless). It uses the same API keys, permissions, resource limits, audit log and
+job system as the REST API; it adds no privileges. Create a key under **Settings → API access**, then point a client
+at the endpoint with `Authorization: Bearer bosun_...`. A signed-in browser session also works, but an API key is
+what you want for an agent.
+
+Discovery: `GET /api/mcp` (or `GET /api/mcp/info`) without MCP headers returns the endpoint URL, protocol versions
+and ready-to-copy client snippets. Every tool call is checked exactly like its REST counterpart. A refused call is an
+MCP tool error that includes the same `POST /api/access-requests` body the REST 403 returns.
+
+Tools:
+
+- `bosun_overview` orients in one call: Bosun version, cluster nodes and each visible server with CPU, memory, load
+  and disk use. `servers_list` and `server_get` add detail.
+- One tool per installed widget dataset (`<widget_type>__<dataset>`, read) and runnable action
+  (`<widget_type>__<action>`). They are generated from the same package specs as `GET /api/openapi.json`, so they
+  appear and disappear with the widgets you install. `tools/list` only shows what the caller may use on at least one
+  server. Destructive actions are annotated and still require `confirm: true`.
+- `job_wait` long-polls a widget job (up to 120 s) and `job_log` returns its full output.
+- `access_whoami` shows what the caller holds; `access_request` asks for a grant or one action run;
+  `access_request_wait` long-polls the decision (up to 50 s).
+- `schedules_list`, `schedule_create` and `schedule_run_now`; `update_status`; `notifications_list`.
+
+Claude Code:
+
+```bash
+claude mcp add --transport http bosun https://bosun.example.com/api/mcp \
+  --header "Authorization: Bearer bosun_..."
+```
+
+Claude Desktop (through `mcp-remote`, because Desktop speaks stdio):
+
+```json
+{
+  "mcpServers": {
+    "bosun": {
+      "command": "npx",
+      "args": ["-y", "mcp-remote", "https://bosun.example.com/api/mcp",
+               "--header", "Authorization: Bearer bosun_..."]
+    }
+  }
+}
+```
+
+Any MCP client that supports Streamable HTTP can use the URL and header directly. A quick check with `curl`:
+
+```bash
+curl -sS -X POST https://bosun.example.com/api/mcp \
+  -H "Authorization: Bearer bosun_..." \
+  -H "Content-Type: application/json" \
+  -H "Accept: application/json, text/event-stream" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+```
+
 **Hiding servers and widgets.** A permission group can *deny* as well as allow. Denying *See a server* for a server
 (or a server group) hides it from everyone in that group: it is not listed, its dashboards and widgets are gone and
 every API route under it answers 404. Denying a package widget's data permission hides that widget. A deny beats any

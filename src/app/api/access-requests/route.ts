@@ -4,12 +4,9 @@ import { ok, fail, failFrom } from '@/lib/api/response';
 import { registeredPermissionDefs } from '@/lib/permissions/store';
 import { createRequest, listRequests, RequestError } from '@/lib/access/requests';
 import { validateRequestInput } from '@/lib/access/validate';
-import { RateLimiter } from '@/lib/utils/rate-limiter';
+import { accessRequestLimiter } from '@/lib/access/limiter';
 
 export const dynamic = 'force-dynamic';
-
-const g = globalThis as unknown as { __bosunAccessRequestLimiter?: RateLimiter };
-const limiter = g.__bosunAccessRequestLimiter ?? (g.__bosunAccessRequestLimiter = new RateLimiter({ maxAttempts: 20, windowMs: 3600_000, lockoutMs: 0 }));
 
 /**
  * GET: the caller's requests (`?mine=1`, or for people who can decide, everyone's; `?status=pending`).
@@ -32,7 +29,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const auth = await requireAuth(request);
   if (auth instanceof NextResponse) return auth;
-  if (!limiter.consume(String(auth.userId)).allowed) return fail('Too many requests; try again later', 429, 'RATE_LIMITED');
+  if (!accessRequestLimiter.consume(String(auth.userId)).allowed) return fail('Too many requests; try again later', 429, 'RATE_LIMITED');
   let body: unknown;
   try { body = await request.json(); } catch { return fail('Invalid JSON body'); }
   const input = validateRequestInput(body, await registeredPermissionDefs());
