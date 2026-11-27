@@ -147,7 +147,7 @@ export function WidgetSettingsDialog({ widgetId, open, onOpenChange, onSave }: W
                         <Label htmlFor={id}>{field.label}</Label>
                         {field.type === 'select' ? (
                           <select id={id} className="form-select" value={String(value)} onChange={e => setConfigValue(field.key, e.target.value)}>
-                            {(field.options || []).map(o => <option key={o} value={o}>{o}</option>)}
+                            {(field.options || []).map(o => <option key={o} value={o}>{field.optionLabels?.[o] ?? o}</option>)}
                           </select>
                         ) : (
                           <Input id={id} type={field.type === 'number' ? 'number' : 'text'} value={String(value)} placeholder={field.placeholder}

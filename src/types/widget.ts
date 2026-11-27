@@ -15,6 +15,8 @@ export interface WidgetConfigField {
   placeholder?: string;
   default?: string | number | boolean;
   options?: string[];
+  /** Labels for `options` (Bosun's own "Look" field uses them); an option without one shows its value. */
+  optionLabels?: Record<string, string>;
   /** Changing this setting needs this permission (declared by the package). */
   requires_permission?: string;
 }

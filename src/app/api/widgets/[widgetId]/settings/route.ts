@@ -4,6 +4,8 @@ import { requirePermission } from '@/lib/permissions/authorize';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { widgetVisible } from '@/lib/widgets/visibility';
 import { resolveWidgetDefinition } from '@/components/widgets/registry-loader';
+import { loadWidgetSpec } from '@/lib/widgets/runtime/execute';
+import { lookConfigField, withLookDefault } from '@/lib/widgets/runtime/looks';
 import { denyGuardedConfigChange } from '@/lib/widgets/config-guard-http';
 
 /**
@@ -26,15 +28,25 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const widget = rowsToObjects(r)[0];
     if (!widget) return NextResponse.json({ error: { message: 'Widget not found' } }, { status: 404 });
     const def = await resolveWidgetDefinition(String(widget.widget_type));
-    let config: unknown = {};
-    try { config = typeof widget.config === 'string' ? JSON.parse(widget.config || '{}') : widget.config || {}; } catch { config = {}; }
+    const loaded = await loadWidgetSpec(String(widget.widget_type));
+    let config: Record<string, unknown> = {};
+    try {
+      const parsed = typeof widget.config === 'string' ? JSON.parse(widget.config || '{}') : widget.config;
+      config = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+    } catch { config = {}; }
+    // A widget that declares looks gets its "Look" choice without listing it in the manifest's config_schema.
+    const schema = [...(def?.configSchema || [])];
+    if (loaded?.spec.looks) {
+      const look = lookConfigField(loaded.spec.looks);
+      if (!schema.some(f => f.key === look.key)) schema.push(look);
+    }
     return NextResponse.json({
       data: {
         ...widget,
         enabled: widget.poll_enabled,
-        config,
+        config: withLookDefault(loaded?.spec.looks, config),
         // Fields the settings dialog renders into widgets.config.
-        config_schema: def?.configSchema || [],
+        config_schema: schema,
         storage_mode: 'server',
         ttl_sec: null,
         display_name: widget.title_override,
