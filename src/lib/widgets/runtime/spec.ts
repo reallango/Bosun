@@ -20,6 +20,10 @@ import { validateDatasets, validateMenu, validateScreens, type DatasetSpec, type
 import { validateResourceFields, validateTarget, type ResourceFields, type ResourceTarget } from './resources';
 import { validateHideBelow, validateInline, type InlineActions, type WidgetSize } from './size';
 export type { WidgetSize } from './size';
+import { validateLooks, type LooksSpec } from './looks';
+export type { LooksSpec, WidgetLook } from './looks';
+import { validateTrend, type TrendSpec } from './trends';
+export type { TrendSpec, TrendWindow } from './trends';
 import { validateLayout, validateLookups, validateScripts, validateState, validateVariants, type ActionVariant, type Block, type LookupSpec, type ScriptSpec, type StateSpec } from './spec-v2';
 export type { ActionVariant, Block, LookupSpec, ScriptSpec, StateSpec } from './spec-v2';
 import { validateSchedules, type ScheduleSpec } from './spec-schedules';
@@ -125,7 +129,8 @@ export interface ActionSpec {
 
 /** One labelled value. `bar` (a template that gives 0-100) draws a gauge under it; `when` hides it for data it does not match. */
 /** `hideBelow` (on any part that has it): hidden while the widget is smaller than that size class (see size.ts). */
-export interface FieldSpec { label: string; value: string; format: (typeof FORMATS)[number]; bar?: string; when?: Cond; hideBelow?: WidgetSize }
+/** `trend` (version 7) draws a small line of the metric's recent history under the value. */
+export interface FieldSpec { label: string; value: string; format: (typeof FORMATS)[number]; bar?: string; trend?: TrendSpec; when?: Cond; hideBelow?: WidgetSize }
 
 /** One column of a table view. `sort` names a raw row field to sort by (the value shown may be formatted). */
 export interface TableColumn { title: string; value: string; format: (typeof FORMATS)[number]; hideBelow?: WidgetSize; sort?: string }
@@ -179,6 +184,8 @@ export interface WidgetSpec {
   view: ViewSpec;
   actions: ActionSpec[];
   metrics?: MetricSpec[];
+  /** The named looks this widget offers (its settings dialog gets a "Look" choice; conditions read `config.look`). */
+  looks?: LooksSpec;
   /** Version 2: host scripts of the package, the widget's state probe and its external lookups (see spec-v2.ts). */
   scripts?: Record<string, ScriptSpec>;
   state?: StateSpec;
@@ -620,6 +627,9 @@ function validateFields(raw: unknown, where: string): Validated<FieldSpec[]> {
       if (!bar) return fail(`${where}: "bar" must be a template that gives a number from 0 to 100`);
       item.bar = bar;
     }
+    const trend = validateTrend(f.trend, where);
+    if (!trend.ok) return trend;
+    if (trend.value) item.trend = trend.value;
     if (f.when !== undefined) {
       const c = cond(f.when, `${where} "when"`);
       if (!c.ok) return c;
@@ -852,6 +862,12 @@ export function validateWidgetSpec(raw: unknown, ownPermissions: readonly string
   if (!v2on) {
     for (const k of ['scripts', 'state', 'lookups', 'datasets', 'screens', 'menu'] as const) if (raw[k] !== undefined) return fail(`"${k}" needs spec version 2`);
   }
+  let looks: LooksSpec | undefined;
+  if (raw.looks !== undefined) {
+    const l = validateLooks(raw.looks);
+    if (!l.ok) return l;
+    looks = l.value;
+  }
   const own = new Set(ownPermissions);
   const scripts = v2on ? validateScripts(raw.scripts) : { ok: true as const, value: {} as Record<string, ScriptSpec> };
   if (!scripts.ok) return scripts;
@@ -916,7 +932,7 @@ export function validateWidgetSpec(raw: unknown, ownPermissions: readonly string
   return {
     ok: true,
     value: {
-      version: raw.version, data: data.value, view: view.value, actions, ...(metrics ? { metrics } : {}),
+      version: raw.version, data: data.value, view: view.value, actions, ...(metrics ? { metrics } : {}), ...(looks ? { looks } : {}),
       ...(Object.keys(scripts.value).length ? { scripts: scripts.value } : {}),
       ...(state.value ? { state: state.value } : {}),
       ...(Object.keys(lookups.value).length ? { lookups: lookups.value } : {}),

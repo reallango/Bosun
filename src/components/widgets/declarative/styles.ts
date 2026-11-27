@@ -48,6 +48,32 @@ export const NOTICE_CLASS = {
   error: 'border-destructive/30 bg-destructive/10 text-destructive',
 } as const;
 
+/**
+ * Stat tiles and ring gauges inside a widget fill its body: the grid grows columns and rows to use the width and
+ * height, and the numbers scale with the tile (container query units) instead of the screen. In dialogs and pages the
+ * blocks keep their normal reading size (see fill.ts).
+ */
+export const FILL_GRID = 'grid h-full min-h-0 auto-rows-fr gap-2 [grid-template-columns:repeat(auto-fit,minmax(min(100%,8.5rem),1fr))]';
+
+/** The same grid on the smallest widget: one compact row, so nothing overflows. */
+export const FILL_GRID_XS = 'grid h-full min-h-0 grid-flow-col auto-cols-fr grid-rows-1 gap-1.5';
+
+/** A tile or gauge card in a filling grid. `@container` makes its text scale with the card, not the screen. */
+export const FILL_CARD = 'flex min-w-0 flex-col justify-evenly gap-1 overflow-hidden rounded-lg border border-border bg-card p-2.5 text-left @container';
+
+/** The main number of a tile or the value in a ring: scales with the card width within sensible bounds. */
+export const FILL_VALUE = 'truncate font-semibold leading-none tabular-nums [font-size:clamp(1.05rem,15cqw,6rem)]';
+
+/** The value inside a ring stays inside the circle, so it scales a little more gently than a tile's number. */
+export const FILL_GAUGE_VALUE = 'truncate font-semibold leading-none tabular-nums [font-size:clamp(0.8rem,11cqw,3.5rem)]';
+
+export const FILL_LABEL = 'truncate text-muted-foreground [font-size:clamp(0.6rem,3.4cqw,0.8rem)]';
+
+export const FILL_SUB = 'truncate text-muted-foreground [font-size:clamp(0.55rem,3cqw,0.75rem)]';
+
+/** A sparkline stretches to the tile width; its height grows a little with the card. */
+export const SPARKLINE = 'block w-full [height:clamp(0.9rem,16cqw,5rem)]';
+
 /** The dialog shell shared by screen dialogs and forms that open behind a button. */
 export const DIALOG_OVERLAY = 'fixed inset-0 z-50 bg-black/50';
 

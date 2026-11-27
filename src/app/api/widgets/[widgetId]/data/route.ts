@@ -3,6 +3,7 @@ import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { requireAuth } from '@/lib/auth/middleware';
 import { hasPermission, requirePermission } from '@/lib/permissions/authorize';
 import { loadWidgetSpec, loadRuntimeData, RuntimeError } from '@/lib/widgets/runtime/execute';
+import { withLookDefault } from '@/lib/widgets/runtime/looks';
 import { serverVisible } from '@/lib/permissions/effective';
 import { filterRows, viewFilter } from '@/lib/widgets/runtime/resource-check';
 
@@ -50,7 +51,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       try {
         const loadedRt = await loadRuntimeData(server.id, loaded, force, cfg, widgetId);
         const rt = view === 'all' ? loadedRt : { ...loadedRt, data: filterRows(loadedRt.data, loaded.spec.data.resources!, view!) };
-        return NextResponse.json({ ...rt, stale: false, ...(loaded.spec.version >= 2 ? { config: cfg } : {}), server: { is_online: !!server.is_online, last_error: server.last_error ?? null, name: server.name, hostname: server.hostname, platform: server.platform || 'linux' } },
+        // `config.look` is the look's default until someone saves another one, so conditions work from the first render.
+        const uiConfig = withLookDefault(loaded.spec.looks, cfg);
+        return NextResponse.json({ ...rt, stale: false, ...(loaded.spec.version >= 2 ? { config: uiConfig } : {}), server: { is_online: !!server.is_online, last_error: server.last_error ?? null, name: server.name, hostname: server.hostname, platform: server.platform || 'linux' } },
           { headers: { 'Cache-Control': 'no-store' } });
       } catch (err) {
         if (err instanceof RuntimeError) return NextResponse.json({ error: { message: err.message, code: err.code } }, { status: err.status });

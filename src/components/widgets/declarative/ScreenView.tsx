@@ -7,6 +7,7 @@ import { readJson } from '@/lib/api/readJson';
 import type { ScreenSpec } from '@/lib/widgets/runtime/spec-screens';
 import { screenArgs, text, type PublicActionLike, type ViewContext } from '@/lib/widgets/runtime/layout';
 import { LayoutBlocks, type LayoutUi } from './LayoutView';
+import { TrendProvider } from './trends';
 import { buttonClass } from './styles';
 
 type Datasets = Record<string, unknown>;
@@ -113,7 +114,9 @@ export function ScreenView({ screen, context, serverId, widgetType, ui, onDone, 
               </button>
             </div>
           )}
-          <LayoutBlocks blocks={screen.blocks} ctx={ctx} ui={screenUi} />
+          <TrendProvider serverId={serverId} source={screen} refreshKey={context.data}>
+            <LayoutBlocks blocks={screen.blocks} ctx={ctx} ui={screenUi} />
+          </TrendProvider>
         </div>
       )}
     </div>

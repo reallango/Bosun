@@ -24,6 +24,8 @@ import type { ViewContext } from '@/lib/widgets/runtime/layout';
 import { MetricsChartWidget } from '@/components/widgets/metrics-chart/MetricsChartWidget';
 import { Bar, DOT, Fields, formatValue, ICONS, IconBtn, type Row } from './parts';
 import { LayoutBlocks, type LayoutUi } from './LayoutView';
+import { WidgetFillContext } from './fill';
+import { TrendProvider } from './trends';
 import { inputClass, toolbarButtonClass } from './styles';
 import { ScreenDialog } from './ScreenDialog';
 import { RowSheet } from './RowSheet';
@@ -446,10 +448,15 @@ export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
     ? (
       <div className="min-h-0 flex-1 overflow-auto">
         {extra.stateError && <div role="alert" className="mb-2 rounded-md border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">Checking this host failed: {extra.stateError}</div>}
-        <LayoutBlocks blocks={view.blocks ?? []} ctx={fullCtx} ui={ui} />
+        {/* A widget fills its body; its dialogs and pages do not. */}
+        <WidgetFillContext.Provider value>
+          <TrendProvider serverId={serverId} source={view} refreshKey={data}>
+            <LayoutBlocks blocks={view.blocks ?? []} ctx={fullCtx} ui={ui} />
+          </TrendProvider>
+        </WidgetFillContext.Provider>
       </div>
     )
-    : v1(view, data);
+    : <TrendProvider serverId={serverId} source={view} refreshKey={data}>{v1(view, data)}</TrendProvider>;
 
   const open = screen ? spec.screens?.[screen.id] : undefined;
   const detailScreen = detail ? spec.screens?.[detail.id] : undefined;

@@ -49,6 +49,7 @@ newer Bosun is still listed under Available (so the reason is visible) but canno
 | 4 | `bulk` on table views, the `stat` block, and the Manage-page keys of the earlier work: tab `count`, `open: "dialog"` on forms and editors, column `sort`, view `defaultSort`, and view `open` for row details. |
 | 5 | `schedules`: the runs a package offers under Settings → Schedules. |
 | 6 | Up to 64 actions per widget (40 before). |
+| 7 | `looks` (and the "Look" choice Bosun adds to the widget's settings), `trend` on stat tiles and fields, the stat tile keys `bar`, `unit` and `thresholds`, and the `gauges` block. |
 
 New spec keys that an older Bosun cannot honour raise the level in `src/lib/widgets/api-level.ts`; keys an older
 Bosun can safely ignore (because it renders the widget sensibly without them) do not.
@@ -334,6 +335,17 @@ Cards use the theme tokens and follow the widget's size class: one column on `xs
 `lg`. The block also works in a widget on a dashboard. An older Bosun ignores the block, so a screen that uses it keeps
 working there without the tiles.
 
+A tile can also carry a thin bar, a unit, a small trend line and thresholds (level 7):
+
+- `bar` is a template that gives a number from 0 to 100, drawn as a thin bar under the number.
+- `unit` is appended to the value (`%` and `°C` sit tight, other units take a space). Keep `value` a plain number when
+  you use thresholds, or they cannot compare it.
+- `trend` is `{ "metric": "cpu.usage", "window": "1h" }`: a small line of that metric's history. `window` is `1h`, `6h`
+  or `24h`. A host with no history draws nothing; it is not an error.
+- `thresholds` colours the number and the bar: `{ "warning": 75, "danger": 90 }` for "high is bad", or
+  `{ "below": { "warning": 20, "danger": 10 } }` for "low is bad". A fixed `tone` or a tone condition wins over it.
+- `trend` is also accepted on a `fields` item (a `fields` view or a `kv` block); it draws the line under the value.
+
 ```jsonc
 "blocks": [
   { "type": "stat", "items": [
@@ -344,6 +356,56 @@ working there without the tiles.
   { "type": "kv", "items": [{ "label": "Docker version", "value": "{datasets.system.version}", "format": "text" }] }
 ]
 ```
+
+### Looks
+
+A widget can offer named ways to draw its main numbers. Bosun adds a "Look" choice to that widget's settings dialog
+automatically and exposes the saved value to conditions as `config.look`, so the spec decides what each look shows:
+
+```jsonc
+"spec": {
+  "looks": { "default": "tiles", "options": [{ "id": "tiles", "label": "Tiles" }, { "id": "gauges", "label": "Gauges" }] },
+  "view": { "type": "layout", "blocks": [
+    { "type": "stat", "when": { "field": "config.look", "equals": "tiles" }, "items": [ /* ... */ ] },
+    { "type": "gauges", "when": { "field": "config.look", "equals": "gauges" }, "items": [ /* ... */ ] }
+  ] }
+}
+```
+
+- `looks.options` is 1-6 looks; each `id` is lowercase letters, digits and underscores and each `label` is what the
+  settings dialog shows. `default` must be one of the ids.
+- The value is stored with the widget's other settings in `widgets.config`. Bosun fills in the default before the
+  widget's data is sent, so conditions work even before anyone opens the settings.
+- Conditions on `config.look` need the context of a layout block (`when` on a block, or a `kv` field). A version 1
+  `fields` view tests conditions against the data, not the settings.
+- A widget without `looks` is unchanged and gets no extra setting.
+
+### Ring gauges
+
+A `gauges` block draws circular gauges with the value in the middle. It is a sibling of `stat`, and uses the same
+conditions and size classes.
+
+```jsonc
+{ "type": "gauges", "items": [
+  { "label": "CPU", "value": "{data.cpu.usagePercent}", "max": 100, "unit": "%", "thresholds": { "warning": 75, "danger": 90 }, "sub": "8 cores" },
+  { "label": "Memory", "value": "{data.memory.usagePercent}", "max": 100, "unit": "%", "thresholds": { "warning": 75, "danger": 90 } }
+] }
+```
+
+- `value` is a template; `max` is what a full ring stands for (default 100).
+- `unit`, `thresholds` and `sub` work as they do on a stat tile.
+- The ring uses theme tokens only and is announced to assistive technology as an image (`role="img"` with the label and
+  value as its `aria-label`).
+
+### Filling the widget
+
+Inside a widget on a dashboard, `stat` tiles and `gauges` flow into a grid that grows its columns and rows to use the
+whole body. The number in a tile (and the ring in a gauge) scales with the tile, not the screen, within a sensible
+minimum and maximum; a sparkline stretches to the tile's width. At the smallest size class (`xs`) the tiles stay in one
+compact row so nothing overflows. In a dialog, a sheet or a full page the same blocks keep their normal reading size.
+
+Bosun applies these rules for every widget (they are not per widget). A spec only chooses the look and what each block
+shows; it does not need any layout CSS of its own.
 
 ## Docker Containers: backups and restore
 
