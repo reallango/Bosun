@@ -675,7 +675,7 @@ if [ "$mode" = list ]; then
               fls = ""
               if (fl != "") { nf = split(fl, fa, "/"); if (nf == 3) fls = fa[1] " new, " fa[2] " changed, " fa[3] " unchanged" }
               nrows++
-              rows[nrows] = sprintf("{\"id\":\"%s\",\"short\":\"%s\",\"time\":\"%s\",\"kind\":\"%s\",\"name\":\"%s\",\"container\":\"%s\",\"stack\":\"%s\",\"size_bytes\":%d,\"size\":\"%s\",\"added_bytes\":%d,\"added\":\"%s\",\"size_added\":\"%s\",\"files\":\"%s\",\"included\":\"%s\",\"pinned_ref\":\"%s\",\"pinned_version\":\"%s\",\"hostname\":\"%s\"}", esc(id), esc(sid), esc(time), esc(kd), esc(nm), esc(cf), esc(sf), bb, esc(sz), ab, esc(adz), esc(sa), esc(fls), esc(inc), esc(pin), esc(ver), esc(host))
+              rows[nrows] = sprintf("{\"id\":\"%s\",\"short\":\"%s\",\"time\":\"%s\",\"kind\":\"%s\",\"name\":\"%s\",\"container\":\"%s\",\"stack\":\"%s\",\"size_bytes\":%.0f,\"size\":\"%s\",\"added_bytes\":%.0f,\"added\":\"%s\",\"size_added\":\"%s\",\"files\":\"%s\",\"included\":\"%s\",\"pinned_ref\":\"%s\",\"pinned_version\":\"%s\",\"hostname\":\"%s\"}", esc(id), esc(sid), esc(time), esc(kd), esc(nm), esc(cf), esc(sf), bb, esc(sz), ab, esc(adz), esc(sa), esc(fls), esc(inc), esc(pin), esc(ver), esc(host))
             }
             { buf = buf $0 "\n" }
             END {
