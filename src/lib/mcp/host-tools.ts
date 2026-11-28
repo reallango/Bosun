@@ -99,7 +99,7 @@ export function hostTools(): CatalogTool[] {
       description: [
         'Open a persistent PTY session on a host and return its session_id.',
         'as "user" uses the non-admin shell account (shell.user); as "service" uses the privileged service account (exec.service).',
-        'Pass container to open an interactive shell in a container instead (needs container shell access).',
+        'Pass container to open an interactive shell in a container instead; a container session always runs as the service account and needs container shell access.',
         'Without the permission a one-time access request is created for one host-shell session (not for containers).',
         'Sessions belong to the principal that opened them, live on the node that opened them (a call on another node answers "Session not found on this node"), close after 15 idle minutes and are capped at 4 per principal.',
       ].join(' '),
@@ -161,7 +161,7 @@ export async function callHostTool(ctx: ActionContext, tool: CatalogTool, args: 
     }
   } catch (error) {
     if (error instanceof TerminalError || error instanceof CommandError) return errorResult(error.message);
-    throw error;
+    return errorResult(error instanceof Error ? error.message : String(error));
   }
 }
 
