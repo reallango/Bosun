@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "docker",
   "name": "Docker Containers",
-  "version": "1.1.3",
+  "version": "1.1.4",
   "description": "Containers on the host with logs, a shell, start, stop and restart; edit a container, create containers and stacks (a compose file, or one from a Git repository), back containers and stacks up with restic (volumes, mapped folders, stack files and the image, with the pinned image version) and restore them, update containers and stacks to newer images with a health check and automatic rollback, and a Manage page for images, volumes, networks and backups.",
   "author": "Bosun",
   "requires": {
@@ -5820,6 +5820,11 @@
                         "items": [
                           {
                             "label": "Destination",
+                            "value": "{datasets.backups.status.destination_name}",
+                            "format": "text"
+                          },
+                          {
+                            "label": "Repository",
                             "value": "{datasets.backups.status.repository}",
                             "format": "text"
                           },

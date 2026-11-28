@@ -674,12 +674,17 @@ Each kind has an `id` (lowercase letters, digits and underscores, unique in the 
 (this package must declare it) and `fields`. A field is `"type": "string"` (public by default, shown in the UI) or
 `"type": "secret"` (never public; it is write-only). A public field may carry a `pattern` and a short `help`; any field
 may be `"optional": true`. `servers` is `"optional"` (an empty server list means every server) or `"required"`;
-`default_per_server` allows one default entry per server.
+`default_per_server` allows one default entry per server. The first entry created for a server becomes its default when
+nothing else is default there yet, and deleting the default promotes the oldest remaining entry that covers the server,
+so a server that has a destination always has a default.
 
 A secret is never returned by a read path: the list routes, the credentials block and the MCP tools return only the
 public fields, whether each secret is set and at most its last four characters. Creating, editing and deleting needs
-the kind's `permission` on every server the entry applies to; viewing the list needs its `view_permission` (which
-defaults to `permission`) on a server the caller may see. Using a credential needs only the action's own permission.
+the kind's `permission` on every server the entry applies to. Viewing the list needs only its `view_permission` (which
+defaults to `permission`), per server: the list holds the entries whose servers the caller may both see and view, so an
+entry scoped to a server a group hides — or where it takes the view permission away — is not listed. A grant limited to
+some stacks or containers counts for viewing (it shows the widget rather than acting on one). Using a credential needs
+only the action's own permission.
 
 ### Resolution for scripts
 
@@ -692,12 +697,13 @@ An action variant or a dataset declares the credentials it needs:
 `entry` names the parameter that may pin an entry id (the UI shows a "Credential" select: "Automatic" plus the entries
 the caller may see); `url` names the parameter that holds a repository URL, matched against the entries by `host` and
 then the longest `scope` (`my-org/my-repo` beats `my-org` beats the whole host). A `default` use (for example a backup
-destination) takes the entry named by `entry`, or the server's default. A URL use with no match is left out unless it
-is `required: true`; a missing required credential stops the call with a clear message instead of running the script
-without it.
+destination) takes the entry named by `entry`, or the server's default; when no entry is marked default and the server
+has exactly one, that one is used (an older destination still configures the server). A URL use with no match is left out
+unless it is `required: true`; a missing required credential stops the call with a clear message instead of running the
+script without it.
 
 Only the resolved entry reaches the script, as `BOSUN_CRED_<KIND>_<FIELD>` (uppercase, non-alphanumerics as `_`), plus
-`BOSUN_CRED_<KIND>_ID` for the entry id. Public fields and secrets alike are exported; a script should copy them into
+`BOSUN_CRED_<KIND>_ID` for the entry id and `BOSUN_CRED_<KIND>_NAME` for its name. Public fields and secrets alike are exported; a script should copy them into
 its own variables and `unset` the `BOSUN_CRED_*` ones before it runs anything else. The resolved secrets are also
 listed so the runner can keep them out of the logs.
 
@@ -727,9 +733,11 @@ A kind may name legacy package secrets under `migrate`:
 
 `fields` maps a field id to `secret:<id>` or `literal:<text>`; `host_list` makes one entry per `host=token` (or
 `host=user:token`) item. `default_for_package_servers: true` marks the entry as the default for every server that has a
-widget of the package. Bosun runs the migration at startup: it inserts entries with deterministic ids (so a second run
-is harmless), deletes the legacy secrets only once they became entries, and logs the package, the names and the ids,
-never a value.
+widget of the package. Bosun runs the migration after every bundled seed (at startup, and again whenever a deferred
+upgrade finally installs): it inserts entries with deterministic ids (so a second run is harmless), deletes the legacy
+secrets only once they became entries, and logs the package, the names and the ids, never a value. A secret it has to
+leave in place (an incomplete destination) is named once in a warning. `server_id` in the routes below accepts the
+server's id or its name, so an API or MCP caller can use the name it sees.
 
 ### Routes and MCP tools
 
@@ -752,14 +760,15 @@ destination is a backup credential (see [Package credentials](#package-credentia
 Backups -> Destinations: a folder on the host (a mounted NAS counts), SFTP (`sftp:user@host:/path`) or an
 S3-compatible endpoint (`s3:https://endpoint/bucket/prefix`), with its repository password and, for SFTP or S3, the key
 or credentials. A destination belongs to one server (a server may have several, and marks one of them the default),
-because each Docker host usually needs its own: a local folder, a NAS mount or a bucket per host.
+because each Docker host usually needs its own: a local folder, a NAS mount or a bucket per host. The first destination
+of a server is its default (the Destinations table marks it and offers "Make default" on the others).
 
 The destination and its password reach the script only as `BOSUN_CRED_BACKUP_DESTINATION_*` environment variables; the
 key and the credentials are written to mode-0600 temporary files, never to a command line, the output or a log. The
 backup actions and the schedule take an optional `destination` parameter (the entry id, or `auto` for the server's
 default); the backup dialog and the snapshot row menus offer a "Backup destination" select. The Backups tab shows the
-default destination and its repository size, and each snapshot lists the destination it is in; restoring a listed
-snapshot uses that destination. When nothing is configured the scripts stop with "the backup destination and password
+destination in use (its name, as in the Destinations table, and its repository path) and the repository size, and each
+snapshot lists the destination it is in; restoring a listed snapshot uses that destination. When nothing is configured the scripts stop with "the backup destination and password
 are not set (Docker -> Manage -> Backups -> Destinations)". Initialise the
 repository once from the Backups tab (the password reminder is shown there) and keep that password somewhere else:
 without it the backups cannot be read.

@@ -125,8 +125,19 @@ async function toPublic(row: CredentialRow, kind: CredentialKindDef | null, secr
 
 const COLUMNS = 'id, package_id, kind, name, public_fields, servers, is_default, created_at, created_by, updated_at, updated_by, last_used_at, last_used_by, last_used_action';
 
-/** Every entry of one kind, with the public fields only. `serverId` narrows to the entries that apply to that server. */
-export async function listCredentialEntries(packageId: string, kind: CredentialKindDef, serverId?: string): Promise<CredentialPublic[]> {
+/**
+ * The id of the server a caller named, or the reference itself when it matches none. The web UI always sends an id,
+ * but an API or MCP caller may pass the name it sees (an entry stores ids); matching on either keeps both views equal.
+ */
+async function serverScopeId(ref: string): Promise<string> {
+  const r = await rqlite.query('SELECT id FROM servers WHERE id = ? OR name = ?', [ref, ref]);
+  const row = r.values?.[0];
+  return row ? String(row[0]) : ref;
+}
+
+/** Every entry of one kind, with the public fields only. `serverRef` narrows to the entries that apply to that server (its id or name). */
+export async function listCredentialEntries(packageId: string, kind: CredentialKindDef, serverRef?: string): Promise<CredentialPublic[]> {
+  const serverId = serverRef ? await serverScopeId(serverRef) : undefined;
   const r = await rqlite.query(`SELECT ${COLUMNS} FROM widget_credentials WHERE package_id = ? AND kind = ? ORDER BY name COLLATE NOCASE`, [packageId, kind.id]);
   const rows = rowsToObjects(r) as unknown as CredentialRow[];
   const out: CredentialPublic[] = [];
@@ -160,7 +171,8 @@ export async function createCredential(packageId: string, kind: CredentialKindDe
   const values = validateCredentialValues(kind, { fields: input.fields, secrets: input.secrets });
   if (!values.ok) throw new CredentialError(values.error, 400, 'INVALID_CREDENTIAL');
   const id = crypto.randomUUID();
-  const isDefault = input.isDefault === true && kind.defaultPerServer;
+  const isDefault = kind.defaultPerServer
+    && (input.isDefault === true || await needsImplicitDefault(packageId, kind.id, meta.value.servers));
   const enc = Object.fromEntries(Object.entries(values.value.secretFields).map(([k, v]) => [k, encrypt(v, getMasterKey())]));
   await rqlite.execute(
     `INSERT INTO widget_credentials (id, package_id, kind, name, public_fields, secrets_enc, servers, is_default, created_by, created_at, updated_by, updated_at)
@@ -197,9 +209,50 @@ export async function updateCredential(packageId: string, kind: CredentialKindDe
   return (await getCredentialEntry(packageId, kind, id))!;
 }
 
-export async function deleteCredential(packageId: string, id: string): Promise<boolean> {
+export async function deleteCredential(packageId: string, id: string, kind?: CredentialKindDef): Promise<boolean> {
+  const removed = kind ? await getCredentialEntry(packageId, kind, id) : null;
   const r = await rqlite.execute('DELETE FROM widget_credentials WHERE id = ? AND package_id = ?', [id, packageId]);
+  // The servers that used this entry as their default get another one, so a backup never loses its destination.
+  if (r.rows_affected > 0 && kind?.defaultPerServer && removed?.isDefault) {
+    await promoteDefault(packageId, kind.id, removed.servers);
+  }
   return r.rows_affected > 0;
+}
+
+/**
+ * Does this kind still need a default for the given servers? True for the first entry of a server (nothing of this
+ * kind is default yet) and false once one covers it. An entry for every server (an empty list) only becomes default
+ * when no default exists at all, so it never takes over another entry's server.
+ */
+async function needsImplicitDefault(packageId: string, kindId: string, servers: string[]): Promise<boolean> {
+  const r = await rqlite.query('SELECT servers FROM widget_credentials WHERE package_id = ? AND kind = ? AND is_default = 1', [packageId, kindId]);
+  const defaults = (r.values ?? []).map(row => parseServers(row[0]));
+  if (defaults.some(s => s.length === 0)) return false;
+  if (!defaults.length) return true;
+  if (!servers.length) return false;
+  const covered = new Set(defaults.flat());
+  return servers.some(s => !covered.has(s));
+}
+
+/** Make the oldest remaining entry that covers a now-defaultless server the default there. */
+async function promoteDefault(packageId: string, kindId: string, servers: string[]): Promise<void> {
+  const r = await rqlite.query(
+    'SELECT id, servers FROM widget_credentials WHERE package_id = ? AND kind = ? AND is_default = 0 ORDER BY created_at, id',
+    [packageId, kindId]);
+  const entries = (r.values ?? []).map(([id, raw]) => ({ id: String(id), servers: parseServers(raw) }));
+  if (!entries.length) return;
+  let best = entries[0];
+  if (servers.length) {
+    const d = await rqlite.query('SELECT servers FROM widget_credentials WHERE package_id = ? AND kind = ? AND is_default = 1', [packageId, kindId]);
+    const covered = new Set((d.values ?? []).flatMap(row => parseServers(row[0])));
+    const uncovered = servers.filter(s => !covered.has(s));
+    if (!uncovered.length) return;
+    const score = (e: { servers: string[] }) => uncovered.filter(s => !e.servers.length || e.servers.includes(s)).length;
+    best = entries.reduce((a, b) => (score(b) > score(a) ? b : a));
+    if (score(best) === 0) return;
+  }
+  await rqlite.execute('UPDATE widget_credentials SET is_default = 1 WHERE id = ?', [best.id]);
+  await clearOtherDefaults(packageId, kindId, best.servers, best.id);
 }
 
 /** Remove every credential of a package (when the package itself is removed). */
@@ -290,8 +343,9 @@ export async function resolveCredentialUses(
         : `No ${kind.label.toLowerCase()} is set for this server`);
     }
     const secretValues = decryptFields(await secretColumn(chosen.id));
-    // The entry's id, so a listing can say which entry a snapshot belongs to and a restore can pick the same one.
+    // The entry's id and name, so a listing (and the backups status panel) can say which entry is in use.
     env[credentialEnvName(kind.id, 'id')] = chosen.id;
+    env[credentialEnvName(kind.id, 'name')] = chosen.name;
     for (const field of kind.fields) {
       const value = field.type === 'secret' ? secretValues[field.id] : chosen.fields[field.id];
       if (!value) continue;
@@ -313,8 +367,9 @@ async function serversWithPackageWidgets(packageId: string): Promise<string[]> {
 }
 
 /**
- * Turn the legacy package secrets a manifest names under `migrate` into credential entries, then delete them. Runs at
- * startup, idempotent (deterministic ids, and the secrets are gone afterwards) and logs names only, never values.
+ * Turn the legacy package secrets a manifest names under `migrate` into credential entries, then delete them. Runs after
+ * every bundled seed (startup, and again whenever a deferred upgrade finally lands), is idempotent (deterministic ids, and
+ * the secrets are gone afterwards) and logs names only, never values.
  */
 export async function migratePackageCredentials(): Promise<void> {
   let packages;
@@ -345,12 +400,36 @@ export async function migratePackageCredentials(): Promise<void> {
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, CURRENT_TIMESTAMP, NULL, CURRENT_TIMESTAMP)`,
           [plan.id, pkg.id, kind.id, plan.name, JSON.stringify(plan.publicFields), JSON.stringify(enc), JSON.stringify(plan.servers), plan.isDefault ? 1 : 0],
         );
-        if (r.rows_affected > 0) made.push(plan.name);
+        // A row in the way is this same entry (the id is deterministic), left by a run that stopped before the secrets
+        // were deleted: count it as made so those secrets are cleaned up instead of retried forever.
+        if (r.rows_affected > 0 || await credentialRowExists(plan.id)) made.push(plan.name);
       }
       // Only drop a kind's legacy secrets once they actually became entries: an incomplete destination stays editable.
       if (made.length) { mine.forEach(sid => consumed.add(sid)); created.push(...made); }
     }
     for (const sid of Array.from(consumed)) await deletePackageSecret(pkg.id, sid);
     if (created.length) console.log(`[widgets] migrated package secrets of ${pkg.id} into credentials: ${created.join(', ')}`);
+    else warnLegacySecrets(pkg.id, Object.keys(legacy).filter(sid => !consumed.has(sid)));
   }
+  const g = globalThis as unknown as { __bosunCredentialMigrationLogged?: boolean };
+  if (!g.__bosunCredentialMigrationLogged) {
+    g.__bosunCredentialMigrationLogged = true;
+    console.log(`[widgets] credential migration: ${packages.length} installed package(s) checked`);
+  }
+}
+
+async function credentialRowExists(id: string): Promise<boolean> {
+  const r = await rqlite.query('SELECT id FROM widget_credentials WHERE id = ?', [id]);
+  return !!r.values?.length;
+}
+
+/** Say once per package which legacy secrets stayed in place (names only), so an admin can finish them by hand. */
+function warnLegacySecrets(packageId: string, secretIds: string[]): void {
+  if (!secretIds.length) return;
+  const g = globalThis as unknown as { __bosunLegacySecretsWarned?: Set<string> };
+  const seen = g.__bosunLegacySecretsWarned ?? (g.__bosunLegacySecretsWarned = new Set());
+  const key = `${packageId}:${secretIds.join(',')}`;
+  if (seen.has(key)) return;
+  seen.add(key);
+  console.warn(`[widgets] kept the legacy secrets of ${packageId} that could not be migrated: ${secretIds.join(', ')}`);
 }

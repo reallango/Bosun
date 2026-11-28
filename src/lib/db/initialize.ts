@@ -31,11 +31,10 @@ export async function initializeDatabase(): Promise<void> {
 
   if (await rqlite.isReady()) {
     await runMigrations();
+    // Installs and upgrades the bundled packages, then moves any legacy package secrets into credential entries
+    // (see bundled-seed.ts and credentials.ts: the migration must follow the upgrade it reads the manifest of).
     const { seedBundledPackages } = await import('@/lib/widgets/bundled-seed');
     await seedBundledPackages();
-    // One-time, idempotent move of legacy package secrets into credential entries (see credentials.ts).
-    const { migratePackageCredentials } = await import('@/lib/widgets/credentials');
-    await migratePackageCredentials().catch(err => console.warn('[widgets] credential migration failed:', err?.message ?? err));
     return;
   }
 

@@ -7,7 +7,9 @@ import { getInstalledPackage } from '@/lib/widgets/package-store';
 import {
   createCredential, deleteCredential, getCredentialEntry, listCredentialEntries, updateCredential,
 } from '@/lib/widgets/credentials';
-import { canManageKind, canViewKind, kindForType, manageTargets, publicKind, requireKindManage } from '@/lib/widgets/credential-access';
+import {
+  canManageKind, entryViewable, kindForType, manageTargets, publicKind, requireKindManage, viewTargets,
+} from '@/lib/widgets/credential-access';
 import type { CredentialKindDef } from '@/lib/widgets/credentials-schema';
 
 /**
@@ -46,15 +48,15 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const kinds = ctx ? [ctx.kind] : pkg.kinds;
     const items = [];
     for (const kind of kinds) {
-      if (!(await canViewKind(auth, kind))) {
+      // Viewing needs the kind's view permission on the servers an entry applies to — the ones the caller may see,
+      // never its manage permission.
+      const viewIds = await viewTargets(auth, kind);
+      if (!viewIds.length) {
         if (kindId) return fail('Not permitted to view these credentials', 403, 'FORBIDDEN');
         continue;
       }
-      items.push({
-        ...publicKind(kind),
-        entries: await listCredentialEntries(pkg.packageId, kind, serverId),
-        canManage: await canManageKind(auth, kind),
-      });
+      const visible = (await listCredentialEntries(pkg.packageId, kind, serverId)).filter(e => entryViewable(e.servers, viewIds));
+      items.push({ ...publicKind(kind), entries: visible, canManage: await canManageKind(auth, kind) });
     }
     return ok({ kinds: items, server_id: serverId ?? null });
   } catch (error) {
@@ -120,7 +122,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     if (!existing) return fail('Credential not found', 404, 'NOT_FOUND');
     const denied = await requireKindManage(auth, ctx.kind, existing.servers);
     if (denied) return denied;
-    await deleteCredential(ctx.packageId, id);
+    await deleteCredential(ctx.packageId, id, ctx.kind);
     await logAudit({ userId: auth.userId, action: AuditActions.WIDGET_CREDENTIAL, status: 'success', ipAddress: clientIp(request) ?? undefined, details: `Deleted ${ctx.kind.id} credential "${existing.name}" of ${ctx.packageId}` });
     return ok({ deleted: true });
   } catch (error) {

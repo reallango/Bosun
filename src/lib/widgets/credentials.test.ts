@@ -4,6 +4,7 @@ import { validateCredentialKinds, type CredentialKindDef } from './credentials-s
 const h = vi.hoisted(() => ({
   rows: [] as Record<string, unknown>[],
   servers: [] as string[],
+  serverNames: {} as Record<string, string>,
   packages: [] as { id: string; manifest: { credentials: CredentialKindDef[] } }[],
   legacy: {} as Record<string, string>,
   deleted: [] as string[],
@@ -26,12 +27,17 @@ vi.mock('@/lib/db/rqlite-client', () => {
         const q = sql.replace(/\s+/g, ' ').trim();
         if (!q.startsWith('SELECT')) return { columns: [], values: [] };
         if (q.includes('DISTINCT w.server_id')) return result(['server_id'], h.servers.map(s => ({ server_id: s })));
+        if (q.includes('FROM servers')) {
+          const found = Object.entries(h.serverNames).find(([id, name]) => params.includes(id) || params.includes(name));
+          return result(['id'], found ? [{ id: found[0] }] : []);
+        }
         if (!q.includes('FROM widget_credentials')) return { columns: [], values: [] };
         let rows = [...h.rows];
         if (q.includes('WHERE id = ? AND package_id = ? AND kind = ?')) rows = rows.filter(r => r.id === params[0] && r.package_id === params[1] && r.kind === params[2]);
         else if (q.includes('WHERE package_id = ? AND kind = ?')) rows = rows.filter(r => r.package_id === params[0] && r.kind === params[1]);
         else if (q.includes('WHERE id = ?')) rows = rows.filter(r => r.id === params[0]);
-        if (q.includes('is_default = 1')) rows = rows.filter(r => Number(r.is_default) === 1 && r.id !== params[2]);
+        if (/is_default = 1/.test(q)) rows = rows.filter(r => Number(r.is_default) === 1 && (params.length < 3 || r.id !== params[2]));
+        if (q.includes('is_default = 0')) rows = rows.filter(r => Number(r.is_default) === 0);
         if (q.includes('ORDER BY name')) rows.sort((a, b) => String(a.name).localeCompare(String(b.name)));
         const picked = /^SELECT (.*?) FROM/.exec(q)?.[1].split(',').map(s => s.trim()) ?? COLUMNS;
         return result(picked, rows);
@@ -58,6 +64,11 @@ vi.mock('@/lib/db/rqlite-client', () => {
           const row = h.rows.find(r => r.id === params[0]);
           if (row) row.is_default = 0;
           return { rows_affected: 1 };
+        }
+        if (q.startsWith('UPDATE widget_credentials SET is_default = 1 WHERE id = ?')) {
+          const row = h.rows.find(r => r.id === params[0]);
+          if (row) row.is_default = 1;
+          return { rows_affected: row ? 1 : 0 };
         }
         if (q.includes('SET last_used_at')) {
           const row = h.rows.find(r => r.id === params[1]);
@@ -131,7 +142,7 @@ const add = (id: string, kind: CredentialKindDef, fields: Record<string, string>
 };
 
 beforeEach(() => {
-  h.rows = []; h.servers = []; h.packages = []; h.sql = [];
+  h.rows = []; h.servers = []; h.serverNames = {}; h.packages = []; h.sql = [];
   ps.legacy = {}; ps.deleted = [];
 });
 
@@ -160,6 +171,15 @@ describe('reading credentials never returns a secret', () => {
     add('other', git, { host: 'github.com', scope: 'o' }, { token: 'y' }, ['s2']);
     expect((await listCredentialEntries('pkg', git, 's1')).map(e => e.id)).toEqual(['all']);
   });
+
+  it('finds the entries when a caller names the server instead of its id (an API or MCP caller)', async () => {
+    h.serverNames = { s1: 'AI-NUC' };
+    add('all', git, { host: 'github.com' }, { token: 'x' });
+    add('one', git, { host: 'gitlab.com' }, { token: 'y' }, ['s1']);
+    for (const ref of ['s1', 'AI-NUC']) {
+      expect((await listCredentialEntries('pkg', git, ref)).map(e => e.id).sort()).toEqual(['all', 'one']);
+    }
+  });
 });
 
 describe('writing credentials', () => {
@@ -169,6 +189,25 @@ describe('writing credentials', () => {
     expect(renamed.secrets.token).toEqual({ set: true, hint: 'ease' });
     const cleared = await updateCredential('pkg', git, 'a', { secrets: { token: null } }, 'u1');
     expect(cleared.secrets.token).toEqual({ set: false, hint: null });
+  });
+
+  it('makes the first entry of each server the default, and leaves later ones alone', async () => {
+    const first = await createCredential('pkg', backup, { name: 'one', fields: { repository: '/srv/one' }, secrets: { password: 'p' }, servers: ['s1'] }, null);
+    expect(first.isDefault).toBe(true);
+    const second = await createCredential('pkg', backup, { name: 'two', fields: { repository: '/srv/two' }, secrets: { password: 'p' }, servers: ['s1'] }, null);
+    expect(second.isDefault).toBe(false);
+    const other = await createCredential('pkg', backup, { name: 'three', fields: { repository: '/srv/three' }, secrets: { password: 'p' }, servers: ['s2'] }, null);
+    expect(other.isDefault).toBe(true);
+    expect(h.rows.find(r => r.id === first.id)!.is_default).toBe(1);
+  });
+
+  it('re-assigns the default of a server when its default entry is deleted', async () => {
+    const a = await createCredential('pkg', backup, { name: 'a', fields: { repository: '/a' }, secrets: { password: 'p' }, servers: ['s1'] }, null);
+    const b = await createCredential('pkg', backup, { name: 'b', fields: { repository: '/b' }, secrets: { password: 'p' }, servers: ['s1'] }, null);
+    expect(a.isDefault).toBe(true);
+    await deleteCredential('pkg', a.id, backup);
+    expect(h.rows.map(r => [r.name, r.is_default])).toEqual([['b', 1]]);
+    expect(b.isDefault).toBe(false);
   });
 
   it('rejects a missing required field and deletes an entry', async () => {
@@ -189,7 +228,7 @@ describe('resolving a credential for a script', () => {
 
   it('injects the longest-scope match as BOSUN_CRED_* and keeps the secret out of the parameters', async () => {
     const r = await resolveCredentialUses('pkg', kinds, [{ kind: 'git', entry: 'credential', url: 'repo' }], { repo: 'https://github.com/my-org/my-repo' }, 's1', 'docker:git_branches');
-    expect(r.env).toEqual({ BOSUN_CRED_GIT_ID: 'repo', BOSUN_CRED_GIT_HOST: 'github.com', BOSUN_CRED_GIT_SCOPE: 'my-org/my-repo', BOSUN_CRED_GIT_TOKEN: 'tok-repo' });
+    expect(r.env).toEqual({ BOSUN_CRED_GIT_ID: 'repo', BOSUN_CRED_GIT_NAME: 'repo', BOSUN_CRED_GIT_HOST: 'github.com', BOSUN_CRED_GIT_SCOPE: 'my-org/my-repo', BOSUN_CRED_GIT_TOKEN: 'tok-repo' });
     expect(r.secrets).toEqual(['tok-repo']);
     expect(h.rows.find(r => r.id === 'repo')).toMatchObject({ last_used_action: 'docker:git_branches' });
   });
@@ -234,11 +273,21 @@ describe('resolving a credential for a script', () => {
     expect(h.sql.length).toBe(before);
   });
 
+  it('falls back to the only destination of a server when none is marked default, and refuses to guess between two', async () => {
+    add('only', backup, { repository: '/srv/only' }, { password: 'pw' }, ['s1'], false);
+    const use = [{ kind: 'backup_destination', entry: 'destination', default: true }];
+    const only = await resolveCredentialUses('pkg', kinds, use, { destination: 'auto' }, 's1', 'a');
+    expect(only.env.BOSUN_CRED_BACKUP_DESTINATION_REPOSITORY).toBe('/srv/only');
+    expect(only.env.BOSUN_CRED_BACKUP_DESTINATION_NAME).toBe('only');
+    add('second', backup, { repository: '/srv/second' }, { password: 'pw' }, ['s1'], false);
+    await expect(resolveCredentialUses('pkg', kinds, use, { destination: 'auto' }, 's1', 'a')).rejects.toThrow(/No backup destination is set for this server/);
+  });
+
   it('picks the backup destination from the parameter, or the server default', async () => {
     add('nas', backup, { repository: '/srv/backups' }, { password: 'pw' }, ['s1'], true);
     add('other', backup, { repository: '/srv/other' }, { password: 'pw2' }, ['s2'], true);
     const auto = await resolveCredentialUses('pkg', kinds, [{ kind: 'backup_destination', entry: 'destination', default: true }], { destination: 'auto' }, 's1', 'a');
-    expect(auto.env).toEqual({ BOSUN_CRED_BACKUP_DESTINATION_ID: 'nas', BOSUN_CRED_BACKUP_DESTINATION_REPOSITORY: '/srv/backups', BOSUN_CRED_BACKUP_DESTINATION_PASSWORD: 'pw' });
+    expect(auto.env).toEqual({ BOSUN_CRED_BACKUP_DESTINATION_ID: 'nas', BOSUN_CRED_BACKUP_DESTINATION_NAME: 'nas', BOSUN_CRED_BACKUP_DESTINATION_REPOSITORY: '/srv/backups', BOSUN_CRED_BACKUP_DESTINATION_PASSWORD: 'pw' });
     const chosen = await resolveCredentialUses('pkg', kinds, [{ kind: 'backup_destination', entry: 'destination', default: true }], { destination: 'other' }, 's2', 'a');
     expect(chosen.env.BOSUN_CRED_BACKUP_DESTINATION_REPOSITORY).toBe('/srv/other');
     await expect(resolveCredentialUses('pkg', kinds, [{ kind: 'backup_destination', entry: 'destination', default: true }], { destination: 'auto' }, 's3', 'a')).rejects.toThrow(/No backup destination is set for this server/);
@@ -259,6 +308,27 @@ describe('migrating the legacy package secrets', () => {
     expect(ps.deleted.sort()).toEqual(['backup_password', 'backup_repository', 'git_credentials', 'git_token']);
     const logs: string[] = [];
     void logs;
+  });
+
+  it('picks up a legacy secret that is still present after an earlier run saw no credential kinds', async () => {
+    // The upgrade with the credential kinds lands later (a deferred bundled upgrade): the first run had nothing to do.
+    h.packages = [{ id: 'docker', manifest: { credentials: [] } }];
+    ps.legacy = { git_token: 'tok-A' };
+    await migratePackageCredentials();
+    expect(h.rows).toHaveLength(0);
+    h.packages = [{ id: 'docker', manifest: { credentials: kinds } }];
+    await migratePackageCredentials();
+    expect(h.rows.map(r => r.name)).toEqual(['GitHub (migrated)']);
+    expect(ps.deleted).toEqual(['git_token']);
+  });
+
+  it('finishes the cleanup when the entry exists but the legacy secret does not (a run that stopped between)', async () => {
+    ps.legacy = { git_token: 'tok-A' };
+    add('mig_git_github_migrated', git, { host: 'github.com' }, { token: 'tok-A' });
+    h.rows[0].package_id = 'docker';
+    await migratePackageCredentials();
+    expect(h.rows).toHaveLength(1);
+    expect(ps.deleted).toEqual(['git_token']);
   });
 
   it('is idempotent: a second run adds nothing and the secrets are gone', async () => {

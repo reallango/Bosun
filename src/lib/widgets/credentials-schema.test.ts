@@ -134,6 +134,15 @@ describe('defaultCredentialForServer', () => {
     expect(defaultCredentialForServer([a, b], 's1')!.id).toBe('a');
     expect(defaultCredentialForServer([a, b], 's3')).toBeNull();
   });
+
+  it('uses the only entry a server may use when none is marked default, and never guesses between two', () => {
+    const only = entry('only', 'nas', '', { servers: ['s1'], isDefault: false });
+    expect(defaultCredentialForServer([only], 's1')!.id).toBe('only');
+    const everywhere = entry('every', 'nas', '', { servers: [], isDefault: false });
+    expect(defaultCredentialForServer([everywhere], 's9')!.id).toBe('every');
+    const second = entry('second', 'other', '', { servers: ['s1'], isDefault: false });
+    expect(defaultCredentialForServer([only, second], 's1')).toBeNull();
+  });
 });
 
 describe('planCredentialMigration', () => {

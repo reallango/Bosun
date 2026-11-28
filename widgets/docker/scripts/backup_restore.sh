@@ -92,6 +92,8 @@ restic_run() {
   [ $# -eq 0 ] || printf '%s\n' "$@" > "$RESTIC_STATE/restic-cmd"
   set --
   while IFS= read -r a; do set -- "$@" "$a"; done < "$RESTIC_DOCKER_ARGS"
+  set -- "$@" "$RESTIC_IMAGE"
+  # restic's own global options (an SFTP argument, and so on) belong after the image, before the subcommand.
   while IFS= read -r a; do set -- "$@" "$a"; done < "$RESTIC_EXTRA_ARGS"
   while IFS= read -r a; do set -- "$@" "$a"; done < "$RESTIC_STATE/restic-cmd"
   $D run --rm --name "bosun-restic-$$" --label bosun.backup=1 "$@"
@@ -102,12 +104,16 @@ restic_shell() { # $1 = the shell command; the remaining arguments become $1, $2
   [ $# -eq 0 ] || printf '%s\n' "$@" > "$RESTIC_STATE/restic-cmd"
   set --
   while IFS= read -r a; do set -- "$@" "$a"; done < "$RESTIC_DOCKER_ARGS"
-  while IFS= read -r a; do set -- "$@" "$a"; done < "$RESTIC_EXTRA_ARGS"
+  # A shell helper runs no restic, so the restic options would be arguments to sh (or docker) and are left out.
   set -- "$@" --entrypoint /bin/sh "$RESTIC_IMAGE" -c "$shell_cmd" sh
   while IFS= read -r a; do set -- "$@" "$a"; done < "$RESTIC_STATE/restic-cmd"
   $D run --rm --name "bosun-restic-$$" --label bosun.backup=1 "$@"
 }
 # <<< restic runner
+# The destination the status refers to: the entry's name (the same one the Destinations table shows), else the path.
+BACKUP_DESTINATION_NAME=${BOSUN_CRED_BACKUP_DESTINATION_NAME-}
+unset BOSUN_CRED_BACKUP_DESTINATION_NAME
+restic_destination_name() { printf '%s' "${BACKUP_DESTINATION_NAME:-$BACKUP_REPOSITORY}"; }
 mode=${BOSUN_PARAM_mode:-list}; kind=${BOSUN_PARAM_kind:-all}
 name=$BOSUN_PARAM_name; [ "$name" = - ] && name=
 snapshot=$BOSUN_PARAM_snapshot; [ "$snapshot" = - ] && snapshot=
@@ -145,8 +151,8 @@ D=docker; $D ps >/dev/null 2>&1 || { command -v sudo >/dev/null 2>&1 && sudo -n 
 jstr() { V=$1 awk 'BEGIN { s = ENVIRON["V"]; o = ""; n = length(s); for (i = 1; i <= n; i++) { c = substr(s, i, 1); if (c == "\\") o = o "\\\\"; else if (c == "\"") o = o "\\\""; else if (c < " " || c == "\177") o = o ""; else o = o c } printf "\"%s\"", o }'; }
 if ! $D ps >/dev/null 2>&1; then
   if [ "$mode" = list ]; then
-    printf '{"status":{"configured":%s,"initialised":false,"repository":%s,"snapshots":0,"size":"","size_bytes":0,"state":"Unavailable","message":"Docker is not available to this account","destination":%s},"rows":[]}\n' \
-      "$(restic_configured && echo true || echo false)" "$(jstr "$BACKUP_REPOSITORY")" "$(jstr "$BACKUP_REPOSITORY")"
+    printf '{"status":{"configured":%s,"initialised":false,"repository":%s,"snapshots":0,"size":"","size_bytes":0,"state":"Unavailable","message":"Docker is not available to this account","destination":%s,"destination_name":%s},"rows":[]}\n' \
+      "$(restic_configured && echo true || echo false)" "$(jstr "$BACKUP_REPOSITORY")" "$(jstr "$BACKUP_REPOSITORY")" "$(jstr "$(restic_destination_name)")"
     exit 0
   fi
   echo 'ERROR: Docker is not available to this account'; exit 0
@@ -705,8 +711,8 @@ if [ "$mode" = list ]; then
   fi
   size=''; [ "$size_bytes" -le 0 ] || size=$(human_bytes "$size_bytes")
   case "$rows" in \[*\]) ;; *) rows='[]' ;; esac
-  printf '{"status":{"configured":%s,"initialised":%s,"repository":%s,"snapshots":%d,"size":%s,"size_bytes":%d,"state":%s,"message":%s,"destination":%s},"rows":%s}\n' \
-    "$configured" "$initialised" "$(jstr "$BACKUP_REPOSITORY")" "$snapshots" "$(jstr "$size")" "$size_bytes" "$(jstr "$state")" "$(jstr "$message")" "$(jstr "$BACKUP_REPOSITORY")" "$rows"
+  printf '{"status":{"configured":%s,"initialised":%s,"repository":%s,"snapshots":%d,"size":%s,"size_bytes":%d,"state":%s,"message":%s,"destination":%s,"destination_name":%s},"rows":%s}\n' \
+    "$configured" "$initialised" "$(jstr "$BACKUP_REPOSITORY")" "$snapshots" "$(jstr "$size")" "$size_bytes" "$(jstr "$state")" "$(jstr "$message")" "$(jstr "$BACKUP_REPOSITORY")" "$(jstr "$(restic_destination_name)")" "$rows"
   exit 0
 fi
 
@@ -789,7 +795,7 @@ while IFS='	' read -r c mt src dst rw tgt; do
 done < "$tmp/plan"
 echo 'PROGRESS 2/5'
 echo '[step] Restoring the data'
-if ! restic_shell 'R=$(command -v restic 2>/dev/null || echo /bin/restic); "$R" restore "$1" --target /bosun/target-root --delete --include /bosun/data' "$snapshot" > "$tmp/restore.out" 2>"$errf"; then
+if ! restic_run -r "$RESTIC_REPO_ARG" restore "$snapshot" --target /bosun/target-root --delete --include /bosun/data > "$tmp/restore.out" 2>"$errf"; then
   fail "the data could not be restored: $(lastline "$errf")"
 fi
 echo 'PROGRESS 3/5'
