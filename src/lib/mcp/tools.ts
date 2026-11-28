@@ -110,7 +110,7 @@ export function buildWidgetTools(sources: WidgetToolSource[], canUse: CanUse, bl
           a.description,
           `Needs the "${label}" permission.`,
           a.kind === 'terminal'
-            ? 'Returns a single-use token for an interactive terminal (connect to /ws/api-terminal?token=...).'
+            ? 'Returns a single-use token for a browser WebSocket (/ws/api-terminal?token=...). MCP clients cannot open that WebSocket; use terminal_open with container for an interactive shell.'
             : `Runs as the ${a.as === 'service' ? 'privileged service account' : 'non-admin shell account'}.`,
           a.confirm ? `Asks for confirmation: ${a.confirm.title}${a.confirm.text ? ` — ${a.confirm.text}` : ''} Send confirm: true.` : undefined,
           a.job ? 'Starts a job: use job_wait with the returned job_id to follow it.' : undefined,
@@ -152,28 +152,9 @@ const jobId: JsonSchema = {
   description: 'Job id returned by a widget action that starts a job.',
 };
 
-const credentialObject: JsonSchema = {
-  type: 'object',
-  additionalProperties: { type: 'string' },
-  description: 'Field id -> value. Secrets are write-only and never returned by any read.',
-};
-
-const credentialServers: JsonSchema = {
-  type: 'array',
-  items: { type: 'string', minLength: 1, maxLength: 128 },
-  description: 'Servers the entry applies to (empty: every server, where the kind allows it).',
-};
-
-const credentialWidgetType: JsonSchema = {
-  type: 'string',
-  minLength: 1,
-  maxLength: 64,
-  description: 'The widget type that belongs to the package (servers_list is unrelated; see the widget pages).',
-};
-
 /** The fixed tools. Compact by default; `detail: true` returns the full object. */
 export function coreTools(): CatalogTool[] {
-  return [
+  const tools: CatalogTool[] = [
     {
       kind: 'core',
       coreName: 'bosun_overview',
@@ -255,11 +236,11 @@ export function coreTools(): CatalogTool[] {
       coreName: 'access_request',
       name: 'access_request',
       title: 'Ask for access',
-      description: 'Create an access request (same body as POST /api/access-requests): a permission grant or one run of a widget action.',
+      description: 'Create an access request (same body as POST /api/access-requests): a permission grant, one run of a widget action, one command, or one terminal session.',
       inputSchema: {
         type: 'object',
         properties: {
-          kind: { type: 'string', enum: ['grant', 'one_time'], description: 'A permission grant, or one run of a widget action.' },
+          kind: { type: 'string', enum: ['grant', 'one_time', 'command', 'terminal'], description: 'A permission grant, one widget action run, one command, or one terminal session.' },
           permission: { type: 'string', description: 'For kind=grant: a permission id from access_whoami.' },
           server_id: { type: 'string', description: 'The server (leave out for a global grant).' },
           resource: {
@@ -277,6 +258,9 @@ export function coreTools(): CatalogTool[] {
           widget_type: { type: 'string', description: 'For kind=one_time: the widget type.' },
           action_id: { type: 'string', description: 'For kind=one_time: the action id.' },
           params: { type: 'object', additionalProperties: true, description: 'For kind=one_time: the action parameters.' },
+          command: { type: 'string', maxLength: 4000, description: 'For kind=command: the exact command, shown verbatim to the approver.' },
+          as: { type: 'string', enum: ['user', 'service'], description: 'For kind=command/terminal: the account (default user).' },
+          container: { type: 'string', description: 'For kind=terminal: open the shell in this container (needs container shell access).' },
         },
         required: ['kind', 'reason'],
         additionalProperties: false,
@@ -381,86 +365,18 @@ export function coreTools(): CatalogTool[] {
       },
       annotations: { readOnlyHint: true, openWorldHint: false },
     },
-    {
-      kind: 'core',
-      coreName: 'credentials_list',
-      name: 'credentials_list',
-      title: 'List package credentials',
-      description: 'Credential entries of a widget package (for example Git access or backup destinations): public fields, whether each secret is set, the server scope and last use. Never a secret value.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          widget_type: credentialWidgetType,
-          kind: { type: 'string', description: 'One credential kind; leave out for every kind you may view.' },
-          server_id: { ...serverId, description: 'Only entries that apply to this server.' },
-        },
-        required: ['widget_type'],
-        additionalProperties: false,
-      },
-      annotations: { readOnlyHint: true, openWorldHint: false },
-    },
-    {
-      kind: 'core',
-      coreName: 'credentials_create',
-      name: 'credentials_create',
-      title: 'Create a package credential',
-      description: 'Create one credential entry (same body as POST /api/widgets/:type/credentials). Needs the credential kind\'s permission on every server it applies to.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          widget_type: credentialWidgetType,
-          kind: { type: 'string', minLength: 1, maxLength: 40 },
-          name: { type: 'string', minLength: 1, maxLength: 80 },
-          fields: credentialObject,
-          secrets: credentialObject,
-          servers: credentialServers,
-          is_default: { type: 'boolean', description: 'Make it the default for its servers (when the kind has a per-server default).' },
-        },
-        required: ['widget_type', 'kind', 'name'],
-        additionalProperties: false,
-      },
-      annotations: { readOnlyHint: false, openWorldHint: false },
-    },
-    {
-      kind: 'core',
-      coreName: 'credentials_update',
-      name: 'credentials_update',
-      title: 'Update a package credential',
-      description: 'Edit one credential entry (same body as PUT /api/widgets/:type/credentials). Leave a secret out (or send "") to keep it unchanged.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          widget_type: credentialWidgetType,
-          kind: { type: 'string', minLength: 1, maxLength: 40 },
-          id: { type: 'string', minLength: 1, maxLength: 64 },
-          name: { type: 'string', minLength: 1, maxLength: 80 },
-          fields: credentialObject,
-          secrets: credentialObject,
-          servers: credentialServers,
-          is_default: { type: 'boolean' },
-        },
-        required: ['widget_type', 'kind', 'id'],
-        additionalProperties: false,
-      },
-      annotations: { readOnlyHint: false, openWorldHint: false },
-    },
-    {
-      kind: 'core',
-      coreName: 'credentials_delete',
-      name: 'credentials_delete',
-      title: 'Delete a package credential',
-      description: 'Delete one credential entry (same as DELETE /api/widgets/:type/credentials).',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          widget_type: credentialWidgetType,
-          kind: { type: 'string', minLength: 1, maxLength: 40 },
-          id: { type: 'string', minLength: 1, maxLength: 64 },
-        },
-        required: ['widget_type', 'kind', 'id'],
-        additionalProperties: false,
-      },
-      annotations: { readOnlyHint: false, openWorldHint: false },
-    },
   ];
+  // The REST route+method each core tool covers, for the parity test (composite tools cover none).
+  const routes: Record<string, string[]> = {
+    servers_list: ['GET servers'],
+    server_get: ['GET servers/[serverId]'],
+    access_whoami: ['GET access'],
+    access_request: ['POST access-requests'],
+    schedules_list: ['GET schedules'],
+    schedule_create: ['POST schedules'],
+    schedule_run_now: ['POST schedules/[id]/run'],
+    update_status: ['GET system/update'],
+    notifications_list: ['GET notifications'],
+  };
+  return tools.map(t => t.coreName && routes[t.coreName] ? { ...t, routes: routes[t.coreName] } : t);
 }

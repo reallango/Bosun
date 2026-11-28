@@ -549,14 +549,47 @@ Tools:
 
 - `bosun_overview` orients in one call: Bosun version, cluster nodes and each visible server with CPU, memory, load
   and disk use. `servers_list` and `server_get` add detail.
+- **Every REST route an API key may call is also a tool.** The mapping is declared on each tool as a route + method,
+  and `src/lib/mcp/parity.test.ts` walks `src/app/api` and fails when a route+method has neither a tool nor an entry
+  with a reason in `src/lib/mcp/parity.allow.json` (browser-only auth flows, the WebSocket token, the MCP endpoint
+  itself and the proxy catch-all are the only exceptions). Each tool invokes the route handler with the caller's own
+  `Authorization`/`Cookie`, so validation, permission checks, rate limits and audit logging cannot drift from REST.
+  Covered groups: servers (get/update/delete/test/detect/health/NICs/setup/Bosun/provision/Portainer), power, wake,
+  refresh, metrics history, dashboards and layout, widget instances/settings/data/screens, widget definitions and
+  runtime, widget jobs (list/get/cancel/origin), widget packages (list/available/install/import/export/settings/
+  delete and secrets), schedules (update/delete/runs/kinds), notifications (read/delete) and channels, alert rules,
+  server groups, SSH keys, permission groups and permissions, users and API keys, audit logs, cluster
+  (status/nodes/config/actions), database (health/settings/export/import), SMTP and WOL settings, system update and
+  health (including rollout and rollback), and access requests.
+- **Destructive or high-risk tools require `confirm: true`** with a short confirmation text, exactly like the
+  existing widget action tools. A package secret can be set through `widget_package_secret_set`, but no tool ever
+  returns a secret's value (the REST route does not either).
+- **Host commands.** `server_command(server_id, command, as, timeout)` runs one command and returns stdout, stderr
+  and the exit code (truncated). `as: "user"` uses the non-admin shell account (`shell.user`); `as: "service"` uses
+  the privileged service account (`exec.service`, PowerShell on Windows). `container_exec(server_id, container,
+  command)` runs one `docker exec` and needs the Docker package's container-shell permission.
+- **Terminal sessions.** `terminal_open(server_id, as, container?)` returns a `session_id`;
+  `terminal_send(session_id, input, wait_ms)`, `terminal_read`, `terminal_screen` (a headless terminal emulator, for
+  htop/vim/less) and `terminal_close` follow. Input accepts `{ctrl-c}`, `{tab}`, `{enter}`, `{esc}`, `{up}`,
+  `{down}`, `{left}`, `{right}`, `{home}`, `{end}`, `{pageup}`, `{pagedown}`, `{delete}` and `{space}`. A container
+  session always runs as the service account and needs the Docker package's container-shell permission. Output is
+  returned without ANSI escapes, with a `more` flag when more is waiting. If the PTY asks for a password
+  (`password_required`), a person must type it; the agent must not. Sessions belong to the principal that opened
+  them, live on the node that opened them (another node answers "Session not found on this node"), close after 15
+  idle minutes and are capped at 4 per principal. Opening a session and sending input are audited; typed input is
+  recorded only as a length, never its text. `docker_containers__shell` still returns a browser WebSocket token that
+  MCP clients cannot use; use `terminal_open` with `container` instead.
 - One tool per installed widget dataset (`<widget_type>__<dataset>`, read) and runnable action
   (`<widget_type>__<action>`). They are generated from the same package specs as `GET /api/openapi.json`, so they
   appear and disappear with the widgets you install. `tools/list` only shows what the caller may use on at least one
   server. Destructive actions are annotated and still require `confirm: true`.
 - `job_wait` long-polls a widget job (up to 120 s) and `job_log` returns its full output.
-- `access_whoami` shows what the caller holds; `access_request` asks for a grant or one action run;
-  `access_request_wait` long-polls the decision (up to 50 s).
-- `schedules_list`, `schedule_create` and `schedule_run_now`; `update_status`; `notifications_list`.
+- `access_whoami` shows what the caller holds; `access_request` asks for a grant, one action run, one command
+  (`kind: "command"`) or one terminal session (`kind: "terminal"`). When a caller lacks `shell.user` or
+  `exec.service`, `server_command` and a host-shell `terminal_open` create that one-time request themselves and
+  return its id rather than only failing. The approver sees the command verbatim, the account and the server, with a
+  warning for the service account. Approval runs the command or opens the session exactly once;
+  `access_request_wait` long-polls the decision (up to 50 s) and then carries the result.
 
 Claude Code:
 
