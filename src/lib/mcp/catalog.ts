@@ -8,6 +8,8 @@ import { loadWidgetSpec } from '@/lib/widgets/runtime/execute';
 import { widgetTypeApiProblem } from '@/lib/widgets/package-api-level';
 import type { TokenPayload } from '@/lib/auth/jwt';
 import { buildWidgetTools, coreTools, type BlockedWidgetSource, type CanUse, type WidgetToolSource } from './tools';
+import { restTools } from './rest-tools';
+import { hostTools } from './host-tools';
 import { buildCatalog, type McpToolCatalog } from './types';
 
 async function loadWidgetSources(): Promise<{ sources: WidgetToolSource[]; blocked: BlockedWidgetSource[] }> {
@@ -62,5 +64,10 @@ async function permissionChecker(auth: TokenPayload): Promise<CanUse> {
 
 export async function loadToolCatalog(auth: TokenPayload): Promise<McpToolCatalog> {
   const [widgets, canUse] = await Promise.all([loadWidgetSources(), permissionChecker(auth)]);
-  return buildCatalog([...coreTools(), ...buildWidgetTools(widgets.sources, canUse, widgets.blocked)]);
+  return buildCatalog([
+    ...coreTools(),
+    ...hostTools(),
+    ...restTools(),
+    ...buildWidgetTools(widgets.sources, canUse, widgets.blocked),
+  ]);
 }

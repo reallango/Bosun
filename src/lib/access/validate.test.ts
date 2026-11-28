@@ -52,3 +52,36 @@ describe('access request input', () => {
       .toBe('run "Deploy stack" once on Dock-Ubuntu (stack test-ai)');
   });
 });
+
+describe('one-time command and terminal requests', () => {
+  it('accepts a command exactly as sent, as user by default', () => {
+    expect(validateRequestInput({ kind: 'command', server_id: 's1', command: '  systemctl status nginx  ' }, defs))
+      .toEqual({ ok: true, value: { kind: 'command', serverId: 's1', command: 'systemctl status nginx', as: 'user', reason: null } });
+    expect(validateRequestInput({ kind: 'command', server_id: 's1', command: 'id', as: 'service' }, defs))
+      .toEqual({ ok: true, value: { kind: 'command', serverId: 's1', command: 'id', as: 'service', reason: null } });
+  });
+
+  it('refuses a command without a server, empty, too long, or with a bad account', () => {
+    const bad = (b: unknown) => validateRequestInput(b, defs).ok;
+    expect(bad({ kind: 'command', command: 'id' })).toBe(false);
+    expect(bad({ kind: 'command', server_id: 's1', command: '   ' })).toBe(false);
+    expect(bad({ kind: 'command', server_id: 's1', command: 'x'.repeat(4001) })).toBe(false);
+    expect(bad({ kind: 'command', server_id: 's1', command: 'id', as: 'root' })).toBe(false);
+  });
+
+  it('accepts a terminal request, optionally in a container', () => {
+    expect(validateRequestInput({ kind: 'terminal', server_id: 's1', as: 'service' }, defs))
+      .toEqual({ ok: true, value: { kind: 'terminal', serverId: 's1', as: 'service', container: null, reason: null } });
+    expect(validateRequestInput({ kind: 'terminal', server_id: 's1', as: 'user', container: 'web-1' }, defs))
+      .toEqual({ ok: true, value: { kind: 'terminal', serverId: 's1', as: 'service', container: 'web-1', reason: null } });
+    expect(validateRequestInput({ kind: 'terminal', server_id: 's1', container: "x'; rm -rf /" }, defs).ok).toBe(false);
+    expect(validateRequestInput({ kind: 'terminal', server_id: 's1', as: 'root' }, defs).ok).toBe(false);
+  });
+
+  it('words command and terminal requests so the approver sees the command and account', () => {
+    expect(describeRequest({ kind: 'command', permissionLabel: 'x', serverName: 'Alpha', resource: null, durationHours: null, command: 'systemctl status nginx', commandAs: 'service' }))
+      .toBe('run a command once as the service account on Alpha: systemctl status nginx');
+    expect(describeRequest({ kind: 'terminal', permissionLabel: 'x', serverName: 'Alpha', resource: null, durationHours: null, commandAs: 'user', container: 'web-1' }))
+      .toBe('open a terminal once as the non-admin account on Alpha in container web-1');
+  });
+});

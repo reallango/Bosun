@@ -29,6 +29,10 @@ export interface WidgetDeps {
 export interface ActionContext {
   auth: TokenPayload;
   ip?: string;
+  /** The MCP request's own headers: the REST adapter forwards only Authorization and Cookie. */
+  headers?: Headers;
+  /** Origin to build the internal REST request URL with. */
+  origin?: string;
 }
 
 function requiredString(value: unknown, name: string): string {
@@ -142,7 +146,7 @@ export async function callWidgetAction(
       const token = typeof data?.token === 'string' ? data.token : '';
       const path = typeof data?.path === 'string' ? data.path : '/ws/api-terminal';
       const expires = data?.expiresInSec !== undefined ? ` (expires in ${data.expiresInSec}s)` : '';
-      return textResult(`${action.label}: connect to ${path}?token=${token}${expires}`, result.structuredContent);
+      return textResult(`${action.label}: connect to ${path}?token=${token}${expires}. This token is for a browser WebSocket; MCP clients cannot use it. Use terminal_open with container for an interactive shell.`, result.structuredContent);
     }
     return result;
   }

@@ -47,6 +47,16 @@ export async function accessView(auth: TokenPayload) {
         params: { '<parameter>': '<value>' }, reason: 'Create the test stack',
         notes: 'The action runs once, exactly with these parameters, when someone approves it. GET /api/openapi.json lists every action and its parameters.',
       },
+      command: {
+        kind: 'command', server_id: servers[0]?.id ?? '<server id>', command: 'systemctl status nginx', as: 'user',
+        reason: 'Check why the site is down',
+        notes: 'One command, shown verbatim to the approver, runs once as the non-admin account (as "user") or the privileged service account (as "service").',
+      },
+      terminal: {
+        kind: 'terminal', server_id: servers[0]?.id ?? '<server id>', as: 'user', container: null,
+        reason: 'Investigate the deploy by hand',
+        notes: 'Approving opens one interactive terminal session for the requester. Pass a container to ask for a shell in it (needs container shell access).',
+      },
       rules: `Requests expire after ${REQUEST_TTL_HOURS} hours if nobody decides. A person who holds the permission decides (Full access for high-risk ones); nobody decides their own request. At most 10 pending per requester.`,
     },
   };
