@@ -17,6 +17,8 @@ export interface WidgetConfigField {
   options?: string[];
   /** Labels for `options` (Bosun's own "Look" field uses them); an option without one shows its value. */
   optionLabels?: Record<string, string>;
+  /** A look's own floor and suggested size (Bosun's "Look" field); the settings dialog applies them. */
+  lookSizes?: Record<string, { min?: { w: number; h: number }; default?: { w: number; h: number } }>;
   /** Changing this setting needs this permission (declared by the package). */
   requires_permission?: string;
 }

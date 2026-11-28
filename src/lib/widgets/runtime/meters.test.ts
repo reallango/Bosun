@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { meterRowView, meterRows, validateMeters, type MeterItem } from './meters';
+import { meterRowView, meterRows, validateMeters, visibleMeterRows, type MeterItem } from './meters';
 import { countRows } from './stat';
 import { formatValue } from './number-format';
 import type { ViewContext } from './layout';
@@ -70,5 +70,24 @@ describe('value formats', () => {
   it('keeps a value that is not a number as text', () => {
     expect(formatValue('unknown', 'bytes')).toBe('unknown');
     expect(formatValue(undefined, 'bytes')).toBe('');
+  });
+});
+
+describe('meter layout and row conditions', () => {
+  it('defaults to rows and accepts grid, ring and a row when', () => {
+    const ok = validateMeters({ shape: 'bar', path: 'data.cores', item: { label: '{id}', value: '{usagePercent}' } }, 'w');
+    expect(ok.ok).toBe(true);
+    if (ok.ok) expect(ok.value.layout).toBe('rows');
+    expect(validateMeters({ shape: 'bar', layout: 'grid', path: 'data.cores', item: { label: '{id}', value: '{usagePercent}' } }, 'w').ok).toBe(true);
+    expect(validateMeters({ shape: 'ring', layout: 'grid', item: { label: '{x}', value: '{y}' } }, 'w').ok).toBe(true);
+    expect(validateMeters({ shape: 'bar', layout: 'pie', item: { label: '{x}', value: '{y}' } }, 'w').ok).toBe(false);
+    expect(validateMeters({ shape: 'bar', item: { label: '{x}', value: '{y}', when: { field: 'y', gt: 0 } } }, 'w').ok).toBe(true);
+    expect(validateMeters({ shape: 'bar', item: { label: '{x}', value: '{y}', when: { nope: 1 } } }, 'w').ok).toBe(false);
+  });
+
+  it('leaves out the rows whose when does not hold', () => {
+    const item: MeterItem = { label: '{id}', value: '{usagePercent}', when: { field: 'usagePercent', gte: 50 } };
+    expect(visibleMeterRows(item, [{ id: 0, usagePercent: 10 }, { id: 1, usagePercent: 80 }])).toEqual([{ id: 1, usagePercent: 80 }]);
+    expect(visibleMeterRows({ label: '{id}', value: '{usagePercent}' }, [{ id: 0 }, { id: 1 }])).toHaveLength(2);
   });
 });

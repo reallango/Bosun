@@ -55,7 +55,8 @@ export const NOTICE_CLASS = {
  * blocks keep their normal reading size (see fill.ts).
  *
  * A block's `minItemWidth` picks one of these fixed classes; `columns` picks a fixed count instead (both are validated
- * keys, never CSS from a package).
+ * keys, never CSS from a package). Without `columns` the renderer replaces the auto-fit template with the balanced
+ * arrangement of the measured body (see arrangement.ts); these classes are what it shows before it is measured.
  */
 export const FILL_GRID_MIN: Record<MinItemWidth, string> = {
   xs: 'grid h-full min-h-0 auto-rows-fr gap-2 [grid-template-columns:repeat(auto-fit,minmax(min(100%,5.5rem),1fr))]',
@@ -82,9 +83,6 @@ export const STAT_GRID_COLUMNS: Record<number, string> = {
   1: 'grid gap-2 grid-cols-1', 2: 'grid gap-2 grid-cols-2', 3: 'grid gap-2 grid-cols-3',
   4: 'grid gap-2 grid-cols-4', 5: 'grid gap-2 grid-cols-5', 6: 'grid gap-2 grid-cols-6',
 };
-
-/** The same grid on the smallest widget: one compact row, so nothing overflows. */
-export const FILL_GRID_XS = 'grid h-full min-h-0 grid-flow-col auto-cols-fr grid-rows-1 gap-1.5';
 
 /** A tile or gauge card in a filling grid: a size container, so its text scales with its width and its height. */
 const FILL_CARD_BASE = 'flex min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-card [container-type:size]';
@@ -133,6 +131,12 @@ export const METER_SUB = 'truncate text-[11px] text-muted-foreground';
 export const METER_RING = 'relative size-9 shrink-0';
 export const METER_RING_COMPACT = 'relative size-7 shrink-0';
 export const METER_RING_TRACK = 'stroke-muted';
+
+/** `layout: "grid"`: many small meters in columns, each a thin vertical bar with its label under it. */
+export const METER_GRID =
+  'grid h-full min-h-0 auto-rows-fr gap-1 overflow-auto [grid-template-columns:repeat(auto-fit,minmax(min(100%,2.1rem),1fr))]';
+export const METER_GRID_CELL = 'flex min-h-0 min-w-0 flex-col items-center gap-0.5';
+export const METER_GRID_TRACK = 'flex w-full min-h-0 flex-1 items-end overflow-hidden rounded bg-muted';
 
 /** The dialog shell shared by screen dialogs and forms that open behind a button. */
 export const DIALOG_OVERLAY = 'fixed inset-0 z-50 bg-black/50';

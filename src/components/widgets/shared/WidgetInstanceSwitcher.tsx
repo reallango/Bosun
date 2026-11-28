@@ -1,6 +1,6 @@
 'use client';
 
-import { instanceChoices, serverLabel, type WidgetInstance } from './screen-page';
+import { instanceChoices, type WidgetInstance } from './screen-page';
 
 interface Props {
   /** Every placement of this widget type the person may open. */
@@ -13,18 +13,19 @@ interface Props {
 
 /**
  * Next to the screen title: a small select with the servers where this widget type is placed. With a single
- * placement the server is plain text, and there is nothing to switch to.
+ * placement the server is plain text, and there is nothing to switch to. A server that places the widget on two
+ * dashboards appears once (see `instanceChoices`).
  */
 export function WidgetInstanceSwitcher({ instances, currentId, onOpen }: Props) {
   if (instances.length === 0) return null;
 
-  const choices = instanceChoices(instances);
+  const choices = instanceChoices(instances, currentId);
   if (choices.length === 1) {
-    const only = instances.find(i => i.id === currentId) ?? instances[0];
-    return <span className="min-w-0 truncate text-sm text-muted-foreground">{serverLabel(only)}</span>;
+    return <span className="min-w-0 truncate text-sm text-muted-foreground">{choices[0].label}</span>;
   }
 
-  const value = choices.some(c => c.id === currentId) ? currentId : choices[0].id;
+  const currentServer = instances.find(i => i.id === currentId)?.server_id;
+  const value = choices.find(c => c.server_id === currentServer)?.id ?? choices[0].id;
   return (
     <span className="inline-flex min-w-0 items-center gap-1">
       <label htmlFor="widget-screen-instance" className="sr-only">Server</label>

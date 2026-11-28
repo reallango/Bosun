@@ -35,6 +35,10 @@ export function WidgetSettingsDialog({ widgetId, open, onOpenChange, onSave }: W
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [data, setData] = useState<any>(null);
   const [selectedSize, setSelectedSize] = useState<SizePreset | null>(null);
+  const [sizeTouched, setSizeTouched] = useState(false);
+  // A look may suggest a size that is not one of the presets; keep it selectable instead of falling back to the first one.
+  const presetMatch = selectedSize ? SIZE_PRESETS.find(p => p.id === selectedSize.id) : undefined;
+  const sizeValue = selectedSize ? (presetMatch ? selectedSize.id : 'look') : 'custom';
   const [config, setConfig] = useState<Record<string, unknown>>({});
   const [configSchema, setConfigSchema] = useState<WidgetConfigField[]>([]);
   const setConfigValue = (key: string, value: unknown) => setConfig(prev => ({ ...prev, [key]: value }));
@@ -42,11 +46,22 @@ export function WidgetSettingsDialog({ widgetId, open, onOpenChange, onSave }: W
   const { can } = useAuth();
   // A setting the package guards with a permission is read-only for people who lack it.
   const locked = (f: WidgetConfigField) => !!f.requires_permission && !can(f.requires_permission, data?.server_id);
+  // The "Look" field Bosun adds carries each look's own floor and suggested size.
+  const lookField = configSchema.find(f => f.lookSizes);
+  const lookSize = (id: unknown) => lookField?.lookSizes?.[String(id ?? '')];
+  const changeConfig = (field: WidgetConfigField, value: unknown) => {
+    setConfigValue(field.key, value);
+    const suggested = field.lookSizes ? field.lookSizes[String(value)]?.default : undefined;
+    if (!suggested || sizeTouched) return;
+    const preset = SIZE_PRESETS.find(p => p.gridW === suggested.w && p.gridH === suggested.h);
+    setSelectedSize(preset ?? { id: `look-${String(value)}`, name: 'Look size', gridW: suggested.w, gridH: suggested.h, description: `${suggested.w}x${suggested.h}` });
+  };
 
   useEffect(() => {
     if (open && widgetId) {
       setLoading(true);
       setError(null);
+      setSizeTouched(false);
       fetchWithAuth(`/api/widgets/${widgetId}/settings`)
         .then(r => readJson<{ data?: any; error?: { message?: string } }>(r)) // eslint-disable-line @typescript-eslint/no-explicit-any
         .then(json => {
@@ -75,13 +90,15 @@ export function WidgetSettingsDialog({ widgetId, open, onOpenChange, onSave }: W
       // Guarded settings the person may not change are not sent back.
       const editable = configSchema.filter(f => !locked(f));
       if (editable.length) payload.config = Object.fromEntries(editable.map(f => [f.key, config[f.key] ?? f.default ?? null]));
-      // Always include grid_w and grid_h - use selectedSize if available, otherwise use current values from data
+      // Always include grid_w and grid_h - use selectedSize if available, otherwise use current values from data.
+      // A look's own floor is never smaller than the size the person picked, so raise the size to it.
+      const min = lookSize(config[lookField?.key ?? ''] ?? lookField?.default);
       if (selectedSize) {
-        payload.grid_w = selectedSize.gridW;
-        payload.grid_h = selectedSize.gridH;
+        payload.grid_w = Math.max(selectedSize.gridW, min?.min?.w ?? 1);
+        payload.grid_h = Math.max(selectedSize.gridH, min?.min?.h ?? 1);
       } else if (data?.grid_w !== undefined) {
-        payload.grid_w = data.grid_w;
-        payload.grid_h = data.grid_h;
+        payload.grid_w = Math.max(Number(data.grid_w) || 4, min?.min?.w ?? 1);
+        payload.grid_h = Math.max(Number(data.grid_h) || 3, min?.min?.h ?? 1);
       }
       const res = await fetchWithAuth(`/api/widgets/${widgetId}/settings`, {
         method: 'PUT',
@@ -139,14 +156,14 @@ export function WidgetSettingsDialog({ widgetId, open, onOpenChange, onSave }: W
                     {field.type === 'boolean' ? (
                       <label className="flex items-center gap-2 text-sm font-medium">
                         <input type="checkbox" className="size-4 accent-primary" checked={value === true || value === 'true'}
-                          onChange={e => setConfigValue(field.key, e.target.checked)} />
+                          onChange={e => changeConfig(field, e.target.checked)} />
                         {field.label}
                       </label>
                     ) : (
                       <>
                         <Label htmlFor={id}>{field.label}</Label>
                         {field.type === 'select' ? (
-                          <select id={id} className="form-select" value={String(value)} onChange={e => setConfigValue(field.key, e.target.value)}>
+                          <select id={id} className="form-select" value={String(value)} onChange={e => changeConfig(field, e.target.value)}>
                             {(field.options || []).map(o => <option key={o} value={o}>{field.optionLabels?.[o] ?? o}</option>)}
                           </select>
                         ) : (
@@ -154,7 +171,7 @@ export function WidgetSettingsDialog({ widgetId, open, onOpenChange, onSave }: W
                             className={field.requires_permission ? 'font-mono' : undefined}
                             readOnly={locked(field)}
                             disabled={locked(field)}
-                            onChange={e => setConfigValue(field.key, field.type === 'number' ? Number(e.target.value) : e.target.value)} />
+                            onChange={e => changeConfig(field, field.type === 'number' ? Number(e.target.value) : e.target.value)} />
                         )}
                       </>
                     )}
@@ -176,12 +193,17 @@ export function WidgetSettingsDialog({ widgetId, open, onOpenChange, onSave }: W
                 <select
                   id={`ws-size-${widgetId}`}
                   className="form-select"
-                  value={selectedSize?.id || 'custom'}
+                  value={sizeValue}
                   onChange={e => {
+                    setSizeTouched(true);
+                    if (e.target.value === 'look') return;
                     const preset = SIZE_PRESETS.find(p => p.id === e.target.value);
                     setSelectedSize(preset || null);
                   }}
                 >
+                  {selectedSize && !presetMatch && (
+                    <option value="look">{selectedSize.name} ({selectedSize.description})</option>
+                  )}
                   {!selectedSize && <option value="custom">Custom ({data?.grid_w}x{data?.grid_h})</option>}
                   {SIZE_PRESETS.map(preset => (
                     <option key={preset.id} value={preset.id}>

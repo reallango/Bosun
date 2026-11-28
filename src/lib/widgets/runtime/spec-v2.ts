@@ -22,7 +22,7 @@ import {
 import { validateThresholds, type Thresholds } from './thresholds';
 import { validateTrend, type TrendSpec } from './trends';
 import { validateGaugeItem, type GaugeItem } from './gauges';
-import { validateMeters, type MeterItem, type MeterShape } from './meters';
+import { validateMeters, type MeterItem, type MeterLayout, type MeterShape } from './meters';
 import { VALUE_FORMATS, type ValueFormat } from './number-format';
 import { cond, fail, FIELD_RE, ID_RE, intIn, isObj, PARAM_RE, text, validateParam, type Obj, type Validated } from './spec-util';
 
@@ -121,6 +121,18 @@ export interface StatItem {
   /** `muted` dims a secondary item's value. */
   emphasis?: Emphasis;
   format?: ValueFormat;
+  /** Level 11: the item shows only while this condition holds (read against the screen's context). */
+  when?: Cond;
+  /** Level 11: fallbacks tried in order when this item's `when` does not hold; the first one that does is drawn. */
+  alternatives?: StatItem[];
+}
+
+/** One `label value` pair of an `info` block or of a block's `footer`. `when` hides the pair when it does not hold. */
+export interface InfoItem {
+  label: string;
+  /** A template over the screen's context. */
+  value: string;
+  when?: Cond;
 }
 
 export const EDITOR_INPUTS = ['text', 'number', 'select', 'checkbox', 'textarea', 'lines', 'pairs', 'rows', 'button', 'heading'] as const;
@@ -216,9 +228,10 @@ export type Block = (
   | { type: 'editor'; fields: EditorField[]; /** The text parameter of the submit actions that receives the settings blob (none: the fields are mapped one by one in each submit's params). */ param?: string; submits: EditorSubmit[]; open?: 'dialog'; label?: string; when?: Cond }
   | { type: 'section'; title: string; defaultOpen: boolean; badges: Badge[]; summary?: string; blocks: Block[]; when?: Cond }
   | { type: 'kv'; items: FieldSpec[]; when?: Cond }
-  | { type: 'stat'; items: StatItem[]; size?: BlockSize; minItemWidth?: MinItemWidth; columns?: number; when?: Cond }
-  | { type: 'gauges'; items: GaugeItem[]; size?: BlockSize; minItemWidth?: MinItemWidth; columns?: number; thickness?: GaugeThickness; when?: Cond }
-  | { type: 'meters'; path?: string; shape: MeterShape; item: MeterItem; empty?: string; when?: Cond }
+  | { type: 'stat'; items: StatItem[]; size?: BlockSize; minItemWidth?: MinItemWidth; columns?: number; footer?: InfoItem[]; when?: Cond }
+  | { type: 'gauges'; items: GaugeItem[]; size?: BlockSize; minItemWidth?: MinItemWidth; columns?: number; thickness?: GaugeThickness; footer?: InfoItem[]; when?: Cond }
+  | { type: 'meters'; path?: string; shape: MeterShape; layout?: MeterLayout; item: MeterItem; empty?: string; when?: Cond }
+  | { type: 'info'; items: InfoItem[]; when?: Cond }
   | { type: 'text'; text: string; when?: Cond }
   | { type: 'notice'; level: 'info' | 'warning' | 'error'; text: string; when?: Cond }
   | { type: 'buttons'; actions: string[]; when?: Cond }
@@ -574,6 +587,128 @@ function dialogOpen(b: Obj, where: string): Validated<{ open?: 'dialog'; label?:
   return { ok: true, value: { open: 'dialog', label } };
 }
 
+/** One stat item (or one of its `alternatives`, which nest at most two deep). */
+function validateStatItem(raw: unknown, where: string, statTabs: { tab: string; where: string }[], depth = 0): Validated<StatItem> {
+  if (depth > 2) return fail(`${where}: "alternatives" are nested too deeply`);
+  if (!isObj(raw)) return fail(`${where}: each stat item must be an object`);
+  const label = text(raw.label, 40);
+  if (!label) return fail(`${where}: each stat item needs a "label"`);
+  const value = raw.value === undefined ? undefined : text(raw.value, 200);
+  if (value === null) return fail(`${where}: stat "${label}": "value" must be a template`);
+  let count: StatCount | undefined;
+  if (raw.count !== undefined) {
+    if (!isObj(raw.count)) return fail(`${where}: stat "${label}": "count" must be an object like {"path": "data.items", "where": {...}}`);
+    let path: string | undefined;
+    if (raw.count.path !== undefined) {
+      if (typeof raw.count.path !== 'string' || !FIELD_RE.test(raw.count.path)) return fail(`${where}: stat "${label}": "count.path" must be a dotted path such as "data.items"`);
+      path = raw.count.path;
+    }
+    let whereCond: Cond | undefined;
+    if (raw.count.where !== undefined) {
+      const c = cond(raw.count.where, `${where} stat "${label}" count "where"`);
+      if (!c.ok) return c;
+      whereCond = c.value;
+    }
+    count = { ...(path ? { path } : {}), ...(whereCond ? { where: whereCond } : {}) };
+  }
+  if (!value && !count) return fail(`${where}: each stat item needs a "value" or a "count"`);
+  const sub = raw.sub === undefined ? undefined : text(raw.sub, 200);
+  if (sub === null) return fail(`${where}: stat "${label}": "sub" must be text`);
+  let tone: StatItem['tone'];
+  if (raw.tone !== undefined) {
+    if (typeof raw.tone === 'string') {
+      if (!(STAT_TONES as readonly string[]).includes(raw.tone)) return fail(`${where}: stat "${label}": "tone" must be one of ${STAT_TONES.join(', ')}`);
+      tone = raw.tone as StatTone;
+    } else if (isObj(raw.tone)) {
+      const keys = Object.keys(raw.tone);
+      if (keys.length < 1 || keys.length > STAT_TONES.length || !keys.every(k => (STAT_TONES as readonly string[]).includes(k))) {
+        return fail(`${where}: stat "${label}": a "tone" object maps ${STAT_TONES.join(', ')} to conditions`);
+      }
+      const conditions: Partial<Record<StatTone, Cond>> = {};
+      for (const [name, condition] of Object.entries(raw.tone)) {
+        const c = cond(condition, `${where} stat "${label}" tone "${name}"`);
+        if (!c.ok) return c;
+        conditions[name as StatTone] = c.value;
+      }
+      tone = conditions;
+    } else {
+      return fail(`${where}: stat "${label}": "tone" must be ${STAT_TONES.join(', ')} or an object of those to conditions`);
+    }
+  }
+  let tab: string | undefined;
+  if (raw.tab !== undefined) {
+    if (typeof raw.tab !== 'string' || !ID_RE.test(raw.tab)) return fail(`${where}: stat "${label}": "tab" must be a tab id`);
+    tab = raw.tab;
+    statTabs.push({ tab, where: `${where} stat "${label}"` });
+  }
+  const bar = raw.bar === undefined ? undefined : text(raw.bar, 200);
+  if (bar === null) return fail(`${where}: stat "${label}": "bar" must be a template that gives a number from 0 to 100`);
+  const unit = raw.unit === undefined ? undefined : text(raw.unit, 8);
+  if (unit === null) return fail(`${where}: stat "${label}": "unit" must be short text`);
+  const trend = validateTrend(raw.trend, `${where} stat "${label}"`);
+  if (!trend.ok) return trend;
+  const thresholds = validateThresholds(raw.thresholds, `${where} stat "${label}"`);
+  if (!thresholds.ok) return thresholds;
+  const decimals = validateDecimals(raw.decimals, `${where} stat "${label}"`);
+  if (!decimals.ok) return decimals;
+  const emphasis = validateEmphasis(raw.emphasis, `${where} stat "${label}"`);
+  if (!emphasis.ok) return emphasis;
+  let format: ValueFormat | undefined;
+  if (raw.format !== undefined) {
+    if (typeof raw.format !== 'string' || !(VALUE_FORMATS as readonly string[]).includes(raw.format)) {
+      return fail(`${where}: stat "${label}": "format" must be one of ${VALUE_FORMATS.join(', ')}`);
+    }
+    format = raw.format as ValueFormat;
+  }
+  let when: Cond | undefined;
+  if (raw.when !== undefined) {
+    const c = cond(raw.when, `${where} stat "${label}" "when"`);
+    if (!c.ok) return c;
+    when = c.value;
+  }
+  let alternatives: StatItem[] | undefined;
+  if (raw.alternatives !== undefined) {
+    if (!Array.isArray(raw.alternatives) || raw.alternatives.length < 1 || raw.alternatives.length > 4) {
+      return fail(`${where}: stat "${label}": "alternatives" must list 1-4 tiles`);
+    }
+    alternatives = [];
+    for (const alt of raw.alternatives as unknown[]) {
+      const v = validateStatItem(alt, where, statTabs, depth + 1);
+      if (!v.ok) return v;
+      alternatives.push(v.value);
+    }
+  }
+  return {
+    ok: true,
+    value: {
+      label, ...(value ? { value } : {}), ...(count ? { count } : {}), ...(sub ? { sub } : {}), ...(tone ? { tone } : {}), ...(tab ? { tab } : {}),
+      ...(bar ? { bar } : {}), ...(unit ? { unit } : {}), ...(trend.value ? { trend: trend.value } : {}), ...(thresholds.value ? { thresholds: thresholds.value } : {}),
+      ...(decimals.value !== undefined ? { decimals: decimals.value } : {}), ...(emphasis.value ? { emphasis: emphasis.value } : {}),
+      ...(format ? { format } : {}), ...(when ? { when } : {}), ...(alternatives ? { alternatives } : {}),
+    },
+  };
+}
+
+/** The `label value` pairs of an `info` block or a block's `footer`. */
+function validateInfoItems(raw: unknown, where: string): Validated<InfoItem[]> {
+  if (!Array.isArray(raw) || raw.length < 1 || raw.length > 8) return fail(`${where}: "items" must list 1-8 pairs`);
+  const items: InfoItem[] = [];
+  for (const x of raw as unknown[]) {
+    if (!isObj(x)) return fail(`${where}: each item must be an object like {"label": "Mounts", "value": "{n}"}`);
+    const label = text(x.label, 40);
+    const value = text(x.value, 200);
+    if (!label || !value) return fail(`${where}: each item needs a "label" and a "value" template`);
+    let when: Cond | undefined;
+    if (x.when !== undefined) {
+      const c = cond(x.when, `${where} item "${label}" "when"`);
+      if (!c.ok) return c;
+      when = c.value;
+    }
+    items.push({ label, value, ...(when ? { when } : {}) });
+  }
+  return { ok: true, value: items };
+}
+
 export function validateLayout(
   rawBlocks: unknown, actionIds: ReadonlySet<string>, innerView: ViewValidator, validateFields: (raw: unknown, where: string) => Validated<FieldSpec[]>,
 ): Validated<Block[]> {
@@ -630,84 +765,13 @@ export function validateLayout(
           if (!sizing.ok) return sizing;
           const items: StatItem[] = [];
           for (const raw of b.items as unknown[]) {
-            if (!isObj(raw)) return fail(`${w}: each stat item must be an object`);
-            const label = text(raw.label, 40);
-            if (!label) return fail(`${w}: each stat item needs a "label"`);
-            const value = raw.value === undefined ? undefined : text(raw.value, 200);
-            if (value === null) return fail(`${w}: stat "${label}": "value" must be a template`);
-            let count: StatCount | undefined;
-            if (raw.count !== undefined) {
-              if (!isObj(raw.count)) return fail(`${w}: stat "${label}": "count" must be an object like {"path": "data.items", "where": {...}}`);
-              let path: string | undefined;
-              if (raw.count.path !== undefined) {
-                if (typeof raw.count.path !== 'string' || !FIELD_RE.test(raw.count.path)) return fail(`${w}: stat "${label}": "count.path" must be a dotted path such as "data.items"`);
-                path = raw.count.path;
-              }
-              let where: Cond | undefined;
-              if (raw.count.where !== undefined) {
-                const c = cond(raw.count.where, `${w} stat "${label}" count "where"`);
-                if (!c.ok) return c;
-                where = c.value;
-              }
-              count = { ...(path ? { path } : {}), ...(where ? { where } : {}) };
-            }
-            if (!value && !count) return fail(`${w}: each stat item needs a "value" or a "count"`);
-            const sub = raw.sub === undefined ? undefined : text(raw.sub, 200);
-            if (sub === null) return fail(`${w}: stat "${label}": "sub" must be text`);
-            let tone: StatItem['tone'];
-            if (raw.tone !== undefined) {
-              if (typeof raw.tone === 'string') {
-                if (!(STAT_TONES as readonly string[]).includes(raw.tone)) return fail(`${w}: stat "${label}": "tone" must be one of ${STAT_TONES.join(', ')}`);
-                tone = raw.tone as StatTone;
-              } else if (isObj(raw.tone)) {
-                const keys = Object.keys(raw.tone);
-                if (keys.length < 1 || keys.length > STAT_TONES.length || !keys.every(k => (STAT_TONES as readonly string[]).includes(k))) {
-                  return fail(`${w}: stat "${label}": a "tone" object maps ${STAT_TONES.join(', ')} to conditions`);
-                }
-                const conditions: Partial<Record<StatTone, Cond>> = {};
-                for (const [name, condition] of Object.entries(raw.tone)) {
-                  const c = cond(condition, `${w} stat "${label}" tone "${name}"`);
-                  if (!c.ok) return c;
-                  conditions[name as StatTone] = c.value;
-                }
-                tone = conditions;
-              } else {
-                return fail(`${w}: stat "${label}": "tone" must be ${STAT_TONES.join(', ')} or an object of those to conditions`);
-              }
-            }
-            let tab: string | undefined;
-            if (raw.tab !== undefined) {
-              if (typeof raw.tab !== 'string' || !ID_RE.test(raw.tab)) return fail(`${w}: stat "${label}": "tab" must be a tab id`);
-              tab = raw.tab;
-              statTabs.push({ tab, where: `${w} stat "${label}"` });
-            }
-            const bar = raw.bar === undefined ? undefined : text(raw.bar, 200);
-            if (bar === null) return fail(`${w}: stat "${label}": "bar" must be a template that gives a number from 0 to 100`);
-            const unit = raw.unit === undefined ? undefined : text(raw.unit, 8);
-            if (unit === null) return fail(`${w}: stat "${label}": "unit" must be short text`);
-            const trend = validateTrend(raw.trend, `${w} stat "${label}"`);
-            if (!trend.ok) return trend;
-            const thresholds = validateThresholds(raw.thresholds, `${w} stat "${label}"`);
-            if (!thresholds.ok) return thresholds;
-            const decimals = validateDecimals(raw.decimals, `${w} stat "${label}"`);
-            if (!decimals.ok) return decimals;
-            const emphasis = validateEmphasis(raw.emphasis, `${w} stat "${label}"`);
-            if (!emphasis.ok) return emphasis;
-            let format: ValueFormat | undefined;
-            if (raw.format !== undefined) {
-              if (typeof raw.format !== 'string' || !(VALUE_FORMATS as readonly string[]).includes(raw.format)) {
-                return fail(`${w}: stat "${label}": "format" must be one of ${VALUE_FORMATS.join(', ')}`);
-              }
-              format = raw.format as ValueFormat;
-            }
-            items.push({
-              label, ...(value ? { value } : {}), ...(count ? { count } : {}), ...(sub ? { sub } : {}), ...(tone ? { tone } : {}), ...(tab ? { tab } : {}),
-              ...(bar ? { bar } : {}), ...(unit ? { unit } : {}), ...(trend.value ? { trend: trend.value } : {}), ...(thresholds.value ? { thresholds: thresholds.value } : {}),
-              ...(decimals.value !== undefined ? { decimals: decimals.value } : {}), ...(emphasis.value ? { emphasis: emphasis.value } : {}),
-              ...(format ? { format } : {}),
-            });
+            const item = validateStatItem(raw, w, statTabs);
+            if (!item.ok) return item;
+            items.push(item.value);
           }
-          out.push({ type: 'stat', items, ...sizing.value, ...base });
+          const footer = b.footer === undefined ? undefined : validateInfoItems(b.footer, `${w} footer`);
+          if (footer && !footer.ok) return footer;
+          out.push({ type: 'stat', items, ...sizing.value, ...(footer && footer.value.length ? { footer: footer.value } : {}), ...base });
           break;
         }
         case 'gauges': {
@@ -722,13 +786,21 @@ export function validateLayout(
             if (!g.ok) return g;
             items.push(g.value);
           }
-          out.push({ type: 'gauges', items, ...sizing.value, ...(thickness.value ? { thickness: thickness.value } : {}), ...base });
+          const footer = b.footer === undefined ? undefined : validateInfoItems(b.footer, `${w} footer`);
+          if (footer && !footer.ok) return footer;
+          out.push({ type: 'gauges', items, ...sizing.value, ...(thickness.value ? { thickness: thickness.value } : {}), ...(footer && footer.value.length ? { footer: footer.value } : {}), ...base });
           break;
         }
         case 'meters': {
           const meters = validateMeters(b, w);
           if (!meters.ok) return meters;
           out.push({ type: 'meters', ...meters.value, ...base });
+          break;
+        }
+        case 'info': {
+          const items = validateInfoItems(b.items, w);
+          if (!items.ok) return items;
+          out.push({ type: 'info', items: items.value, ...base });
           break;
         }
         case 'text': {
@@ -861,7 +933,7 @@ export function validateLayout(
           break;
         }
         default:
-          return fail(`${w}: unknown block type "${b.type}" (section, tabs, kv, stat, gauges, meters, text, code, notice, buttons, form, editor, select, jobProgress or view)`);
+          return fail(`${w}: unknown block type "${b.type}" (section, tabs, kv, stat, gauges, meters, info, text, code, notice, buttons, form, editor, select, jobProgress or view)`);
       }
     }
     return { ok: true, value: out };

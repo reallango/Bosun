@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useId, useRef, useSt
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { Dialog } from 'radix-ui';
 import { ChevronDown, ChevronRight, Loader2, X } from 'lucide-react';
-import type { Block, FormField } from '@/lib/widgets/runtime/spec-v2';
+import type { Block, FormField, InfoItem } from '@/lib/widgets/runtime/spec-v2';
 import { fillTemplate, type ViewSpec } from '@/lib/widgets/runtime/spec';
 import {
   actionApplies, activeTabId, formInitial, formParams, jobHeadline, layoutRows, opensInDialog, primaryToolbarEntry, selectCurrent, selectParams, tabCount, text, visible, visibleBadges,
@@ -15,16 +15,18 @@ import { fitsSize, type WidgetSize } from '@/lib/widgets/runtime/size';
 import { countRows, statTone, withUnit } from '@/lib/widgets/runtime/stat';
 import { thresholdTone } from '@/lib/widgets/runtime/thresholds';
 import { formatStatValue } from '@/lib/widgets/runtime/number-format';
-import { meterRowView, meterRows } from '@/lib/widgets/runtime/meters';
-import { gaugeLabelFontSize, labelFontSize, fitGaugeValues, fitTileValues, unitOnOwnLine, type BlockSize, type MinItemWidth, type ValueFit, type ValueText } from '@/lib/widgets/runtime/sizing';
+import { meterRowView, visibleMeterRows } from '@/lib/widgets/runtime/meters';
+import { pickAdaptive, visibleInfo } from '@/lib/widgets/runtime/adaptive';
+import { gaugeLabelFontSize, labelFontSize, fitGaugeValues, fitTileValues, longestValueLength, unitOnOwnLine, type BlockSize, type MinItemWidth, type ValueFit, type ValueText } from '@/lib/widgets/runtime/sizing';
 import { gaugeGeometry, gaugeStroke, GAUGE_VIEWBOX, type GaugeItem } from '@/lib/widgets/runtime/gauges';
 import { useWidgetSize } from '@/components/dashboard/widget-size';
 import { useWidgetDensity, useWidgetFill } from './fill';
 import { CodeBlock, EditorBlock } from './EditorBlock';
+import { ItemGrid } from './ItemGrid';
 import {
   buttonClass, DIALOG_CONTENT, DIALOG_FOOTER, DIALOG_HEADER, DIALOG_OVERLAY, DIALOG_TITLE, DIALOG_WIDTH, FILL_CARD, FILL_CARD_COMPACT, FILL_GAUGE_CARD,
-  FILL_GAUGE_CARD_COMPACT, FILL_GAUGE_LABEL, FILL_GAUGE_VALUE, FILL_GRID_COLUMNS, FILL_GRID_MIN, FILL_GRID_XS, FILL_LABEL, FILL_SUB, FILL_VALUE,
-  FILL_VALUE_COMPACT, METER_LIST, METER_LIST_COMPACT, METER_RING, METER_RING_COMPACT, METER_RING_TRACK, METER_ROW, METER_SUB, METER_VALUE,
+  FILL_GAUGE_CARD_COMPACT, FILL_GAUGE_LABEL, FILL_GAUGE_VALUE, FILL_GRID_COLUMNS, FILL_GRID_MIN, FILL_LABEL, FILL_SUB, FILL_VALUE,
+  FILL_VALUE_COMPACT, METER_GRID, METER_GRID_CELL, METER_GRID_TRACK, METER_LIST, METER_LIST_COMPACT, METER_RING, METER_RING_COMPACT, METER_RING_TRACK, METER_ROW, METER_SUB, METER_VALUE,
   STAT_GRID_COLUMNS,
   iconButtonClass, inputClass, NOTICE_CLASS as NOTICE, primarySubmitClass, toolbarButtonClass,
 } from './styles';
@@ -91,7 +93,7 @@ export function LayoutBlocks({ blocks, ctx, ui, groupToolbar }: { blocks: Block[
   return (
     <div className={fill ? 'flex h-full min-h-0 flex-col gap-2' : 'space-y-2'}>
       {shown.map((b, i) => (
-        <div key={i} className={fill && fillsBody(b) ? 'min-h-0 flex-1' : undefined}>
+        <div key={i} className={fill && fillsBody(b) ? 'min-h-0 flex-1' : fill && b.type === 'info' ? 'mt-auto' : undefined}>
           <BlockView block={b} ctx={ctx} ui={ui} />
         </div>
       ))}
@@ -147,6 +149,7 @@ function BlockView({ block, ctx, ui, toolbar }: { block: Block; ctx: ViewContext
     case 'stat': return <StatBlock block={block} ctx={ctx} />;
     case 'gauges': return <GaugeBlock block={block} ctx={ctx} />;
     case 'meters': return <MetersBlock block={block} ctx={ctx} />;
+    case 'info': return <InfoLine items={block.items} ctx={ctx} />;
     case 'text': return <TextBlock block={block} ctx={ctx} />;
     case 'notice': return <div role={block.level === 'error' ? 'alert' : 'status'} className={`rounded-md border px-2 py-1.5 text-xs ${NOTICE[block.level]}`}>{text(block.text, ctx)}</div>;
     case 'buttons': return <Buttons block={block} ctx={ctx} ui={ui} toolbar={toolbar} />;
@@ -255,16 +258,24 @@ const STAT_TONE_STROKE: Record<StatToneName, string> = {
   warning: 'stroke-warning',
   success: 'stroke-success',
 };
+const STAT_TONE_BAR: Record<StatToneName, string> = {
+  danger: 'bg-destructive',
+  warning: 'bg-warning',
+  success: 'bg-success',
+};
 const STAT_CARD = 'flex min-w-0 flex-col gap-0.5 rounded-lg border border-border bg-card p-3 text-left';
 const GAUGE_CARD = 'flex min-w-0 flex-col items-center gap-1 rounded-lg border border-border bg-card p-3 text-center';
 
 /** Below this measured widget body height (about three grid rows) tiles and gauges switch to their compact layout. */
 const COMPACT_HEIGHT = 160;
 
-/** The grid of a stat or gauge block: a fixed count, the auto-fit minimum of `minItemWidth`, or the size class outside a widget. */
+/**
+ * The grid class of a stat or gauge block: a fixed count, the auto-fit minimum of `minItemWidth`, or the size class outside
+ * a widget. Inside a widget the measured balanced arrangement overrides the auto-fit template (see ItemGrid).
+ */
 function itemGridClass(fill: boolean, widgetSize: WidgetSize, block: { columns?: number; minItemWidth?: MinItemWidth }): string {
   if (block.columns) return fill ? FILL_GRID_COLUMNS[block.columns] : STAT_GRID_COLUMNS[block.columns];
-  if (fill) return widgetSize === 'xs' ? FILL_GRID_XS : FILL_GRID_MIN[block.minItemWidth ?? 'md'];
+  if (fill) return FILL_GRID_MIN[block.minItemWidth ?? 'md'];
   return `grid gap-2 ${STAT_COLUMNS[widgetSize] ?? STAT_COLUMNS.lg}`;
 }
 
@@ -330,6 +341,23 @@ function ValueLines({ number, unit, fit, className, tone }: {
   );
 }
 
+/** The footer of a `stat` or `gauges` block: one muted line of label/value pairs, pinned under the block. */
+function InfoLine({ items, ctx }: { items: InfoItem[]; ctx: ViewContext }) {
+  const shown = visibleInfo(items, ctx);
+  if (!shown.length) return null;
+  const title = shown.map(i => `${i.label} ${text(i.value, ctx)}`.trim()).join(' · ');
+  return (
+    <div className="mt-auto min-w-0 shrink-0 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] leading-tight text-muted-foreground" title={title}>
+      {shown.map((item, i) => (
+        <span key={i}>
+          {i > 0 && <span aria-hidden="true"> · </span>}
+          <span>{item.label}</span> <span className="text-foreground">{text(item.value, ctx)}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 /** A responsive grid of number cards; a card with a `tab` switches to that tab when it is inside a tab group. */
 function StatBlock({ block, ctx }: { block: Extract<Block, { type: 'stat' }>; ctx: ViewContext }) {
   const { size: widgetSize, height } = useWidgetSize();
@@ -339,7 +367,8 @@ function StatBlock({ block, ctx }: { block: Extract<Block, { type: 'stat' }>; ct
   const selectTab = useContext(TabSelectContext);
   const blockSize = block.size ?? 'md';
   const card = useCardSize();
-  const shown = block.items.map(item => {
+  const items = block.items.map(item => pickAdaptive(item, ctx)).filter((item): item is NonNullable<typeof item> => item !== null);
+  const shown = items.map(item => {
     const raw = item.count ? String(countRows(item.count, ctx)) : text(item.value ?? '', ctx);
     return { item, ...formatStatValue(raw, item.format, item.unit, item.decimals) };
   });
@@ -348,8 +377,10 @@ function StatBlock({ block, ctx }: { block: Extract<Block, { type: 'stat' }>; ct
   const fit = fitTileValues(shown.map(({ number, unit }) => ({ number, unit })), {
     size: blockSize, compact, width: card.width, height: card.height,
   });
-  return (
-    <div className={itemGridClass(fill, widgetSize, block)} style={fill && compact ? { gap: '0.375rem' } : undefined}>
+  const valueChars = longestValueLength(shown.map(({ number, unit }) => withUnit(number, unit)));
+  const grid = (
+    <ItemGrid fill={fill} columns={block.columns} minItemWidth={block.minItemWidth} kind="stat" count={shown.length}
+      valueChars={valueChars} compact={compact} className={itemGridClass(fill, widgetSize, block)}>
       {shown.map(({ item, number, unit }, i) => {
         const numeric = item.count ? countRows(item.count, ctx) : Number(fillTemplate(item.value ?? '', ctx));
         const tone = statTone(item.tone, ctx) ?? thresholdTone(numeric, item.thresholds);
@@ -373,6 +404,13 @@ function StatBlock({ block, ctx }: { block: Extract<Block, { type: 'stat' }>; ct
           ? <button key={i} type="button" ref={i === 0 ? card.ref : undefined} onClick={() => selectTab(item.tab!)} className={`${cardClass} hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}>{content}</button>
           : <div key={i} ref={i === 0 ? card.ref : undefined} className={cardClass}>{content}</div>;
       })}
+    </ItemGrid>
+  );
+  if (!block.footer?.length) return grid;
+  return (
+    <div className={fill ? 'flex h-full min-h-0 flex-col gap-1' : 'space-y-1'}>
+      <div className={fill ? 'min-h-0 flex-1' : undefined}>{grid}</div>
+      <InfoLine items={block.footer} ctx={ctx} />
     </div>
   );
 }
@@ -424,19 +462,29 @@ function GaugeBlock({ block, ctx }: { block: Extract<Block, { type: 'gauges' }>;
   const compact = fill && (density === 'compact' || (height > 0 && height < COMPACT_HEIGHT));
   const blockSize = block.size ?? 'md';
   const card = useCardSize();
-  const values: ValueText[] = block.items.map(item => {
+  const items = block.items.map(item => pickAdaptive(item, ctx)).filter((item): item is NonNullable<typeof item> => item !== null);
+  const values: ValueText[] = items.map(item => {
     const value = text(item.value, ctx);
     return formatStatValue(value, item.format, item.unit, item.decimals);
   });
   // One size for the block, sized for its thickest ring so a mixed `thickness` still shares it.
-  const stroke = Math.max(...block.items.map(item => gaugeStroke(item.thickness ?? block.thickness)));
+  const stroke = Math.max(...items.map(item => gaugeStroke(item.thickness ?? block.thickness)));
   const fit = fitGaugeValues(values, { size: blockSize, stroke, width: card.width, height: card.height });
-  return (
-    <div className={itemGridClass(fill, widgetSize, block)} style={fill && compact ? { gap: '0.375rem' } : undefined}>
-      {block.items.map((item, i) => (
+  const valueChars = longestValueLength(values.map(value => withUnit(value.number, value.unit)));
+  const grid = (
+    <ItemGrid fill={fill} columns={block.columns} minItemWidth={block.minItemWidth} kind="gauges" count={items.length}
+      valueChars={valueChars} compact={compact} className={itemGridClass(fill, widgetSize, block)}>
+      {items.map((item, i) => (
         <Gauge key={i} item={item} ctx={ctx} fill={fill} compact={compact} fit={fit} blockSize={blockSize} thickness={block.thickness}
           cardRef={fill && i === 0 ? card.ref : undefined} />
       ))}
+    </ItemGrid>
+  );
+  if (!block.footer?.length) return grid;
+  return (
+    <div className={fill ? 'flex h-full min-h-0 flex-col gap-1' : 'space-y-1'}>
+      <div className={fill ? 'min-h-0 flex-1' : undefined}>{grid}</div>
+      <InfoLine items={block.footer} ctx={ctx} />
     </div>
   );
 }
@@ -467,29 +515,53 @@ function MetersBlock({ block, ctx }: { block: Extract<Block, { type: 'meters' }>
   const density = useWidgetDensity();
   const compact = fill && (density === 'compact' || (height > 0 && height < COMPACT_HEIGHT));
   const source = block.path ? (/^(datasets|context)\./.test(block.path) ? pathOf(ctx, block.path) : pathOf(ctx.data, block.path)) : ctx.data;
-  const rows = meterRows(source);
+  const rows = visibleMeterRows(block.item, source);
   if (!rows.length) return <div className="py-4 text-center text-xs text-muted-foreground">{block.empty || 'Nothing to show'}</div>;
   const views = rows.map(row => meterRowView(block.item, row));
   const ring = block.shape === 'ring';
-  return (
-    <ul className={fill ? (compact ? METER_LIST_COMPACT : METER_LIST) : 'space-y-2'}>
-      {views.map((v, i) => {
-        const toneClass = v.tone ? STAT_TONE_CLASS[v.tone] : v.emphasis === 'muted' ? 'text-muted-foreground' : 'text-foreground';
-        return (
-          <li key={i} className={METER_ROW}>
-            {ring && <MeterRing pct={v.pct} tone={v.tone} label={`${v.label}: ${v.valueText}`} compact={compact} />}
-            <div className="min-w-0 flex-1">
-              <div className="flex items-baseline justify-between gap-2">
-                <span className="truncate text-foreground">{v.label}</span>
-                <span className={`${METER_VALUE} ${toneClass}`}>{v.valueText}</span>
+  // A grid of many small meters (one per CPU core): a thin vertical bar with its label under it, in as many columns as fit.
+  if (fill && block.layout === 'grid') {
+    return (
+      <div className="h-full min-h-0 [container-type:size]">
+        <ul className={METER_GRID}>
+          {views.map((v, i) => (
+            <li key={i} className={METER_GRID_CELL} title={`${v.label}: ${v.valueText}`}>
+              <div className={METER_GRID_TRACK}>
+                <div className={`w-full rounded-sm ${v.tone ? STAT_TONE_BAR[v.tone] : v.emphasis === 'muted' ? 'bg-muted-foreground' : 'bg-primary'}`}
+                  style={{ height: `${v.pct}%` }} />
               </div>
-              {!ring && <Bar value={v.pct} tone={v.tone} />}
-              {!compact && v.sub && <div className={METER_SUB}>{v.sub}</div>}
-            </div>
-          </li>
-        );
-      })}
-    </ul>
+              <span className="w-full truncate text-center tabular-nums text-muted-foreground" style={{ fontSize: 'clamp(0.55rem, 6cqh, 0.8rem)' }}>{v.label}</span>
+            </li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+  // Rows scale their bar thickness and text a little with the room the widget leaves, within a readable range.
+  const rowFont = fill ? { fontSize: 'clamp(0.7rem, max(3cqw, 6cqh), 0.95rem)' } : undefined;
+  const subFont = fill ? { fontSize: 'clamp(0.6rem, 4cqh, 0.8rem)' } : undefined;
+  const barHeight = fill ? '[height:clamp(0.25rem,7cqh,1.5rem)]' : undefined;
+  return (
+    <div className={fill ? 'h-full min-h-0 [container-type:size]' : undefined}>
+      <ul className={`${fill ? (compact ? METER_LIST_COMPACT : METER_LIST) : 'space-y-2'} ${fill ? 'h-full' : ''}`}>
+        {views.map((v, i) => {
+          const toneClass = v.tone ? STAT_TONE_CLASS[v.tone] : v.emphasis === 'muted' ? 'text-muted-foreground' : 'text-foreground';
+          return (
+            <li key={i} className={METER_ROW}>
+              {ring && <MeterRing pct={v.pct} tone={v.tone} label={`${v.label}: ${v.valueText}`} compact={compact} />}
+              <div className="min-w-0 flex-1">
+                <div className="flex items-baseline justify-between gap-2">
+                  <span className="truncate text-foreground" style={rowFont}>{v.label}</span>
+                  <span className={`${METER_VALUE} ${toneClass}`} style={rowFont}>{v.valueText}</span>
+                </div>
+                {!ring && <Bar value={v.pct} tone={v.tone} className={barHeight} />}
+                {!compact && v.sub && <div className={METER_SUB} style={subFont}>{v.sub}</div>}
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
 

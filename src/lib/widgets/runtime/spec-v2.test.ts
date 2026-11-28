@@ -392,3 +392,51 @@ describe('paths into the data', () => {
     expect(getPath({ data }, 'data.cpu.nope')).toBeUndefined();
   });
 });
+
+describe('level 11: adaptive items, footers and info lines', () => {
+  const layout = (blocks: unknown[]) => check(s => { s.view = { type: 'layout', blocks }; });
+  const stat = (items: unknown[], extra: object = {}) => layout([{ type: 'stat', items, ...extra }]);
+
+  it('allows when and alternatives on stat and gauge items', () => {
+    const item = { label: 'Errors', value: '{n}', when: { field: 'n', gt: 0 } };
+    const alternatives = { label: 'Uptime', value: '{u}' };
+    expect(stat([item, { label: 'Cores', value: '{c}', format: 'percent' }]).ok).toBe(true);
+    expect(stat([{ ...item, alternatives: [alternatives] }]).ok).toBe(true);
+    expect(stat([{ ...item, alternatives: [] }]).ok).toBe(false);
+    expect(stat([{ ...item, alternatives: [{ label: 'x' }] }]).ok).toBe(false);
+    expect(layout([{ type: 'gauges', items: [{ label: 'Disk', value: '{p}', when: { field: 'p', gt: 50 }, alternatives: [{ label: 'Fullest', value: '{q}' }] }] }]).ok).toBe(true);
+    expect(layout([{ type: 'gauges', items: [{ label: 'Disk', value: '{p}', when: { nope: 1 } }] }]).ok).toBe(false);
+  });
+
+  it('validates a footer on stat and gauges, and a standalone info block', () => {
+    const footer = [{ label: 'Mounts', value: '{n}' }, { label: 'eth0', value: '{ip}', when: { field: 'ip', exists: true } }];
+    expect(stat([{ label: 'Used', value: '{u}' }], { footer }).ok).toBe(true);
+    expect(layout([{ type: 'gauges', items: [{ label: 'Disk', value: '{p}' }], footer }]).ok).toBe(true);
+    expect(layout([{ type: 'info', items: footer }]).ok).toBe(true);
+    expect(layout([{ type: 'info', items: [] }]).ok).toBe(false);
+    expect(layout([{ type: 'info', items: [{ label: 'x' }] }]).ok).toBe(false);
+    expect(layout([{ type: 'info', items: [{ label: 'x', value: 'y', when: { nope: 1 } }] }]).ok).toBe(false);
+    expect(stat([{ label: 'Used', value: '{u}' }], { footer: [] }).ok).toBe(false);
+  });
+
+  it('accepts count conditions with a where clause, and rejects a malformed one', () => {
+    expect(cond({ count: { path: 'data.items', where: { field: 'state', equals: 'error' } }, gt: 0 }, 'c').ok).toBe(true);
+    expect(cond({ count: { path: 'data.items' }, gt: 0 }, 'c').ok).toBe(true);
+    expect(cond({ count: { path: 'data.items', where: { count: { path: 'tags' }, gt: 0 } }, gt: 0 }, 'c').ok).toBe(true);
+    expect(cond({ count: { path: 'data[0]' } }, 'c').ok).toBe(false);
+    expect(cond({ count: 'data.items' }, 'c').ok).toBe(false);
+    expect(cond({ count: { path: 'data.items', where: { nope: 1 } } }, 'c').ok).toBe(false);
+  });
+
+  it('validates a look min_size and default_size on the spec', () => {
+    expect(check(s => { s.looks = { default: 'tiles', options: [{ id: 'tiles', label: 'Tiles', min_size: { w: 2, h: 2 }, default_size: { w: 4, h: 3 } }] }; }).ok).toBe(true);
+    expect(check(s => { s.looks = { default: 'tiles', options: [{ id: 'tiles', label: 'Tiles', min_size: { w: 2 } }] }; }).ok).toBe(false);
+    expect(check(s => { s.looks = { default: 'tiles', options: [{ id: 'tiles', label: 'Tiles', min_size: { w: 3, h: 3 }, default_size: { w: 2, h: 2 } }] }; }).ok).toBe(false);
+  });
+
+  it('accepts meters layout and row conditions', () => {
+    expect(layout([{ type: 'meters', path: 'data.cores', shape: 'bar', layout: 'grid', item: { label: '{id}', value: '{usagePercent}', when: { field: 'usagePercent', gte: 50 } } }]).ok).toBe(true);
+    expect(layout([{ type: 'meters', shape: 'bar', layout: 'pie', item: { label: '{x}', value: '{y}' } }]).ok).toBe(false);
+    expect(layout([{ type: 'meters', shape: 'ring', item: { label: '{x}', value: '{y}' } }]).ok).toBe(true);
+  });
+});

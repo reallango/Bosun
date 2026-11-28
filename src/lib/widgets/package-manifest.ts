@@ -8,6 +8,7 @@
 import { sanitizeCustomWidget, type CustomWidgetColumns } from '@/lib/widgets/custom-widget-input';
 import { CATALOG } from '@/lib/permissions/catalog';
 import { validateWidgetSpec, type WidgetSpec } from '@/lib/widgets/runtime/spec';
+import { lookSizesProblem, readLookSize } from '@/lib/widgets/runtime/looks';
 import { lookupHosts } from '@/lib/widgets/runtime/spec-v2';
 import type { WidgetApiRequires } from '@/lib/widgets/api-level';
 
@@ -204,6 +205,15 @@ export function validateManifest(
       if (field.requires_permission !== undefined && !permissions.some(p => p.id === field.requires_permission)) {
         return fail(`widget "${type}": setting "${field.key}" requires the permission "${field.requires_permission}", which this package does not declare`);
       }
+    }
+    // A look may need a different floor, but never more room than the widget's own default size.
+    if (spec?.looks) {
+      const declared = (raw: unknown) => {
+        if (typeof raw !== 'string') return readLookSize(raw);
+        try { return readLookSize(JSON.parse(raw)); } catch { return null; }
+      };
+      const problem = lookSizesProblem(spec.looks, declared(v.values.default_size) ?? { w: 8, h: 6 }, declared(v.values.max_size));
+      if (problem) return fail(`widget "${type}": ${problem}`);
     }
     widgets.push({ type, columns: v.values, spec });
   }

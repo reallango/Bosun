@@ -52,9 +52,27 @@ export function cond(raw: unknown, where: string, depth = 0): Validated<Cond> {
     return { ok: true, value: k === 'all' ? { all: out } : { any: out } };
   }
 
-  if (typeof raw.field !== 'string' || !FIELD_RE.test(raw.field)) return fail(`${where}: "field" must be a field name`);
-  const c: Cond = { field: raw.field };
+  if (typeof raw.field !== 'string' || !FIELD_RE.test(raw.field)) {
+    if (raw.field !== undefined || !isObj(raw.count) || typeof raw.count.path !== 'string' || !FIELD_RE.test(raw.count.path)) {
+      return fail(`${where}: "field" must be a field name (or "count.path" must be a dotted path to a list)`);
+    }
+  }
+  const c: Cond = typeof raw.field === 'string' ? { field: raw.field } : {};
   let n = 0;
+  if (raw.count !== undefined) {
+    if (!isObj(raw.count)) return fail(`${where}: "count" must be an object like {"path": "data.items", "where": {...}}`);
+    const count: NonNullable<Cond['count']> = {};
+    if (raw.count.path !== undefined) {
+      if (typeof raw.count.path !== 'string' || !FIELD_RE.test(raw.count.path)) return fail(`${where}: "count.path" must be a dotted path such as "data.items"`);
+      count.path = raw.count.path;
+    }
+    if (raw.count.where !== undefined) {
+      const nested = cond(raw.count.where, `${where} count "where"`, depth + 1);
+      if (!nested.ok) return nested;
+      count.where = nested.value;
+    }
+    c.count = count;
+  }
   if (raw.equals !== undefined) { if (!scalar(raw.equals)) return fail(`${where}: "equals" must be a string, number or boolean`); c.equals = raw.equals; n++; }
   if (raw.notEquals !== undefined) { if (!scalar(raw.notEquals)) return fail(`${where}: "notEquals" must be a string, number or boolean`); c.notEquals = raw.notEquals; n++; }
   if (raw.in !== undefined) {

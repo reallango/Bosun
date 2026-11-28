@@ -23,7 +23,7 @@ function metricsSection(metrics, uptimeSeconds) {
 }
 
 /** Metrics that come from a slower probe tier (disks: every minute or two), so a fast poll does not have them. */
-const SLOW_PREFIXES = ['disk.'];
+const SLOW_METRICS = new Set(['disk.root_used_pct', 'disk.max_used_pct']);
 
 /**
  * The numbers for the `metrics` snapshot: this poll's, plus the last value of every slow-tier metric this poll did not
@@ -32,7 +32,7 @@ const SLOW_PREFIXES = ['disk.'];
  */
 function withSlowMetrics(metrics, state) {
   const slow = (state.slowMetrics && typeof state.slowMetrics === 'object') ? state.slowMetrics : {};
-  const measured = Object.keys(metrics).filter(k => SLOW_PREFIXES.some(p => k.startsWith(p)));
+  const measured = Object.keys(metrics).filter(k => SLOW_METRICS.has(k));
   if (measured.length) {
     // A slow probe ran: its values replace all earlier ones (a disk that is gone must not linger).
     const next = {};

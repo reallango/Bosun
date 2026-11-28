@@ -2,10 +2,11 @@
  * Ring gauges: the items of a `gauges` block and the geometry of a ring. The ring is drawn in a 100 x 100 viewBox, so
  * the renderer only needs a radius and a dash offset. Pure (no I/O).
  */
-import { fail, isObj, text, type Validated } from './spec-util';
+import { cond, fail, isObj, text, type Validated } from './spec-util';
 import { validateDecimals, validateEmphasis, validateGaugeThickness, type Emphasis, type GaugeThickness } from './sizing';
 import { validateThresholds, type Thresholds } from './thresholds';
 import { VALUE_FORMATS, type ValueFormat } from './number-format';
+import type { Cond } from './spec';
 
 export const GAUGE_VIEWBOX = 100;
 export const GAUGE_STROKE = 10;
@@ -33,10 +34,15 @@ export interface GaugeItem {
   thickness?: GaugeThickness;
   /** Write the value in this format (a byte count, a rate, MB, °C, a duration ...) instead of a plain number. */
   format?: ValueFormat;
+  /** Level 11: the gauge shows only while this condition holds (read against the screen's context). */
+  when?: Cond;
+  /** Level 11: fallbacks tried in order when this gauge's `when` does not hold; the first one that does is drawn. */
+  alternatives?: GaugeItem[];
 }
 
 /** Validate one item of a `gauges` block. */
-export function validateGaugeItem(raw: unknown, where: string): Validated<GaugeItem> {
+export function validateGaugeItem(raw: unknown, where: string, depth = 0): Validated<GaugeItem> {
+  if (depth > 2) return fail(`${where}: "alternatives" are nested too deeply`);
   if (!isObj(raw)) return fail(`${where}: each gauge must be an object`);
   const label = text(raw.label, 40);
   const value = text(raw.value, 200);
@@ -65,6 +71,24 @@ export function validateGaugeItem(raw: unknown, where: string): Validated<GaugeI
     }
     format = raw.format as ValueFormat;
   }
+  let when: Cond | undefined;
+  if (raw.when !== undefined) {
+    const c = cond(raw.when, `${where} gauge "${label}" "when"`);
+    if (!c.ok) return c;
+    when = c.value;
+  }
+  let alternatives: GaugeItem[] | undefined;
+  if (raw.alternatives !== undefined) {
+    if (!Array.isArray(raw.alternatives) || raw.alternatives.length < 1 || raw.alternatives.length > 4) {
+      return fail(`${where}: gauge "${label}": "alternatives" must list 1-4 gauges`);
+    }
+    alternatives = [];
+    for (const alt of raw.alternatives as unknown[]) {
+      const v = validateGaugeItem(alt, where, depth + 1);
+      if (!v.ok) return v;
+      alternatives.push(v.value);
+    }
+  }
   return {
     ok: true,
     value: {
@@ -74,6 +98,8 @@ export function validateGaugeItem(raw: unknown, where: string): Validated<GaugeI
       ...(emphasis.value ? { emphasis: emphasis.value } : {}),
       ...(thickness.value ? { thickness: thickness.value } : {}),
       ...(format ? { format } : {}),
+      ...(when ? { when } : {}),
+      ...(alternatives ? { alternatives } : {}),
     },
   };
 }

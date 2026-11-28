@@ -3,14 +3,18 @@
  * a path to the list and one template per row field, so a widget never needs code for its own list. Pure (no I/O), so the
  * validation and the per-row numbers can be tested on their own.
  */
-import { fail, FIELD_RE, isObj, text, type Validated } from './spec-util';
+import { fail, cond, FIELD_RE, isObj, text, type Validated } from './spec-util';
 import { validateDecimals, validateEmphasis, type Emphasis } from './sizing';
 import { validateThresholds, thresholdTone, type ThresholdTone, type Thresholds } from './thresholds';
 import { formatValueText, withUnit } from './number-format';
-import { fillTemplate } from './spec';
+import { evalCond, fillTemplate, type Cond } from './spec';
 
 export const METER_SHAPES = ['bar', 'ring'] as const;
 export type MeterShape = (typeof METER_SHAPES)[number];
+
+/** `rows`: one row per item; `grid`: a dense grid of small meters (one per CPU core, for example). */
+export const METER_LAYOUTS = ['rows', 'grid'] as const;
+export type MeterLayout = (typeof METER_LAYOUTS)[number];
 
 /** One row template of a `meters` block: the templates are filled from the row at `path`. */
 export interface MeterItem {
@@ -25,12 +29,16 @@ export interface MeterItem {
   decimals?: number;
   /** `muted` dims a secondary value. */
   emphasis?: Emphasis;
+  /** Level 11: draw the row only while this condition holds (read against the row). */
+  when?: Cond;
 }
 
 export interface MetersSpec {
   /** Where the rows come from: a path into the widget's data (default: the data itself). */
   path?: string;
   shape: MeterShape;
+  /** `rows` (default) or `grid` (many small meters in columns). */
+  layout: MeterLayout;
   item: MeterItem;
   empty?: string;
 }
@@ -56,6 +64,12 @@ export function validateMeterItem(raw: unknown, where: string): Validated<MeterI
   if (!decimals.ok) return decimals;
   const emphasis = validateEmphasis(raw.emphasis, `${where} item`);
   if (!emphasis.ok) return emphasis;
+  let when: Cond | undefined;
+  if (raw.when !== undefined) {
+    const c = cond(raw.when, `${where} item "when"`);
+    if (!c.ok) return c;
+    when = c.value;
+  }
   return {
     ok: true,
     value: {
@@ -63,6 +77,7 @@ export function validateMeterItem(raw: unknown, where: string): Validated<MeterI
       ...(thresholds.value ? { thresholds: thresholds.value } : {}),
       ...(decimals.value !== undefined ? { decimals: decimals.value } : {}),
       ...(emphasis.value ? { emphasis: emphasis.value } : {}),
+      ...(when ? { when } : {}),
     },
   };
 }
@@ -81,11 +96,18 @@ export function validateMeters(raw: Record<string, unknown>, where: string): Val
     }
     shape = raw.shape as MeterShape;
   }
+  let layout: MeterLayout = 'rows';
+  if (raw.layout !== undefined) {
+    if (typeof raw.layout !== 'string' || !(METER_LAYOUTS as readonly string[]).includes(raw.layout)) {
+      return fail(`${where}: "layout" must be one of ${METER_LAYOUTS.join(', ')}`);
+    }
+    layout = raw.layout as MeterLayout;
+  }
   const item = validateMeterItem(raw.item, where);
   if (!item.ok) return item;
   const empty = raw.empty === undefined ? undefined : text(raw.empty, 80);
   if (empty === null) return fail(`${where}: "empty" must be short text`);
-  return { ok: true, value: { ...(path ? { path } : {}), shape, item: item.value, ...(empty ? { empty } : {}) } };
+  return { ok: true, value: { ...(path ? { path } : {}), shape, layout, item: item.value, ...(empty ? { empty } : {}) } };
 }
 
 /** The rows a `meters` block draws: the array at `path` (an object becomes one row; nothing becomes no rows). */
@@ -93,6 +115,12 @@ export function meterRows(source: unknown): Record<string, unknown>[] {
   if (Array.isArray(source)) return source.filter((r): r is Record<string, unknown> => !!r && typeof r === 'object');
   if (source && typeof source === 'object') return [source as Record<string, unknown>];
   return [];
+}
+
+/** The rows a `meters` block draws after its item's `when`: a row whose condition does not hold is left out. */
+export function visibleMeterRows(item: MeterItem, source: unknown): Record<string, unknown>[] {
+  const rows = meterRows(source);
+  return item.when ? rows.filter(row => evalCond(item.when!, row)) : rows;
 }
 
 export interface MeterRowView {
