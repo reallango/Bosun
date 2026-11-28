@@ -28,6 +28,8 @@ export interface WidgetInstance {
 export interface InstanceChoice {
   id: string;
   label: string;
+  /** The server the choice stands for, so the switcher can mark the current one. */
+  server_id: string;
 }
 
 const text = (v: unknown): string | null => (typeof v === 'string' && v.trim() ? v.trim() : null);
@@ -64,20 +66,27 @@ export function listInstances(rows: InstanceRow[], visibleDashboardIds: Readonly
 }
 
 /**
- * The entries of the server switcher: the server name, and the dashboard too when that server has more than one
- * placement of the widget (so the two entries stay apart). Labels stay unique even then.
+ * The entries of the server switcher: one per server, labelled with the server name, even when that server places
+ * the widget on several dashboards. The entry opens the current instance when it belongs to that server, else the
+ * server's first instance. Labels stay unique when two servers share a name.
  */
-export function instanceChoices(instances: WidgetInstance[]): InstanceChoice[] {
-  const servers = new Map<string, number>();
-  for (const i of instances) servers.set(serverLabel(i), (servers.get(serverLabel(i)) ?? 0) + 1);
-  const labelled = instances.map(i => {
-    const server = serverLabel(i);
-    const label = (servers.get(server) ?? 0) > 1 ? `${server} — ${i.dashboard_name ?? 'Dashboard'}` : server;
-    return { id: i.id, label };
-  });
+export function instanceChoices(instances: WidgetInstance[], currentId?: string): InstanceChoice[] {
+  const byServer = new Map<string, WidgetInstance[]>();
+  for (const i of instances) {
+    const key = i.server_id || serverLabel(i);
+    const list = byServer.get(key);
+    if (list) list.push(i); else byServer.set(key, [i]);
+  }
+  const choices: InstanceChoice[] = [];
+  for (const list of Array.from(byServer.values())) {
+    const chosen = (currentId ? list.find(i => i.id === currentId) : undefined) ?? list[0];
+    choices.push({ id: chosen.id, label: serverLabel(chosen), server_id: chosen.server_id });
+  }
+  const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+  choices.sort((a, b) => cmp(a.label, b.label) || cmp(a.id, b.id));
   const counts = new Map<string, number>();
-  for (const c of labelled) counts.set(c.label, (counts.get(c.label) ?? 0) + 1);
-  return labelled.map(c => ((counts.get(c.label) ?? 0) > 1 ? { id: c.id, label: `${c.label} (${shortId(c.id)})` } : c));
+  for (const c of choices) counts.set(c.label, (counts.get(c.label) ?? 0) + 1);
+  return choices.map(c => ((counts.get(c.label) ?? 0) > 1 ? { ...c, label: `${c.label} (${shortId(c.server_id || c.id)})` } : c));
 }
 
 /** "updated 5 s ago": a short, human age for the screen's loaded data. */

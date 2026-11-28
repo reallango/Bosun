@@ -55,12 +55,12 @@ const MAX_BACKOFF_MS = 5 * 60 * 1000;
 /** Probe tiers: [probes, period ms]. The fast tier runs every poll. */
 const TIERS = {
   linux: [
-    { name: 'fast', probes: ['stat', 'mem', 'load', 'temp', 'netdev', 'gpu'], periodMs: 0 },
+    { name: 'fast', probes: ['stat', 'mem', 'load', 'temp', 'netdev', 'diskstats', 'gpu'], periodMs: 0 },
     { name: 'medium', probes: ['df', 'ip'], periodMs: 60 * 1000 },
     { name: 'slow', probes: ['services', 'system'], periodMs: 5 * 60 * 1000 },
   ],
   windows: [
-    { name: 'fast', probes: ['stat', 'mem', 'netdev', 'gpu'], periodMs: 0 },
+    { name: 'fast', probes: ['stat', 'mem', 'netdev', 'diskstats', 'gpu'], periodMs: 0 },
     { name: 'medium', probes: ['df'], periodMs: 2 * 60 * 1000 },
     { name: 'slow', probes: ['ip', 'services', 'system'], periodMs: 15 * 60 * 1000 },
   ],

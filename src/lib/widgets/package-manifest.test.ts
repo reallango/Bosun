@@ -229,3 +229,28 @@ describe('packages shipped in the repository', () => {
     expect(spec.view.toggles?.[0].key).toBe('stopped');
   });
 });
+
+describe('look sizes in a manifest', () => {
+  const withLooks = (looks: unknown) => {
+    const m: any = good();
+    m.widgets[0].spec.looks = looks;
+    return validateManifest(m);
+  };
+
+  it('accepts a look minimum that fits the widget default size', () => {
+    expect(withLooks({ default: 'tiles', options: [{ id: 'tiles', label: 'Tiles', min_size: { w: 2, h: 2 }, default_size: { w: 4, h: 3 } }] }).ok).toBe(true);
+  });
+
+  it('refuses a look minimum larger than the widget default size', () => {
+    const r = withLooks({ default: 'tiles', options: [{ id: 'tiles', label: 'Tiles', min_size: { w: 5, h: 2 } }] });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error).toMatch(/min_size.*default_size/);
+  });
+
+  it('refuses a look default_size above the widget max_size', () => {
+    const m: any = good();
+    m.widgets[0].max_size = { w: 4, h: 3 };
+    m.widgets[0].spec.looks = { default: 'tiles', options: [{ id: 'tiles', label: 'Tiles', default_size: { w: 6, h: 3 } }] };
+    expect(validateManifest(m).ok).toBe(false);
+  });
+});

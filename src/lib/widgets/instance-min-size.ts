@@ -45,3 +45,25 @@ export function minSizeStatements(
   }
   return statements;
 }
+
+/** The stored size of an instance, as the settings route reads it. */
+export interface InstanceSizeState {
+  grid_min_w: number;
+  grid_min_h: number;
+  grid_w: number;
+  grid_h: number;
+}
+
+/**
+ * The size changes a look asks for when a person switches to it: the instance's floor follows the look's `min_size`
+ * (lowered or raised), and the current size grows when the new floor no longer fits. Null when nothing changes.
+ */
+export function applyLookMinSize(current: InstanceSizeState, min: MinSize | null): Partial<InstanceSizeState> | null {
+  if (!min) return null;
+  const w = Math.max(1, Math.round(min.w));
+  const h = Math.max(1, Math.round(min.h));
+  const grid_w = Math.max(current.grid_w, w);
+  const grid_h = Math.max(current.grid_h, h);
+  if (current.grid_min_w === w && current.grid_min_h === h && grid_w === current.grid_w && grid_h === current.grid_h) return null;
+  return { grid_min_w: w, grid_min_h: h, grid_w, grid_h };
+}

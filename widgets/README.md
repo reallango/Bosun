@@ -70,6 +70,7 @@ until the node is updated.
 | 8 | The bounded sizing keys: `size`, `minItemWidth` and `columns` on `stat` and `gauges`, `thickness` on gauges, `emphasis` and `decimals` on their items, and the widget-level `density`. A `%` value (and the `percent` format) now shows at most one decimal and a whole number from 100 up. |
 | 9 | `before` on an action variant: a package script that runs first, and the action does not run when it fails (used to take a backup before an update); and `target.byKind` on actions and datasets (a target whose kind comes from one of its parameters, so one action can act on a container or a stack), with `"byKind"` as a schedule target. |
 | 10 | The `meters` block (a compact bar or small ring per row of a data list), `count` and `format` on a stat tile, `format` on a ring gauge, the `rate` value format on fields, tables, tiles and gauges, and dotted data keys (a metric named `cpu.usage` is reached as `{data.metrics.cpu.usage}`). |
+| 11 | Per-look sizes (`min_size` and `default_size` on `looks.options`), `when` and `alternatives` on `stat` and `gauges` items and `when` on `meters` rows, the `info` block and the `footer` key on `stat` and `gauges`, `layout` on `meters`, and `count` in conditions. |
 
 New spec keys that an older Bosun cannot honour raise the level in `src/lib/widgets/api-level.ts`; keys an older
 Bosun can safely ignore (because it renders the widget sensibly without them) do not.
@@ -168,6 +169,7 @@ its manifest, scripts and declarative screen; Bosun has no code of its own for a
 - `data.also` and `data.server` combine several sections and the server row; templates reach them by name (`{system.prettyName}`, `{server.name}`, `{metrics.cpu.usage}`). The `metrics` section holds the latest value of every tracked number.
 - In a version 2 `layout` view, the widget's data is under `data` (`{data.system.prettyName}`, `{data.metrics.cpu.usage}`); the server row is also at the top level (`{server.name}`). A data key that itself contains dots, such as a metric named `cpu.usage`, is reached by its full path: the longest key that matches wins, so `{data.metrics.cpu.usage}` reads `metrics["cpu.usage"]`.
 - `metrics` lists the statistics the widget tracks. A name the built-in collectors produce (`cpu.usage`, `mem.used_pct`, `net.rx_bps`, `disk.root_used_pct`, `gpu*.util`, ...) only sets how long its history is kept. A name that starts with the package id and has `from` is computed from the widget's data on every collection (`count`, `sum`, `avg`, `min`, `max` or `first`, optionally over the rows matching `where`). `rawHours` (up to 2160), `rollup5mDays` (up to 365) and `rollup1hDays` (up to 3650) override the global retention; when several widgets name one metric the longest wins. Computed metrics are recorded for the servers that have the widget on a dashboard.
+- The host snapshot also carries the newer collector fields: `cpu.cores` (`[{ "id": 0, "usagePercent": 42 }]`, snapshot only; `cpu.coreCount` is the count), `disk_io` (`readBps`, `writeBps` and per-device `devices`) with the `disk.read_bps` / `disk.write_bps` metrics, `disks[].readBps` / `writeBps` on a mount that maps to a device, and `network_headline` (`name`, `ipv4`, `state`, `macAddress`) for the interface with the default route.
 - View types: `list`, `table` (columns may use `bar`, `mb`, `duration`, `temp` formats), `fields` (labelled values, optional gauges), `text`, and `chart` (history lines of `chart.metrics`). List rows can carry `fields` too.
 
 ### Schedules
@@ -376,6 +378,27 @@ A tile can also carry a thin bar, a unit, a small trend line and thresholds (lev
 - `format` writes the value the way a list column does: `bytes`, `rate` (bytes per second), `mb`, `temp`, `duration`,
   `percent`, `ago` or `until` (level 10). A `percent` format honours `decimals`; the others choose their own precision.
   The `bar` and thresholds still read the raw number.
+- `when` hides the tile while its condition does not hold, and `alternatives` lists fallback tiles tried in order
+  (level 11). The first alternative whose own `when` holds is drawn; with no match the tile is left out. This is how
+  "show the errors when there are any, else the average uptime" stays one card:
+
+```jsonc
+{ "type": "stat", "items": [
+  { "label": "Errors", "value": "{data.errors}", "tone": "danger", "when": { "field": "data.errors", "gt": 0 },
+    "alternatives": [{ "label": "Avg uptime", "value": "{data.avgUptime}", "format": "duration" }] }
+] }
+```
+
+- `footer` adds a muted `label value` line under the block (level 11), for small facts that do not deserve a tile.
+  Each pair is `{ "label": "...", "value": "...", "when": { ... } }`; `when` is optional and hides that pair. The line
+  truncates and stays pinned to the bottom of the widget. See [Info line](#info-line).
+- A condition may compare the length of a list: `{ "count": { "path": "data.mounts", "where": { ... } }, "gt": 1 }`.
+  `where` is optional and is itself a condition read against each row; the comparison (`equals`, `gt`, `gte`, `lt`,
+  `lte`) is the usual top-level one (level 11):
+
+```jsonc
+{ "count": { "path": "data.mounts", "where": { "field": "usedPercent", "gte": 90 } }, "gt": 0 }
+```
 
 ```jsonc
 "blocks": [
@@ -405,6 +428,18 @@ automatically and exposes the saved value to conditions as `config.look`, so the
 
 - `looks.options` is 1-6 looks; each `id` is lowercase letters, digits and underscores and each `label` is what the
   settings dialog shows. `default` must be one of the ids.
+- A look may declare its own grid sizes (level 11): `min_size` replaces the widget's minimum while that look is
+  selected, and `default_size` is the size the settings dialog suggests for it. Both are `{ "w": 1-48, "h": 1-48 }`.
+  A look minimum cannot be larger than the widget's `default_size`. When a person switches look, Bosun lowers or raises
+  the instance's `grid_min_w`/`grid_min_h` to the look's minimum, and grows the instance if its current size no longer
+  fits. Bars can therefore need less room than tiles:
+
+```jsonc
+"looks": { "default": "tiles", "options": [
+  { "id": "tiles", "label": "Tiles", "min_size": { "w": 4, "h": 3 } },
+  { "id": "bars", "label": "Bars", "min_size": { "w": 2, "h": 2 }, "default_size": { "w": 3, "h": 4 } }
+] }
+```
 - The value is stored with the widget's other settings in `widgets.config`. Bosun fills in the default before the
   widget's data is sent, so conditions work even before anyone opens the settings.
 - Conditions on `config.look` need the context of a layout block (`when` on a block, or a `kv` field). A version 1
@@ -429,6 +464,7 @@ conditions and size classes.
   still read the raw number.
 - `thickness` (`thin`, `normal` or `thick`) sets the ring stroke, on the block or on one item. See
   [Tuning sizes](#tuning-sizes) (level 8).
+- Items accept `when` and `alternatives` like stat tiles (level 11). `footer` works on the block too.
 - The ring uses theme tokens only and is announced to assistive technology as an image (`role="img"` with the label and
   value as its `aria-label`).
 
@@ -447,14 +483,44 @@ large tiles would waste the room.
 - `path` is a dotted path into the widget's data; the block draws one row per array item. An object is one row and a
   missing list draws the `empty` text.
 - `shape` is `bar` (default) or `ring` (a small ring at the left of each row).
+- `layout` is `rows` (default) or `grid` (level 11). `grid` packs many small meters into as many columns as fit, each a
+  thin vertical bar with its label underneath; it is what a per-core CPU widget needs (4 to 64 cores stay readable).
+- `item.when` hides the rows whose condition does not hold (level 11), so a meter list can show only the cores above a
+  threshold, or only the mounts that are in use. `grid` and `item.when` together draw a per-core CPU widget:
+
+```jsonc
+{ "type": "meters", "path": "cores", "shape": "bar", "layout": "grid",
+  "item": { "label": "{id}", "value": "{usagePercent}", "max": 100,
+            "when": { "field": "usagePercent", "gt": 5 } } }
+```
 - `item` is the row template: `label` and `value` are templates over the row (like a list row's fields), `max` is what
   a full bar or ring stands for (default 100), and `unit`, `sub`, `thresholds`, `decimals` and `emphasis` work as they
   do on a stat tile.
 - A `meters` block is a list, so it takes the room the other blocks leave and scrolls; it does not use the filling
   tile grid. In a widget of about three rows it tightens its gaps and drops the `sub` line, keeping every row's label
-  and value.
+  and value. When it does fill the body, it scales its bar thickness and text modestly with the spare height (container
+  query units with a readable minimum and maximum), like tiles.
 - The rows are plain text and theme tokens; the bar is the same one a stat tile uses and the ring is the same
   geometry, at a fixed small size.
+
+### Info line
+
+An `info` block is one muted line of `label value` pairs, for the small facts that should not take a whole tile:
+"2 mounts", "3 interfaces · eth0 192.168.1.130", "Uptime 31d 6h". `stat` and `gauges` take the same list as a `footer`
+instead (level 11).
+
+```jsonc
+{ "type": "info", "items": [
+  { "label": "Mounts", "value": "{data.mounts.length}" },
+  { "label": "{data.network_headline.name}", "value": "{data.network_headline.ipv4}", "when": { "field": "data.network_headline.ipv4", "exists": true } },
+  { "label": "Uptime", "value": "{data.uptime}" }
+] }
+```
+
+- Each pair needs a `label` and a `value`; both are templates over the screen's context.
+- Pairs may carry `when`; a pair whose condition does not hold is left out.
+- The pairs are separated by " · ", truncate instead of wrapping, and stay pinned to the bottom of the widget body.
+- `footer` on a `stat` or `gauges` block takes exactly the same list and sits under that block.
 
 ### Filling the widget
 

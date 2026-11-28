@@ -60,6 +60,20 @@ export interface Cond {
   all?: Cond[];
   any?: Cond[];
   not?: Cond;
+  /**
+   * Level 11: test the number of items of a list instead of one value. The list is at `count.path` (default: `field`);
+   * `count.where` counts only the rows matching it. The comparisons (`equals`, `gt`, `gte`, `lt`, `lte`, ...) then
+   * read that number, so `{ "count": { "path": "data.mounts" }, "equals": 1 }` is "exactly one mount".
+   */
+  count?: CondCount;
+}
+
+/** The list a condition counts, and an optional filter over its rows. */
+export interface CondCount {
+  /** A dotted path to the list (default: the condition's `field`). */
+  path?: string;
+  /** Count only the rows matching this condition (read against each row). */
+  where?: Cond;
 }
 
 /** Keep the rows whose `field` equals the widget setting `config` (an instance setting from the widget's config_schema); `all` is the setting value that keeps every row. */
@@ -1032,8 +1046,13 @@ export function evalCond(c: Cond, row: unknown): boolean {
   if (c.all) return c.all.every(x => evalCond(x, row));
   if (c.any) return c.any.some(x => evalCond(x, row));
   if (c.not) return !evalCond(c.not, row);
-  if (c.field === undefined) return false;
-  const v = getPath(row, c.field);
+  if (c.field === undefined && !c.count?.path) return false;
+  let v = c.field === undefined ? undefined : getPath(row, c.field);
+  if (c.count) {
+    const base = c.count.path ? getPath(row, c.count.path) : v;
+    const rows = Array.isArray(base) ? base : base === null || base === undefined ? [] : [base];
+    v = c.count.where ? rows.filter(r => evalCond(c.count!.where!, r)).length : rows.length;
+  }
   const num = Number(v);
   const isNum = v !== undefined && v !== null && v !== '' && Number.isFinite(num);
   if (c.gt !== undefined) return isNum && num > c.gt;

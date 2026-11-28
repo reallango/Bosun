@@ -17,7 +17,7 @@ const macs = require('./macs');
 const { metricsSection, withSlowMetrics } = require('./metrics-section');
 const { splitSections } = linux;
 
-const PROBES = ['stat', 'mem', 'netdev', 'gpu', 'df', 'ip', 'services', 'system'];
+const PROBES = ['stat', 'mem', 'netdev', 'diskstats', 'gpu', 'df', 'ip', 'services', 'system'];
 
 const SCRIPT = String.raw`
 $ErrorActionPreference = 'SilentlyContinue'
@@ -28,10 +28,12 @@ function J($o) { Write-Output ($o | ConvertTo-Json -Compress -Depth 4) }
 foreach ($p in $Probes) {
   switch ($p) {
     'stat' { M 'stat'
-      $c = Get-CimInstance Win32_PerfRawData_PerfOS_Processor -Filter "Name='_Total'"
+      $c = @(Get-CimInstance Win32_PerfRawData_PerfOS_Processor)
+      $t = $c | Where-Object { $_.Name -eq '_Total' } | Select-Object -First 1
       $os = Get-CimInstance Win32_OperatingSystem
-      J @{ busy100ns = [double]$c.PercentProcessorTime; ts100ns = [double]$c.Timestamp_Sys100NS; threads = [Environment]::ProcessorCount;
-           uptimeSeconds = [int]((Get-Date) - $os.LastBootUpTime).TotalSeconds } }
+      J @{ busy100ns = [double]$t.PercentProcessorTime; ts100ns = [double]$t.Timestamp_Sys100NS; threads = [Environment]::ProcessorCount;
+           uptimeSeconds = [int]((Get-Date) - $os.LastBootUpTime).TotalSeconds;
+           cores = @($c | Where-Object { $_.Name -ne '_Total' } | ForEach-Object { @{ id = $_.Name; busy100ns = [double]$_.PercentProcessorTime; ts100ns = [double]$_.Timestamp_Sys100NS } }) } }
     'mem' { M 'mem'
       $os = Get-CimInstance Win32_OperatingSystem
       J @{ totalKB = [double]$os.TotalVisibleMemorySize; freeKB = [double]$os.FreePhysicalMemory;
@@ -42,14 +44,18 @@ foreach ($p in $Probes) {
       $smi = Get-Command nvidia-smi.exe -ErrorAction SilentlyContinue
       if ($smi) { & $smi.Source --query-gpu=index,name,memory.total,memory.used,utilization.gpu,temperature.gpu,power.draw,power.limit,fan.speed --format=csv,noheader,nounits | Select-Object -First 16 }
       else { Write-Output 'NONE' } }
+    'diskstats' { M 'diskstats'
+      J @(Get-CimInstance Win32_PerfRawData_PerfDisk_PhysicalDisk | ForEach-Object { @{ name = $_.Name; read = [double]$_.DiskReadBytesPersec; write = [double]$_.DiskWriteBytesPersec } }) }
     'df' { M 'df'
       J @(Get-CimInstance Win32_LogicalDisk -Filter 'DriveType=3' | ForEach-Object { @{ id = $_.DeviceID; fs = $_.FileSystem; size = [double]$_.Size; free = [double]$_.FreeSpace; label = $_.VolumeName } }) }
     'ip' { M 'ip'
       Write-Output ("SSHCONN " + $env:SSH_CONNECTION)
+      $route = Get-NetRoute -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue | Sort-Object RouteMetric | Select-Object -First 1
+      Write-Output ("DEFAULT " + $(if ($route) { [int]$route.InterfaceIndex } else { -1 }))
       $cfgs = @{}; Get-CimInstance Win32_NetworkAdapterConfiguration | ForEach-Object { $cfgs[[int]$_.Index] = $_ }
       J @(Get-CimInstance Win32_NetworkAdapter -Filter 'PhysicalAdapter=True' | Where-Object { $_.MACAddress } | ForEach-Object {
         $c = $cfgs[[int]$_.Index]
-        @{ name = $_.NetConnectionID; desc = $_.Name; mac = $_.MACAddress; up = ($_.NetConnectionStatus -eq 2); ips = @(if ($c -and $c.IPAddress) { $c.IPAddress }) } }) }
+        @{ name = $_.NetConnectionID; desc = $_.Name; mac = $_.MACAddress; idx = [int]$_.Index; up = ($_.NetConnectionStatus -eq 2); ips = @(if ($c -and $c.IPAddress) { $c.IPAddress }) } }) }
     'services' { M 'services'
       J @(Get-Service | Select-Object -First 400 | ForEach-Object { @{ name = $_.Name; status = [string]$_.Status; display = $_.DisplayName; start = [string]$_.StartType } }) }
     'system' { M 'system'
@@ -107,6 +113,8 @@ const jsonOf = t => {
 
 const arr = v => (Array.isArray(v) ? v : v ? [v] : []);
 const round1 = v => Math.round(v * 10) / 10;
+const num = (v, d = 0) => { const n = Number(v); return Number.isFinite(n) ? n : d; };
+const coreId = v => /^\d+$/.test(String(v)) ? Number(v) : v;
 
 /** Convert raw Windows probe output into the Linux-style raw sections. */
 function buildSnapshot(raw, prev, now = Date.now()) {
@@ -120,7 +128,7 @@ function buildSnapshot(raw, prev, now = Date.now()) {
   if (raw.stat !== undefined || raw.mem !== undefined) {
     const sys = (prev && prev.system) || {};
     const st = jsonOf(raw.stat || '') || {};
-    const cpu = { model: sys.cpuModel || 'Unknown', cores: sys.cpuCores || 1, threads: st.threads || sys.cpuThreads || 1,
+    const cpu = { model: sys.cpuModel || 'Unknown', coreCount: sys.cpuCores || 1, cores: [], threads: st.threads || sys.cpuThreads || 1,
       usagePercent: null, loadAvg1: 0, loadAvg5: 0, loadAvg15: 0, temperature: null };
     if (st.ts100ns) {
       if (prev && prev.stat && st.ts100ns > prev.stat.ts) {
@@ -129,7 +137,16 @@ function buildSnapshot(raw, prev, now = Date.now()) {
         cpu.usagePercent = round1(Math.max(0, Math.min(100, (1 - idle) * 100)));
         metrics['cpu.usage'] = cpu.usagePercent;
       }
-      state.stat = { busy: st.busy100ns, ts: st.ts100ns };
+      // Per-core usage from the same counters. Snapshot only: no per-core history is recorded.
+      const before = new Map(((prev && prev.stat && prev.stat.cores) || []).map(c => [c.id, c]));
+      cpu.cores = arr(st.cores).map(c => {
+        const id = coreId(c.id);
+        const p = before.get(id);
+        if (!p || c.ts100ns <= p.ts100ns) return { id, usagePercent: null };
+        const idle = (c.busy100ns - p.busy100ns) / (c.ts100ns - p.ts100ns);
+        return { id, usagePercent: round1(Math.max(0, Math.min(100, (1 - idle) * 100))) };
+      });
+      state.stat = { busy: st.busy100ns, ts: st.ts100ns, cores: arr(st.cores).map(c => ({ id: coreId(c.id), busy100ns: c.busy100ns, ts100ns: c.ts100ns })) };
       state.uptimeSeconds = st.uptimeSeconds;
     }
     const m = jsonOf(raw.mem || '');
@@ -172,28 +189,72 @@ function buildSnapshot(raw, prev, now = Date.now()) {
   }
 
   if (raw.ip !== undefined) {
-    // SSHCONN line, then a JSON list of physical adapters (connected or not).
+    // SSHCONN and DEFAULT lines, then a JSON list of physical adapters (connected or not).
     const lines = String(raw.ip).split('\n');
     const sshConn = (lines.find(l => l.startsWith('SSHCONN')) || '').replace(/^SSHCONN ?/, '');
-    const adapters = arr(jsonOf(lines.filter(l => !l.startsWith('SSHCONN')).join('\n').trim()))
+    const defLine = lines.find(l => l.startsWith('DEFAULT'));
+    const defaultIdx = defLine ? Number(defLine.replace(/^DEFAULT ?/, '')) : -1;
+    const adapters = arr(jsonOf(lines.filter(l => !/^(SSHCONN|DEFAULT)/.test(l)).join('\n').trim()))
       .filter(a => !/bluetooth|virtual|hyper-v|vpn|tap-|miniport|loopback/i.test(`${a.name || ''} ${a.desc || ''}`));
     sections.network = adapters.map(a => ({
       name: a.name || a.desc, description: a.desc || '', state: a.up ? 'UP' : 'DOWN', mtu: null, macAddress: (a.mac || '').toLowerCase(),
       ipv4: arr(a.ips).filter(ip => ip.includes('.')), ipv6: arr(a.ips).filter(ip => ip.includes(':')),
       physical: true, wireless: /wi-?fi|wireless|wlan|802\.11/i.test(`${a.name || ''} ${a.desc || ''}`),
+      default: Number.isFinite(defaultIdx) && defaultIdx >= 0 && a.idx === defaultIdx,
       rxBps: null, txBps: null,
     }));
+    const main = sections.network.find(n => n.default)
+      || sections.network.find(n => n.state === 'UP' && n.ipv4.length)
+      || sections.network.find(n => n.ipv4.length);
+    if (main) sections.network_headline = { name: main.name, ipv4: main.ipv4[0] ?? null, state: main.state, macAddress: main.macAddress };
     sections.nics = macs.pickMacs(sections.network.map(n => ({
       name: n.name, mac: n.macAddress, physical: true, wireless: n.wireless, up: n.state === 'UP', ipv4: n.ipv4,
     })), macs.serverIpFromSshConnection(sshConn));
   }
 
+  if (raw.diskstats !== undefined) {
+    const list = arr(jsonOf(raw.diskstats));
+    const devices = {};
+    for (const d of list) {
+      if (!d || !d.name || d.name === '_Total') continue;
+      devices[d.name] = { readBytes: num(d.read), writeBytes: num(d.write) };
+    }
+    const t = now / 1000;
+    const rates = {};
+    if (prev && prev.diskio && t > prev.diskio.t) {
+      const dt = t - prev.diskio.t;
+      for (const [name, c] of Object.entries(devices)) {
+        const p = prev.diskio.devices[name];
+        if (!p || c.readBytes < p.readBytes || c.writeBytes < p.writeBytes) continue; // new device or counter reset
+        rates[name] = {
+          readBps: Math.round((c.readBytes - p.readBytes) / dt),
+          writeBps: Math.round((c.writeBytes - p.writeBytes) / dt),
+        };
+      }
+      let readBps = 0;
+      let writeBps = 0;
+      for (const r of Object.values(rates)) { readBps += r.readBps; writeBps += r.writeBps; }
+      metrics['disk.read_bps'] = readBps;
+      metrics['disk.write_bps'] = writeBps;
+    }
+    state.diskio = { t, devices };
+    state.diskRates = rates;
+    sections.disk_io = {
+      readBps: metrics['disk.read_bps'] ?? 0, writeBps: metrics['disk.write_bps'] ?? 0,
+      devices: Object.entries(rates).map(([name, r]) => ({ name, ...r })),
+    };
+  }
+
   if (raw.df !== undefined) {
+    const rates = state.diskRates || {};
     sections.disks = arr(jsonOf(raw.df)).filter(d => d.size > 0).map(d => {
       const sizeMB = Math.round(d.size / 1048576);
       const availableMB = Math.round(d.free / 1048576);
-      return { filesystem: d.label || d.id, fsType: d.fs, sizeMB, usedMB: sizeMB - availableMB, availableMB,
+      const disk = { filesystem: d.label || d.id, fsType: d.fs, sizeMB, usedMB: sizeMB - availableMB, availableMB,
         usagePercent: sizeMB ? Math.round(((sizeMB - availableMB) / sizeMB) * 100) : 0, mountPoint: d.id };
+      // A physical disk's name carries the drive letter ("0 C:"), which is enough to map it to the volume.
+      const name = Object.keys(rates).find(n => d.id && n.includes(d.id));
+      return name ? { ...disk, readBps: rates[name].readBps, writeBps: rates[name].writeBps } : disk;
     });
     const c = sections.disks.find(d => /^C:/i.test(d.mountPoint));
     if (c) metrics['disk.root_used_pct'] = c.usagePercent;

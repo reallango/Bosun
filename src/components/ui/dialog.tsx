@@ -78,14 +78,17 @@ function DialogHeader({ className, ...props }: React.ComponentProps<"div">) {
   return <div data-slot="dialog-header" className={cn("flex flex-col gap-1 pr-8", className)} {...props} />
 }
 
-/** Scrollable middle section of a dialog. */
+/**
+ * Scrollable middle section of a dialog. The body scrolls while the footer stays in view; the bottom padding keeps
+ * the last field's help text clear of the footer instead of clipped behind it.
+ */
 const DialogBody = React.forwardRef<HTMLDivElement, React.ComponentProps<"div">>(
   function DialogBody({ className, ...props }, ref) {
     return (
       <div
         ref={ref}
         data-slot="dialog-body"
-        className={cn("-mx-4 min-h-0 flex-1 overflow-y-auto px-4 sm:-mx-6 sm:px-6", className)}
+        className={cn("-mx-4 min-h-0 flex-1 overflow-y-auto px-4 pb-6 sm:-mx-6 sm:px-6 sm:pb-8", className)}
         {...props}
       />
     )

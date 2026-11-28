@@ -35,10 +35,10 @@ export type StatToneName = 'warning' | 'danger' | 'success';
 
 const TONE_BAR: Record<StatToneName, string> = { danger: 'bg-destructive', warning: 'bg-warning', success: 'bg-success' };
 
-export function Bar({ value, color, tone }: { value: number; color?: string; tone?: StatToneName | null }) {
+export function Bar({ value, color, tone, className }: { value: number; color?: string; tone?: StatToneName | null; className?: string }) {
   const pct = Math.max(0, Math.min(100, value));
   return (
-    <div className="h-1.5 w-full overflow-hidden rounded bg-muted" role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
+    <div className={`${className ?? 'h-1.5'} w-full overflow-hidden rounded bg-muted`} role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100}>
       <div className={`h-full ${color ?? (tone ? TONE_BAR[tone] : barColor(pct))}`} style={{ width: `${pct}%` }} />
     </div>
   );

@@ -81,28 +81,37 @@ describe('listInstances', () => {
 
 describe('instanceChoices', () => {
   it('labels a single placement with the server name', () => {
-    expect(instanceChoices([instance({ id: 'w1' })])).toEqual([{ id: 'w1', label: 'nas' }]);
+    expect(instanceChoices([instance({ id: 'w1' })])).toEqual([{ id: 'w1', label: 'nas', server_id: 'srv-1' }]);
   });
 
-  it('adds the dashboard when one server has more than one placement', () => {
+  it('shows one entry per server, even when the widget is placed twice on it', () => {
     const choices = instanceChoices([
       instance({ id: 'w1', dashboard_id: 'd1', dashboard_name: 'Home' }),
       instance({ id: 'w2', dashboard_id: 'd2', dashboard_name: 'Lab' }),
       instance({ id: 'w3', server_id: 'srv-2', server_name: 'pve' }),
     ]);
     expect(choices).toEqual([
-      { id: 'w1', label: 'nas — Home' },
-      { id: 'w2', label: 'nas — Lab' },
-      { id: 'w3', label: 'pve' },
+      { id: 'w1', label: 'nas', server_id: 'srv-1' },
+      { id: 'w3', label: 'pve', server_id: 'srv-2' },
     ]);
   });
 
-  it('keeps labels apart even when server and dashboard names match', () => {
+  it('uses the current instance for its server and the first otherwise', () => {
+    const instances = [
+      instance({ id: 'w1', dashboard_id: 'd1', dashboard_name: 'Home' }),
+      instance({ id: 'w2', dashboard_id: 'd2', dashboard_name: 'Lab' }),
+      instance({ id: 'w3', server_id: 'srv-2', server_name: 'pve' }),
+    ];
+    expect(instanceChoices(instances, 'w2').map(c => c.id)).toEqual(['w2', 'w3']);
+    expect(instanceChoices(instances, 'w3').map(c => c.id)).toEqual(['w1', 'w3']);
+  });
+
+  it('keeps labels apart even when two servers share a name', () => {
     const choices = instanceChoices([
-      instance({ id: 'aaaaaaaa-1', dashboard_id: 'd1', dashboard_name: 'Home' }),
-      instance({ id: 'bbbbbbbb-2', dashboard_id: 'd1', dashboard_name: 'Home' }),
+      instance({ id: 'w1', server_id: 'aaaaaaaa-1', server_name: 'nas' }),
+      instance({ id: 'w2', server_id: 'bbbbbbbb-2', server_name: 'nas' }),
     ]);
-    expect(choices.map(c => c.label)).toEqual(['nas — Home (aaaaaaaa)', 'nas — Home (bbbbbbbb)']);
+    expect(choices.map(c => c.label)).toEqual(['nas (aaaaaaaa)', 'nas (bbbbbbbb)']);
     expect(new Set(choices.map(c => c.label)).size).toBe(2);
   });
 });

@@ -17,7 +17,7 @@ const { metricsSection, withSlowMetrics } = require('./metrics-section');
 const MARK = '@@BOSUN ';
 
 /** Probes the script understands; the poller picks a subset per tick. */
-const PROBES = ['stat', 'mem', 'load', 'temp', 'netdev', 'gpu', 'df', 'ip', 'services', 'system'];
+const PROBES = ['stat', 'mem', 'load', 'temp', 'netdev', 'diskstats', 'gpu', 'df', 'ip', 'services', 'system'];
 
 const SCRIPT = String.raw`
 export LC_ALL=C
@@ -25,7 +25,7 @@ m() { printf '\n@@BOSUN %s\n' "$1"; }
 have() { command -v "$1" >/dev/null 2>&1; }
 for p in "$@"; do
 case "$p" in
-stat) m stat; head -n 1 /proc/stat; grep -c '^cpu[0-9]' /proc/stat ;;
+stat) m stat; head -n 1 /proc/stat; grep '^cpu[0-9]' /proc/stat ;;
 mem) m mem; cat /proc/meminfo ;;
 load) m load; cat /proc/loadavg; cat /proc/uptime ;;
 temp) m temp
@@ -38,6 +38,7 @@ temp) m temp
     case "$n" in coretemp|k10temp|zenpower|cpu_thermal) [ -r "$h/temp1_input" ] && printf '%s %s\n' "$n" "$(cat "$h/temp1_input")" ;; esac
   done ;;
 netdev) m netdev; cat /proc/net/dev ;;
+diskstats) m diskstats; cat /proc/diskstats ;;
 gpu) m gpu
   if have nvidia-smi; then
     nvidia-smi --query-gpu=index,name,memory.total,memory.used,utilization.gpu,temperature.gpu,power.draw,power.limit,fan.speed --format=csv,noheader,nounits 2>&1 | head -n 16
@@ -47,7 +48,13 @@ ip) m ip
   echo "SSHCONN $SSH_CONNECTION"
   printf "PHYS"; for d in /sys/class/net/*; do [ -e "$d/device" ] && printf " %s" "$(basename "$d")"; done; echo
   printf "WIFI"; for d in /sys/class/net/*; do [ -e "$d/wireless" ] && printf " %s" "$(basename "$d")"; done; echo
-  if have ip; then ip -j addr show 2>/dev/null || echo NOJSON; else echo NONE; fi ;;
+  if have ip; then
+    echo "DEFAULT $(ip route show default 2>/dev/null | sed -n 's/.* dev \([^ ]*\).*/\1/p' | head -n 1)"
+    ip -j addr show 2>/dev/null || echo NOJSON
+  else
+    echo "DEFAULT $(awk '$2=="00000000" {print $1; exit}' /proc/net/route 2>/dev/null)"
+    echo NONE
+  fi ;;
 services) m services
   if have systemctl; then systemctl list-units --type=service --all --no-pager --plain --no-legend 2>/dev/null | head -n 400
   else echo NONE; fi ;;
@@ -96,11 +103,24 @@ const num = (v, d = 0) => {
 const round1 = v => Math.round(v * 10) / 10;
 
 function parseStat(text) {
-  const [line, count] = text.split('\n');
-  const f = (line || '').trim().split(/\s+/).slice(1).map(Number);
+  const lines = String(text).split('\n').filter(l => l.trim());
+  const f = (lines[0] || '').trim().split(/\s+/).slice(1).map(Number);
   const idle = (f[3] || 0) + (f[4] || 0);
   const total = f.reduce((a, b) => a + (Number.isFinite(b) ? b : 0), 0);
-  return { idle, total, threads: num(count, 1) };
+  // One line per logical CPU (`cpu0`, `cpu1`, ...); the counts are the same ticks as the `cpu` line.
+  const cores = [];
+  for (const line of lines.slice(1)) {
+    const parts = line.trim().split(/\s+/);
+    const m = (parts[0] || '').match(/^cpu(\d+)$/);
+    if (!m) continue;
+    const c = parts.slice(1).map(Number);
+    cores.push({
+      id: num(m[1]),
+      idle: (c[3] || 0) + (c[4] || 0),
+      total: c.reduce((a, b) => a + (Number.isFinite(b) ? b : 0), 0),
+    });
+  }
+  return { idle, total, threads: cores.length || 1, cores };
 }
 
 function parseMeminfo(text) {
@@ -149,6 +169,34 @@ function parseNetdev(text) {
   return ifs;
 }
 
+/** `/proc/diskstats` sectors are 512 bytes each, whatever the device's physical sector size. */
+const DISK_SECTOR_BYTES = 512;
+/** Whole disks (not partitions, dm/md/loop devices), so the totals are not counted twice. */
+const WHOLE_DISK_RE = /^(?:sd[a-z]+|vd[a-z]+|hd[a-z]+|xvd[a-z]+|nvme\d+n\d+|mmcblk\d+)$/;
+
+/** Per-device cumulative sector counters from `/proc/diskstats`. */
+function parseDiskstats(text) {
+  const out = {};
+  for (const line of String(text).split('\n')) {
+    const p = line.trim().split(/\s+/);
+    if (p.length < 14) continue;
+    const name = p[2];
+    if (!name) continue;
+    out[name] = { readSectors: num(p[5]), writeSectors: num(p[9]) };
+  }
+  return out;
+}
+
+/** The device a mount's filesystem lives on: its diskstats name, else the longest whole-disk prefix (`sda2` -> `sda`). */
+function deviceForMount(filesystem, names) {
+  const base = String(filesystem || '').replace(/^\/dev\//, '');
+  if (!base || base.startsWith('mapper/')) return null;
+  if (names.has(base)) return base;
+  let best = null;
+  for (const n of names) if (base.startsWith(n) && (!best || n.length > best.length)) best = n;
+  return best;
+}
+
 function parseGpu(text) {
   if (!text || text === 'NONE') return [];
   return text.split('\n').map(l => l.split(',').map(s => s.trim())).filter(p => p.length >= 7 && /^\d+$/.test(p[0]))
@@ -187,10 +235,10 @@ function parseDf(text) {
  * /sys device) and wireless (has /sys wireless).
  */
 function parseIpProbe(text) {
-  const meta = { SSHCONN: '', PHYS: '', WIFI: '' };
+  const meta = { SSHCONN: '', PHYS: '', WIFI: '', DEFAULT: '' };
   let json = '';
   for (const line of String(text || '').split('\n')) {
-    const mm = line.match(/^(SSHCONN|PHYS|WIFI)\b ?(.*)$/);
+    const mm = line.match(/^(SSHCONN|PHYS|WIFI|DEFAULT)\b ?(.*)$/);
     if (mm) meta[mm[1]] = mm[2].trim();
     else if (line.trim().startsWith('[')) json = line.trim();
   }
@@ -205,12 +253,13 @@ function parseIpProbe(text) {
         ipv6: (i.addr_info || []).filter(a => a.family === 'inet6').map(a => a.local),
         physical: phys.size ? phys.has(i.ifname) : !VIRTUAL_IF.test(i.ifname),
         wireless: wifi.has(i.ifname) || /^wl/.test(i.ifname),
+        default: !!meta.DEFAULT && meta.DEFAULT === i.ifname,
       }));
     } catch {
       interfaces = [];
     }
   }
-  return { interfaces, serverIp: macs.serverIpFromSshConnection(meta.SSHCONN) };
+  return { interfaces, serverIp: macs.serverIpFromSshConnection(meta.SSHCONN), defaultInterface: meta.DEFAULT || null };
 }
 
 function parseIp(text) {
@@ -266,7 +315,7 @@ function buildSnapshot(raw, prev, now = Date.now()) {
 
   if (raw.stat !== undefined || raw.mem !== undefined) {
     const sys = (prev && prev.system) || {};
-    const cpu = { model: sys.cpuModel || 'Unknown', cores: sys.cpuCores || 1, threads: sys.cpuThreads || 1, usagePercent: null,
+    const cpu = { model: sys.cpuModel || 'Unknown', coreCount: sys.cpuCores || 1, cores: [], threads: sys.cpuThreads || 1, usagePercent: null,
       loadAvg1: 0, loadAvg5: 0, loadAvg15: 0, temperature: null };
     if (raw.stat !== undefined) {
       const s = parseStat(raw.stat);
@@ -276,7 +325,15 @@ function buildSnapshot(raw, prev, now = Date.now()) {
         cpu.usagePercent = round1(Math.max(0, Math.min(100, ((dt - (s.idle - prev.stat.idle)) / dt) * 100)));
         metrics['cpu.usage'] = cpu.usagePercent;
       }
-      state.stat = { idle: s.idle, total: s.total };
+      // Per-core usage from the same deltas as the total. This is a snapshot only: no per-core history is recorded.
+      const before = new Map(((prev && prev.stat && prev.stat.cores) || []).map(c => [c.id, c]));
+      cpu.cores = s.cores.map(c => {
+        const p = before.get(c.id);
+        if (!p || c.total <= p.total) return { id: c.id, usagePercent: null };
+        const dt = c.total - p.total;
+        return { id: c.id, usagePercent: round1(Math.max(0, Math.min(100, ((dt - (c.idle - p.idle)) / dt) * 100))) };
+      });
+      state.stat = { idle: s.idle, total: s.total, cores: s.cores };
     }
     if (raw.load !== undefined) {
       const l = parseLoad(raw.load);
@@ -324,6 +381,11 @@ function buildSnapshot(raw, prev, now = Date.now()) {
     const rates = state.netRates || {};
     const probe = parseIpProbe(raw.ip);
     sections.network = probe.interfaces.map(i => ({ ...i, rxBps: rates[i.name] ? rates[i.name].rxBps : null, txBps: rates[i.name] ? rates[i.name].txBps : null }));
+    // The main interface (the default route) and its IPv4, for a one-line network headline.
+    const main = probe.interfaces.find(i => i.default)
+      || probe.interfaces.find(i => i.physical && i.state === 'UP' && i.ipv4.length)
+      || probe.interfaces.find(i => i.ipv4.length);
+    if (main) sections.network_headline = { name: main.name, ipv4: main.ipv4[0] ?? null, state: main.state, macAddress: main.macAddress };
     // Wake-on-LAN candidates (primary = NIC the SSH connection arrived on).
     sections.nics = macs.pickMacs(probe.interfaces.map(i => ({
       name: i.name, mac: i.macAddress, physical: i.physical, wireless: i.wireless, up: i.state === 'UP', ipv4: i.ipv4,
@@ -342,9 +404,47 @@ function buildSnapshot(raw, prev, now = Date.now()) {
     }
   }
 
+  if (raw.diskstats !== undefined) {
+    const devices = parseDiskstats(raw.diskstats);
+    const t = now / 1000;
+    const rates = {};
+    if (prev && prev.diskio && t > prev.diskio.t) {
+      const dt = t - prev.diskio.t;
+      for (const [name, c] of Object.entries(devices)) {
+        const p = prev.diskio.devices[name];
+        if (!p || c.readSectors < p.readSectors || c.writeSectors < p.writeSectors) continue; // new device or counter reset
+        rates[name] = {
+          readBps: Math.round(((c.readSectors - p.readSectors) * DISK_SECTOR_BYTES) / dt),
+          writeBps: Math.round(((c.writeSectors - p.writeSectors) * DISK_SECTOR_BYTES) / dt),
+        };
+      }
+      // Whole disks only: partitions and dm/md devices would count the same bytes twice.
+      let readBps = 0;
+      let writeBps = 0;
+      for (const [name, r] of Object.entries(rates)) {
+        if (!WHOLE_DISK_RE.test(name)) continue;
+        readBps += r.readBps;
+        writeBps += r.writeBps;
+      }
+      metrics['disk.read_bps'] = readBps;
+      metrics['disk.write_bps'] = writeBps;
+    }
+    state.diskio = { t, devices };
+    state.diskRates = rates;
+    sections.disk_io = {
+      readBps: metrics['disk.read_bps'] ?? 0, writeBps: metrics['disk.write_bps'] ?? 0,
+      devices: Object.entries(rates).map(([name, r]) => ({ name, ...r })),
+    };
+  }
+
   if (raw.df !== undefined) {
     const disks = parseDf(raw.df);
-    sections.disks = disks;
+    const rates = state.diskRates || {};
+    const names = new Set(Object.keys(rates));
+    sections.disks = disks.map(d => {
+      const dev = deviceForMount(d.filesystem, names);
+      return dev ? { ...d, readBps: rates[dev].readBps, writeBps: rates[dev].writeBps } : d;
+    });
     const root = disks.find(d => d.mountPoint === '/');
     if (root) metrics['disk.root_used_pct'] = root.usagePercent;
     if (disks.length) metrics['disk.max_used_pct'] = Math.max(...disks.map(d => d.usagePercent));
@@ -368,5 +468,5 @@ module.exports = {
   buildCommand,
   splitSections,
   buildSnapshot,
-  _parsers: { parseStat, parseMeminfo, parseLoad, parseTemp, parseNetdev, parseGpu, parseDf, parseIp, parseIpProbe, parseServices, parseSystem },
+  _parsers: { parseStat, parseMeminfo, parseLoad, parseTemp, parseNetdev, parseDiskstats, deviceForMount, parseGpu, parseDf, parseIp, parseIpProbe, parseServices, parseSystem },
 };

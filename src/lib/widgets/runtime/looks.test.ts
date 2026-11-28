@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { lookConfigField, validateLooks, withLookDefault } from './looks';
+import { lookConfigField, lookMinSize, lookSizesProblem, validateLooks, withLookDefault } from './looks';
 
 const looks = {
   default: 'tiles',
@@ -48,5 +48,44 @@ describe('withLookDefault', () => {
   it('leaves a widget without looks alone', () => {
     expect(withLookDefault(undefined, { x: 1 })).toEqual({ x: 1 });
     expect(withLookDefault(undefined, undefined)).toEqual({});
+  });
+});
+
+describe('per-look sizes', () => {
+  const sized = {
+    default: 'tiles',
+    options: [
+      { id: 'tiles', label: 'Tiles', min_size: { w: 4, h: 3 } },
+      { id: 'bars', label: 'Bars', min_size: { w: 2, h: 2 }, default_size: { w: 3, h: 4 } },
+    ],
+  };
+
+  it('reads a look min_size and default_size', () => {
+    expect(validateLooks(sized)).toEqual({ ok: true, value: sized });
+    expect(lookMinSize(sized, 'bars')).toEqual({ w: 2, h: 2 });
+    expect(lookMinSize(sized, 'tiles')).toEqual({ w: 4, h: 3 });
+    expect(lookMinSize(sized, 'nope')).toBeNull();
+    expect(lookMinSize(sized, undefined)).toBeNull();
+  });
+
+  it('refuses a malformed size and a default smaller than the look minimum', () => {
+    expect(validateLooks({ default: 'a', options: [{ id: 'a', label: 'A', min_size: { w: 0, h: 2 } }] }).ok).toBe(false);
+    expect(validateLooks({ default: 'a', options: [{ id: 'a', label: 'A', min_size: { w: 2 } }] }).ok).toBe(false);
+    expect(validateLooks({ default: 'a', options: [{ id: 'a', label: 'A', min_size: { w: 3, h: 3 }, default_size: { w: 2, h: 3 } }] }).ok).toBe(false);
+  });
+
+  it('refuses a look minimum larger than the widget default size', () => {
+    expect(lookSizesProblem(sized, { w: 4, h: 3 })).toBeNull();
+    expect(lookSizesProblem(sized, { w: 3, h: 3 })).toMatch(/cannot be larger/);
+    expect(lookSizesProblem(sized, { w: 8, h: 6 }, { w: 2, h: 2 })).toMatch(/max_size/);
+    expect(lookSizesProblem(undefined, { w: 1, h: 1 })).toBeNull();
+  });
+
+  it('exposes the sizes on the settings field', () => {
+    expect(lookConfigField(sized).lookSizes).toEqual({
+      tiles: { min: { w: 4, h: 3 } },
+      bars: { min: { w: 2, h: 2 }, default: { w: 3, h: 4 } },
+    });
+    expect(lookConfigField(looks).lookSizes).toBeUndefined();
   });
 });

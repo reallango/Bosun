@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { minSizeStatements, parseMinSize, type MinSizeRow } from './instance-min-size';
+import { applyLookMinSize, minSizeStatements, parseMinSize, type MinSizeRow } from './instance-min-size';
 
 const row = (over: Partial<MinSizeRow> = {}): MinSizeRow => ({
   id: 'w1', widget_type: 'cpu_memory', grid_min_w: 4, grid_min_h: 5, ...over,
@@ -48,5 +48,24 @@ describe('lowering the minimum stored on widget instances', () => {
       { sql: 'UPDATE widgets SET grid_min_w = ?, grid_min_h = ? WHERE id = ?', params: [4, 3, 'a'] },
       { sql: 'UPDATE widgets SET grid_min_w = ?, grid_min_h = ? WHERE id = ?', params: [2, 3, 'c'] },
     ]);
+  });
+});
+
+describe('applyLookMinSize', () => {
+  it('lowers and raises the floor with the look', () => {
+    const current = { grid_min_w: 4, grid_min_h: 4, grid_w: 8, grid_h: 6 };
+    expect(applyLookMinSize(current, { w: 2, h: 2 })).toEqual({ grid_min_w: 2, grid_min_h: 2, grid_w: 8, grid_h: 6 });
+    expect(applyLookMinSize(current, { w: 6, h: 5 })).toEqual({ grid_min_w: 6, grid_min_h: 5, grid_w: 8, grid_h: 6 });
+  });
+
+  it('grows the instance when the new floor no longer fits', () => {
+    const current = { grid_min_w: 2, grid_min_h: 2, grid_w: 3, grid_h: 2 };
+    expect(applyLookMinSize(current, { w: 4, h: 3 })).toEqual({ grid_min_w: 4, grid_min_h: 3, grid_w: 4, grid_h: 3 });
+  });
+
+  it('returns null when the look does not change anything', () => {
+    const current = { grid_min_w: 4, grid_min_h: 4, grid_w: 8, grid_h: 6 };
+    expect(applyLookMinSize(current, { w: 4, h: 4 })).toBeNull();
+    expect(applyLookMinSize(current, null)).toBeNull();
   });
 });
