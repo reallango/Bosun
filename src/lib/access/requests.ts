@@ -173,9 +173,9 @@ export async function createRequest(auth: TokenPayload, input: RequestInput): Pr
   } else if (input.kind === 'terminal') {
     container = input.container;
     permission = container ? CONTAINER_SHELL_PERMISSION : input.as === 'user' ? 'shell.user' : 'exec.service';
-    commandAs = input.as;
+    commandAs = container ? 'service' : input.as;
     resource = container ? { kind: 'container', name: container } : null;
-    action = JSON.stringify({ as: input.as, container });
+    action = JSON.stringify({ as: commandAs, container });
     if (await hasPermission(auth, permission, input.serverId, container ? { kind: 'container', name: container } : null)) {
       throw new RequestError('You already hold this permission there: open the terminal directly', 409, 'ALREADY_GRANTED');
     }

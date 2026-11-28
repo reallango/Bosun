@@ -141,6 +141,13 @@ describe('terminal tools', () => {
     expect(result.structuredContent).toMatchObject({ session_id: 'sess-1' });
   });
 
+  it('opens a container session as the service account even when as is user', async () => {
+    h.permissions.add('docker.shell');
+    const result = await callHostTool(ctx, tool('terminal_open'), { server_id: 'srv-1', as: 'user', container: 'web-1' });
+    expect(h.openCalls[0]).toMatchObject({ serverId: 'srv-1', as: 'service', container: 'web-1' });
+    expect(result.structuredContent).toMatchObject({ as: 'service', container: 'web-1' });
+  });
+
   it('surfaces the password-prompt flag and never the typed input in the result', async () => {
     h.terminalOutput = { output: 'Password: ', more: false, password_required: true };
     const result = await callHostTool(ctx, tool('terminal_send'), { session_id: 'sess-1', input: '{enter}' });

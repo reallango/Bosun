@@ -73,7 +73,7 @@ describe('one-time command and terminal requests', () => {
     expect(validateRequestInput({ kind: 'terminal', server_id: 's1', as: 'service' }, defs))
       .toEqual({ ok: true, value: { kind: 'terminal', serverId: 's1', as: 'service', container: null, reason: null } });
     expect(validateRequestInput({ kind: 'terminal', server_id: 's1', as: 'user', container: 'web-1' }, defs))
-      .toEqual({ ok: true, value: { kind: 'terminal', serverId: 's1', as: 'user', container: 'web-1', reason: null } });
+      .toEqual({ ok: true, value: { kind: 'terminal', serverId: 's1', as: 'service', container: 'web-1', reason: null } });
     expect(validateRequestInput({ kind: 'terminal', server_id: 's1', container: "x'; rm -rf /" }, defs).ok).toBe(false);
     expect(validateRequestInput({ kind: 'terminal', server_id: 's1', as: 'root' }, defs).ok).toBe(false);
   });

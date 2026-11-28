@@ -213,10 +213,11 @@ describe('one-time terminal access requests', () => {
     expect(approved.result).toMatchObject({ session_id: 'sess-1' });
   });
 
-  it('asks for docker.shell when a container is named', async () => {
+  it('asks for docker.shell when a container is named, and always as the service account', async () => {
     const created = await createRequest(requester(), { kind: 'terminal', serverId: 'srv-1', as: 'user', container: 'web-1', reason: 'logs' });
     expect(created.permission).toBe('docker.shell');
     expect(created.resource).toEqual({ kind: 'container', name: 'web-1' });
+    expect(created.command).toEqual({ command: '', as: 'service', container: 'web-1' });
   });
 });
 

@@ -145,15 +145,17 @@ export class TerminalSessionManager {
     void this.sweep();
     const container = input.container?.trim() || null;
     if (container && !CONTAINER_NAME_RE.test(container)) throw new TerminalError('container must be a container name or id', 400, 'INVALID_CONTAINER');
+    // A container shell always runs through the service account's docker access.
+    const as = container ? 'service' : input.as;
     const count = Array.from(this.sessions.values()).filter(s => s.owner === owner && !s.closed).length;
     if (count >= this.maxPerPrincipal) {
       throw new TerminalError(`Too many open terminal sessions (at most ${this.maxPerPrincipal}); close one first`, 429, 'TOO_MANY_SESSIONS');
     }
-    const handle = await this.deps.openPty({ serverId: input.serverId, as: input.as, container, cols: 120, rows: 30 });
+    const handle = await this.deps.openPty({ serverId: input.serverId, as, container, cols: 120, rows: 30 });
     const id = crypto.randomUUID();
     const now = this.deps.now();
     const session: Session = {
-      id, owner, serverId: input.serverId, as: input.as, container, handle,
+      id, owner, serverId: input.serverId, as, container, handle,
       buffer: '', cursor: 0, screen: this.deps.createScreen(120, 30), screenQueue: Promise.resolve(),
       lastActivity: now, createdAt: now, closed: false, passwordPrompt: false,
     };
@@ -165,9 +167,9 @@ export class TerminalSessionManager {
     await this.deps.audit({
       userId: auth.userId, serverId: input.serverId, ipAddress: input.ip,
       action: AuditActions.TERMINAL_MCP_OPEN, status: 'success',
-      details: `session ${id} as ${input.as}${container ? ` in container ${container}` : ''}`,
+      details: `session ${id} as ${as}${container ? ` in container ${container}` : ''}`,
     });
-    return { session_id: id, server_id: input.serverId, as: input.as, container, idle_timeout_sec: Math.round(this.idleMs / 1000) };
+    return { session_id: id, server_id: input.serverId, as, container, idle_timeout_sec: Math.round(this.idleMs / 1000) };
   }
 
   /** Send input, then return the output that arrives until it goes quiet or wait_ms passes. */

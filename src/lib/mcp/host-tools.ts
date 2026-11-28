@@ -204,7 +204,8 @@ async function terminalOpen(ctx: ActionContext, args: Record<string, unknown>) {
   const as = args.as === 'service' ? 'service' as const : args.as === 'user' ? 'user' as const : null;
   if (!as) return errorResult('as must be "user" or "service"');
   const container = typeof args.container === 'string' && args.container.trim() ? args.container.trim() : null;
-  const permission = container ? CONTAINER_SHELL_PERMISSION : as === 'user' ? 'shell.user' : 'exec.service';
+  const account = container ? 'service' as const : as;
+  const permission = container ? CONTAINER_SHELL_PERMISSION : account === 'user' ? 'shell.user' : 'exec.service';
 
   if (!(await hasPermission(ctx.auth, permission, serverId))) {
     if (container) {
@@ -212,7 +213,7 @@ async function terminalOpen(ctx: ActionContext, args: Record<string, unknown>) {
       return errorResult(await toolErrorFromResponse(denied ?? new Response(), 'Not permitted'));
     }
     const defs = await registeredPermissionDefs();
-    const input = validateRequestInput({ kind: 'terminal', server_id: serverId, as, container: null, reason: args.reason }, defs);
+    const input = validateRequestInput({ kind: 'terminal', server_id: serverId, as: account, container: null, reason: args.reason }, defs);
     if (!input.ok) return errorResult(input.error);
     const request = await createRequest(ctx.auth, input.value);
     return textResult(
@@ -221,7 +222,7 @@ async function terminalOpen(ctx: ActionContext, args: Record<string, unknown>) {
     );
   }
 
-  const opened = await getMcpTerminalManager().open(principalKey(ctx.auth), ctx.auth, { serverId, as, container, ip: ctx.ip });
+  const opened = await getMcpTerminalManager().open(principalKey(ctx.auth), ctx.auth, { serverId, as: account, container, ip: ctx.ip });
   return textResult(
     `Terminal session ${opened.session_id} opened on ${serverId} as ${opened.as}${container ? ` in container ${container}` : ''}. It closes after ${opened.idle_timeout_sec / 60} idle minutes.`,
     { ...opened },

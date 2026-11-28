@@ -58,6 +58,15 @@ function fakeDeps() {
 const auth = (id = 'u1') => ({ userId: id, username: `user-${id}`, role: 'operator', authType: 'user' } as never);
 
 describe('terminal sessions', () => {
+  it('forces a container session to the service account', async () => {
+    const { deps, state } = fakeDeps();
+    const manager = new TerminalSessionManager(deps);
+    const opened = await manager.open('user:u1', auth(), { serverId: 'srv-1', as: 'user', container: 'web-1' });
+    expect(opened.as).toBe('service');
+    expect(state.opens[0]).toMatchObject({ as: 'service', container: 'web-1' });
+    await manager.close('user:u1', opened.session_id);
+  });
+
   it('opens, sends (with control keys), reads, shows the screen and closes', async () => {
     const { deps, state, stream } = fakeDeps();
     const manager = new TerminalSessionManager(deps);

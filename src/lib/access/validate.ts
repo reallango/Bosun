@@ -109,7 +109,8 @@ export function validateRequestInput(body: unknown, defs: readonly PermissionDef
     if (container !== null && (typeof container !== 'string' || !CONTAINER_RE.test(container))) {
       return { ok: false, error: 'container must be a container name or id' };
     }
-    return { ok: true, value: { kind: 'terminal', serverId, as, container, reason: reason.value } };
+    // A container shell always runs through the service account's docker access.
+    return { ok: true, value: { kind: 'terminal', serverId, as: container ? 'service' : as, container, reason: reason.value } };
   }
 
   return { ok: false, error: 'kind must be "grant", "one_time", "command" or "terminal"' };
