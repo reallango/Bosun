@@ -9,6 +9,7 @@ import type { ActionContext } from './actions';
 import type { CatalogTool, ObjectJsonSchema, ToolResult } from './types';
 import { hasPermission, requirePermission } from '@/lib/permissions/authorize';
 import { createRequest } from '@/lib/access/requests';
+import { accessRequestLimiter } from '@/lib/access/limiter';
 import { validateRequestInput } from '@/lib/access/validate';
 import { registeredPermissionDefs } from '@/lib/permissions/store';
 import { runServerCommand, runContainerCommand, commandRateLimited, CommandError, type RunCommandResult } from '@/lib/exec/run-command';
@@ -180,6 +181,7 @@ async function serverCommand(ctx: ActionContext, args: Record<string, unknown>) 
   const permission = as === 'user' ? 'shell.user' : 'exec.service';
 
   if (!(await hasPermission(ctx.auth, permission, serverId))) {
+    if (!accessRequestLimiter.consume(String(ctx.auth.userId)).allowed) return errorResult('Too many access requests; try again later (RATE_LIMITED).');
     const defs = await registeredPermissionDefs();
     const input = validateRequestInput({ kind: 'command', server_id: serverId, command, as, reason: args.reason }, defs);
     if (!input.ok) return errorResult(input.error);
@@ -222,6 +224,7 @@ async function terminalOpen(ctx: ActionContext, args: Record<string, unknown>) {
     const denied = await requirePermission(ctx.auth, permission, serverId, { kind: 'container', name: container });
     if (denied) return errorResult(await toolErrorFromResponse(denied, 'Not permitted'));
   } else if (!(await hasPermission(ctx.auth, permission, serverId))) {
+    if (!accessRequestLimiter.consume(String(ctx.auth.userId)).allowed) return errorResult('Too many access requests; try again later (RATE_LIMITED).');
     const defs = await registeredPermissionDefs();
     const input = validateRequestInput({ kind: 'terminal', server_id: serverId, as: account, container: null, reason: args.reason }, defs);
     if (!input.ok) return errorResult(input.error);

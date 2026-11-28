@@ -297,6 +297,13 @@ async function approvedGroupFor(type: 'user' | 'api_key', id: string, name: stri
   return groupId;
 }
 
+/** The person behind an API key (whoever created it), or null when the key records no creator. */
+async function apiKeyCreator(apiKeyId: string): Promise<string | null> {
+  const r = await rqlite.query('SELECT created_by FROM api_keys WHERE id = ?', [apiKeyId]);
+  const v = r.values?.[0]?.[0];
+  return v ? String(v) : null;
+}
+
 /**
  * The decision in the bell of the person behind the request: the requester, or for an API key the person who made the key
  * (keys have no bell; they read the request with GET /api/access-requests/:id?wait=…). Never throws.
@@ -304,11 +311,7 @@ async function approvedGroupFor(type: 'user' | 'api_key', id: string, name: stri
 async function tellRequester(row: Record<string, unknown>, status: string, outcome: unknown, approverName: string, note: string | null, serverId: string | null, defs: readonly PermissionDef[]): Promise<void> {
   try {
     const isKey = row.requester_type === 'api_key';
-    let recipient: string | null = isKey ? null : String(row.requester_id);
-    if (isKey) {
-      const k = await rqlite.query('SELECT created_by FROM api_keys WHERE id = ?', [String(row.requester_id)]);
-      recipient = k.values?.[0]?.[0] ? String(k.values[0][0]) : null;
-    }
+    const recipient = isKey ? await apiKeyCreator(String(row.requester_id)) : String(row.requester_id);
     if (!recipient) return;
     const dto = await toDto(row, defs, await serverNames());
     const whose = isKey ? `Your API key ${String(row.requester_name)}'s request` : 'Your request';
@@ -347,6 +350,10 @@ export async function decideRequest(approver: TokenPayload, id: string, decision
   if (!row) throw new RequestError('Request not found', 404, 'NOT_FOUND');
   if (row.status !== 'pending') throw new RequestError(`This request is already ${row.status}`, 409, 'NOT_PENDING');
   if (row.requester_type === 'user' && row.requester_id === String(approver.userId)) throw new RequestError('You cannot decide your own request', 403, 'FORBIDDEN');
+  // An API key has no bell of its own: its creator is the person it acts for, and they must not decide it either.
+  if (row.requester_type === 'api_key' && (await apiKeyCreator(String(row.requester_id))) === String(approver.userId)) {
+    throw new RequestError('You cannot decide a request from your own API key', 403, 'FORBIDDEN');
+  }
   const defs = await registeredPermissionDefs();
   const def = permissionDef(String(row.permission), defs);
   if (!def) throw new RequestError('That permission no longer exists', 409, 'UNKNOWN_PERMISSION');

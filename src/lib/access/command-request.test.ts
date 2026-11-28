@@ -9,6 +9,7 @@ const h = vi.hoisted(() => {
   type Row = Record<string, unknown>;
   const state = {
     requests: new Map<string, Row>(),
+    apiKeyOwners: {} as Record<string, string>,
     servers: [{ id: 'srv-1', name: 'Alpha' }],
     runCalls: [] as Array<Record<string, unknown>>,
     openCalls: [] as Array<Record<string, unknown>>,
@@ -56,6 +57,10 @@ const h = vi.hoisted(() => {
         const n = Array.from(state.requests.values())
           .filter(r => r.requester_type === params[0] && r.requester_id === params[1] && r.status === 'pending').length;
         return cols([{ 'COUNT(*)': n }]);
+      }
+      if (s === 'SELECT created_by FROM api_keys WHERE id = ?') {
+        const owner = state.apiKeyOwners[String(params[0])];
+        return cols(owner ? [{ created_by: owner }] : []);
       }
       if (s === 'SELECT * FROM access_requests WHERE id = ?') {
         const r = state.requests.get(String(params[0]));
@@ -117,6 +122,7 @@ const h = vi.hoisted(() => {
     ],
     reset() {
       state.requests.clear();
+      state.apiKeyOwners = {};
       state.runCalls.length = 0;
       state.openCalls.length = 0;
       state.requester = { userId: 'u-requester', username: 'requester', role: 'operator', authType: 'user' };
@@ -144,6 +150,8 @@ import { createRequest, decideRequest, expireStale, getRequest, RequestError } f
 
 const requester = () => ({ userId: 'u-requester', username: 'requester', role: 'operator', authType: 'user' } as never);
 const approver = () => ({ userId: 'u-admin', username: 'admin', role: 'admin', authType: 'user' } as never);
+const secondApprover = () => ({ userId: 'u-admin-2', username: 'admin2', role: 'admin', authType: 'user' } as never);
+const apiKey = (id = 'key-1') => ({ userId: `apikey:${id}`, username: 'ci key', role: 'operator', authType: 'api_key', apiKeyId: id } as never);
 
 describe('one-time command access requests', () => {
   beforeEach(() => h.reset());
@@ -187,6 +195,29 @@ describe('one-time command access requests', () => {
     await expireStale();
     expect(h.state.requests.get(created.id)!.status).toBe('expired');
     await expect(decideRequest(approver(), created.id, 'approve', null)).rejects.toBeInstanceOf(RequestError);
+    expect(h.state.runCalls).toHaveLength(0);
+  });
+
+  it('does not let the person who created an API key decide the key\'s own request', async () => {
+    h.state.apiKeyOwners['key-1'] = 'u-admin';
+    const created = await createRequest(apiKey(), { kind: 'command', serverId: 'srv-1', command: 'id', as: 'service', reason: 'look' });
+    await expect(decideRequest(approver(), created.id, 'approve', null)).rejects.toMatchObject({ code: 'FORBIDDEN', status: 403 });
+    expect(h.state.runCalls).toHaveLength(0);
+    expect(h.state.requests.get(created.id)!.status).toBe('pending');
+  });
+
+  it('still lets another person decide an API key\'s request', async () => {
+    h.state.apiKeyOwners['key-1'] = 'u-admin';
+    const created = await createRequest(apiKey(), { kind: 'command', serverId: 'srv-1', command: 'id', as: 'service', reason: 'look' });
+    const approved = await decideRequest(secondApprover(), created.id, 'approve', 'ok');
+    expect(approved.status).toBe('approved');
+    expect(h.state.runCalls).toHaveLength(1);
+  });
+
+  it('does not let a person decide their own request', async () => {
+    const created = await createRequest(requester(), { kind: 'command', serverId: 'srv-1', command: 'id', as: 'user', reason: 'look' });
+    const self = { userId: 'u-requester', username: 'requester', role: 'admin', authType: 'user' } as never;
+    await expect(decideRequest(self, created.id, 'approve', null)).rejects.toMatchObject({ code: 'FORBIDDEN', status: 403 });
     expect(h.state.runCalls).toHaveLength(0);
   });
 

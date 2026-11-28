@@ -66,6 +66,17 @@ export async function requireKindManage(auth: TokenPayload, kind: CredentialKind
   return null;
 }
 
+/**
+ * The servers an edit must be allowed on: what the entry is scoped to now plus what it will be scoped to. `next` is
+ * null when the scope is left alone. An empty list means "every server", so it is passed on as such: widening an
+ * entry from one server to all of them needs the permission everywhere, not only where it happened to be before.
+ */
+export function manageTargets(existing: string[], next: string[] | null): string[] {
+  if (next === null) return existing;
+  if (!next.length) return [];
+  return Array.from(new Set([...existing, ...next]));
+}
+
 /** The kind as the UI (and MCP) may see it: no migration rules, no secrets. */
 export function publicKind(kind: CredentialKindDef) {
   return {
