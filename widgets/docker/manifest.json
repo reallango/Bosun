@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "docker",
   "name": "Docker Containers",
-  "version": "1.1.1",
+  "version": "1.1.2",
   "description": "Containers on the host with logs, a shell, start, stop and restart; edit a container, create containers and stacks (a compose file, or one from a Git repository), back containers and stacks up with restic (volumes, mapped folders, stack files and the image, with the pinned image version) and restore them, update containers and stacks to newer images with a health check and automatic rollback, and a Manage page for images, volumes, networks and backups.",
   "author": "Bosun",
   "requires": {
@@ -586,7 +586,7 @@
               },
               "credential": {
                 "type": "string",
-                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto"
               }
@@ -660,7 +660,7 @@
               },
               "credential": {
                 "type": "string",
-                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto"
               }
@@ -747,7 +747,7 @@
               },
               "credential": {
                 "type": "string",
-                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto"
               }
@@ -770,7 +770,7 @@
               },
               "credential": {
                 "type": "string",
-                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto"
               }
@@ -798,7 +798,7 @@
               },
               "credential": {
                 "type": "string",
-                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto"
               }
@@ -854,7 +854,7 @@
               },
               "destination": {
                 "type": "string",
-                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto"
               }
@@ -906,7 +906,7 @@
               },
               "destination": {
                 "type": "string",
-                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto"
               }
@@ -1614,7 +1614,7 @@
               },
               "credential": {
                 "type": "string",
-                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto",
                 "from": "credential"
@@ -1710,14 +1710,14 @@
               },
               "credential": {
                 "type": "string",
-                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto",
                 "from": "credential"
               },
               "destination": {
                 "type": "string",
-                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto"
               }
@@ -2134,7 +2134,7 @@
               },
               "credential": {
                 "type": "string",
-                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto"
               }
@@ -2227,7 +2227,7 @@
               },
               "credential": {
                 "type": "string",
-                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto"
               }
@@ -2325,7 +2325,7 @@
               },
               "credential": {
                 "type": "string",
-                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto"
               }
@@ -2417,7 +2417,7 @@
               },
               "credential": {
                 "type": "string",
-                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto"
               }
@@ -2472,7 +2472,7 @@
               },
               "credential": {
                 "type": "string",
-                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto",
                 "from": "credential"
@@ -2522,7 +2522,7 @@
               },
               "credential": {
                 "type": "string",
-                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto",
                 "from": "credential"
@@ -2576,7 +2576,7 @@
               },
               "credential": {
                 "type": "string",
-                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto",
                 "from": "credential"
@@ -2637,7 +2637,7 @@
               },
               "credential": {
                 "type": "string",
-                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto",
                 "from": "credential"
@@ -2708,14 +2708,14 @@
               },
               "credential": {
                 "type": "string",
-                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto",
                 "from": "credential"
               },
               "destination": {
                 "type": "string",
-                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto"
               }
@@ -2787,7 +2787,7 @@
               },
               "credential": {
                 "type": "string",
-                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto",
                 "from": "credential"
@@ -2838,7 +2838,7 @@
               },
               "credential": {
                 "type": "string",
-                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto",
                 "from": "credential"
@@ -2895,7 +2895,7 @@
               },
               "credential": {
                 "type": "string",
-                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto",
                 "from": "credential"
@@ -2958,7 +2958,7 @@
               },
               "credential": {
                 "type": "string",
-                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto",
                 "from": "credential"
@@ -3044,7 +3044,7 @@
             "params": {
               "destination": {
                 "type": "string",
-                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto"
               }
@@ -3118,7 +3118,7 @@
               },
               "destination": {
                 "type": "string",
-                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto"
               }
@@ -3196,7 +3196,7 @@
               },
               "destination": {
                 "type": "string",
-                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto"
               }

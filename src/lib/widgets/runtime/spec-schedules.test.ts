@@ -81,11 +81,16 @@ describe('the schedules a widget declares', () => {
     expect(errorOf(withWhen)).toContain('takes no "when"');
   });
 
-  it('does not let an action omit a required parameter, even one with a default', () => {
-    const s = base();
-    s.actions[1].params = { name: { type: 'string', pattern: '^[a-z]+$', default: 'web' } };
-    s.schedules = [{ id: 'noop', label: 'Noop', run: { action: 'noop' } }];
-    expect(errorOf(s)).toContain('needs the parameter "name"');
+  it('lets an action rely on a declared default, but still needs a parameter without one', () => {
+    const withDefault = base();
+    withDefault.actions[1].params = { name: { type: 'string', pattern: '^[a-z]+$', default: 'web' } };
+    withDefault.schedules = [{ id: 'noop', label: 'Noop', run: { action: 'noop' } }];
+    expect(ok(withDefault).schedules?.[0].run).toEqual({ action: 'noop' });
+
+    const withoutDefault = base();
+    withoutDefault.actions[1].params = { name: { type: 'string', pattern: '^[a-z]+$' } };
+    withoutDefault.schedules = [{ id: 'noop', label: 'Noop', run: { action: 'noop' } }];
+    expect(errorOf(withoutDefault)).toContain('needs the parameter "name"');
   });
 
   it('lets a dataset rely on its own defaults', () => {

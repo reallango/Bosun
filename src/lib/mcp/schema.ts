@@ -48,7 +48,7 @@ function paramProperties(params: Record<string, ParamSpec>): { properties: JsonS
   return { properties, required };
 }
 
-/** A dataset tool: server_id plus the dataset script's arguments. Defaults stay optional (loadDataset fills them). */
+/** A dataset tool: server_id plus the dataset script's arguments. A parameter with a default may be left out. */
 export function datasetInputSchema(params: Record<string, ParamSpec>): ObjectJsonSchema {
   const { properties, required } = paramProperties(params);
   return {
@@ -60,8 +60,8 @@ export function datasetInputSchema(params: Record<string, ParamSpec>): ObjectJso
 }
 
 /**
- * An action tool: server_id plus every declared parameter. Action defaults are never filled by Bosun, so every
- * parameter is required. Destructive actions also take the same `confirm: true` the REST action route requires.
+ * An action tool: server_id plus every declared parameter. A parameter with a default may be left out (the runtime
+ * fills it in). Destructive actions also take the same `confirm: true` the REST action route requires.
  */
 export function actionInputSchema(action: ActionSpec): ObjectJsonSchema {
   const properties: JsonSchema = { server_id: SERVER_ID };

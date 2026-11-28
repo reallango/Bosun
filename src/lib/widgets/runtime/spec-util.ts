@@ -102,7 +102,7 @@ export function validateParam(name: string, raw: unknown, where: string): Valida
   const description = raw.description === undefined ? undefined : text(raw.description, 200);
   if (description === null) return fail(`${where}: parameter "${name}": description is too long`);
   const common = { ...(from ? { from } : {}), ...(description ? { description } : {}) };
-  // A default is only a value the widget's form starts with; callers of the API must still send every parameter.
+  // A default is the value a caller may leave out; the runtime fills it in (validateParamValues).
   const dflt = raw.default;
   if (raw.type === 'boolean') {
     if (dflt !== undefined && typeof dflt !== 'boolean') return fail(`${where}: default of "${name}" must be true or false`);

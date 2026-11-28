@@ -198,14 +198,13 @@ function validateOne(
   for (const name of Object.keys(declared.params)) {
     const satisfied = fixed[name] !== undefined
       || (aimed && (name === declared.targetParam || name === declared.targetKindParam))
-      // A dataset script may rely on its own declared defaults (loadDataset fills them); an action may not,
-      // because Bosun never fills in action parameter defaults.
-      || (!hasAction && declared.params[name].default !== undefined);
+      // A parameter with a default may be left out: the runtime fills it in when the run starts.
+      || declared.params[name].default !== undefined;
     if (!satisfied) return fail(`${where}: the run needs the parameter "${name}"`);
   }
-  // Validate the values that are fixed here (and a dataset's own defaults) with the same rules an ordinary call uses.
+  // Validate the values that are fixed here (and the declared defaults) with the same rules an ordinary call uses.
   const providedSpecs = Object.fromEntries(Object.entries(declared.params).filter(([name, spec]) =>
-    fixed[name] !== undefined || (!hasAction && spec.default !== undefined)));
+    fixed[name] !== undefined || spec.default !== undefined));
   const providedValues = Object.fromEntries(Object.entries(providedSpecs).map(([name, spec]) =>
     [name, fixed[name] ?? spec.default as ScheduleArg]));
   if (Object.keys(providedSpecs).length) {

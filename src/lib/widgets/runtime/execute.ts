@@ -194,7 +194,6 @@ export async function loadDataset(serverId: string, loaded: LoadedSpec, datasetI
   const script = ds ? loaded.spec.scripts?.[ds.script] : undefined;
   if (!ds || !script) throw new RuntimeError('Unknown dataset', 404, 'NOT_FOUND');
   const given = rawArgs && typeof rawArgs === 'object' && !Array.isArray(rawArgs) ? { ...(rawArgs as Record<string, unknown>) } : {};
-  for (const [name, spec] of Object.entries(script.params)) if (given[name] === undefined && spec.default !== undefined) given[name] = spec.default;
   const values = validateParamValues(script.params, given);
   const key = `${serverId}|${loaded.type}|${datasetId}|${JSON.stringify(values)}`;
   const hit = datasetCache.get(key);

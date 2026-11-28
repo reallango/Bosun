@@ -266,14 +266,17 @@ export async function resolveCredentialUses(
   for (const use of uses) {
     const kind = kinds.find(k => k.id === use.kind);
     if (!kind) throw new CredentialError(`This package declares no credential kind "${use.kind}"`, 500, 'CREDENTIAL_KIND');
+    const url = use.url ? String(values[use.url] ?? '').trim() : '';
+    // No URL, no resolution: a source that is not remote (an editor stack, a "-" value) has no entry to match and a
+    // named entry is ignored rather than an error.
+    if (use.url && (!url || url === '-')) continue;
     const candidates = await candidatesFor(packageId, kind, serverId);
     const pinnedId = use.entry ? String(values[use.entry] ?? '').trim() : '';
     let chosen: Candidate | null = null;
-    if (pinnedId && pinnedId !== 'auto') {
+    if (pinnedId && pinnedId !== 'auto' && pinnedId !== '-') {
       chosen = candidates.find(c => c.id === pinnedId) ?? null;
       if (!chosen) throw new CredentialError(`The chosen ${kind.label.toLowerCase()} is not available on this server`);
     } else if (use.url) {
-      const url = String(values[use.url] ?? '').trim();
       // "-" is the "not a Git source" value of a deploy form; there is nothing to match then.
       if (url && url !== '-') chosen = matchCredentialByUrl(candidates, url) as Candidate | null;
     } else if (use.default) {
@@ -282,7 +285,6 @@ export async function resolveCredentialUses(
     const required = use.required ?? (use.default === true && !use.url);
     if (!chosen) {
       if (!required) continue;
-      const url = use.url ? String(values[use.url] ?? '').trim() : '';
       throw new CredentialError(url
         ? `No ${kind.label.toLowerCase()} matches ${url}`
         : `No ${kind.label.toLowerCase()} is set for this server`);
