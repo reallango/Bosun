@@ -220,6 +220,15 @@ describe('the Docker manager package', () => {
     }
   });
 
+  it('stack_retag accepts exactly the four parameters that Bosun self-update sends', () => {
+    // src/lib/update/rollout.ts retag() calls stack_retag with only { name, service, image, as }. A node whose build
+    // predates parameter defaults sends exactly those four, so any other declared parameter (required or optional)
+    // would make the self-update fail with "Missing parameter: <name>" before the script runs.
+    const params = spec.actions.find(a => a.id === 'stack_retag')!.params!;
+    expect(Object.keys(params).sort()).toEqual(['as', 'image', 'name', 'service']);
+    for (const p of Object.values(params)) expect(p).not.toHaveProperty('default');
+  });
+
   it('what an editor sends is accepted by the script parameters', () => {
     const [ed] = editors(spec.screens!.edit.blocks);
     const ctx = { context: { name: 'web' }, datasets: { networks: [{ name: 'bridge' }], cur: { settings: { name: 'web', image: 'nginx:1', restart: 'always', env: ['A=1'], port: ['8080:80/tcp'], volume: ['/srv/a:/a:ro'], tty: 'true' } } } };
@@ -246,14 +255,26 @@ describe('the Docker manager package', () => {
     expect(() => validateParamValues(params, { name: 'demo', source: 'git', yaml: '', env: '', repo: 'https://github.com/owner/repo', branch: 'main', file: 'a.yml', pull: 'false', allow_risky: 'false', override: 'svc.web.volume=/etc:/etc\nrm -rf /', credential: 'auto' })).toThrow();   // an override line must be a svc.<service>.<setting>=value line
     // no script reads a package secret any more: the Git token and the backup destination are credential entries
     for (const [id, s] of Object.entries(spec.scripts!)) expect(s.secrets, id).toBeUndefined();
-    const gitUsers = ['stack_deploy', 'stack_action', 'git_branches', 'git_files', 'git_services'];
-    const actions = (Array.isArray(spec.actions) ? spec.actions : Object.values(spec.actions ?? {})) as { id: string; variants?: { script: string; credentials?: unknown }[] }[];
+    // Only the scripts that really reach git get the Git credential: a deployment (stack_deploy) and an update from
+    // source (stack_action with op update). Every other Docker action runs without it, so an older node never has to
+    // supply a repo or credential it does not use.
+    const gitScripts = ['stack_deploy', 'git_branches', 'git_files', 'git_services'];
+    const actions = (Array.isArray(spec.actions) ? spec.actions : Object.values(spec.actions ?? {})) as { id: string; params?: Record<string, unknown>; variants?: { script: string; args?: Record<string, string>; credentials?: unknown }[] }[];
     expect(actions.length).toBeGreaterThan(0);
     for (const a of actions) {
       for (const v of a.variants ?? []) {
-        if (!gitUsers.includes(v.script)) continue;
+        const usesGit = gitScripts.includes(v.script) || (v.script === 'stack_action' && v.args?.op === 'literal:update');
+        if (!usesGit) continue;
         expect(v.credentials, a.id).toEqual([{ kind: 'git', entry: 'credential', url: 'repo' }]);
       }
+    }
+    // The actions that never reach git do not take its parameters or credential either (self-update retags with four
+    // parameters only, and an older node would otherwise refuse the call before the script runs).
+    for (const id of ['container_update', 'container_update_backup', 'stack_start', 'stack_stop', 'stack_restart', 'stack_guard_up', 'stack_update_images', 'stack_update_images_backup', 'stack_retag']) {
+      const action = actions.find(a => a.id === id)!;
+      expect(Object.keys(action.params ?? {}), id).not.toContain('repo');
+      expect(Object.keys(action.params ?? {}), id).not.toContain('credential');
+      for (const v of action.variants ?? []) expect(v.credentials, id).toBeUndefined();
     }
     expect(spec.datasets!.backups!.credentials).toMatchObject([{ kind: 'backup_destination', entry: 'destination', default: true }]);
   });
