@@ -111,10 +111,11 @@ export function buildOpenApi(widgets: OpenApiWidget[], serverUrl = '/'): Json {
         continue;
       }
       const names = Object.keys(a.params);
-      const props: Json = { ...(names.length ? { params: { type: 'object', required: names, additionalProperties: false, properties: Object.fromEntries(names.map(n => [n, paramSchema(a.params[n])])) } } : {}) };
+      const requiredNames = names.filter(n => a.params[n].default === undefined);
+      const props: Json = { ...(names.length ? { params: { type: 'object', ...(requiredNames.length ? { required: requiredNames } : {}), additionalProperties: false, properties: Object.fromEntries(names.map(n => [n, paramSchema(a.params[n])])) } } : {}) };
       if (a.confirm) props.confirm = { type: 'boolean', enum: [true], description: 'Must be true: this action asks for confirmation in the widget' };
       if (a.kind === 'script') props.widgetId = { type: 'string', description: 'The widget (instance) whose settings the action reads, when it uses any' };
-      const required = [...(names.length ? ['params'] : []), ...(a.confirm ? ['confirm'] : [])];
+      const required = [...(requiredNames.length ? ['params'] : []), ...(a.confirm ? ['confirm'] : [])];
       paths[`/api/servers/{serverId}/widget-actions/${w.type}/${a.id}`] = {
         post: {
           operationId: `widgetAction_${w.type}_${a.id}`, summary: a.label, tags: [tag],

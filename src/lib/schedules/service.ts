@@ -163,7 +163,7 @@ async function normalize(
     if (run.targetKindParam) fixed[run.targetKindParam] = resourceKind;
   }
   for (const [param, spec] of Object.entries(run.params)) {
-    if (fixed[param] === undefined && 'dataset' in kind.run && spec.default !== undefined) fixed[param] = spec.default as ScheduleArg;
+    if (fixed[param] === undefined && spec.default !== undefined) fixed[param] = spec.default as ScheduleArg;
   }
   try {
     validateParamValues(run.params, fixed);

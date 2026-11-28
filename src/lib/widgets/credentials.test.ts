@@ -217,6 +217,23 @@ describe('resolving a credential for a script', () => {
     await expect(resolveCredentialUses('pkg', kinds, [{ kind: 'git', url: 'repo', required: true }], { repo: 'https://gitlab.com/o/r' }, 's1', 'a')).rejects.toThrow(/No git access matches https:\/\/gitlab.com\/o\/r/);
   });
 
+  it('resolves auto and omitted credentials by URL', async () => {
+    const auto = await resolveCredentialUses('pkg', kinds, [{ kind: 'git', entry: 'credential', url: 'repo' }], { repo: 'https://github.com/my-org/my-repo', credential: 'auto' }, 's1', 'a');
+    expect(auto.env.BOSUN_CRED_GIT_TOKEN).toBe('tok-repo');
+    const omitted = await resolveCredentialUses('pkg', kinds, [{ kind: 'git', entry: 'credential', url: 'repo' }], { repo: 'https://github.com/my-org/my-repo' }, 's1', 'a');
+    expect(omitted.env.BOSUN_CRED_GIT_TOKEN).toBe('tok-repo');
+    const dash = await resolveCredentialUses('pkg', kinds, [{ kind: 'git', entry: 'credential', url: 'repo' }], { repo: 'https://github.com/my-org/my-repo', credential: '-' }, 's1', 'a');
+    expect(dash.env.BOSUN_CRED_GIT_TOKEN).toBe('tok-repo');
+  });
+
+  it('does not resolve (or even look up) a credential when the source has no URL', async () => {
+    const before = h.sql.length;
+    expect(await resolveCredentialUses('pkg', kinds, [{ kind: 'git', entry: 'credential', url: 'repo' }], { repo: '-' }, 's1', 'a')).toEqual({ env: {}, secrets: [] });
+    // Even a named entry is ignored for an editor source, not an error.
+    expect(await resolveCredentialUses('pkg', kinds, [{ kind: 'git', entry: 'credential', url: 'repo' }], { repo: '-', credential: 'org' }, 's1', 'a')).toEqual({ env: {}, secrets: [] });
+    expect(h.sql.length).toBe(before);
+  });
+
   it('picks the backup destination from the parameter, or the server default', async () => {
     add('nas', backup, { repository: '/srv/backups' }, { password: 'pw' }, ['s1'], true);
     add('other', backup, { repository: '/srv/other' }, { password: 'pw2' }, ['s2'], true);

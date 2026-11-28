@@ -1,10 +1,47 @@
 import { describe, it, expect } from 'vitest';
 import { spawn, spawnSync } from 'child_process';
-import { buildScriptInvocation, buildCancelInvocation, parseScriptOutput, parseStateOutput, quotePs, quoteSh, scriptFileFor } from './script-run';
+import { buildScriptInvocation, buildCancelInvocation, parseScriptOutput, parseStateOutput, quotePs, quoteSh, scriptFileFor, validateParamValues, ParamError } from './script-run';
 
 const hasSh = spawnSync('sh', ['-c', 'exit 0']).status === 0;
 // Stopping a whole process tree needs pgrep or a ps that can list parents (as on any real host).
 const canKillTree = hasSh && spawnSync('sh', ['-c', 'command -v pgrep >/dev/null 2>&1 || ps -eo pid=,ppid= >/dev/null 2>&1']).status === 0;
+
+describe('validating parameter values', () => {
+  const declared = {
+    name: { type: 'string', pattern: '^[a-z]+$', maxLength: 10 },
+    mode: { type: 'string', values: ['a', 'b'], maxLength: 10, default: 'a' },
+    count: { type: 'number', min: 0, max: 10, integer: true, default: 0 },
+    force: { type: 'boolean', default: false },
+    note: { type: 'text', maxLength: 20, maxLines: 2, default: '' },
+  };
+
+  it('fills a missing parameter from its declared default, including false, 0 and ""', () => {
+    expect(validateParamValues(declared, { name: 'web' })).toEqual({
+      name: 'web', mode: 'a', count: '0', force: 'false', note: '',
+    });
+  });
+
+  it('treats null (and an empty form value) as missing when there is a default', () => {
+    expect(validateParamValues(declared, { name: 'web', mode: null, count: '', force: null })).toMatchObject({
+      mode: 'a', count: '0', force: 'false',
+    });
+  });
+
+  it('still refuses a missing parameter that has no default', () => {
+    expect(() => validateParamValues(declared, {})).toThrow(ParamError);
+    expect(() => validateParamValues(declared, {})).toThrow('Missing parameter: name');
+  });
+
+  it('lets an explicit value override the default', () => {
+    expect(validateParamValues(declared, { name: 'web', mode: 'b', count: '7', force: true, note: 'hi' })).toEqual({
+      name: 'web', mode: 'b', count: '7', force: 'true', note: 'hi',
+    });
+  });
+
+  it('validates the default with the same rules as any value', () => {
+    expect(() => validateParamValues({ bad: { type: 'number', min: 1, max: 2, integer: true, default: 5 } }, {})).toThrow(/between 1 and 2/);
+  });
+});
 
 describe('building a script invocation', () => {
   it('Linux: the script travels on stdin and parameters as quoted environment variables, never in the script text', () => {
