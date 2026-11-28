@@ -29,5 +29,10 @@ ps=$(printf '%s' "$ps" | awk '{
   }
   print out s
 }')
-printf '{"version":"%s","tags":%s,"ps":%s}\n' "$version" "$tags" "$ps"
+vram=$(printf '%s' "$ps" | awk '{
+  s = $0; total = 0
+  while (match(s, /"size_vram":[0-9]+/)) { total += substr(s, RSTART + 12, RLENGTH - 12) + 0; s = substr(s, RSTART + RLENGTH) }
+  print total
+}')
+printf '{"version":"%s","tags":%s,"ps":%s,"vram_used":%s}\n' "$version" "$tags" "$ps" "${vram:-0}"
 exit 0

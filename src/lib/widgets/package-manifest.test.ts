@@ -183,7 +183,6 @@ describe('system packages', () => {
 
 import fs from 'fs';
 import path from 'path';
-import { reservedPackageNames } from './system-packages';
 import { reviewPackage } from './runtime/review';
 
 describe('packages shipped in the repository', () => {
@@ -224,9 +223,13 @@ describe('packages shipped in the repository', () => {
     expect(shell).toMatchObject({ kind: 'terminal', terminal: { ref: 'name', check: 'shell_check' }, permission: 'docker.shell', command: '' });
     expect(shell.terminal?.command).toContain('docker exec -it {{ref}}');
     expect(spec.metrics?.[0]).toMatchObject({ name: 'docker.running', from: { agg: 'count' } });
-    expect(spec.view.row?.actions).toEqual(['logs', 'shell', 'edit', 'backup_run', 'backup_dialog', 'restart', 'stop', 'start']);
-    expect(spec.view.filter?.fields).toEqual(['name', 'image']);
-    expect(spec.view.toggles?.[0].key).toBe('stopped');
+    // The list look keeps the built-in list; the tiles and gauges looks come on top (level 11).
+    const layout = spec.view as unknown as { blocks: Array<{ type: string; view?: any }> };
+    const list = layout.blocks.find(b => b.type === 'view')?.view;
+    expect(spec.looks?.default).toBe('list');
+    expect(list.row?.actions).toEqual(['logs', 'shell', 'edit', 'backup_run', 'backup_dialog', 'restart', 'stop', 'start']);
+    expect(list.filter?.fields).toEqual(['name', 'image']);
+    expect(list.toggles?.[0].key).toBe('stopped');
   });
 });
 
@@ -237,14 +240,18 @@ describe('look sizes in a manifest', () => {
     return validateManifest(m);
   };
 
-  it('accepts a look minimum that fits the widget default size', () => {
+  it('accepts a look minimum above the widget default size (a look may need more room)', () => {
     expect(withLooks({ default: 'tiles', options: [{ id: 'tiles', label: 'Tiles', min_size: { w: 2, h: 2 }, default_size: { w: 4, h: 3 } }] }).ok).toBe(true);
+    expect(withLooks({ default: 'tiles', options: [{ id: 'tiles', label: 'Tiles', min_size: { w: 5, h: 2 } }] }).ok).toBe(true);
   });
 
-  it('refuses a look minimum larger than the widget default size', () => {
-    const r = withLooks({ default: 'tiles', options: [{ id: 'tiles', label: 'Tiles', min_size: { w: 5, h: 2 } }] });
+  it('refuses a look minimum above the widget max_size', () => {
+    const m: any = good();
+    m.widgets[0].max_size = { w: 4, h: 4 };
+    m.widgets[0].spec.looks = { default: 'tiles', options: [{ id: 'tiles', label: 'Tiles', min_size: { w: 5, h: 2 } }] };
+    const r = validateManifest(m);
     expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.error).toMatch(/min_size.*default_size/);
+    if (!r.ok) expect(r.error).toMatch(/min_size.*max_size/);
   });
 
   it('refuses a look default_size above the widget max_size', () => {

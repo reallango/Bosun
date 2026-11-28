@@ -2,11 +2,11 @@
   "schema": 1,
   "id": "cpu_memory",
   "name": "CPU/Memory",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "CPU and memory usage with load averages, swap and temperature. Tracks CPU, load, temperature, memory and swap as history.",
   "author": "Bosun",
   "requires": {
-    "api": 7
+    "api": 13
   },
   "permissions": [
     {
@@ -49,6 +49,18 @@
             {
               "id": "gauges",
               "label": "Gauges"
+            },
+            {
+              "id": "cores",
+              "label": "Cores",
+              "min_size": {
+                "w": 8,
+                "h": 6
+              },
+              "default_size": {
+                "w": 10,
+                "h": 6
+              }
             }
           ]
         },
@@ -127,7 +139,8 @@
                     "danger": 90
                   }
                 }
-              ]
+              ],
+              "columns": 2
             },
             {
               "type": "gauges",
@@ -156,7 +169,51 @@
                     "danger": 90
                   }
                 }
+              ],
+              "columns": 2
+            },
+            {
+              "type": "info",
+              "when": {
+                "field": "config.look",
+                "equals": "cores"
+              },
+              "items": [
+                {
+                  "label": "CPU",
+                  "value": "{data.cpu.usagePercent}",
+                  "format": "percent"
+                },
+                {
+                  "label": "Memory",
+                  "value": "{data.memory.usagePercent}",
+                  "format": "percent"
+                },
+                {
+                  "label": "Cores",
+                  "value": "{data.cpu.threads}"
+                }
               ]
+            },
+            {
+              "type": "meters",
+              "when": {
+                "field": "config.look",
+                "equals": "cores"
+              },
+              "path": "cpu.cores",
+              "shape": "bar",
+              "layout": "grid",
+              "empty": "No per-core data",
+              "item": {
+                "label": "{id}",
+                "value": "{usagePercent}",
+                "unit": "%",
+                "thresholds": {
+                  "warning": 75,
+                  "danger": 90
+                }
+              }
             },
             {
               "type": "text",

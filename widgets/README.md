@@ -72,6 +72,7 @@ until the node is updated.
 | 10 | The `meters` block (a compact bar or small ring per row of a data list), `count` and `format` on a stat tile, `format` on a ring gauge, the `rate` value format on fields, tables, tiles and gauges, and dotted data keys (a metric named `cpu.usage` is reached as `{data.metrics.cpu.usage}`). |
 | 11 | Per-look sizes (`min_size` and `default_size` on `looks.options`), `when` and `alternatives` on `stat` and `gauges` items and `when` on `meters` rows, the `info` block and the `footer` key on `stat` and `gauges`, `layout` on `meters`, and `count` in conditions. |
 | 12 | Package `credentials` (see below): credential kinds with public and secret fields, a per-package screen block, the credential routes and MCP tools, and `BOSUN_CRED_*` environment variables for the scripts that declare a use. |
+| 13 | A `gauges` block that draws one ring per row of a data list (`path` with `item` and `empty`), `format` on the `label value` pairs of an `info` block or a block\'s `footer`, and a per-look `min_size`/`default_size` that may exceed the widget\'s default size (up to its `max_size`), so a look such as a per-core grid can ask for the room it needs. |
 
 New spec keys that an older Bosun cannot honour raise the level in `src/lib/widgets/api-level.ts`; keys an older
 Bosun can safely ignore (because it renders the widget sensibly without them) do not.
@@ -431,7 +432,8 @@ automatically and exposes the saved value to conditions as `config.look`, so the
   settings dialog shows. `default` must be one of the ids.
 - A look may declare its own grid sizes (level 11): `min_size` replaces the widget's minimum while that look is
   selected, and `default_size` is the size the settings dialog suggests for it. Both are `{ "w": 1-48, "h": 1-48 }`.
-  A look minimum cannot be larger than the widget's `default_size`. When a person switches look, Bosun lowers or raises
+  A look minimum may be larger than the widget's `default_size` (level 13), up to the widget's `max_size` when it sets one;
+  a look such as a per-core grid needs more room than the widget opens at. When a person switches look, Bosun lowers or raises
   the instance's `grid_min_w`/`grid_min_h` to the look's minimum, and grows the instance if its current size no longer
   fits. Bars can therefore need less room than tiles:
 
@@ -466,6 +468,17 @@ conditions and size classes.
 - `thickness` (`thin`, `normal` or `thick`) sets the ring stroke, on the block or on one item. See
   [Tuning sizes](#tuning-sizes) (level 8).
 - Items accept `when` and `alternatives` like stat tiles (level 11). `footer` works on the block too.
+- A `gauges` block can draw its rings from a data list instead of listing them (level 13): give `path` (a dotted path
+  into the widget's data) and one `item` template, and the block draws one ring per row, in the same balanced
+  arrangement as fixed items. The row's fields fill `label`, `value` and `sub`; the item's `when` and `alternatives`
+  are read against that row. `empty` is shown when the list has no rows.
+
+```jsonc
+{ "type": "gauges", "path": "disks", "empty": "No disk data",
+  "item": { "label": "{mountPoint}", "value": "{usagePercent}", "max": 100, "unit": "%",
+            "sub": "{filesystem}", "thresholds": { "warning": 80, "danger": 90 } } }
+```
+
 - The ring uses theme tokens only and is announced to assistive technology as an image (`role="img"` with the label and
   value as its `aria-label`).
 
@@ -498,7 +511,8 @@ large tiles would waste the room.
   a full bar or ring stands for (default 100), and `unit`, `sub`, `thresholds`, `decimals` and `emphasis` work as they
   do on a stat tile.
 - A `meters` block is a list, so it takes the room the other blocks leave and scrolls; it does not use the filling
-  tile grid. In a widget of about three rows it tightens its gaps and drops the `sub` line, keeping every row's label
+  tile grid. `layout: rows` spreads its rows over the height they get, and the bar thickness and text scale a little
+  with the room. In a widget of about three rows it tightens its gaps and drops the `sub` line, keeping every row's label
   and value. When it does fill the body, it scales its bar thickness and text modestly with the spare height (container
   query units with a readable minimum and maximum), like tiles.
 - The rows are plain text and theme tokens; the bar is the same one a stat tile uses and the ring is the same
@@ -519,6 +533,8 @@ instead (level 11).
 ```
 
 - Each pair needs a `label` and a `value`; both are templates over the screen's context.
+- A pair may carry `format` (level 13) to write its value like a field: `bytes`, `rate`, `percent`, `mb`, `temp`,
+  `duration`, `ago` or `until`. Without it the template's text is shown as it is.
 - Pairs may carry `when`; a pair whose condition does not hold is left out.
 - The pairs are separated by " · ", truncate instead of wrapping, and stay pinned to the bottom of the widget body.
 - `footer` on a `stat` or `gauges` block takes exactly the same list and sits under that block.

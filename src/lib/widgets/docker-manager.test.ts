@@ -115,8 +115,10 @@ describe('the Docker manager package', () => {
     expect(editor.fields.find(f => f.name === 'stack_files')?.when).toEqual({ field: 'values.kind', equals: 'stack' });
     expect(editor.fields.find(f => f.name === 'keep_daily')).toBeDefined();
 
-    expect(spec.view.row?.actions).toContain('backup_run');
-    expect(spec.view.row?.actions).toContain('backup_dialog');
+    const list = (spec.view as unknown as { blocks: Array<{ type: string; view?: { row?: { actions?: string[] } } }> })
+      .blocks.find(b => b.type === 'view')!.view!;
+    expect(list.row?.actions).toContain('backup_run');
+    expect(list.row?.actions).toContain('backup_dialog');
     const manage = spec.screens!.manage;
     const tabs = manage.blocks.find(b => b.type === 'tabs') as Extract<Block, { type: 'tabs' }>;
     for (const id of ['containers', 'stacks']) {

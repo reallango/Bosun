@@ -68,14 +68,14 @@ export function validateLooks(raw: unknown): Validated<LooksSpec> {
 }
 
 /**
- * Why a widget's looks cannot fit its own sizes, or null. A look may lower its floor (bars need less room than
- * tiles), but it cannot need more than the widget's default size, or a person picking it would get a widget larger
- * than the one they added.
+ * Why a widget's looks cannot fit its own sizes, or null. A look may change its floor either way: bars need less room
+ * than tiles, while a per-core grid needs more. A look may not exceed the widget's `max_size` when it has one, and may
+ * not suggest a default below its own floor.
  */
-export function lookSizesProblem(looks: LooksSpec | undefined, widgetDefault: LookSize, widgetMax?: LookSize | null): string | null {
+export function lookSizesProblem(looks: LooksSpec | undefined, _widgetDefault: LookSize, widgetMax?: LookSize | null): string | null {
   for (const look of looks?.options ?? []) {
-    if (look.min_size && (look.min_size.w > widgetDefault.w || look.min_size.h > widgetDefault.h)) {
-      return `look "${look.id}": "min_size" cannot be larger than the widget's default_size`;
+    if (look.min_size && widgetMax && (look.min_size.w > widgetMax.w || look.min_size.h > widgetMax.h)) {
+      return `look "${look.id}": "min_size" cannot be larger than the widget's max_size`;
     }
     if (look.default_size) {
       if (look.min_size && (look.default_size.w < look.min_size.w || look.default_size.h < look.min_size.h)) {

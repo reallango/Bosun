@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { gaugeGeometry, gaugeStroke, GAUGE_STROKE, validateGaugeItem } from './gauges';
+import { gaugeGeometry, gaugeItemsFromRows, gaugeStroke, GAUGE_STROKE, validateGaugeItem } from './gauges';
 
 describe('validateGaugeItem', () => {
   it('accepts a label, a value template and the optional keys', () => {
@@ -62,6 +62,32 @@ describe('validateGaugeItem sizing keys', () => {
     expect(validateGaugeItem({ label: 'CPU', value: '{v}', decimals: 4 }, 'x').ok).toBe(false);
     expect(validateGaugeItem({ label: 'CPU', value: '{v}', emphasis: 'loud' }, 'x').ok).toBe(false);
     expect(validateGaugeItem({ label: 'CPU', value: '{v}', thickness: 'wide' }, 'x').ok).toBe(false);
+  });
+});
+
+describe('gaugeItemsFromRows', () => {
+  const item = { label: '{mountPoint}', value: '{usagePercent}', max: 100, unit: '%', sub: '{filesystem}', thresholds: { warning: 80 } };
+
+  it('fills the templates from each row, keeping the item options', () => {
+    expect(gaugeItemsFromRows(item, [
+      { mountPoint: '/', usagePercent: 42, filesystem: '/dev/sda1' },
+      { mountPoint: '/data', usagePercent: 91, filesystem: '/dev/sdb1' },
+    ])).toEqual([
+      { label: '/', value: '42', max: 100, unit: '%', sub: '/dev/sda1', thresholds: { warning: 80 } },
+      { label: '/data', value: '91', max: 100, unit: '%', sub: '/dev/sdb1', thresholds: { warning: 80 } },
+    ]);
+  });
+
+  it('reads the item when against the row, and falls through its alternatives', () => {
+    const g = { ...item, when: { field: 'usagePercent', gte: 90 }, alternatives: [{ label: '{mountPoint}', value: '{usagePercent}', sub: 'low' }] };
+    expect(gaugeItemsFromRows(g, [{ mountPoint: '/', usagePercent: 42 }, { mountPoint: '/data', usagePercent: 91 }]).map(x => x.label)).toEqual(['/', '/data']);
+    expect(gaugeItemsFromRows(g, [{ mountPoint: '/', usagePercent: 42 }])[0].sub).toBe('low');
+    expect(gaugeItemsFromRows({ ...item, when: { field: 'usagePercent', gte: 90 } }, [{ mountPoint: '/', usagePercent: 42 }])).toEqual([]);
+  });
+
+  it('takes one object as one row and nothing as no rows', () => {
+    expect(gaugeItemsFromRows(item, { mountPoint: '/', usagePercent: 7 })).toHaveLength(1);
+    expect(gaugeItemsFromRows(item, undefined)).toEqual([]);
   });
 });
 

@@ -74,9 +74,9 @@ describe('per-look sizes', () => {
     expect(validateLooks({ default: 'a', options: [{ id: 'a', label: 'A', min_size: { w: 3, h: 3 }, default_size: { w: 2, h: 3 } }] }).ok).toBe(false);
   });
 
-  it('refuses a look minimum larger than the widget default size', () => {
+  it('allows a look to need more room than the widget default, but not more than its max', () => {
     expect(lookSizesProblem(sized, { w: 4, h: 3 })).toBeNull();
-    expect(lookSizesProblem(sized, { w: 3, h: 3 })).toMatch(/cannot be larger/);
+    expect(lookSizesProblem(sized, { w: 3, h: 3 })).toBeNull();
     expect(lookSizesProblem(sized, { w: 8, h: 6 }, { w: 2, h: 2 })).toMatch(/max_size/);
     expect(lookSizesProblem(undefined, { w: 1, h: 1 })).toBeNull();
   });

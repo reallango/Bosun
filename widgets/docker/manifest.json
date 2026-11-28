@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "docker",
   "name": "Docker Containers",
-  "version": "1.0.29",
+  "version": "1.1.0",
   "description": "Containers on the host with logs, a shell, start, stop and restart; edit a container, create containers and stacks (a compose file, or one from a Git repository), back containers and stacks up with restic (volumes, mapped folders, stack files and the image, with the pinned image version) and restore them, update containers and stacks to newer images with a health check and automatic rollback, and a Manage page for images, volumes, networks and backups.",
   "author": "Bosun",
   "requires": {
@@ -911,6 +911,12 @@
                 "default": "auto"
               }
             }
+          },
+          "summary": {
+            "as": "service",
+            "timeoutSec": 900,
+            "linux": "scripts/summary.sh",
+            "params": {}
           }
         },
         "data": {
@@ -950,70 +956,298 @@
           }
         ],
         "view": {
-          "type": "list",
-          "empty": "No containers",
-          "summary": [
+          "type": "layout",
+          "blocks": [
             {
-              "label": "running",
-              "where": {
-                "field": "state",
-                "equals": "running"
-              }
-            },
-            {
-              "label": "total"
-            }
-          ],
-          "filter": {
-            "fields": [
-              "name",
-              "image"
-            ],
-            "placeholder": "Filter",
-            "hideBelow": "sm"
-          },
-          "toggles": [
-            {
-              "key": "stopped",
-              "label": "stopped",
-              "default": true,
-              "hideWhen": {
-                "field": "state",
-                "notEquals": "running"
+              "type": "stat",
+              "when": {
+                "field": "config.look",
+                "equals": "tiles"
               },
-              "hideBelow": "sm"
-            }
-          ],
-          "row": {
-            "dot": {
-              "field": "state",
-              "colors": {
-                "running": "green",
-                "restarting": "amber",
-                "paused": "amber",
-                "created": "gray",
-                "exited": "gray",
-                "dead": "red"
+              "items": [
+                {
+                  "label": "Containers",
+                  "value": "{state.docker.total}",
+                  "sub": "{state.docker.split}",
+                  "when": {
+                    "field": "state.docker.total",
+                    "exists": true
+                  },
+                  "alternatives": [
+                    {
+                      "label": "Containers",
+                      "count": {
+                        "path": "data"
+                      },
+                      "sub": "containers"
+                    }
+                  ]
+                },
+                {
+                  "label": "Updates available",
+                  "value": "{state.docker.updates}",
+                  "tone": "warning",
+                  "sub": "images",
+                  "when": {
+                    "field": "state.docker.updates",
+                    "gt": 0
+                  },
+                  "alternatives": [
+                    {
+                      "label": "Updates available",
+                      "value": "—",
+                      "tone": "warning",
+                      "sub": "check incomplete",
+                      "when": {
+                        "field": "state.docker.updates_unknown",
+                        "gt": 0
+                      }
+                    },
+                    {
+                      "label": "Updates available",
+                      "value": "0",
+                      "tone": "success",
+                      "sub": "up to date",
+                      "when": {
+                        "field": "state.docker.updates",
+                        "exists": true
+                      }
+                    },
+                    {
+                      "label": "Updates available",
+                      "value": "—",
+                      "sub": "not checked yet",
+                      "emphasis": "muted"
+                    }
+                  ]
+                },
+                {
+                  "label": "Errors",
+                  "value": "{state.docker.errors}",
+                  "tone": "danger",
+                  "sub": "containers need attention",
+                  "when": {
+                    "field": "state.docker.errors",
+                    "gt": 0
+                  },
+                  "alternatives": [
+                    {
+                      "label": "Average uptime",
+                      "value": "{state.docker.avg_uptime}",
+                      "format": "duration",
+                      "sub": "running containers",
+                      "when": {
+                        "field": "state.docker.avg_uptime",
+                        "exists": true
+                      }
+                    },
+                    {
+                      "label": "Errors",
+                      "value": "0",
+                      "tone": "success",
+                      "sub": "all healthy",
+                      "when": {
+                        "field": "state.docker.errors",
+                        "exists": true
+                      }
+                    },
+                    {
+                      "label": "Errors",
+                      "value": "—",
+                      "sub": "checking…",
+                      "emphasis": "muted"
+                    }
+                  ]
+                }
+              ],
+              "footer": [
+                {
+                  "label": "Docker",
+                  "value": "{state.docker.version}",
+                  "when": {
+                    "field": "state.docker.version",
+                    "exists": true
+                  }
+                },
+                {
+                  "label": "Stacks",
+                  "value": "{state.docker.stacks}",
+                  "when": {
+                    "field": "state.docker.stacks",
+                    "exists": true
+                  }
+                }
+              ]
+            },
+            {
+              "type": "gauges",
+              "when": {
+                "field": "config.look",
+                "equals": "gauges"
+              },
+              "items": [
+                {
+                  "label": "Running",
+                  "value": "{state.docker.running_pct}",
+                  "max": 100,
+                  "unit": "%",
+                  "sub": "{state.docker.running} of {state.docker.total} running",
+                  "when": {
+                    "field": "state.docker.running_pct",
+                    "exists": true
+                  }
+                },
+                {
+                  "label": "Healthy",
+                  "value": "{state.docker.healthy_pct}",
+                  "max": 100,
+                  "unit": "%",
+                  "sub": "{state.docker.healthy} of {state.docker.health_total} with checks",
+                  "when": {
+                    "field": "state.docker.health_total",
+                    "gt": 0
+                  },
+                  "alternatives": [
+                    {
+                      "label": "Stopped",
+                      "value": "{state.docker.stopped_pct}",
+                      "max": 100,
+                      "unit": "%",
+                      "sub": "{state.docker.stopped} stopped",
+                      "when": {
+                        "field": "state.docker.stopped_pct",
+                        "exists": true
+                      }
+                    },
+                    {
+                      "label": "Health",
+                      "value": "—",
+                      "sub": "no health checks",
+                      "emphasis": "muted"
+                    }
+                  ]
+                }
+              ],
+              "footer": [
+                {
+                  "label": "Docker",
+                  "value": "{state.docker.version}",
+                  "when": {
+                    "field": "state.docker.version",
+                    "exists": true
+                  }
+                },
+                {
+                  "label": "Stacks",
+                  "value": "{state.docker.stacks}",
+                  "when": {
+                    "field": "state.docker.stacks",
+                    "exists": true
+                  }
+                }
+              ],
+              "minItemWidth": "xs",
+              "columns": 2
+            },
+            {
+              "type": "view",
+              "when": {
+                "field": "config.look",
+                "equals": "list"
+              },
+              "view": {
+                "type": "list",
+                "empty": "No containers",
+                "summary": [
+                  {
+                    "label": "running",
+                    "where": {
+                      "field": "state",
+                      "equals": "running"
+                    }
+                  },
+                  {
+                    "label": "total"
+                  }
+                ],
+                "filter": {
+                  "fields": [
+                    "name",
+                    "image"
+                  ],
+                  "placeholder": "Filter",
+                  "hideBelow": "sm"
+                },
+                "toggles": [
+                  {
+                    "key": "stopped",
+                    "label": "stopped",
+                    "default": true,
+                    "hideWhen": {
+                      "field": "state",
+                      "notEquals": "running"
+                    },
+                    "hideBelow": "sm"
+                  }
+                ],
+                "row": {
+                  "dot": {
+                    "field": "state",
+                    "colors": {
+                      "running": "green",
+                      "restarting": "amber",
+                      "paused": "amber",
+                      "created": "gray",
+                      "exited": "gray",
+                      "dead": "red"
+                    }
+                  },
+                  "title": "{name}",
+                  "subtitle": "{image} · {status}",
+                  "actions": [
+                    "logs",
+                    "shell",
+                    "edit",
+                    "backup_run",
+                    "backup_dialog",
+                    "restart",
+                    "stop",
+                    "start"
+                  ],
+                  "inline": {
+                    "xs": 0,
+                    "sm": 2,
+                    "md": 4
+                  }
+                }
               }
             },
-            "title": "{name}",
-            "subtitle": "{image} \u00b7 {status}",
-            "actions": [
-              "logs",
-              "shell",
-              "edit",
-              "backup_run",
-              "backup_dialog",
-              "restart",
-              "stop",
-              "start"
-            ],
-            "inline": {
-              "xs": 0,
-              "sm": 2,
-              "md": 4
+            {
+              "type": "info",
+              "when": {
+                "field": "config.look",
+                "equals": "list"
+              },
+              "items": [
+                {
+                  "label": "Docker",
+                  "value": "{state.docker.version}",
+                  "when": {
+                    "field": "state.docker.version",
+                    "exists": true
+                  }
+                },
+                {
+                  "label": "Stacks",
+                  "value": "{state.docker.stacks}",
+                  "when": {
+                    "field": "state.docker.stacks",
+                    "exists": true
+                  }
+                }
+              ]
             }
-          }
+          ]
         },
         "actions": [
           {
@@ -2837,7 +3071,7 @@
           },
           {
             "id": "backup_dialog",
-            "label": "Back up\u2026",
+            "label": "Back up…",
             "permission": "docker.backup",
             "kind": "screen",
             "screen": "backup_target",
@@ -3306,7 +3540,7 @@
                       "args": {
                         "ref": "values.image"
                       },
-                      "busy": "Looking at the image\u2026"
+                      "busy": "Looking at the image…"
                     }
                   },
                   {
@@ -3833,7 +4067,7 @@
                       "args": {
                         "input": "values.import_text"
                       },
-                      "busy": "Converting\u2026"
+                      "busy": "Converting…"
                     }
                   },
                   {
@@ -3924,7 +4158,7 @@
                       "args": {
                         "ref": "values.image"
                       },
-                      "busy": "Looking at the image\u2026"
+                      "busy": "Looking at the image…"
                     }
                   },
                   {
@@ -4404,7 +4638,7 @@
                       "equals": "git"
                     },
                     "placeholder": "main",
-                    "custom": "Custom\u2026",
+                    "custom": "Custom…",
                     "remote": {
                       "dataset": "git_branches",
                       "args": {
@@ -4423,7 +4657,7 @@
                       "equals": "git"
                     },
                     "placeholder": "docker-compose.yml",
-                    "custom": "Custom\u2026",
+                    "custom": "Custom…",
                     "remote": {
                       "dataset": "git_files",
                       "args": {
@@ -4654,7 +4888,7 @@
                       "equals": "git"
                     },
                     "placeholder": "main",
-                    "custom": "Custom\u2026",
+                    "custom": "Custom…",
                     "remote": {
                       "dataset": "git_branches",
                       "args": {
@@ -4674,7 +4908,7 @@
                       "equals": "git"
                     },
                     "placeholder": "docker-compose.yml",
-                    "custom": "Custom\u2026",
+                    "custom": "Custom…",
                     "remote": {
                       "dataset": "git_files",
                       "args": {
@@ -6226,7 +6460,7 @@
                 "equals": true
               },
               "title": "{count} image update(s) on {server}",
-              "message": "The schedule {schedule} found {count} container(s) on {server} whose registry has a newer image for the same tag. See Docker \u2192 Manage \u2192 Containers.",
+              "message": "The schedule {schedule} found {count} container(s) on {server} whose registry has a newer image for the same tag. See Docker → Manage → Containers.",
               "severity": "info"
             }
           },
@@ -6333,7 +6567,48 @@
               "severity": "info"
             }
           }
-        ]
+        ],
+        "looks": {
+          "default": "list",
+          "options": [
+            {
+              "id": "list",
+              "label": "List"
+            },
+            {
+              "id": "tiles",
+              "label": "Tiles"
+            },
+            {
+              "id": "gauges",
+              "label": "Gauges"
+            }
+          ]
+        },
+        "state": {
+          "script": "summary",
+          "periodSec": 1800,
+          "initialDelaySec": 120,
+          "fields": {
+            "docker.available": "boolean",
+            "docker.version": "string",
+            "docker.total": "number",
+            "docker.running": "number",
+            "docker.stopped": "number",
+            "docker.stacks": "number",
+            "docker.split": "string",
+            "docker.errors": "number",
+            "docker.health_total": "number",
+            "docker.healthy": "number",
+            "docker.running_pct": "number",
+            "docker.stopped_pct": "number",
+            "docker.healthy_pct": "number",
+            "docker.avg_uptime": "number",
+            "docker.updates": "number",
+            "docker.updates_checked": "number",
+            "docker.updates_unknown": "number"
+          }
+        }
       }
     }
   ],
