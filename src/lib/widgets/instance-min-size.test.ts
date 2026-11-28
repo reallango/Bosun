@@ -49,6 +49,28 @@ describe('lowering the minimum stored on widget instances', () => {
       { sql: 'UPDATE widgets SET grid_min_w = ?, grid_min_h = ? WHERE id = ?', params: [2, 3, 'c'] },
     ]);
   });
+
+  it('keeps the floor an instance’s selected look asks for', () => {
+    // cpu_memory declares 4x3, but its "cores" look needs 8x6: an instance on that look is at 8x6 (the settings route
+    // put it there), and an upgrade must not lower it to 4x3, or the per-core grid can be shrunk below its floor.
+    const looks = new Map([['cpu_memory', {
+      default: 'tiles',
+      options: [
+        { id: 'tiles', label: 'Tiles' },
+        { id: 'cores', label: 'Cores', min_size: { w: 8, h: 6 }, default_size: { w: 10, h: 6 } },
+      ],
+    }]]);
+    const cores = row({ grid_min_w: 8, grid_min_h: 6, config: JSON.stringify({ look: 'cores' }) });
+    expect(minSizeStatements([cores], declared(4, 3), looks)).toEqual([]);
+    // The same instance on a look without a floor follows the package's new minimum.
+    const tiles = row({ grid_min_w: 8, grid_min_h: 6, config: JSON.stringify({ look: 'tiles' }) });
+    expect(minSizeStatements([tiles], declared(4, 3), looks)).toEqual([
+      { sql: 'UPDATE widgets SET grid_min_w = ?, grid_min_h = ? WHERE id = ?', params: [4, 3, 'w1'] },
+    ]);
+    // No stored settings (or unreadable ones) fall back to the package's minimum.
+    expect(minSizeStatements([row({ grid_min_w: 8, grid_min_h: 6, config: 'nonsense' })], declared(4, 3), looks)[0].params).toEqual([4, 3, 'w1']);
+    expect(minSizeStatements([row({ grid_min_w: 8, grid_min_h: 6 })], declared(4, 3), looks)[0].params).toEqual([4, 3, 'w1']);
+  });
 });
 
 describe('applyLookMinSize', () => {

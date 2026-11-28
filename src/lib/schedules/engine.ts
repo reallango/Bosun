@@ -250,7 +250,7 @@ export async function executeScheduleRun(scheduleId: string, opts: { trigger: 's
     const stored = parseOptions(row.options);
 
     if ('dataset' in kind.run) {
-      const args = datasetArgs(kind, stored, resource?.name ?? null, run.targetParam);
+      const args = datasetArgs(kind, stored, resource?.name ?? null, run.targetParam, resource?.kind ?? null, run.targetKindParam);
       // Fill the script's own declared defaults, exactly like a screen loading the dataset.
       for (const [name, spec] of Object.entries(run.params) as Array<[string, { default?: string | number | boolean }]>) if (args[name] === undefined && spec.default !== undefined) args[name] = spec.default;
       const view = await viewFilter(requester, run.permission, row.server_id, run.dataset?.resources);

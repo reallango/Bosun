@@ -112,7 +112,9 @@ export function validateParam(name: string, raw: unknown, where: string): Valida
     if (typeof raw.min !== 'number' || typeof raw.max !== 'number' || !Number.isFinite(raw.min) || !Number.isFinite(raw.max) || raw.min > raw.max) {
       return fail(`${where}: number parameter "${name}" needs numeric "min" and "max"`);
     }
-    if (dflt !== undefined && (typeof dflt !== 'number' || dflt < raw.min || dflt > raw.max)) return fail(`${where}: default of "${name}" must be a number between min and max`);
+    if (dflt !== undefined && (typeof dflt !== 'number' || dflt < raw.min || dflt > raw.max || (raw.integer !== false && !Number.isInteger(dflt)))) {
+      return fail(`${where}: default of "${name}" must be a ${raw.integer === false ? 'number' : 'whole number'} between min and max`);
+    }
     return { ok: true, value: { type: 'number', min: raw.min, max: raw.max, integer: raw.integer !== false, ...common, ...(dflt !== undefined ? { default: dflt as number } : {}) } };
   }
   if (raw.type === 'string') {
@@ -134,7 +136,7 @@ export function validateParam(name: string, raw: unknown, where: string): Valida
       pattern = raw.pattern;
     }
     if (!pattern && !values) return fail(`${where}: string parameter "${name}" needs an anchored "pattern" or a list of "values"`);
-    if (dflt !== undefined && (typeof dflt !== 'string' || dflt.length > maxLength || (pattern && !new RegExp(pattern).test(dflt)) || (values && !values.includes(dflt)))) return fail(`${where}: default of "${name}" does not satisfy its own rules`);
+    if (dflt !== undefined && (typeof dflt !== 'string' || dflt.length === 0 || dflt.length > maxLength || (pattern && !new RegExp(pattern).test(dflt)) || (values && !values.includes(dflt)))) return fail(`${where}: default of "${name}" does not satisfy its own rules`);
     return { ok: true, value: { type: 'string', maxLength, ...(pattern ? { pattern } : {}), ...(values ? { values } : {}), ...common, ...(dflt !== undefined ? { default: dflt as string } : {}) } };
   }
   if (raw.type === 'text') {
@@ -150,6 +152,19 @@ export function validateParam(name: string, raw: unknown, where: string): Valida
       linePattern = raw.linePattern;
     }
     if (dflt !== undefined && typeof dflt !== 'string') return fail(`${where}: default of "${name}" must be text`);
+    // A default must pass the same checks the run itself applies (see validateOne in script-run.js): a default that
+    // cannot be run would make every call that leaves the parameter out fail.
+    if (typeof dflt === 'string') {
+      const v = dflt.replace(/\r\n?/g, '\n');
+      if (v.length > maxLength) return fail(`${where}: default of "${name}" may be at most ${maxLength} characters`);
+      if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/.test(v)) return fail(`${where}: default of "${name}" contains control characters`);
+      const lines = v.split('\n');
+      if (lines.length > maxLines) return fail(`${where}: default of "${name}" may have at most ${maxLines} lines`);
+      if (linePattern) {
+        const re = new RegExp(linePattern);
+        if (lines.some(l => l !== '' && !re.test(l))) return fail(`${where}: default of "${name}" has a line with an invalid format`);
+      }
+    }
     return { ok: true, value: { type: 'text', maxLength, maxLines, ...(linePattern ? { linePattern } : {}), ...common, ...(dflt !== undefined ? { default: dflt as string } : {}) } };
   }
   return fail(`${where}: parameter "${name}" has an unknown type (use string, number, boolean or text)`);

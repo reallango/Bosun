@@ -25,9 +25,9 @@ export const MAX_LOOKS = 6;
 
 /** Read a `{w, h}` grid size (1-48), or null when it is malformed. */
 export function readLookSize(raw: unknown): LookSize | null {
-  if (!isObj(raw)) return null;
-  const w = Math.round(Number(raw.w));
-  const h = Math.round(Number(raw.h));
+  if (!isObj(raw) || typeof raw.w !== 'number' || typeof raw.h !== 'number') return null;
+  const w = Math.round(raw.w);
+  const h = Math.round(raw.h);
   return w >= 1 && w <= 48 && h >= 1 && h <= 48 ? { w, h } : null;
 }
 
