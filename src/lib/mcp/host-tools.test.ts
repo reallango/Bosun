@@ -61,7 +61,7 @@ vi.mock('@/lib/terminal/mcp-sessions', () => ({
 import { hostTools, callHostTool } from './host-tools';
 import type { ActionContext } from './actions';
 
-const ctx = { auth: { userId: 'u1', username: 'u', role: 'operator', authType: 'user' }, ip: '10.0.0.1' } as unknown as ActionContext;
+const ctx = { auth: { userId: 'u1', username: 'u', role: 'operator', authType: 'api_key', apiKeyId: 'key-1' }, ip: '10.0.0.1' } as unknown as ActionContext;
 const tool = (name: string) => hostTools().find(t => t.name === name)!;
 
 function textOf(result: { content: Array<{ type: string; text?: string }> }): string {
@@ -94,6 +94,15 @@ describe('server_command', () => {
     expect(h.requests[0]).toMatchObject({ kind: 'command', serverId: 'srv-1', command: 'systemctl restart nginx', as: 'service', reason: 'restart' });
     expect(result.structuredContent).toMatchObject({ request_id: 'req-1', status: 'pending' });
     expect(textOf(result)).toContain('one-time access request req-1');
+  });
+
+  it('refuses a signed-in principal (host commands use API keys only)', async () => {
+    h.permissions.add('exec.service');
+    const session = { ...ctx, auth: { ...ctx.auth, authType: 'user', apiKeyId: undefined } } as unknown as ActionContext;
+    const result = await callHostTool(session, tool('server_command'), { server_id: 'srv-1', command: 'id', as: 'service' });
+    expect(result.isError).toBe(true);
+    expect(textOf(result).toLowerCase()).toContain('api keys only');
+    expect(h.runs).toHaveLength(0);
   });
 
   it('rejects a bad account name', async () => {

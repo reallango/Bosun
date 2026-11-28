@@ -165,7 +165,14 @@ export async function callHostTool(ctx: ActionContext, tool: CatalogTool, args: 
   }
 }
 
+function apiKeyOnly(ctx: ActionContext) {
+  if (ctx.auth.authType === 'api_key' && ctx.auth.apiKeyId) return null;
+  return errorResult('Host commands and MCP terminal sessions are for API keys only; signed-in people should use the web terminal with their own login.');
+}
+
 async function serverCommand(ctx: ActionContext, args: Record<string, unknown>) {
+  const notApiKey = apiKeyOnly(ctx);
+  if (notApiKey) return notApiKey;
   const serverId = requiredString(args.server_id, 'server_id');
   const command = requiredString(args.command, 'command');
   const as = args.as === 'service' ? 'service' as const : args.as === 'user' ? 'user' as const : null;
@@ -189,6 +196,8 @@ async function serverCommand(ctx: ActionContext, args: Record<string, unknown>) 
 }
 
 async function containerExec(ctx: ActionContext, args: Record<string, unknown>) {
+  const notApiKey = apiKeyOnly(ctx);
+  if (notApiKey) return notApiKey;
   const serverId = requiredString(args.server_id, 'server_id');
   const container = requiredString(args.container, 'container');
   const command = requiredString(args.command, 'command');
@@ -200,6 +209,8 @@ async function containerExec(ctx: ActionContext, args: Record<string, unknown>) 
 }
 
 async function terminalOpen(ctx: ActionContext, args: Record<string, unknown>) {
+  const notApiKey = apiKeyOnly(ctx);
+  if (notApiKey) return notApiKey;
   const serverId = requiredString(args.server_id, 'server_id');
   const as = args.as === 'service' ? 'service' as const : args.as === 'user' ? 'user' as const : null;
   if (!as) return errorResult('as must be "user" or "service"');
@@ -207,11 +218,10 @@ async function terminalOpen(ctx: ActionContext, args: Record<string, unknown>) {
   const account = container ? 'service' as const : as;
   const permission = container ? CONTAINER_SHELL_PERMISSION : account === 'user' ? 'shell.user' : 'exec.service';
 
-  if (!(await hasPermission(ctx.auth, permission, serverId))) {
-    if (container) {
-      const denied = await requirePermission(ctx.auth, permission, serverId, { kind: 'container', name: container });
-      return errorResult(await toolErrorFromResponse(denied ?? new Response(), 'Not permitted'));
-    }
+  if (container) {
+    const denied = await requirePermission(ctx.auth, permission, serverId, { kind: 'container', name: container });
+    if (denied) return errorResult(await toolErrorFromResponse(denied, 'Not permitted'));
+  } else if (!(await hasPermission(ctx.auth, permission, serverId))) {
     const defs = await registeredPermissionDefs();
     const input = validateRequestInput({ kind: 'terminal', server_id: serverId, as: account, container: null, reason: args.reason }, defs);
     if (!input.ok) return errorResult(input.error);
@@ -222,6 +232,7 @@ async function terminalOpen(ctx: ActionContext, args: Record<string, unknown>) {
     );
   }
 
+  if (commandRateLimited(String(ctx.auth.userId))) return errorResult('Too many requests, slow down (RATE_LIMITED).');
   const opened = await getMcpTerminalManager().open(principalKey(ctx.auth), ctx.auth, { serverId, as: account, container, ip: ctx.ip });
   return textResult(
     `Terminal session ${opened.session_id} opened on ${serverId} as ${opened.as}${container ? ` in container ${container}` : ''}. It closes after ${opened.idle_timeout_sec / 60} idle minutes.`,
