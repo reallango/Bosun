@@ -5,6 +5,7 @@ import { validateManifest } from './package-manifest';
 import { reviewPackage } from './runtime/review';
 import { editorInitial, serializeEditor } from './runtime/layout';
 import { validateParamValues } from './runtime/script-run';
+import { elevatedHint, elevatedSiblingOf, explainElevated } from './runtime/elevated';
 import type { Block, EditorField } from './runtime/spec-v2';
 
 // The Docker manager is a package like any other: its screens, datasets and actions are checked here against each other and
@@ -34,6 +35,24 @@ describe('the Docker manager package', () => {
     const review = reviewPackage(manifest);
     expect(review.runsAsService).toBe(true);
     expect(review.widgets[0].commands.some(c => /dataset "inspect"/.test(c.what))).toBe(true);
+  });
+
+  it('points a plain action that refuses elevated options at the action that allows them', () => {
+    const action = (id: string) => spec.actions.find(a => a.id === id)!;
+    const sibling = (id: string) => elevatedSiblingOf(action(id), spec.actions)?.id ?? null;
+    for (const [plain, elevated] of [
+      ['stack_deploy', 'stack_deploy_privileged'], ['stack_deploy_later', 'stack_deploy_privileged_later'],
+      ['create', 'create_privileged'], ['recreate', 'recreate_privileged'], ['stack_update', 'stack_update_privileged'],
+    ]) expect(sibling(plain), plain).toBe(elevated);
+    expect(sibling('container_update')).toBeNull();
+    expect(sibling('stack_deploy_privileged')).toBeNull();
+    const label = (id: string) => manifest.permissions.find(p => p.id === id)?.label ?? id;
+    expect(explainElevated(
+      'needs elevated container options (capability SYS_ADMIN, security option seccomp=unconfined)', action('stack_deploy'), spec.actions, label,
+    )).toBe('needs elevated container options (capability SYS_ADMIN, security option seccomp=unconfined): use "Deploy with elevated options" (stack_deploy_privileged), which needs the "Use elevated container options" permission');
+    expect(explainElevated('the script failed', action('stack_deploy'), spec.actions, label)).toBe('the script failed');
+    expect(elevatedHint(action('stack_deploy'), spec.actions, label)).toBe(' Options that need elevation use the "Deploy with elevated options" action (stack_deploy_privileged), which needs the "Use elevated container options" permission.');
+    expect(elevatedHint(action('container_update'), spec.actions, label)).toBe('');
   });
 
   it('the Manage page counts its tabs and keeps the create forms behind buttons', () => {

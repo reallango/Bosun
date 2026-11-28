@@ -171,7 +171,7 @@ describe('risky settings', () => {
 
   it.skipIf(!hasSh)('refuses each risky key without allow_risky, lists the reasons, and passes them with it', () => {
     const cases: [string, RegExp, string][] = [
-      ['privileged=true', /: privileged$/, '--privileged'],
+      ['privileged=true', /privileged\)$/, '--privileged'],
       ['pid=host', /host PID namespace/, '--pid=host'],
       ['ipc=host', /host IPC namespace/, '--ipc=host'],
       ['cap_add=SYS_ADMIN', /capability SYS_ADMIN/, '--cap-add=SYS_ADMIN'],
@@ -182,7 +182,7 @@ describe('risky settings', () => {
     ];
     for (const [line, why, arg] of cases) {
       const refused = create(base + line);
-      expect(refused.error, line).toMatch(/^needs the permission to use elevated container options: /);
+      expect(refused.error, line).toMatch(/^needs elevated container options \(/);
       expect(refused.error, line).toMatch(why);
       expect(dockerCalls(), line).toEqual([]);
       for (const mode of ['true']) { // only the exact string true opens the gate
@@ -192,9 +192,9 @@ describe('risky settings', () => {
         fs.writeFileSync(log, '');
       }
     }
-    for (const gate of ['', 'false', 'TRUE', '1', 'yes']) expect(create(base + 'privileged=true', gate).error, gate).toMatch(/needs the permission/);
+    for (const gate of ['', 'false', 'TRUE', '1', 'yes']) expect(create(base + 'privileged=true', gate).error, gate).toMatch(/needs elevated container options \(/);
     expect(create(base + 'privileged=true\ncap_add=NET_ADMIN\nnetwork=host\nvolume=/etc:/x').error)
-      .toBe('needs the permission to use elevated container options: privileged, capability NET_ADMIN, host network, host path /etc');
+      .toBe('needs elevated container options (privileged, capability NET_ADMIN, host network, host path /etc)');
   });
 
   it.skipIf(!hasSh)('cap_drop, ordinary host paths, named volumes and bridge networks are not risky', () => {
@@ -208,7 +208,7 @@ describe('risky settings', () => {
       '/var', '/var/lib', '/run', '/run/user/1000', '/dev', '/dev/sda', '/lib', '/bin', '/home', '/home/alice', '/home/alice/.bashrc', '/home/alice/.config/x', '/opt/podman.sock'];
     for (const p of risky) {
       const r = create(`${base}volume=${p}:/x`);
-      expect(r.error, p).toMatch(/needs the permission to use elevated container options: host path /);
+      expect(r.error, p).toMatch(/needs elevated container options \(host path /);
       expect(create(`${base}volume=${p}:/x`, 'true').error, p).toBeNull();
     }
     for (const p of ['/srv', '/srv/etc', '/etcfoo', '/usrlocal', '/home/alice/docs', '/home/alice/docs/.git', '/var/lib/other', '/var/log', '/mnt/data', '/opt/proc', '/tmp/..foo']) {
@@ -220,6 +220,49 @@ describe('risky settings', () => {
     const link = path.join(bin, 'sneaky');
     try { fs.symlinkSync('/etc', link); } catch { return; }
     expect(create(`${base}volume=${link}:/x`).error).toMatch(/host path .*sneaky \(is \/etc\)/);
+  });
+
+  // The capability set Docker already gives a container, and the security options that keep its isolation.
+  const capabilityCases: [string, boolean][] = [
+    ['cap_drop=ALL\ncap_add=CHOWN\ncap_add=SETUID\ncap_add=SETGID\ncap_add=DAC_OVERRIDE\ncap_add=FOWNER\ncap_add=KILL\nsecurity_opt=no-new-privileges:true', false],
+    ['cap_add=SYS_ADMIN', true],
+    ['cap_add=ALL', true],
+    ['cap_add=cap_net_bind_service', false],
+    ['security_opt=seccomp=unconfined', true],
+    ['security_opt=apparmor:unconfined', true],
+    ['security_opt=no-new-privileges:false', true],
+    ['security_opt=label=type:container_t', false],
+    ['security_opt=foo=bar', true],
+  ];
+  const refuses = (file: string, line: string) => {
+    const params: Record<string, string> = file === 'container_create.sh'
+      ? { settings: `${base}${line}`, allow_risky: 'false' }
+      : { name: 'web', settings: `${base}${line}`, allow_risky: 'false' };
+    return out(file, params).error ?? '';
+  };
+
+  it.skipIf(!hasSh)('container_create and container_recreate only treat a capability outside the default set as elevated', () => {
+    for (const file of ['container_create.sh', 'container_recreate.sh']) {
+      for (const [line, risky] of capabilityCases) {
+        const error = refuses(file, line);
+        if (risky) expect(error, `${file}: ${line}`).toMatch(/^needs elevated container options \(/);
+        else expect(error, `${file}: ${line}`).not.toMatch(/^needs elevated container options \(/);
+      }
+      expect(refuses(file, 'security_opt=foo=bar'), file).toContain('security option foo=bar');
+    }
+  });
+
+  it('the risk classification is the same text in every script that scans for risk', () => {
+    const block = (f: string) => {
+      const s = script(f).replace(/\r\n/g, '\n');
+      const i = s.indexOf('# >>> risk classification');
+      expect(i, f).toBeGreaterThan(-1);
+      return s.slice(i, s.indexOf('# <<< risk classification', i));
+    };
+    const files = ['container_create.sh', 'container_recreate.sh', 'inspect.sh', 'stack_action.sh', 'stack_deploy.sh'];
+    const first = block(files[0]);
+    expect(first.length).toBeGreaterThan(400);
+    for (const f of files.slice(1)) expect(block(f), f).toBe(first);
   });
 });
 
@@ -342,7 +385,7 @@ exit 0`;
 
   it.skipIf(!hasSh)('refuses risky settings without the permission before touching docker, and validates the name', () => {
     fake(dockerBody());
-    expect(out('container_recreate.sh', p('privileged=true')).error).toMatch(/needs the permission/);
+    expect(out('container_recreate.sh', p('privileged=true')).error).toMatch(/needs elevated container options \(/);
     expect(out('container_recreate.sh', { ...p('env=A=1'), name: 'bad name' }).error).toMatch(/invalid container name/);
     expect(dockerCalls()).toEqual([]);
     expect(out('container_recreate.sh', p('privileged=true', 'true')).error).toBeNull();
@@ -553,7 +596,7 @@ describe('inspect (dataset)', () => {
     fakeInspect();
     const j = JSON.parse(run('inspect.sh', { name: 'web' }).stdout);
     const blob = Object.entries(j.settings as Record<string, string | string[]>).flatMap(([k, v]) => (Array.isArray(v) ? v.map((x) => `${k}=${x}`) : v === '' ? [] : [`${k}=${v}`])).join('\n');
-    expect(out('container_recreate.sh', { name: 'web', settings: blob, allow_risky: 'false' }).error).toMatch(/needs the permission/);
+    expect(out('container_recreate.sh', { name: 'web', settings: blob, allow_risky: 'false' }).error).toMatch(/needs elevated container options \(/);
     const safe = blob.split('\n').filter((l) => !/^(cap_add|device|security_opt|sysctl)=|^volume=\/etc/.test(l)).join('\n');
     const r = out('container_recreate.sh', { name: 'web', settings: safe, allow_risky: 'false' });
     expect(r.error, safe).not.toMatch(/unknown setting|invalid|use /);
@@ -824,7 +867,7 @@ exit 0`);
       fs.writeFileSync(log, '');
       composeFake(config(svc));
       const r = parseScriptOutput(deploy().stdout);
-      expect(r.error, svc).toMatch(/^needs the permission to use elevated container options: /);
+      expect(r.error, svc).toMatch(/^needs elevated container options \(/);
       expect(r.error, svc).toMatch(why);
       expect(fs.existsSync(stackDir('demo')), svc).toBe(false);
       expect(dockerCalls().some((x) => x.includes('up')), svc).toBe(false);
@@ -844,11 +887,54 @@ exit 0`);
     expect(fs.existsSync(stackDir('demo'))).toBe(false);
   });
 
+  it.skipIf(!hasSh)('only capabilities outside the default set and isolation-weakening security options are risky (issue #61)', () => {
+    // The compose from #61: cap_drop ALL, the default capabilities added back, and no-new-privileges:true.
+    composeFake(config(`      "cap_drop": [
+        "ALL"
+      ],
+      "cap_add": [
+        "CHOWN",
+        "SETUID",
+        "SETGID",
+        "DAC_OVERRIDE",
+        "FOWNER",
+        "KILL"
+      ],
+      "security_opt": [
+        "no-new-privileges:true"
+      ]`));
+    const ok = parseScriptOutput(deploy().stdout);
+    expect(ok.error).toBeNull();
+    expect(ok.done).toBe('deployed demo');
+    fs.rmSync(stackDir('demo'), { recursive: true, force: true });
+    const cases: [string, boolean, RegExp | null][] = [
+      ['"cap_add": [\n        "SYS_ADMIN"\n      ]', true, /capability SYS_ADMIN/],
+      ['"cap_add": [\n        "ALL"\n      ]', true, /capability ALL/],
+      ['"cap_add": [\n        "cap_net_bind_service"\n      ]', false, null],
+      ['"security_opt": [\n        "seccomp=unconfined"\n      ]', true, /security option seccomp=unconfined/],
+      ['"security_opt": [\n        "apparmor:unconfined"\n      ]', true, /security option apparmor:unconfined/],
+      ['"security_opt": [\n        "no-new-privileges:false"\n      ]', true, /security option no-new-privileges:false/],
+      ['"security_opt": [\n        "label=type:container_t"\n      ]', false, null],
+      ['"security_opt": [\n        "foo=bar"\n      ]', true, /security option foo=bar/],
+    ];
+    for (const [line, risky, why] of cases) {
+      fs.rmSync(stackDir('demo'), { recursive: true, force: true });
+      composeFake(config('      ' + line));
+      const r = parseScriptOutput(deploy().stdout);
+      if (risky) {
+        expect(r.error, line).toMatch(/^needs elevated container options \(/);
+        if (why) expect(r.error, line).toMatch(why);
+      } else {
+        expect(r.error, line).toBeNull();
+      }
+    }
+  });
+
   it.skipIf(!hasSh)('stack_deploy keeps the previous files when a later deployment is refused', () => {
     composeFake(config('      "ports": []'));
     deploy();
     composeFake(config('      "privileged": true'));
-    expect(parseScriptOutput(deploy({ yaml: 'services: {changed: {}}\n' }).stdout).error).toMatch(/needs the permission/);
+    expect(parseScriptOutput(deploy({ yaml: 'services: {changed: {}}\n' }).stdout).error).toMatch(/needs elevated container options \(/);
     expect(fs.readFileSync(path.join(stackDir('demo'), 'compose.yaml'), 'utf8')).toBe('services:\n  web:\n    image: nginx\n');
     expect(fs.existsSync(path.join(stackDir('demo'), 'compose.yaml.new'))).toBe(false);
   });
@@ -960,7 +1046,7 @@ exit 0`);
       fakeGit();
       composeFake(config('      "privileged": true'));
       fakeGit();
-      expect(parseScriptOutput(deploy(g).stdout).error).toMatch(/needs the permission/);
+      expect(parseScriptOutput(deploy(g).stdout).error).toMatch(/needs elevated container options \(/);
       expect(fs.existsSync(stackDir('demo'))).toBe(false);
       composeFake(config(''));
       fakeCmd('git', `echo 'fatal: repository not found' >&2; exit 128`);
@@ -977,7 +1063,7 @@ exit 0`);
       composeFake(config('      "privileged": true'));
       fs.writeFileSync(log, '');
       fakeGit();
-      expect(parseScriptOutput(deploy(g).stdout).error).toMatch(/needs the permission/);
+      expect(parseScriptOutput(deploy(g).stdout).error).toMatch(/needs elevated container options \(/);
       const repoDir = shDir('demo') + '/repo';
       expect(gitCalls().at(-1)!.join(' ')).toBe(`-C ${repoDir} reset --hard deadbeef`);
       expect(fs.existsSync(path.join(stackDir('demo'), 'repo'))).toBe(true);
@@ -1023,7 +1109,7 @@ exit 0`);
       fs.writeFileSync(log, '');
       composeFake(config(svc));
       const r = out('stack_action.sh', { name: 'g', op: 'update' });
-      expect(r.error, svc).toMatch(/the new version needs the permission to use elevated container options .*it was not deployed/);
+      expect(r.error, svc).toMatch(/the new version needs elevated container options .*it was not deployed/);
       expect(dockerCalls().some((c) => c.includes('up')), svc).toBe(false);
       expect(gitArgs().at(-1), svc).toBe(`-C ${repo} reset --hard cafe1234`);
       fs.writeFileSync(log, '');
@@ -1372,7 +1458,7 @@ exit 0`);
       // the merged config (what compose prints for the two files) has a host path of /etc
       ovFake(config('      "volumes": [\n        {\n          "type": "bind",\n          "source": "/etc",\n          "target": "/x"\n        }\n      ]'));
       const r = parseScriptOutput(deploy({ override: 'svc.web.volume=/etc:/x' }).stdout);
-      expect(r.error).toBe('needs the permission to use elevated container options: host path /etc');
+      expect(r.error).toBe('needs elevated container options (host path /etc)');
       expect(fs.readFileSync(path.join(stackDir('demo'), 'compose.override.yaml'), 'utf8')).toBe(before);
       expect(fs.readFileSync(path.join(stackDir('demo'), 'bosun.override'), 'utf8')).toBe('svc.web.port=8080:80\n');
       expect(fs.existsSync(path.join(stackDir('demo'), 'compose.override.yaml.new'))).toBe(false);

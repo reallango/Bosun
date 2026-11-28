@@ -185,6 +185,36 @@ fi
 # ---- risky options (the same check as stack_deploy.sh; keep the two in step) ----
 RISKY=''
 add_risk() { case "$RISKY" in *"$1"*) ;; *) RISKY="${RISKY:+$RISKY, }$1" ;; esac; }
+# >>> risk classification (the same text in container_create.sh, container_recreate.sh, inspect.sh, stack_action.sh and
+# stack_deploy.sh; a test compares them)
+# Only an added capability outside Docker's default set is elevated, and only a security option that weakens isolation is.
+# cap_add: ALL is every capability; cap_drop never is. An option this does not know stays elevated (the safe default).
+cap_risky() {
+  _cap=$(printf '%s' "$1" | tr '[:lower:]' '[:upper:]')
+  case "$_cap" in CAP_*) _cap=${_cap#CAP_} ;; esac
+  case "$_cap" in ALL) return 0 ;; esac
+  for _capd in CHOWN DAC_OVERRIDE FSETID FOWNER MKNOD NET_RAW SETGID SETUID SETFCAP SETPCAP NET_BIND_SERVICE SYS_CHROOT KILL AUDIT_WRITE; do
+    [ "$_cap" = "$_capd" ] && return 1
+  done
+  return 0
+}
+secopt_risky() {
+  _so=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+  case "$_so" in
+    *=*) _sok=${_so%%=*}; _sov=${_so#*=} ;;
+    *:*) _sok=${_so%%:*}; _sov=${_so#*:} ;;
+    *) _sok=$_so; _sov='' ;;
+  esac
+  case "$_sok" in
+    seccomp) case "$_sov" in ''|default) return 1 ;; esac; return 0 ;;
+    apparmor) case "$_sov" in unconfined) return 0 ;; esac; return 1 ;;
+    label) case "$_sov" in disable) return 0 ;; esac; return 1 ;;
+    systempaths) case "$_sov" in unconfined) return 0 ;; esac; return 1 ;;
+    no-new-privileges) case "$_sov" in false|0|no) return 0 ;; esac; return 1 ;;
+    *) return 0 ;;
+  esac
+}
+# <<< risk classification
 sensitive() {
   P=$1 awk 'BEGIN {
     n = split(ENVIRON["P"], a, "/"); k = 0
@@ -238,8 +268,8 @@ check_risks() { # $1: the output of `docker compose config --format json`
       else if ((k == "cap_add" || k == "devices" || k == "security_opt" || k == "sysctls" || k == "volumes" || k == "volumes_from" || k == "device_cgroup_rules" || k == "build") && line ~ /[\[{]$/) arr = k
       next
     }
-    if (arr == "cap_add" && ind == 8) print "RISK capability " item(line)
-    else if (arr == "security_opt" && ind == 8) print "RISK security option " item(line)
+    if (arr == "cap_add" && ind == 8) print "CAP " item(line)
+    else if (arr == "security_opt" && ind == 8) print "SECOPT " item(line)
     else if (arr == "sysctls" && ind == 8) print "RISK sysctl " key(line)
     else if (arr == "volumes_from" && ind == 8) print "RISK volumes of " item(line)
     else if (arr == "device_cgroup_rules" && ind == 8) print "RISK device rule " item(line)
@@ -264,6 +294,8 @@ check_risks() { # $1: the output of `docker compose config --format json`
   while IFS= read -r l; do
     case "$l" in
       'RISK '*) add_risk "${l#RISK }" ;;
+      'CAP '*) capv=${l#CAP }; if cap_risky "$capv"; then add_risk "capability $capv"; fi ;;
+      'SECOPT '*) secv=${l#SECOPT }; if secopt_risky "$secv"; then add_risk "security option $secv"; fi ;;
       'PATH '*) host_path_risk "${l#PATH }" ;;
     esac
   done <<EOF
@@ -377,7 +409,7 @@ if [ "$op" = update ]; then
   check_risks "$cfg"
   if [ -n "$RISKY" ] && [ "$BOSUN_PARAM_allow_risky" != true ]; then
     [ -z "$prev" ] || restore
-    fail "the new version needs the permission to use elevated container options ($RISKY); it was not deployed. Someone with that permission can use Update with elevated options."
+    fail "the new version needs elevated container options ($RISKY); it was not deployed"
   fi
 fi
 dc "$@" >/dev/null 2>"$errf"; rc=$?
