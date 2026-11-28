@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "docker",
   "name": "Docker Containers",
-  "version": "1.1.4",
+  "version": "1.1.6",
   "description": "Containers on the host with logs, a shell, start, stop and restart; edit a container, create containers and stacks (a compose file, or one from a Git repository), back containers and stacks up with restic (volumes, mapped folders, stack files and the image, with the pinned image version) and restore them, update containers and stacks to newer images with a health check and automatic rollback, and a Manage page for images, volumes, networks and backups.",
   "author": "Bosun",
   "requires": {
@@ -586,7 +586,7 @@
               },
               "credential": {
                 "type": "string",
-                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9_-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto"
               }
@@ -660,7 +660,7 @@
               },
               "credential": {
                 "type": "string",
-                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9_-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto"
               }
@@ -747,7 +747,7 @@
               },
               "credential": {
                 "type": "string",
-                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9_-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto"
               }
@@ -770,7 +770,7 @@
               },
               "credential": {
                 "type": "string",
-                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9_-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto"
               }
@@ -798,7 +798,7 @@
               },
               "credential": {
                 "type": "string",
-                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9_-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto"
               }
@@ -854,7 +854,7 @@
               },
               "destination": {
                 "type": "string",
-                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9_-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto"
               }
@@ -906,7 +906,7 @@
               },
               "destination": {
                 "type": "string",
-                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9_-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto"
               }
@@ -1682,7 +1682,7 @@
               },
               "destination": {
                 "type": "string",
-                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9_-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto"
               }
@@ -1704,7 +1704,14 @@
                     "kind": "literal:container",
                     "name": "param.name",
                     "settings": "param.settings"
-                  }
+                  },
+                  "credentials": [
+                    {
+                      "kind": "backup_destination",
+                      "entry": "destination",
+                      "default": true
+                    }
+                  ]
                 }
               },
               {
@@ -2092,7 +2099,7 @@
               },
               "credential": {
                 "type": "string",
-                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9_-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto"
               }
@@ -2185,7 +2192,7 @@
               },
               "credential": {
                 "type": "string",
-                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9_-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto"
               }
@@ -2283,7 +2290,7 @@
               },
               "credential": {
                 "type": "string",
-                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9_-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto"
               }
@@ -2375,7 +2382,7 @@
               },
               "credential": {
                 "type": "string",
-                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9_-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto"
               }
@@ -2575,7 +2582,7 @@
               },
               "destination": {
                 "type": "string",
-                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9_-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto"
               }
@@ -2640,7 +2647,7 @@
               },
               "credential": {
                 "type": "string",
-                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9_-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto",
                 "from": "credential"
@@ -2691,7 +2698,7 @@
               },
               "credential": {
                 "type": "string",
-                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9_-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto",
                 "from": "credential"
@@ -2855,7 +2862,7 @@
             "params": {
               "destination": {
                 "type": "string",
-                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9_-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto"
               }
@@ -2929,7 +2936,7 @@
               },
               "destination": {
                 "type": "string",
-                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9_-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto"
               }
@@ -3007,7 +3014,7 @@
               },
               "destination": {
                 "type": "string",
-                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
+                "pattern": "^(auto|-|[A-Za-z0-9_-]{1,64})$",
                 "maxLength": 64,
                 "default": "auto"
               }
@@ -4596,7 +4603,8 @@
                       "branch": "values.branch",
                       "file": "values.file",
                       "pull": "values.pull",
-                      "override": "values.override"
+                      "override": "values.override",
+                      "credential": "values.credential"
                     }
                   },
                   {
@@ -4612,7 +4620,8 @@
                       "branch": "values.branch",
                       "file": "values.file",
                       "pull": "values.pull",
-                      "override": "values.override"
+                      "override": "values.override",
+                      "credential": "values.credential"
                     }
                   }
                 ]
@@ -4849,7 +4858,8 @@
                       "branch": "values.branch",
                       "file": "values.file",
                       "pull": "values.pull",
-                      "override": "values.override"
+                      "override": "values.override",
+                      "credential": "values.credential"
                     }
                   },
                   {
@@ -4865,7 +4875,8 @@
                       "branch": "values.branch",
                       "file": "values.file",
                       "pull": "values.pull",
-                      "override": "values.override"
+                      "override": "values.override",
+                      "credential": "values.credential"
                     }
                   }
                 ]
@@ -5988,6 +5999,7 @@
                     "input": "select",
                     "credentialsKind": "backup_destination",
                     "default": "auto",
+                    "transient": true,
                     "help": "Automatic uses the server's default destination. Pick another one to keep this backup elsewhere.",
                     "value": "context.destination_id"
                   },
@@ -6062,6 +6074,7 @@
                     "input": "select",
                     "credentialsKind": "backup_destination",
                     "default": "auto",
+                    "transient": true,
                     "help": "Automatic uses the server's default destination. Pick another one to keep this backup elsewhere."
                   },
                   {
@@ -6208,7 +6221,8 @@
                     "params": {
                       "mode": "literal:run",
                       "kind": "values.kind",
-                      "name": "values.name"
+                      "name": "values.name",
+                      "destination": "values.destination"
                     }
                   }
                 ]

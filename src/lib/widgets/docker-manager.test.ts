@@ -3,7 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { validateManifest } from './package-manifest';
 import { reviewPackage } from './runtime/review';
-import { editorInitial, serializeEditor } from './runtime/layout';
+import { editorInitial, editorSubmitParams, serializeEditor } from './runtime/layout';
 import { validateParamValues } from './runtime/script-run';
 import { elevatedHint, elevatedSiblingOf, explainElevated } from './runtime/elevated';
 import type { Block, EditorField } from './runtime/spec-v2';
@@ -277,5 +277,86 @@ describe('the Docker manager package', () => {
       for (const v of action.variants ?? []) expect(v.credentials, id).toBeUndefined();
     }
     expect(spec.datasets!.backups!.credentials).toMatchObject([{ kind: 'backup_destination', entry: 'destination', default: true }]);
+  });
+});
+
+describe('the credential entry a dialog names', () => {
+  // A migrated entry id (the store writes mig_<kind>_<slug>) and the id of an entry created in the UI.
+  const MIGRATED = 'mig_backup_destination_backups_migrated';
+  const UUID = '0f7c4a2e-1b3d-4a5f-9c8e-2d6b7a1c3e5f';
+  const allActions = () => {
+    const raw = spec.actions as unknown;
+    return (Array.isArray(raw) ? raw : Object.values(raw ?? {})) as {
+      id: string; params?: Record<string, { pattern?: string; default?: unknown }>;
+      variants?: { script: string; args?: Record<string, string>; before?: { script: string; args?: Record<string, string>; credentials?: unknown } }[];
+    }[];
+  };
+
+  /** What an editor block sends: the settings blob for its `param` plus the parameters its submit names (see EditorBlock). */
+  const send = (screenId: string, submitIndex: number, pick: Record<string, string>) => {
+    const [ed] = editors(spec.screens![screenId].blocks);
+    const ctx = { context: { kind: 'container', name: 'web', id: 'c'.repeat(64), destination_id: MIGRATED } };
+    const values = { ...editorInitial(ed.fields, ctx), ...pick };
+    const submit = ed.submits![submitIndex];
+    const action = allActions().find(a => a.id === submit.action)!;
+    const { params } = editorSubmitParams(
+      action as unknown as Parameters<typeof editorSubmitParams>[0], submit, ed.param, ed.fields, values, ctx,
+    );
+    return { action, params: params as Record<string, unknown> };
+  };
+
+  it('backs up to the destination the Back up dialog names, and never puts it in the settings', () => {
+    const { params } = send('backup_target', 0, { destination: MIGRATED });
+    expect(params.destination).toBe(MIGRATED);
+    expect(String(params.settings)).not.toContain('destination=');
+    expect(() => validateParamValues(spec.scripts!.backup_run.params, params)).not.toThrow();
+    // untouched, the select means "the server's default"
+    expect(send('backup_target', 0, {}).params.destination).toBe('auto');
+  });
+
+  it('restores from the destination the snapshot came from, and never puts it in the settings', () => {
+    const { params } = send('restore_backup', 0, {});
+    expect(params.destination).toBe(MIGRATED);
+    expect(String(params.settings)).not.toContain('destination=');
+    expect(() => validateParamValues(spec.scripts!.backup_restore.params, params)).not.toThrow();
+  });
+
+  it('deploys a stack with the Git credential the dialog pins', () => {
+    for (const screenId of ['stack_new', 'stack_edit']) {
+      const [ed] = editors(spec.screens![screenId].blocks);
+      expect(ed.submits!.length).toBe(2);
+      for (let i = 0; i < ed.submits!.length; i += 1) {
+        const { params } = send(screenId, i, { source: 'git', credential: UUID });
+        expect(params.credential, `${screenId} submit ${i}`).toBe(UUID);
+      }
+    }
+  });
+
+  it('accepts every credential entry id the store writes as a parameter', () => {
+    for (const script of Object.values(spec.scripts ?? {})) {
+      for (const [name, spec2] of Object.entries(script.params ?? {})) {
+        if (name !== 'credential' && name !== 'destination') continue;
+        expect((spec2 as { pattern?: string }).pattern, name).toBeDefined();
+      }
+    }
+    for (const action of allActions()) for (const [name, p] of Object.entries(action.params ?? {})) {
+      if (name !== 'credential' && name !== 'destination') continue;
+      for (const id of [MIGRATED, UUID]) {
+        expect(() => validateParamValues({ [name]: p }, { [name]: id }), `${action.id}.${name} = ${id}`).not.toThrow();
+      }
+      expect(() => validateParamValues({ [name]: p }, { [name]: 'two words' })).toThrow();
+    }
+  });
+
+  it('takes a backup before every image update, with the destination it resolves', () => {
+    const want = [{ kind: 'backup_destination', entry: 'destination', default: true }];
+    for (const id of ['container_update_backup', 'stack_update_images_backup']) {
+      const action = allActions().find(a => a.id === id)!;
+      expect(action.variants!.length).toBeGreaterThan(0);
+      for (const v of action.variants!) {
+        expect(v.before?.script, id).toBe('backup_run');
+        expect(v.before?.credentials, `${id} -> ${v.script}`).toMatchObject(want);
+      }
+    }
   });
 });

@@ -627,7 +627,7 @@ pin_stack() { # $1 = stack name; redeploys it with an extra override file, the u
 STOPPED=''
 start_stopped() {
   [ -z "$STOPPED" ] && return 0
-  for c in $STOPPED; do $D start "$c" >/dev/null 2>&1; done
+  for c in $STOPPED; do $D start "$c" >/dev/null 2>&1 || echo "[step] WARNING: the container $c did not start again"; done
   STOPPED=''
 }
 tmp=$(mktemp -d) || fail 'cannot create a temporary folder'
@@ -719,6 +719,18 @@ fi
 # ---- restore and forget --------------------------------------------------------------------------------------
 restic_prepare
 errf="$tmp/err"; : > "$errf"
+# A restore or a delete acts only on a backup of the container or stack it names: the tags Bosun wrote on the snapshot
+# say which one it is. Without this a grant for one stack or container would reach another one's backup by its id.
+snapshot_tags=""
+if ! restic_run -r "$RESTIC_REPO_ARG" cat snapshot "$snapshot" > "$tmp/snapshot" 2>/dev/null; then
+  fail "the backup $snapshot cannot be read"
+fi
+snapshot_tags=$(tr -d '\n' < "$tmp/snapshot")
+case "$snapshot_tags" in *"\"bosun:kind=$kind\""*) ;; *) fail "the backup $snapshot is not a backup of a $kind" ;; esac
+case "$kind" in
+  container) case "$snapshot_tags" in *"\"bosun:container=$name\""*) ;; *) fail "the backup $snapshot is not a backup of the container $name" ;; esac ;;
+  stack) case "$snapshot_tags" in *"\"bosun:stack=$name\""*) ;; *) fail "the backup $snapshot is not a backup of the stack $name" ;; esac ;;
+esac
 if [ "$mode" = forget ]; then
   echo 'PROGRESS 0/1'
   echo "[step] Deleting the snapshot $snapshot"
