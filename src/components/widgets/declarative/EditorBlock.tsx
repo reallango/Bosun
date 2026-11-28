@@ -49,6 +49,29 @@ export function CodeBlock({ title, text, filename }: { title?: string; text: str
   );
 }
 
+/** A select of the entries of a credential kind: "Automatic" first, then each entry the caller may see. */
+function CredentialSelect({ f, value, onChange, ui, cls }: { f: EditorField; value: string; onChange: (v: string) => void; ui: LayoutUi; cls: string }) {
+  const kind = f.credentialsKind!;
+  const [options, setOptions] = useState<Option[]>([]);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!ui.credentialOptions) { setError('Credentials are not available here.'); return; }
+    let live = true;
+    void ui.credentialOptions(kind).then(o => { if (live) { setOptions(o); setError(null); } }).catch(e => { if (live) setError(e instanceof Error ? e.message : String(e)); });
+    return () => { live = false; };
+  }, [kind, ui]);
+  const cur = value || 'auto';
+  return (
+    <div className="space-y-1">
+      <select className={cls} value={cur} onChange={e => onChange(e.target.value)}>
+        {!options.some(o => o.value === cur) && <option value={cur}>{cur === 'auto' ? 'Automatic' : cur}</option>}
+        {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+      </select>
+      {error && <span className="block text-[11px] text-amber-700 dark:text-amber-400">Could not load the entries: {error}</span>}
+    </div>
+  );
+}
+
 /** A select whose options come from the host (the branches of a repository), with an optional "Custom" entry that shows a box. */
 function RemoteSelect({ f, value, onChange, ctx, values, ui, cls }: { f: EditorField; value: string; onChange: (v: string) => void; ctx: ViewContext; values: EditorValues; ui: LayoutUi; cls: string }) {
   const remote = f.remote!;
@@ -289,6 +312,9 @@ export function EditorBlock({ block, ctx, ui, dialog }: { block: EditorBlockSpec
     let labelled = true;   // false when the control needs its own label line (several boxes)
     if (f.input === 'select' && f.remote) {
       control = <RemoteSelect f={f} value={String(values[f.name] ?? '')} onChange={v => set(f.name, v)} ctx={ctx} values={values} ui={ui} cls={field} />;
+      labelled = false;
+    } else if (f.input === 'select' && f.credentialsKind) {
+      control = <CredentialSelect f={f} value={String(values[f.name] ?? '')} onChange={v => set(f.name, v)} ui={ui} cls={field} />;
       labelled = false;
     } else if (f.input === 'select') {
       const opts = editorOptions(f, ctx);

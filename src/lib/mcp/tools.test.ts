@@ -81,6 +81,7 @@ describe('MCP core tools', () => {
       'access_whoami', 'access_request', 'access_request_wait',
       'schedules_list', 'schedule_create', 'schedule_run_now',
       'update_status', 'notifications_list',
+      'credentials_list', 'credentials_create', 'credentials_update', 'credentials_delete',
     ]);
   });
 

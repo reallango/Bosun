@@ -16,6 +16,9 @@ import { getPackageFile } from '@/lib/widgets/materialize-db';
 import { loadLookups } from '@/lib/widgets/runtime/lookups';
 import { dataSectionFor } from '@/lib/widgets/runtime/store-data';
 import { getPackageSecrets } from '@/lib/widgets/package-secrets';
+import { resolveCredentialUses, CredentialError, type ResolvedCredentials } from '@/lib/widgets/credentials';
+import type { CredentialKindDef } from '@/lib/widgets/credentials-schema';
+import type { CredentialUse } from '@/lib/widgets/runtime/spec-v2';
 
 export class RuntimeError extends Error {
   status: number;
@@ -33,6 +36,8 @@ export interface LoadedSpec {
   spec: WidgetSpec;
   /** Hosts the package's manifest lets its lookups contact. */
   network: string[];
+  /** Credential kinds the package declares (see credentials-schema.ts). */
+  credentials: CredentialKindDef[];
 }
 
 const SPEC_TTL_MS = 15_000;
@@ -58,21 +63,26 @@ export async function loadWidgetSpec(type: string): Promise<LoadedSpec | null> {
   const row = rowsToObjects(r)[0];
   if (row && Number(row.enabled) === 1) {
     const perms = await rqlite.query('SELECT id FROM permission_definitions WHERE source = ?', [`package:${row.package_id}`]);
+    const meta = await packageMetaOf(String(row.package_id));
     let raw: unknown = null;
     try { raw = JSON.parse(String(row.spec)); } catch { raw = null; }
-    const v = validateWidgetSpec(raw, (perms.values ?? []).map(p => String(p[0])), String(row.package_id));
-    if (v.ok) value = { type, packageId: String(row.package_id), spec: v.value, network: await networkOf(String(row.package_id)) };
+    const v = validateWidgetSpec(raw, (perms.values ?? []).map(p => String(p[0])), String(row.package_id), meta.credentials.map(c => c.id));
+    if (v.ok) value = { type, packageId: String(row.package_id), spec: v.value, network: meta.network, credentials: meta.credentials };
   }
   specCache.set(type, { at: Date.now(), value });
   return value;
 }
 
-async function networkOf(packageId: string): Promise<string[]> {
+async function packageMetaOf(packageId: string): Promise<{ network: string[]; credentials: CredentialKindDef[] }> {
   const r = rowsToObjects(await rqlite.query('SELECT manifest FROM widget_packages WHERE id = ?', [packageId]))[0];
   try {
     const m = JSON.parse(String(r?.manifest ?? '{}'));
-    return Array.isArray(m.network) ? m.network.filter((h: unknown): h is string => typeof h === 'string') : [];
-  } catch { return []; }
+    const network = Array.isArray(m.network) ? m.network.filter((h: unknown): h is string => typeof h === 'string') : [];
+    const credentials = Array.isArray(m.credentials)
+      ? m.credentials.filter((c: unknown): c is CredentialKindDef => !!c && typeof c === 'object' && typeof (c as { id?: unknown }).id === 'string')
+      : [];
+    return { network, credentials };
+  } catch { return { network: [], credentials: [] }; }
 }
 
 interface ServerInfo { id: string; platform: 'linux' | 'windows' }
@@ -148,8 +158,9 @@ export interface ScriptResult extends ActionResult {
 /**
  * Run one of a package's host scripts on a server, as the account the script declares. The parameters are validated
  * against the script's declaration and reach the script as data (environment variables), never as part of its text.
+ * `ext.credentials` are the BOSUN_CRED_* values already resolved for this one script (see prepareScriptAction).
  */
-export async function runScript(serverId: string, loaded: LoadedSpec, scriptId: string, args: unknown, ext: RunExtras & { jobId?: string } = {}): Promise<ScriptResult> {
+export async function runScript(serverId: string, loaded: LoadedSpec, scriptId: string, args: unknown, ext: RunExtras & { jobId?: string; credentials?: ResolvedCredentials } = {}): Promise<ScriptResult> {
   const script = loaded.spec.scripts?.[scriptId];
   if (!script) throw new RuntimeError(`The package has no script "${scriptId}"`, 404, 'SCRIPT_NOT_FOUND');
   const server = await loadServer(serverId);
@@ -160,9 +171,9 @@ export async function runScript(serverId: string, loaded: LoadedSpec, scriptId: 
   const values = validateParamValues(script.params, args);
   const secrets = script.secrets?.length ? await getPackageSecrets(loaded.packageId, script.secrets) : {};
   const stdinParams = Object.entries(script.params).filter(([, p]) => p.type === 'text').map(([n]) => n);
-  const inv = buildScriptInvocation(server.platform, text, values, { jobId: ext.jobId, secrets, stdinParams });
-  // Whatever a script prints, a secret it was given never leaves it (live output included).
-  const secretValues = Object.values(secrets).filter(v => v.length >= 4);
+  const inv = buildScriptInvocation(server.platform, text, values, { jobId: ext.jobId, secrets, credentials: ext.credentials?.env, stdinParams });
+  // Whatever a script prints, a secret or credential it was given never leaves it (live output included).
+  const secretValues = [...Object.values(secrets), ...(ext.credentials?.secrets ?? [])].filter(v => v.length >= 4);
   const scrub = (s: string) => secretValues.reduce((acc, v) => acc.split(v).join('***'), s);
   const onData = ext.onData && secretValues.length ? (t: string, isErr: boolean) => ext.onData!(scrub(t), isErr) : ext.onData;
   const out = await runAs(server, script.as, inv.command, script.timeoutSec, inv.stdin, { onData, signal: ext.signal });
@@ -188,7 +199,14 @@ export async function loadDataset(serverId: string, loaded: LoadedSpec, datasetI
   const key = `${serverId}|${loaded.type}|${datasetId}|${JSON.stringify(values)}`;
   const hit = datasetCache.get(key);
   if (ds.cacheSec > 0 && hit && Date.now() - hit.at < ds.cacheSec * 1000) return { data: hit.value, collectedAt: new Date(hit.at).toISOString() };
-  const r = await runScript(serverId, loaded, ds.script, values);
+  let credentials: ResolvedCredentials | undefined;
+  try {
+    credentials = await resolveCredentialUses(loaded.packageId, loaded.credentials, ds.credentials, values, serverId, `dataset:${datasetId}`);
+  } catch (e) {
+    if (e instanceof CredentialError) throw new RuntimeError(e.message, e.status, e.code);
+    throw e;
+  }
+  const r = await runScript(serverId, loaded, ds.script, values, { credentials });
   if (r.protocol.error) throw new RuntimeError(r.protocol.error, 502, 'DATASET_FAILED');
   if (r.timedOut) throw new RuntimeError('The host took too long to answer', 504, 'DATASET_TIMEOUT');
   const out = r.stdout.trim();
@@ -240,8 +258,10 @@ export async function buildActionContext(serverId: string, loaded: LoadedSpec, i
 export interface PreparedScript {
   scriptId: string;
   args: Record<string, unknown>;
+  /** BOSUN_CRED_* values resolved for this one script. */
+  credentials?: ResolvedCredentials;
   /** A script to run first; the main one does not run when it fails. */
-  before?: { scriptId: string; args: Record<string, unknown> };
+  before?: { scriptId: string; args: Record<string, unknown>; credentials?: ResolvedCredentials };
 }
 
 /** Validate the action's parameters, pick the variant that applies to this host and work out the script's arguments. */
@@ -254,13 +274,25 @@ export async function prepareScriptAction(serverId: string, loaded: LoadedSpec, 
   if (!script) throw new RuntimeError(`The package has no script "${variant.script}"`, 404, 'SCRIPT_NOT_FOUND');
   const beforeScript = variant.before ? loaded.spec.scripts?.[variant.before.script] : undefined;
   if (variant.before && !beforeScript) throw new RuntimeError(`The package has no script "${variant.before.script}"`, 404, 'SCRIPT_NOT_FOUND');
-  return {
-    scriptId: variant.script,
-    args: resolveScriptArgs(variant, script, ctx),
-    ...(variant.before && beforeScript ? {
-      before: { scriptId: variant.before.script, args: resolveScriptArgs({ script: variant.before.script, args: variant.before.args }, beforeScript, ctx) },
-    } : {}),
-  };
+  const args = resolveScriptArgs(variant, script, ctx);
+  const beforeArgs = variant.before && beforeScript ? resolveScriptArgs({ script: variant.before.script, args: variant.before.args }, beforeScript, ctx) : undefined;
+  try {
+    const credentials = await resolveCredentialUses(loaded.packageId, loaded.credentials, variant.credentials, args, serverId, action.id);
+    const beforeCredentials = variant.before && beforeArgs
+      ? await resolveCredentialUses(loaded.packageId, loaded.credentials, variant.before.credentials, beforeArgs, serverId, action.id)
+      : undefined;
+    return {
+      scriptId: variant.script,
+      args,
+      ...(Object.keys(credentials.env).length ? { credentials } : {}),
+      ...(variant.before && beforeArgs ? {
+        before: { scriptId: variant.before.script, args: beforeArgs, ...(beforeCredentials && Object.keys(beforeCredentials.env).length ? { credentials: beforeCredentials } : {}) },
+      } : {}),
+    };
+  } catch (e) {
+    if (e instanceof CredentialError) throw new RuntimeError(e.message, e.status, e.code);
+    throw e;
+  }
 }
 
 export interface RuntimeData {

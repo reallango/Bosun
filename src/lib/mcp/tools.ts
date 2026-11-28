@@ -152,6 +152,25 @@ const jobId: JsonSchema = {
   description: 'Job id returned by a widget action that starts a job.',
 };
 
+const credentialObject: JsonSchema = {
+  type: 'object',
+  additionalProperties: { type: 'string' },
+  description: 'Field id -> value. Secrets are write-only and never returned by any read.',
+};
+
+const credentialServers: JsonSchema = {
+  type: 'array',
+  items: { type: 'string', minLength: 1, maxLength: 128 },
+  description: 'Servers the entry applies to (empty: every server, where the kind allows it).',
+};
+
+const credentialWidgetType: JsonSchema = {
+  type: 'string',
+  minLength: 1,
+  maxLength: 64,
+  description: 'The widget type that belongs to the package (servers_list is unrelated; see the widget pages).',
+};
+
 /** The fixed tools. Compact by default; `detail: true` returns the full object. */
 export function coreTools(): CatalogTool[] {
   return [
@@ -361,6 +380,87 @@ export function coreTools(): CatalogTool[] {
         additionalProperties: false,
       },
       annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    {
+      kind: 'core',
+      coreName: 'credentials_list',
+      name: 'credentials_list',
+      title: 'List package credentials',
+      description: 'Credential entries of a widget package (for example Git access or backup destinations): public fields, whether each secret is set, the server scope and last use. Never a secret value.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          widget_type: credentialWidgetType,
+          kind: { type: 'string', description: 'One credential kind; leave out for every kind you may view.' },
+          server_id: { ...serverId, description: 'Only entries that apply to this server.' },
+        },
+        required: ['widget_type'],
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+    },
+    {
+      kind: 'core',
+      coreName: 'credentials_create',
+      name: 'credentials_create',
+      title: 'Create a package credential',
+      description: 'Create one credential entry (same body as POST /api/widgets/:type/credentials). Needs the credential kind\'s permission on every server it applies to.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          widget_type: credentialWidgetType,
+          kind: { type: 'string', minLength: 1, maxLength: 40 },
+          name: { type: 'string', minLength: 1, maxLength: 80 },
+          fields: credentialObject,
+          secrets: credentialObject,
+          servers: credentialServers,
+          is_default: { type: 'boolean', description: 'Make it the default for its servers (when the kind has a per-server default).' },
+        },
+        required: ['widget_type', 'kind', 'name'],
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: false, openWorldHint: false },
+    },
+    {
+      kind: 'core',
+      coreName: 'credentials_update',
+      name: 'credentials_update',
+      title: 'Update a package credential',
+      description: 'Edit one credential entry (same body as PUT /api/widgets/:type/credentials). Leave a secret out (or send "") to keep it unchanged.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          widget_type: credentialWidgetType,
+          kind: { type: 'string', minLength: 1, maxLength: 40 },
+          id: { type: 'string', minLength: 1, maxLength: 64 },
+          name: { type: 'string', minLength: 1, maxLength: 80 },
+          fields: credentialObject,
+          secrets: credentialObject,
+          servers: credentialServers,
+          is_default: { type: 'boolean' },
+        },
+        required: ['widget_type', 'kind', 'id'],
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: false, openWorldHint: false },
+    },
+    {
+      kind: 'core',
+      coreName: 'credentials_delete',
+      name: 'credentials_delete',
+      title: 'Delete a package credential',
+      description: 'Delete one credential entry (same as DELETE /api/widgets/:type/credentials).',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          widget_type: credentialWidgetType,
+          kind: { type: 'string', minLength: 1, maxLength: 40 },
+          id: { type: 'string', minLength: 1, maxLength: 64 },
+        },
+        required: ['widget_type', 'kind', 'id'],
+        additionalProperties: false,
+      },
+      annotations: { readOnlyHint: false, openWorldHint: false },
     },
   ];
 }

@@ -5,7 +5,7 @@ import { buildWidgetTools } from './tools';
 import { callWidgetAction, type WidgetDeps } from './actions';
 import { sampleSource } from '../../../test/mcp-fixtures';
 
-const loaded = { type: 'sample_widget', packageId: 'sample', spec: sampleSource.spec, network: [] };
+const loaded = { type: 'sample_widget', packageId: 'sample', spec: sampleSource.spec, network: [], credentials: [] };
 const ctx = { auth: { userId: 'u1', username: 'uma', role: 'user' }, ip: '127.0.0.1' };
 const restart = buildWidgetTools([sampleSource], () => true).find(t => t.actionId === 'restart')!;
 

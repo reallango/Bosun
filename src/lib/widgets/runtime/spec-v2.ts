@@ -71,8 +71,30 @@ export interface ActionVariant {
   script: string;
   /** Script parameter -> where its value comes from: `param.<action parameter>` or a path into the context. */
   args: Record<string, string>;
+  /** Credentials this variant's script receives (see credentials-schema.ts); they reach it as BOSUN_CRED_* only. */
+  credentials?: CredentialUse[];
   /** A package script to run before the main one; the action fails without running the main script when it fails. */
-  before?: { script: string; args: Record<string, string> };
+  before?: { script: string; args: Record<string, string>; credentials?: CredentialUse[] };
+}
+
+/**
+ * One credential an action variant or dataset hands to its script. The entry is picked once, on the server: a pinned
+ * entry id, the longest match for a URL, or the server's default. Only that entry's fields reach the script.
+ */
+export interface CredentialUse {
+  /** A credential kind the package declares. */
+  kind: string;
+  /** Script parameter naming a pinned entry id (empty or "auto" means automatic). */
+  entry?: string;
+  /** Script parameter naming a repository URL to match (with `match.url` in the manifest). */
+  url?: string;
+  /** Use the server's default entry of this kind. */
+  default?: boolean;
+  /**
+   * Refuse to run when no entry is found (default: true for `default`, false for a URL match so public repositories
+   * work without a credential).
+   */
+  required?: boolean;
 }
 
 export interface Badge { text: string; color: (typeof BADGE_COLORS)[number]; when?: Cond }
@@ -211,6 +233,8 @@ export interface EditorField {
   derive?: Record<string, RowDerive>;
   /** Button: asks the host to fill fields. The dataset answers { fill: { <field key>: value }, errors?: [], notes?: [] }. */
   tool?: { dataset: string; args: Record<string, string>; busy?: string };
+  /** Select: the options are the entries of this credential kind (plus "Automatic"), loaded from the generic credentials API. */
+  credentialsKind?: string;
 }
 
 export interface EditorSubmit {
@@ -240,6 +264,8 @@ export type Block = (
   | { type: 'jobProgress'; when?: Cond }
   /** `path`: the part of the widget's data the inner view shows (default: all of it). */
   | { type: 'view'; view: ViewSpec; path?: string; when?: Cond }
+  /** The entries of one credential kind (public fields, secret status, last use), with add/edit/delete dialogs. */
+  | { type: 'credentials'; kind: string; title?: string; description?: string; rowAction?: { action: string; label: string; icon?: string }; when?: Cond }
 ) & { hideBelow?: WidgetSize };
 
 /** What the validators of version 1 give version 2 to work with. */
@@ -381,8 +407,48 @@ function validateVariantArgs(
   return { ok: true, value: args };
 }
 
+/**
+ * The credentials a script is handed (`credentials` on a variant, a `before` variant or a dataset). `paramNames` are the
+ * script's parameters: an `entry` or `url` names the parameter holding the pinned entry id or the URL.
+ */
+export function validateCredentialUses(
+  raw: unknown, where: string, kinds: ReadonlySet<string>, paramNames: ReadonlySet<string>,
+): Validated<CredentialUse[] | undefined> {
+  if (raw === undefined) return { ok: true, value: undefined };
+  if (!Array.isArray(raw) || raw.length < 1 || raw.length > 4) return fail(`${where}: "credentials" must list 1-4 uses`);
+  const out: CredentialUse[] = [];
+  const seen = new Set<string>();
+  for (const u of raw as unknown[]) {
+    if (!isObj(u) || typeof u.kind !== 'string' || !kinds.has(u.kind)) return fail(`${where}: each credential use needs a "kind" this package declares`);
+    if (seen.has(u.kind)) return fail(`${where}: the credential kind "${u.kind}" is used twice (its variables would collide)`);
+    seen.add(u.kind);
+    const use: CredentialUse = { kind: u.kind };
+    let any = false;
+    for (const key of ['entry', 'url'] as const) {
+      if (u[key] === undefined) continue;
+      if (typeof u[key] !== 'string' || !PARAM_RE.test(u[key] as string) || !paramNames.has(u[key] as string)) {
+        return fail(`${where}: "${key}" must name a parameter of the script`);
+      }
+      use[key] = u[key] as string;
+      any = true;
+    }
+    if (u.default !== undefined) {
+      if (typeof u.default !== 'boolean') return fail(`${where}: "default" must be true or false`);
+      use.default = u.default;
+      any = true;
+    }
+    if (u.required !== undefined) {
+      if (typeof u.required !== 'boolean') return fail(`${where}: "required" must be true or false`);
+      use.required = u.required;
+    }
+    if (!any) return fail(`${where}: a credential use needs "entry", "url" or "default"`);
+    out.push(use);
+  }
+  return { ok: true, value: out };
+}
+
 function validateOneVariant(
-  raw: unknown, where: string, scripts: Record<string, ScriptSpec>, actionParams: Record<string, ParamSpec>,
+  raw: unknown, where: string, scripts: Record<string, ScriptSpec>, actionParams: Record<string, ParamSpec>, kinds: ReadonlySet<string>,
 ): Validated<ActionVariant> {
   if (!isObj(raw)) return fail(`${where}: each variant must be an object`);
   if (typeof raw.script !== 'string' || !(raw.script in scripts)) return fail(`${where}: a variant must name one of the package scripts`);
@@ -390,24 +456,29 @@ function validateOneVariant(
   if (raw.when !== undefined) { const c = cond(raw.when, `${where} variant "when"`); if (!c.ok) return c; when = c.value; }
   const args = validateVariantArgs(raw.args, where, raw.script, scripts[raw.script], actionParams);
   if (!args.ok) return args;
+  const paramNames = new Set(Object.keys(scripts[raw.script].params));
+  const credentials = validateCredentialUses(raw.credentials, where, kinds, paramNames);
+  if (!credentials.ok) return credentials;
   let before: ActionVariant['before'];
   if (raw.before !== undefined) {
     if (!isObj(raw.before)) return fail(`${where}: "before" must be an object`);
     if (typeof raw.before.script !== 'string' || !(raw.before.script in scripts)) return fail(`${where}: "before.script" must name one of the package scripts`);
     const b = validateVariantArgs(raw.before.args, `${where} before`, raw.before.script, scripts[raw.before.script], actionParams);
     if (!b.ok) return b;
-    before = { script: raw.before.script, args: b.value };
+    const bc = validateCredentialUses(raw.before.credentials, `${where} before`, kinds, new Set(Object.keys(scripts[raw.before.script].params)));
+    if (!bc.ok) return bc;
+    before = { script: raw.before.script, args: b.value, ...(bc.value ? { credentials: bc.value } : {}) };
   }
-  return { ok: true, value: { ...(when ? { when } : {}), script: raw.script, args: args.value, ...(before ? { before } : {}) } };
+  return { ok: true, value: { ...(when ? { when } : {}), script: raw.script, args: args.value, ...(credentials.value ? { credentials: credentials.value } : {}), ...(before ? { before } : {}) } };
 }
 
 export function validateVariants(
-  raw: unknown, where: string, scripts: Record<string, ScriptSpec>, actionParams: Record<string, ParamSpec>,
+  raw: unknown, where: string, scripts: Record<string, ScriptSpec>, actionParams: Record<string, ParamSpec>, kinds: ReadonlySet<string> = new Set(),
 ): Validated<ActionVariant[]> {
   if (!Array.isArray(raw) || raw.length < 1 || raw.length > 8) return fail(`${where}: "variants" must list 1-8 variants`);
   const out: ActionVariant[] = [];
   for (const v of raw as unknown[]) {
-    const one = validateOneVariant(v, where, scripts, actionParams);
+    const one = validateOneVariant(v, where, scripts, actionParams, kinds);
     if (!one.ok) return one;
     out.push(one.value);
   }
@@ -436,7 +507,7 @@ function options(raw: unknown, where: string, max = 20): Validated<{ value: stri
   return { ok: true, value: out };
 }
 
-function validateEditorFields(raw: unknown, where: string): Validated<EditorField[]> {
+function validateEditorFields(raw: unknown, where: string, kinds: ReadonlySet<string> = new Set()): Validated<EditorField[]> {
   if (!Array.isArray(raw) || raw.length < 1 || raw.length > 120) return fail(`${where}: "fields" must list 1-120 fields`);
   const out: EditorField[] = [];
   for (const f of raw as unknown[]) {
@@ -468,7 +539,13 @@ function validateEditorFields(raw: unknown, where: string): Validated<EditorFiel
         }
         field.optionsFrom = { path: of.path, ...(of.value ? { value: of.value } : {}), ...(of.label ? { label: of.label } : {}) };
       }
-      if (!field.options && !field.optionsFrom && f.remote === undefined) return fail(`${where}: select field "${f.name}" needs "options", "optionsFrom" or "remote"`);
+      if (f.credentialsKind !== undefined) {
+        if (f.input !== 'select' || typeof f.credentialsKind !== 'string' || !kinds.has(f.credentialsKind)) {
+          return fail(`${where}: field "${f.name}": "credentialsKind" must name a credential kind this package declares, on a select field`);
+        }
+        field.credentialsKind = f.credentialsKind;
+      }
+      if (!field.options && !field.optionsFrom && field.credentialsKind === undefined && f.remote === undefined) return fail(`${where}: select field "${f.name}" needs "options", "optionsFrom", "credentialsKind" or "remote"`);
     }
     const ref = (s: unknown) => typeof s === 'string' && (s.startsWith('literal:') ? /^[A-Za-z0-9_.:/ -]{0,100}$/.test(s.slice(8)) : FIELD_RE.test(s));
     const refs = (a: unknown): Record<string, string> | null => {
@@ -711,6 +788,7 @@ function validateInfoItems(raw: unknown, where: string): Validated<InfoItem[]> {
 
 export function validateLayout(
   rawBlocks: unknown, actionIds: ReadonlySet<string>, innerView: ViewValidator, validateFields: (raw: unknown, where: string) => Validated<FieldSpec[]>,
+  kinds: ReadonlySet<string> = new Set(),
 ): Validated<Block[]> {
   let count = 0;
   // Every tab id of this screen, and every stat tile that links to one; checked once the whole tree is known.
@@ -896,7 +974,7 @@ export function validateLayout(
           break;
         }
         case 'editor': {
-          const fields = validateEditorFields(b.fields, w);
+          const fields = validateEditorFields(b.fields, w, kinds);
           if (!fields.ok) return fail(fields.error);
           if (b.param !== undefined && (typeof b.param !== 'string' || !PARAM_RE.test(b.param))) return fail(`${w}: "param" must name the text parameter of the submit actions that receives the settings`);
           if (!Array.isArray(b.submits) || b.submits.length < 1 || b.submits.length > 4) return fail(`${w}: "submits" must list 1-4 buttons`);
@@ -932,8 +1010,25 @@ export function validateLayout(
           out.push({ type: 'view', view: v.value, ...(typeof b.path === 'string' ? { path: b.path } : {}), ...base });
           break;
         }
+        case 'credentials': {
+          if (typeof b.kind !== 'string' || !kinds.has(b.kind)) return fail(`${w}: "kind" must name a credential kind this package declares`);
+          const title = b.title === undefined ? undefined : text(b.title, 80);
+          if (title === null) return fail(`${w}: "title" must be short text`);
+          const description = b.description === undefined ? undefined : text(b.description, 300);
+          if (description === null) return fail(`${w}: "description" must be text (max 300 characters)`);
+          let rowAction: { action: string; label: string; icon?: string } | undefined;
+          if (b.rowAction !== undefined) {
+            const ra = b.rowAction as Record<string, unknown>;
+            const label = isObj(ra) ? text(ra.label, 40) : null;
+            if (!isObj(ra) || typeof ra.action !== 'string' || !label) return fail(`${w}: "rowAction" needs an "action" and a "label"`);
+            if (ra.icon !== undefined && typeof ra.icon !== 'string') return fail(`${w}: "rowAction.icon" must be a name`);
+            rowAction = { action: ra.action, label, ...(typeof ra.icon === 'string' ? { icon: ra.icon } : {}) };
+          }
+          out.push({ type: 'credentials', kind: b.kind, ...(title ? { title } : {}), ...(description ? { description } : {}), ...(rowAction ? { rowAction } : {}), ...base });
+          break;
+        }
         default:
-          return fail(`${w}: unknown block type "${b.type}" (section, tabs, kv, stat, gauges, meters, info, text, code, notice, buttons, form, editor, select, jobProgress or view)`);
+          return fail(`${w}: unknown block type "${b.type}" (section, tabs, kv, stat, gauges, meters, text, code, notice, buttons, form, editor, select, jobProgress, credentials or view)`);
       }
     }
     return { ok: true, value: out };

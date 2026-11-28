@@ -13,6 +13,11 @@ import { accessRequestLimiter } from '@/lib/access/limiter';
 import { registeredPermissionDefs } from '@/lib/permissions/store';
 import { createSchedule, listSchedules, runScheduleNow } from '@/lib/schedules/service';
 import { listForViewer } from '@/lib/notifications/store';
+import { hasPermission } from '@/lib/permissions/authorize';
+import { allServerContexts } from '@/lib/permissions/store';
+import { canViewKind, kindsForType, publicKind } from '@/lib/widgets/credential-access';
+import { createCredential, deleteCredential, getCredentialEntry, listCredentialEntries, updateCredential } from '@/lib/widgets/credentials';
+import type { CredentialKindDef } from '@/lib/widgets/credentials-schema';
 import type { TokenPayload } from '@/lib/auth/jwt';
 import type { JobRecord } from '@/lib/widgets/jobs/store';
 import type { CatalogTool, ToolResult } from './types';
@@ -270,6 +275,105 @@ async function notificationsList(ctx: CoreContext, args: Record<string, unknown>
   return textResult(lines.length ? lines.join('\n') : 'No notifications you may see.', { notifications });
 }
 
+function credentialLine(e: { id: string; name: string; servers: string[]; isDefault: boolean; fields: Record<string, string>; secrets: Record<string, { set: boolean }>; lastUsedAt: string | null; lastUsedAction: string | null }): string {
+  const scope = e.servers.length ? e.servers.join(',') : 'all servers';
+  const pub = Object.entries(e.fields).map(([k, v]) => `${k}=${v}`).join(' ');
+  const sec = Object.entries(e.secrets).map(([k, s]) => `${k}:${s.set ? 'set' : 'unset'}`).join(' ');
+  const used = e.lastUsedAt ? `  last used ${e.lastUsedAt}${e.lastUsedAction ? ` by ${e.lastUsedAction}` : ''}` : '';
+  return `  ${e.id}  ${e.name}  [${scope}]${e.isDefault ? '  default' : ''}  ${pub}${sec ? `  ${sec}` : ''}${used}`;
+}
+
+async function mayManageCredential(ctx: CoreContext, kind: CredentialKindDef, servers: string[]): Promise<string | null> {
+  if (ctx.auth.role === 'admin') return null;
+  const visible = await visibleServerIds(ctx.auth);
+  const targets = servers.length ? servers : (await allServerContexts()).filter(s => visible === '*' || visible.has(s.id)).map(s => s.id);
+  for (const serverId of targets) {
+    if (!(await hasPermission(ctx.auth, kind.permission, serverId))) {
+      return `Insufficient permissions: requires "${kind.permission}" on server ${serverId} (FORBIDDEN).`;
+    }
+  }
+  return null;
+}
+
+async function credentialsList(ctx: CoreContext, args: Record<string, unknown>): Promise<ToolResult> {
+  const type = requiredString(args.widget_type, 'widget_type');
+  const kindId = typeof args.kind === 'string' ? args.kind : '';
+  const found = await kindsForType(type);
+  if (!found) return errorResult(`Widget type not found: ${type}`);
+  const kinds = kindId ? found.kinds.filter(k => k.id === kindId) : found.kinds;
+  if (kindId && !kinds.length) return errorResult(`Unknown credential kind: ${kindId}`);
+  const serverId = typeof args.server_id === 'string' ? args.server_id : undefined;
+  const lines: string[] = [];
+  const out: Record<string, unknown>[] = [];
+  for (const kind of kinds) {
+    if (!(await canViewKind(ctx.auth, kind))) {
+      if (kindId) return errorResult('Insufficient permissions: requires the view permission of this credential kind (FORBIDDEN).');
+      continue;
+    }
+    const entries = await listCredentialEntries(found.packageId, kind, serverId);
+    lines.push(`${kind.label} (${kind.id})${entries.length ? '' : ' — none'}`);
+    for (const e of entries) lines.push(credentialLine(e));
+    out.push({ ...publicKind(kind), entries });
+  }
+  return textResult(lines.length ? lines.join('\n') : 'No credentials you may view.', { kinds: out });
+}
+
+function credFields(args: Record<string, unknown>, key: string): Record<string, unknown> | undefined {
+  return args[key] && typeof args[key] === 'object' && !Array.isArray(args[key]) ? args[key] as Record<string, unknown> : undefined;
+}
+
+function credServers(args: Record<string, unknown>): string[] {
+  return Array.isArray(args.servers) ? args.servers.filter((s): s is string => typeof s === 'string') : [];
+}
+
+async function credentialsCreate(ctx: CoreContext, args: Record<string, unknown>): Promise<ToolResult> {
+  const type = requiredString(args.widget_type, 'widget_type');
+  const kindId = requiredString(args.kind, 'kind');
+  const found = await kindsForType(type);
+  const kind = found?.kinds.find(k => k.id === kindId);
+  if (!found || !kind) return errorResult('Unknown credential kind');
+  const servers = credServers(args);
+  const denied = await mayManageCredential(ctx, kind, servers);
+  if (denied) return errorResult(denied);
+  const entry = await createCredential(found.packageId, kind, {
+    name: args.name, fields: credFields(args, 'fields'), secrets: credFields(args, 'secrets'), servers, isDefault: args.is_default === true,
+  }, ctx.auth.userId);
+  return textResult(`Created ${kind.label.toLowerCase()} "${entry.name}" (${entry.id}).\n${credentialLine(entry)}`, { entry });
+}
+
+async function credentialsUpdate(ctx: CoreContext, args: Record<string, unknown>): Promise<ToolResult> {
+  const type = requiredString(args.widget_type, 'widget_type');
+  const kindId = requiredString(args.kind, 'kind');
+  const id = requiredString(args.id, 'id');
+  const found = await kindsForType(type);
+  const kind = found?.kinds.find(k => k.id === kindId);
+  if (!found || !kind) return errorResult('Unknown credential kind');
+  const existing = await getCredentialEntry(found.packageId, kind, id);
+  if (!existing) return errorResult('Credential not found');
+  const servers = args.servers === undefined ? existing.servers : credServers(args);
+  const denied = await mayManageCredential(ctx, kind, Array.from(new Set([...existing.servers, ...servers])));
+  if (denied) return errorResult(denied);
+  const entry = await updateCredential(found.packageId, kind, id, {
+    name: args.name, fields: credFields(args, 'fields'), secrets: credFields(args, 'secrets'), servers: args.servers, isDefault: args.is_default,
+  }, ctx.auth.userId);
+  return textResult(`Updated ${kind.label.toLowerCase()} "${entry.name}".\n${credentialLine(entry)}`, { entry });
+}
+
+async function credentialsDelete(ctx: CoreContext, args: Record<string, unknown>): Promise<ToolResult> {
+  const type = requiredString(args.widget_type, 'widget_type');
+  const kindId = requiredString(args.kind, 'kind');
+  const id = requiredString(args.id, 'id');
+  const found = await kindsForType(type);
+  const kind = found?.kinds.find(k => k.id === kindId);
+  if (!found || !kind) return errorResult('Unknown credential kind');
+  const existing = await getCredentialEntry(found.packageId, kind, id);
+  if (!existing) return errorResult('Credential not found');
+  const denied = await mayManageCredential(ctx, kind, existing.servers);
+  if (denied) return errorResult(denied);
+  await deleteCredential(found.packageId, id);
+  return textResult(`Deleted ${kind.label.toLowerCase()} "${existing.name}" (${id}).`, { deleted: true, id });
+}
+
 export async function callCoreTool(ctx: CoreContext, tool: CatalogTool, args: Record<string, unknown>): Promise<ToolResult> {
   switch (tool.coreName) {
     case 'bosun_overview': return bosunOverview(ctx);
@@ -285,6 +389,10 @@ export async function callCoreTool(ctx: CoreContext, tool: CatalogTool, args: Re
     case 'schedule_run_now': return scheduleRunNow(ctx, args);
     case 'update_status': return updateStatusTool(ctx);
     case 'notifications_list': return notificationsList(ctx, args);
+    case 'credentials_list': return credentialsList(ctx, args);
+    case 'credentials_create': return credentialsCreate(ctx, args);
+    case 'credentials_update': return credentialsUpdate(ctx, args);
+    case 'credentials_delete': return credentialsDelete(ctx, args);
     default: return errorResult(`Unknown tool: ${tool.name}`);
   }
 }

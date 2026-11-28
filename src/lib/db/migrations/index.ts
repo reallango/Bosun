@@ -723,6 +723,30 @@ const V20_SCHEDULES: string[] = [
     // One run per schedule at a time, enforced by the database as well as by startRunRow.
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_schedule_runs_one_running ON schedule_runs(schedule_id) WHERE status = 'running'`,
 ];
+const V21_WIDGET_CREDENTIALS: string[] = [
+    // Entries of a widget package's credential kinds (a Git token for one owner, a backup destination for one host).
+    // `secrets_enc` is never selected by a read path; only the runner decrypts one entry to hand it to its script.
+    `CREATE TABLE IF NOT EXISTS widget_credentials (
+        id TEXT PRIMARY KEY,
+        package_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        name TEXT NOT NULL,
+        public_fields TEXT NOT NULL DEFAULT '{}',
+        secrets_enc TEXT NOT NULL DEFAULT '{}',
+        servers TEXT NOT NULL DEFAULT '[]',
+        is_default INTEGER NOT NULL DEFAULT 0,
+        created_by TEXT,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_by TEXT,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        last_used_at DATETIME,
+        last_used_by TEXT,
+        last_used_action TEXT
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_widget_credentials_kind ON widget_credentials(package_id, kind)`,
+    // A package's entries go with it.
+    `DELETE FROM widget_credentials WHERE package_id NOT IN (SELECT id FROM widget_packages)`,
+];
 export const MIGRATIONS: Migration[] = [
     {
         version: 1,
@@ -752,6 +776,7 @@ export const MIGRATIONS: Migration[] = [
     { version: 18, name: 'task_dismissals', statements: V18_TASK_DISMISSALS },
     { version: 19, name: 'widget_size_hints', statements: V19_WIDGET_SIZE_HINTS },
     { version: 20, name: 'schedules', statements: V20_SCHEDULES },
+    { version: 21, name: 'widget_credentials', statements: V21_WIDGET_CREDENTIALS },
 ];
 
 /** The schema version this build expects. */
@@ -793,6 +818,7 @@ export const CORE_TABLES: string[] = [
     'task_dismissals',
     'schedules',
     'schedule_runs',
+    'widget_credentials',
 ];
 
 export class LegacySchemaError extends Error {

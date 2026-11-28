@@ -13,8 +13,9 @@
  */
 import type { ActionSpec, ParamSpec, ViewSpec } from './spec';
 import { fail, FIELD_RE, ID_RE, intIn, isObj, text, type Validated } from './spec-util';
-import { validateLayout, type Block, type ScriptSpec } from './spec-v2';
-import type { FieldSpec } from './spec';
+import { validateLayout, validateCredentialUses, type Block, type CredentialUse, type ScriptSpec } from './spec-v2';
+import type { FieldSpec } from './spec';
+
 import { validateResourceFields, validateTarget, type ResourceFields, type ResourceTarget } from './resources';
 
 export const MAX_DATASETS = 20;
@@ -34,6 +35,8 @@ export interface DatasetSpec {
   target?: ResourceTarget;
   /** For a list: the row fields naming each row's container/stack (rows are filtered for limited grants). */
   resources?: ResourceFields;
+  /** Credentials the dataset's script receives (see credentials-schema.ts); they reach it as BOSUN_CRED_* only. */
+  credentials?: CredentialUse[];
 }
 
 export interface ScreenLoad {
@@ -65,7 +68,7 @@ export interface MenuEntry {
 
 const LITERAL_RE = /^[A-Za-z0-9_.:/ -]{0,100}$/;
 
-export function validateDatasets(raw: unknown, scripts: Record<string, ScriptSpec>, own: ReadonlySet<string>): Validated<Record<string, DatasetSpec>> {
+export function validateDatasets(raw: unknown, scripts: Record<string, ScriptSpec>, own: ReadonlySet<string>, kinds: ReadonlySet<string> = new Set()): Validated<Record<string, DatasetSpec>> {
   if (raw === undefined) return { ok: true, value: {} };
   if (!isObj(raw)) return fail('"datasets" must be an object');
   const entries = Object.entries(raw);
@@ -83,7 +86,9 @@ export function validateDatasets(raw: unknown, scripts: Record<string, ScriptSpe
     if (!target.ok) return fail(target.error);
     const resources = validateResourceFields(d.resources, where);
     if (!resources.ok) return fail(resources.error);
-    out[id] = { script: d.script, cacheSec, permission: d.permission, ...(target.value ? { target: target.value } : {}), ...(resources.value ? { resources: resources.value } : {}) };
+    const credentials = validateCredentialUses(d.credentials, where, kinds, new Set(Object.keys(scripts[d.script].params)));
+    if (!credentials.ok) return fail(credentials.error);
+    out[id] = { script: d.script, cacheSec, permission: d.permission, ...(target.value ? { target: target.value } : {}), ...(resources.value ? { resources: resources.value } : {}), ...(credentials.value ? { credentials: credentials.value } : {}) };
   }
   return { ok: true, value: out };
 }
@@ -93,6 +98,7 @@ type Fields = (raw: unknown, where: string) => Validated<FieldSpec[]>;
 
 export function validateScreens(
   raw: unknown, actions: ActionSpec[], datasets: Record<string, DatasetSpec>, scripts: Record<string, ScriptSpec>, innerView: InnerView, fields: Fields,
+  kinds: ReadonlySet<string> = new Set(),
 ): Validated<Record<string, ScreenSpec>> {
   if (raw === undefined) return { ok: true, value: {} };
   if (!isObj(raw)) return fail('"screens" must be an object');
@@ -134,7 +140,7 @@ export function validateScreens(
         load[alias] = { dataset: l.dataset, args };
       }
     }
-    const blocks = validateLayout(s.blocks, actionIds, innerView, fields);
+    const blocks = validateLayout(s.blocks, actionIds, innerView, fields, kinds);
     if (!blocks.ok) return fail(`${where}: ${blocks.error}`);
     const bad = checkEditors(blocks.value, actions, datasets, scripts);
     if (bad) return fail(`${where}: ${bad}`);
