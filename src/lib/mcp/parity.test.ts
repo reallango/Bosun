@@ -75,14 +75,12 @@ describe('MCP parity with the REST API', () => {
     expect(mapped.get('POST servers/[serverId]/terminal')).toContain('terminal_open');
   });
 
-  it('covers widget data, datasets, actions and jobs through generated tools', () => {
+  it('covers widget data, datasets and actions through generated tools', () => {
     const mapped = mappedRoutes();
     for (const route of [
       'GET servers/[serverId]/widget-data/[widgetType]',
       'POST servers/[serverId]/widget-datasets/[widgetType]/[datasetId]',
       'POST servers/[serverId]/widget-actions/[widgetType]/[actionId]',
-      'GET servers/[serverId]/widget-jobs/[widgetType]',
-      'POST servers/[serverId]/widget-jobs/[widgetType]/[jobId]/cancel',
     ]) expect(mapped.get(route)).toContain('generated widget tool');
   });
 

@@ -33,8 +33,6 @@ export const WIDGET_ROUTE_COVERAGE = [
   'GET servers/[serverId]/widget-data/[widgetType]',
   'POST servers/[serverId]/widget-datasets/[widgetType]/[datasetId]',
   'POST servers/[serverId]/widget-actions/[widgetType]/[actionId]',
-  'GET servers/[serverId]/widget-jobs/[widgetType]',
-  'POST servers/[serverId]/widget-jobs/[widgetType]/[jobId]/cancel',
 ];
 
 export function allowList(): AllowEntry[] {
