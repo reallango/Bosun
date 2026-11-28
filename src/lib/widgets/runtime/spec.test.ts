@@ -479,7 +479,7 @@ describe('the stacks declaration (import from other tools)', () => {
     const m = JSON.parse(fs.readFileSync('widgets/docker/manifest.json', 'utf8'));
     const own = m.permissions.map((p: { id: string }) => p.id);
     const spec = m.widgets[0].spec;
-    const ok = validateWidgetSpec(spec, own, m.id);
+    const ok = validateWidgetSpec(spec, own, m.id, m.credentials.map((c: { id: string }) => c.id));
     expect(ok.ok && ok.value.stacks?.deploy).toBeTruthy();
     for (const [k, v] of [['deploy', 'nope'], ['guard', 'stack_edit'], ['list', 'nope'], ['export', 'nope']] as const) {
       const bad = validateWidgetSpec({ ...spec, stacks: { ...spec.stacks, [k]: v } }, own, m.id);
@@ -493,7 +493,7 @@ describe('the stacks declaration (import from other tools)', () => {
     const m = JSON.parse(fs.readFileSync('widgets/docker/manifest.json', 'utf8'));
     const own = m.permissions.map((p: { id: string }) => p.id);
     const spec = m.widgets[0].spec;
-    const ok = validateWidgetSpec(spec, own, m.id);
+    const ok = validateWidgetSpec(spec, own, m.id, m.credentials.map((c: { id: string }) => c.id));
     expect(ok.ok && ok.value.setup).toMatchObject({ label: 'Docker Engine', detect: 'host_detect', install: 'docker_install' });
     for (const bad of [{ ...spec.setup, detect: 'nope' }, { ...spec.setup, install: 'nope' }, { ...spec.setup, install: 'stack_deploy' }, { ...spec.setup, label: '' }, 'x']) {
       expect(validateWidgetSpec({ ...spec, setup: bad }, own, m.id).ok, JSON.stringify(bad)).toBe(false);
@@ -505,14 +505,14 @@ describe('the stacks declaration (import from other tools)', () => {
     const m = JSON.parse(fs.readFileSync('widgets/docker/manifest.json', 'utf8'));
     const own = m.permissions.map((p: { id: string }) => p.id);
     const spec = m.widgets[0].spec;
-    const ok = validateWidgetSpec(spec, own, m.id);
+    const ok = validateWidgetSpec(spec, own, m.id, m.credentials.map((c: { id: string }) => c.id));
     expect(ok.ok && ok.value.stacks).toMatchObject({ deployLater: 'stack_deploy_later', deployPrivilegedLater: 'stack_deploy_privileged_later' });
     for (const v of ['nope', 3]) {
       expect(validateWidgetSpec({ ...spec, stacks: { ...spec.stacks, deployLater: v } }, own, m.id).ok, String(v)).toBe(false);
     }
     // a widget without them: own stacks are imported from another node, as before
     const { deployLater: _a, deployPrivilegedLater: _b, ...without } = spec.stacks;
-    const old = validateWidgetSpec({ ...spec, stacks: without }, own, m.id);
+    const old = validateWidgetSpec({ ...spec, stacks: without }, own, m.id, m.credentials.map((c: { id: string }) => c.id));
     expect(old.ok && old.value.stacks?.deployLater).toBeUndefined();
   });
 

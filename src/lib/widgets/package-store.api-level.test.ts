@@ -18,7 +18,7 @@ describe('installPackage and the widget API level', () => {
   it('refuses a package that needs a newer Bosun before touching the database', async () => {
     await expect(installPackage({ manifest: validated({ api: 99 }), files: {}, source: 'upload' }))
       .rejects.toMatchObject({
-        message: 'This widget needs a newer Bosun (widget API level 99; this Bosun has 11). Update Bosun first.',
+        message: 'This widget needs a newer Bosun (widget API level 99; this Bosun has 12). Update Bosun first.',
         status: 422,
         code: 'NEWER_BOSUN_REQUIRED',
       });

@@ -23,6 +23,7 @@ import { useWidgetSize } from '@/components/dashboard/widget-size';
 import { useWidgetDensity, useWidgetFill } from './fill';
 import { CodeBlock, EditorBlock } from './EditorBlock';
 import { ItemGrid } from './ItemGrid';
+import { CredentialsBlock } from './CredentialsBlock';
 import {
   buttonClass, DIALOG_CONTENT, DIALOG_FOOTER, DIALOG_HEADER, DIALOG_OVERLAY, DIALOG_TITLE, DIALOG_WIDTH, FILL_CARD, FILL_CARD_COMPACT, FILL_GAUGE_CARD,
   FILL_GAUGE_CARD_COMPACT, FILL_GAUGE_LABEL, FILL_GAUGE_VALUE, FILL_GRID_COLUMNS, FILL_GRID_MIN, FILL_LABEL, FILL_SUB, FILL_VALUE,
@@ -64,6 +65,15 @@ export interface LayoutUi {
   large?: boolean;
   /** A full-page screen: tabs keep the open one in the URL. */
   page?: boolean;
+  /** The entries of a credential kind (a `credentials` block), their writes, and the server choices. */
+  credentials?: {
+    load: (kind: string) => Promise<import('@/lib/widgets/runtime/credential-view').CredentialResult<import('@/lib/widgets/runtime/credential-view').CredentialKindView>>;
+    save: (kind: string, entry: import('@/lib/widgets/runtime/credential-view').CredentialWriteView) => Promise<import('@/lib/widgets/runtime/credential-view').CredentialResult>;
+    remove: (kind: string, id: string) => Promise<import('@/lib/widgets/runtime/credential-view').CredentialResult>;
+    servers: () => Promise<{ id: string; name: string }[]>;
+  };
+  /** Options of a select bound to a credential kind: "Automatic" plus the entries the caller may see. */
+  credentialOptions?: (kind: string) => Promise<{ value: string; label: string }[]>;
 }
 
 /**
@@ -156,6 +166,7 @@ function BlockView({ block, ctx, ui, toolbar }: { block: Block; ctx: ViewContext
     case 'form': return block.open === 'dialog' ? <DialogBlock block={block} ctx={ctx} ui={ui} toolbar={toolbar} /> : <Form block={block} ctx={ctx} ui={ui} />;
     case 'select': return <SelectBlock block={block} ctx={ctx} ui={ui} />;
     case 'jobProgress': return <JobProgress job={ctx.job ?? null} ui={ui} />;
+    case 'credentials': return <CredentialsBlock block={block} ui={ui} />;
     case 'tabs': return <Tabs block={block} ctx={ctx} ui={ui} />;
     case 'editor': return block.open === 'dialog' ? <DialogBlock block={block} ctx={ctx} ui={ui} toolbar={toolbar} /> : <EditorBlock block={block} ctx={ctx} ui={ui} />;
     case 'code': return <CodeBlock title={block.title} text={String(pathOf(ctx, block.value) ?? '')} filename={block.filename} />;

@@ -5,6 +5,7 @@ import { Loader2, RefreshCw } from 'lucide-react';
 import { fetchWithAuth } from '@/lib/api/fetchWithAuth';
 import { readJson } from '@/lib/api/readJson';
 import type { ScreenSpec } from '@/lib/widgets/runtime/spec-screens';
+import type { CredentialKindView, CredentialResult, CredentialWriteView } from '@/lib/widgets/runtime/credential-view';
 import { screenArgs, text, type PublicActionLike, type ViewContext } from '@/lib/widgets/runtime/layout';
 import { LayoutBlocks, type LayoutUi } from './LayoutView';
 import { TrendProvider } from './trends';
@@ -87,13 +88,58 @@ export function ScreenView({ screen, context, serverId, widgetType, ui, onDone, 
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
     }
   }, [serverId, widgetType]);
+  const credentialsBase = `/api/widgets/${encodeURIComponent(widgetType)}/credentials`;
+  const loadCredentialKind = useCallback(async (kind: string): Promise<CredentialResult<CredentialKindView>> => {
+    try {
+      const res = await fetchWithAuth(`${credentialsBase}?kind=${encodeURIComponent(kind)}&server_id=${encodeURIComponent(serverId)}`);
+      const json = await readJson<{ data?: { kinds?: CredentialKindView[] }; error?: { message?: string } }>(res);
+      if (!res.ok || !json.data) return { ok: false, error: json.error?.message || `HTTP ${res.status}` };
+      const found = json.data.kinds?.[0];
+      return found ? { ok: true, value: found } : { ok: false, error: 'This widget type declares no such credential kind.' };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }, [credentialsBase, serverId]);
+  const saveCredential = useCallback(async (kind: string, entry: CredentialWriteView): Promise<CredentialResult> => {
+    try {
+      const res = await fetchWithAuth(credentialsBase, {
+        method: entry.id ? 'PUT' : 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...entry, kind }),
+      });
+      const json = await readJson<{ error?: { message?: string } }>(res);
+      return res.ok ? { ok: true, value: json } : { ok: false, error: json.error?.message || `HTTP ${res.status}` };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }, [credentialsBase]);
+  const removeCredential = useCallback(async (kind: string, id: string): Promise<CredentialResult> => {
+    try {
+      const res = await fetchWithAuth(`${credentialsBase}?kind=${encodeURIComponent(kind)}&id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const json = await readJson<{ error?: { message?: string } }>(res);
+      return res.ok ? { ok: true, value: json } : { ok: false, error: json.error?.message || `HTTP ${res.status}` };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }, [credentialsBase]);
+  const serverChoices = useCallback(async () => {
+    const res = await fetchWithAuth(`${credentialsBase}/servers`);
+    const json = await readJson<{ data?: { servers?: { id: string; name: string }[] } }>(res);
+    return json.data?.servers ?? [];
+  }, [credentialsBase]);
+  const credentialOptions = useCallback(async (kind: string) => {
+    const r = await loadCredentialKind(kind);
+    if (!r.ok) throw new Error(r.error);
+    return [{ value: 'auto', label: 'Automatic (match by URL)' }, ...r.value.entries.map(e => ({ value: e.id, label: e.name }))];
+  }, [loadCredentialKind]);
   const screenUi: LayoutUi = useMemo(() => ({
     ...ui,
     large: true,
     page: screen.kind === 'page',
     loadDataset,
+    credentials: { load: loadCredentialKind, save: saveCredential, remove: removeCredential, servers: serverChoices },
+    credentialOptions,
     onSubmitted: ok => { if (ok) { onDone?.(); void reload(); } },
-  }), [ui, onDone, reload, loadDataset, screen.kind]);
+  }), [ui, onDone, reload, loadDataset, screen.kind, loadCredentialKind, saveCredential, removeCredential, serverChoices, credentialOptions]);
   const failed = Object.entries(errors);
   const waiting = loading && loadedAt === 0;
   return (

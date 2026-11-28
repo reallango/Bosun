@@ -33,6 +33,9 @@ export async function initializeDatabase(): Promise<void> {
     await runMigrations();
     const { seedBundledPackages } = await import('@/lib/widgets/bundled-seed');
     await seedBundledPackages();
+    // One-time, idempotent move of legacy package secrets into credential entries (see credentials.ts).
+    const { migratePackageCredentials } = await import('@/lib/widgets/credentials');
+    await migratePackageCredentials().catch(err => console.warn('[widgets] credential migration failed:', err?.message ?? err));
     return;
   }
 

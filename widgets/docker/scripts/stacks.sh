@@ -15,17 +15,17 @@ case "$HOME" in /*)
     [ -d "$d" ] || continue
     n=${d%/}; n=${n##*/}
     case "$n" in ''|[!a-z0-9]*|*[!a-z0-9_-]*) continue ;; esac
-    src=''; repo=''; branch=''; file=''; upd=''
+    src=''; repo=''; branch=''; file=''; upd=''; cred=''
     if [ -f "$d/bosun.meta" ]; then
       while IFS= read -r l; do
         case "$l" in
-          source=*) src=${l#*=} ;; repo=*) repo=${l#*=} ;; branch=*) branch=${l#*=} ;; file=*) file=${l#*=} ;; updated=*) upd=${l#*=} ;;
+          source=*) src=${l#*=} ;; repo=*) repo=${l#*=} ;; branch=*) branch=${l#*=} ;; file=*) file=${l#*=} ;; updated=*) upd=${l#*=} ;; credential=*) cred=${l#*=} ;;
         esac
       done < "$d/bosun.meta"
     fi
     case "$src" in git) ;; *) src=editor ;; esac
     # no tabs inside a value
-    printf 'M\t%s\t%s\t%s\t%s\t%s\t%s\n' "$n" "$src" "$(printf '%s' "$repo" | tr -d "$tab")" "$(printf '%s' "$branch" | tr -d "$tab")" "$(printf '%s' "$file" | tr -d "$tab")" "$(printf '%s' "$upd" | tr -d "$tab")" >> "$in"
+    printf 'M\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$n" "$src" "$(printf '%s' "$repo" | tr -d "$tab")" "$(printf '%s' "$branch" | tr -d "$tab")" "$(printf '%s' "$file" | tr -d "$tab")" "$(printf '%s' "$upd" | tr -d "$tab")" "$(printf '%s' "$cred" | tr -d "$tab")" >> "$in"
   done ;;
 esac
 awk -F '\t' '
@@ -35,11 +35,11 @@ awk -F '\t' '
     if (!(($2 SUBSEP $3) in seen)) { seen[$2 SUBSEP $3] = 1; svc[$2]++ }
     if ($4 == "running") run[$2]++; else other[$2]++
   }
-  $1 == "M" { names[$2] = 1; src[$2] = $3; repo[$2] = $4; branch[$2] = $5; file[$2] = $6; upd[$2] = $7 }
+  $1 == "M" { names[$2] = 1; src[$2] = $3; repo[$2] = $4; branch[$2] = $5; file[$2] = $6; upd[$2] = $7; cred[$2] = $8 }
   END {
     for (n in names) {
       st = (run[n] > 0) ? ((other[n] > 0) ? "partial" : "running") : "stopped"
       s = (n in src) ? src[n] : "external"
-      printf "%s\t{\"name\":\"%s\",\"kind\":\"stack\",\"status\":\"%s\",\"services\":%d,\"source\":\"%s\",\"repo\":\"%s\",\"branch\":\"%s\",\"file\":\"%s\",\"updated\":\"%s\"}\n", n, esc(n), st, svc[n] + 0, s, esc(repo[n]), esc(branch[n]), esc(file[n]), esc(upd[n])
+      printf "%s\t{\"name\":\"%s\",\"kind\":\"stack\",\"status\":\"%s\",\"services\":%d,\"source\":\"%s\",\"repo\":\"%s\",\"branch\":\"%s\",\"file\":\"%s\",\"updated\":\"%s\",\"credential\":\"%s\"}\n", n, esc(n), st, svc[n] + 0, s, esc(repo[n]), esc(branch[n]), esc(file[n]), esc(upd[n]), esc(cred[n])
     }
   }' "$in" | sort | cut -f2- | awk 'BEGIN { printf "[" } { if (NR > 1) printf ","; printf "%s", $0 } END { print "]" }'

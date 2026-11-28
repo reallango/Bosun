@@ -504,7 +504,7 @@ function actionTail(raw: Obj, where: string): Validated<Pick<ActionSpec, 'when' 
   return { ok: true, value: { ...(when ? { when } : {}), ...(confirm ? { confirm } : {}), result, after } };
 }
 
-function validateAction(raw: unknown, ownPerms: ReadonlySet<string>, v2?: { scripts: Record<string, ScriptSpec> }): Validated<ActionSpec> {
+function validateAction(raw: unknown, ownPerms: ReadonlySet<string>, v2?: { scripts: Record<string, ScriptSpec> }, credentialKinds: ReadonlySet<string> = new Set()): Validated<ActionSpec> {
   if (!isObj(raw)) return fail('each action must be an object');
   const id = typeof raw.id === 'string' ? raw.id : '';
   if (!ID_RE.test(id)) return fail(`action id "${id}" must be lowercase letters, digits and underscores`);
@@ -581,7 +581,7 @@ function validateAction(raw: unknown, ownPerms: ReadonlySet<string>, v2?: { scri
     if ((typeof raw.command === 'string' && raw.command !== '') || raw.windowsCommand !== undefined) return fail(`${where}: a script action has "variants" instead of a command`);
     const sparams = actionParams(raw, where);
     if (!sparams.ok) return sparams;
-    const variants = validateVariants(raw.variants, where, v2.scripts, sparams.value);
+    const variants = validateVariants(raw.variants, where, v2.scripts, sparams.value, credentialKinds);
     if (!variants.ok) return variants;
     const stail = actionTail(raw, where);
     if (!stail.ok) return stail;
@@ -661,7 +661,7 @@ function validateFields(raw: unknown, where: string): Validated<FieldSpec[]> {
   return { ok: true, value: out };
 }
 
-function validateView(raw: unknown, actionIds: ReadonlySet<string>, v2 = false, rowTargetIds?: ReadonlySet<string>): Validated<ViewSpec> {
+function validateView(raw: unknown, actionIds: ReadonlySet<string>, v2 = false, rowTargetIds?: ReadonlySet<string>, kinds: ReadonlySet<string> = new Set()): Validated<ViewSpec> {
   if (!isObj(raw)) return fail('"view" is required');
   if (raw.type !== 'list' && raw.type !== 'table' && raw.type !== 'text' && raw.type !== 'fields' && raw.type !== 'chart' && raw.type !== 'layout') {
     return fail('view.type must be "list", "table", "fields", "chart", "layout" or "text"');
@@ -669,7 +669,7 @@ function validateView(raw: unknown, actionIds: ReadonlySet<string>, v2 = false, 
   const view: ViewSpec = { type: raw.type };
   if (raw.type === 'layout') {
     if (!v2) return fail('layout views need spec version 2');
-    const blocks = validateLayout(raw.blocks, actionIds, inner => validateView(inner, actionIds, true, rowTargetIds), validateFields);
+    const blocks = validateLayout(raw.blocks, actionIds, inner => validateView(inner, actionIds, true, rowTargetIds, kinds), validateFields, kinds);
     if (!blocks.ok) return blocks;
     view.blocks = blocks.value;
     return { ok: true, value: view };
@@ -873,7 +873,7 @@ function validateMetrics(raw: unknown, packageId: string | undefined): Validated
   return { ok: true, value: out };
 }
 
-export function validateWidgetSpec(raw: unknown, ownPermissions: readonly string[], packageId?: string): Validated<WidgetSpec> {
+export function validateWidgetSpec(raw: unknown, ownPermissions: readonly string[], packageId?: string, credentialKinds: readonly string[] = []): Validated<WidgetSpec> {
   if (!isObj(raw)) return fail('"spec" must be an object');
   if (raw.version !== 1 && raw.version !== 2) return fail('spec.version must be 1 or 2');
   const v2on = raw.version === 2;
@@ -889,6 +889,7 @@ export function validateWidgetSpec(raw: unknown, ownPermissions: readonly string
   const density = validateDensity(raw.density);
   if (!density.ok) return density;
   const own = new Set(ownPermissions);
+  const kinds = new Set(credentialKinds);
   const scripts = v2on ? validateScripts(raw.scripts) : { ok: true as const, value: {} as Record<string, ScriptSpec> };
   if (!scripts.ok) return scripts;
   const v2 = v2on ? { scripts: scripts.value } : undefined;
@@ -899,7 +900,7 @@ export function validateWidgetSpec(raw: unknown, ownPermissions: readonly string
   if (raw.actions !== undefined) {
     if (!Array.isArray(raw.actions) || raw.actions.length > 64) return fail('"actions" must be a list of up to 64 actions');
     for (const a of raw.actions) {
-      const v = validateAction(a, own, v2);
+      const v = validateAction(a, own, v2, kinds);
       if (!v.ok) return v;
       if (ids.has(v.value.id)) return fail(`action "${v.value.id}" is listed twice`);
       ids.add(v.value.id);
@@ -910,16 +911,16 @@ export function validateWidgetSpec(raw: unknown, ownPermissions: readonly string
   const rowTargetIds = new Set(actions
     .filter(a => a.target || Object.values(a.params).some(p => p.from))
     .map(a => a.id));
-  const view = validateView(raw.view, ids, v2on, rowTargetIds);
+  const view = validateView(raw.view, ids, v2on, rowTargetIds, kinds);
   if (!view.ok) return view;
   const state = v2on ? validateState(raw.state, scripts.value) : { ok: true as const, value: undefined };
   if (!state.ok) return state;
   const lookups = v2on ? validateLookups(raw.lookups) : { ok: true as const, value: {} as Record<string, LookupSpec> };
   if (!lookups.ok) return lookups;
-  const datasets = v2on ? validateDatasets(raw.datasets, scripts.value, own) : { ok: true as const, value: {} as Record<string, DatasetSpec> };
+  const datasets = v2on ? validateDatasets(raw.datasets, scripts.value, own, kinds) : { ok: true as const, value: {} as Record<string, DatasetSpec> };
   if (!datasets.ok) return datasets;
   const screens = v2on
-    ? validateScreens(raw.screens, actions, datasets.value, scripts.value, inner => validateView(inner, ids, true, rowTargetIds), validateFields)
+    ? validateScreens(raw.screens, actions, datasets.value, scripts.value, inner => validateView(inner, ids, true, rowTargetIds, kinds), validateFields, kinds)
     : { ok: true as const, value: {} as Record<string, ScreenSpec> };
   if (!screens.ok) return screens;
   for (const a of actions) if (a.kind === 'screen' && !(a.screen! in screens.value)) return fail(`action "${a.id}": the screen "${a.screen}" is not declared`);

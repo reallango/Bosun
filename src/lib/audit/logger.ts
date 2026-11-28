@@ -76,6 +76,7 @@ export const AuditActions = {
   WIDGET_PACKAGE_REMOVE: 'widget_package.remove',
   WIDGET_PACKAGE_EXPORT: 'widget_package.export',
   WIDGET_PACKAGE_SETTINGS: 'widget_package.settings',
+  WIDGET_CREDENTIAL: 'widget_credential.change',
   SERVER_POWER: 'server.power',
   PERMISSION_GROUP_CREATE: 'permission_group.create',
   PERMISSION_GROUP_UPDATE: 'permission_group.update',

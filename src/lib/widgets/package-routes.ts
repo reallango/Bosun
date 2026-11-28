@@ -49,7 +49,7 @@ export async function listAllInstalled(): Promise<PackageListItem[]> {
   }));
   const installed: PackageListItem[] = (await listInstalledPackages()).map(p => ({
     id: p.id, name: p.name, version: p.version, description: p.description, author: p.author, system: false, source: p.source,
-    sourceRef: p.sourceRef, widgetTypes: p.widgetTypes, permissions: p.permissions, installedAt: p.installedAt, secrets: p.manifest.secrets,
+    sourceRef: p.sourceRef, widgetTypes: p.widgetTypes, permissions: p.permissions, installedAt: p.installedAt, secrets: p.manifest.secrets.filter(s => !s.legacy),
   }));
   return [...system, ...installed];
 }

@@ -71,6 +71,7 @@ until the node is updated.
 | 9 | `before` on an action variant: a package script that runs first, and the action does not run when it fails (used to take a backup before an update); and `target.byKind` on actions and datasets (a target whose kind comes from one of its parameters, so one action can act on a container or a stack), with `"byKind"` as a schedule target. |
 | 10 | The `meters` block (a compact bar or small ring per row of a data list), `count` and `format` on a stat tile, `format` on a ring gauge, the `rate` value format on fields, tables, tiles and gauges, and dotted data keys (a metric named `cpu.usage` is reached as `{data.metrics.cpu.usage}`). |
 | 11 | Per-look sizes (`min_size` and `default_size` on `looks.options`), `when` and `alternatives` on `stat` and `gauges` items and `when` on `meters` rows, the `info` block and the `footer` key on `stat` and `gauges`, `layout` on `meters`, and `count` in conditions. |
+| 12 | Package `credentials` (see below): credential kinds with public and secret fields, a per-package screen block, the credential routes and MCP tools, and `BOSUN_CRED_*` environment variables for the scripts that declare a use. |
 
 New spec keys that an older Bosun cannot honour raise the level in `src/lib/widgets/api-level.ts`; keys an older
 Bosun can safely ignore (because it renders the widget sensibly without them) do not.
@@ -620,15 +621,129 @@ package that uses any of these keys must declare `"requires": { "api": 8 }`.
 }
 ```
 
+## Package credentials
+
+Package secrets (`secrets` in a manifest, Settings -> Widgets) hold one value for the whole cluster. A credential holds
+values per server or per repository instead: a Git token for one owner, a backup destination for one Docker host. A
+package declares credential kinds in its manifest and manages them on its own screens; Bosun resolves the entry a
+script needs and hands it over as environment variables, never as parameters, so it stays out of the audit log and
+the parameter lists.
+
+```jsonc
+"credentials": [
+  {
+    "id": "git", "label": "Git access", "permission": "docker.credentials",
+    "fields": [
+      { "id": "host", "label": "Host", "type": "string", "public": true, "pattern": "^[a-z0-9.-]+$" },
+      { "id": "scope", "label": "Owner or repository", "type": "string", "public": true, "optional": true },
+      { "id": "username", "label": "Username", "type": "string", "public": true, "optional": true },
+      { "id": "token", "type": "secret" }
+    ],
+    "match": { "url": "host+scope" }, "servers": "optional"
+  },
+  {
+    "id": "backup_destination", "label": "Backup destination", "permission": "docker.backup_config",
+    "fields": [
+      { "id": "repository", "label": "Repository", "type": "string", "public": true },
+      { "id": "password", "type": "secret" },
+      { "id": "credentials", "label": "Key or credentials", "type": "secret", "optional": true }
+    ],
+    "servers": "required", "default_per_server": true
+  }
+]
+```
+
+Each kind has an `id` (lowercase letters, digits and underscores, unique in the package), a `label`, a `permission`
+(this package must declare it) and `fields`. A field is `"type": "string"` (public by default, shown in the UI) or
+`"type": "secret"` (never public; it is write-only). A public field may carry a `pattern` and a short `help`; any field
+may be `"optional": true`. `servers` is `"optional"` (an empty server list means every server) or `"required"`;
+`default_per_server` allows one default entry per server.
+
+A secret is never returned by a read path: the list routes, the credentials block and the MCP tools return only the
+public fields, whether each secret is set and at most its last four characters. Creating, editing and deleting needs
+the kind's `permission` on every server the entry applies to; viewing the list needs its `view_permission` (which
+defaults to `permission`) on a server the caller may see. Using a credential needs only the action's own permission.
+
+### Resolution for scripts
+
+An action variant or a dataset declares the credentials it needs:
+
+```jsonc
+"credentials": [ { "kind": "git", "entry": "credential", "url": "repo" } ]
+```
+
+`entry` names the parameter that may pin an entry id (the UI shows a "Credential" select: "Automatic" plus the entries
+the caller may see); `url` names the parameter that holds a repository URL, matched against the entries by `host` and
+then the longest `scope` (`my-org/my-repo` beats `my-org` beats the whole host). A `default` use (for example a backup
+destination) takes the entry named by `entry`, or the server's default. A URL use with no match is left out unless it
+is `required: true`; a missing required credential stops the call with a clear message instead of running the script
+without it.
+
+Only the resolved entry reaches the script, as `BOSUN_CRED_<KIND>_<FIELD>` (uppercase, non-alphanumerics as `_`), plus
+`BOSUN_CRED_<KIND>_ID` for the entry id. Public fields and secrets alike are exported; a script should copy them into
+its own variables and `unset` the `BOSUN_CRED_*` ones before it runs anything else. The resolved secrets are also
+listed so the runner can keep them out of the logs.
+
+### The credentials block
+
+A package screen shows one kind with a `credentials` block:
+
+```jsonc
+{ "type": "credentials", "kind": "git", "title": "Git access", "description": "...",
+  "rowAction": { "action": "backup_init", "label": "Initialise" } }
+```
+
+It lists the entries with their public fields, server scope, "set" for each secret, last use and the default marker,
+and offers add, edit and delete dialogs to the people who may manage them. A select field can take its options from a
+kind with `"credentialsKind": "git"`: "Automatic" first, then the entries.
+
+### Migrating package secrets
+
+A kind may name legacy package secrets under `migrate`:
+
+```jsonc
+"migrate": [
+  { "name": "GitHub (migrated)", "fields": { "host": "literal:github.com", "token": "secret:git_token" } },
+  { "name": "Git ({host})", "host_list": { "secret": "git_credentials", "hostField": "host", "tokenField": "token", "usernameField": "username" } }
+]
+```
+
+`fields` maps a field id to `secret:<id>` or `literal:<text>`; `host_list` makes one entry per `host=token` (or
+`host=user:token`) item. `default_for_package_servers: true` marks the entry as the default for every server that has a
+widget of the package. Bosun runs the migration at startup: it inserts entries with deterministic ids (so a second run
+is harmless), deletes the legacy secrets only once they became entries, and logs the package, the names and the ids,
+never a value.
+
+### Routes and MCP tools
+
+```
+GET    /api/widgets/:type/credentials?kind=<id>&server_id=<id>
+POST   /api/widgets/:type/credentials      { kind, name, fields, secrets, servers, isDefault }
+PUT    /api/widgets/:type/credentials      { id, kind, ... }
+DELETE /api/widgets/:type/credentials?kind=<id>&id=<entry id>
+GET    /api/widgets/:type/credentials/servers
+```
+
+`secrets` is write-only: leave a field out or send `""` to keep it unchanged, send `null` to clear it. The MCP tools
+are `credentials_list`, `credentials_create`, `credentials_update` and `credentials_delete`, with the same bodies.
+
 ## Docker Containers: backups and restore
 
-Docker Containers 1.0.28 can back up a container or a Bosun-managed stack with [restic](https://restic.net/), run
-as a short-lived `restic/restic` container with the data mounted read-only; nothing is installed on the host. Choose
-the destination once per server in the widget's settings: a folder on the host (a mounted NAS counts), SFTP
-(`sftp:user@host:/path`) or an S3-compatible endpoint (`s3:https://endpoint/bucket/prefix`). The destination and the
-repository password are package secrets (`backup_repository`, `backup_password`, and `backup_credentials` for the SFTP
-key or the S3 credentials). They reach the script only as `BOSUN_SECRET_*` environment variables; the key and the
-credentials are written to mode-0600 temporary files, never to a command line, the output or a log. Initialise the
+Docker Containers 1.0.29 can back up a container or a Bosun-managed stack with [restic](https://restic.net/), run
+as a short-lived `restic/restic` container with the data mounted read-only; nothing is installed on the host. A backup
+destination is a backup credential (see [Package credentials](#package-credentials)) managed on Docker -> Manage ->
+Backups -> Destinations: a folder on the host (a mounted NAS counts), SFTP (`sftp:user@host:/path`) or an
+S3-compatible endpoint (`s3:https://endpoint/bucket/prefix`), with its repository password and, for SFTP or S3, the key
+or credentials. A destination belongs to one server (a server may have several, and marks one of them the default),
+because each Docker host usually needs its own: a local folder, a NAS mount or a bucket per host.
+
+The destination and its password reach the script only as `BOSUN_CRED_BACKUP_DESTINATION_*` environment variables; the
+key and the credentials are written to mode-0600 temporary files, never to a command line, the output or a log. The
+backup actions and the schedule take an optional `destination` parameter (the entry id, or `auto` for the server's
+default); the backup dialog and the snapshot row menus offer a "Backup destination" select. The Backups tab shows the
+default destination and its repository size, and each snapshot lists the destination it is in; restoring a listed
+snapshot uses that destination. When nothing is configured the scripts stop with "the backup destination and password
+are not set (Docker -> Manage -> Backups -> Destinations)". Initialise the
 repository once from the Backups tab (the password reminder is shown there) and keep that password somewhere else:
 without it the backups cannot be read.
 
