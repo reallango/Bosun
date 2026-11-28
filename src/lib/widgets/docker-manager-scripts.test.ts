@@ -3228,6 +3228,8 @@ describe('backup and restore (restic in a container)', () => {
   const IMGID = 'sha256:' + '2'.repeat(64);
   const CID = 'a'.repeat(64);
   const SNAP = 'c'.repeat(64);
+  // What `restic cat snapshot` answers: the tags Bosun writes on a snapshot of the container web and the stack demo.
+  const SNAPSHOT_TAGS = '{"tags":["bosun:kind=container","bosun:container=web","bosun:kind=stack","bosun:stack=demo"]}';
   const NEWID = 'd'.repeat(64);
   const CAPTURE_META = `meta=''; prev=''
 for a in "$@"; do [ "$prev" = -v ] && case "$a" in *:/bosun/meta:ro) meta=\${a%:/bosun/meta:ro} ;; esac; prev=$a; done
@@ -3237,7 +3239,7 @@ for a in "$@"; do [ "$prev" = -v ] && case "$a" in *:/bosun/meta:ro) meta=\${a%:
   const backupDocker = (opts: {
     label?: string; mounts?: string; backup?: string; facts?: string;
     save?: string; onBackup?: string; pinned?: string; exportFacts?: string; ifacts?: string; snapshots?: string;
-    snapshotsFail?: boolean; stats?: string;
+    snapshotsFail?: boolean; stats?: string; snapshotTags?: string;
   } = {}) => {
     const label = opts.label ?? '1.2.3';
     const mounts = opts.mounts ?? 'volume\\tdata\\t/var/lib/docker/volumes/data/_data\\t/data\\ttrue\\nbind\\t-\\t/srv/app\\t/app\\tfalse';
@@ -3270,6 +3272,7 @@ for a in "$@"; do [ "$prev" = -v ] && case "$a" in *:/bosun/meta:ro) meta=\${a%:
     *' backup '*) ${CAPTURE_META}${opts.onBackup ? `; ${opts.onBackup}` : ''}; ${backup} ;;
     *' forget '*) echo forgot ;;
     *' cat config'*) exit 0 ;;
+    *' cat snapshot'*) echo '${opts.snapshotTags ?? SNAPSHOT_TAGS}' ;;
     *' snapshots --json'*) ${opts.snapshotsFail ? 'exit 1' : `echo '${opts.snapshots ?? '[]'}'`} ;;
     *' stats '*) echo '${opts.stats ?? '{"total_size":0}'}' ;;
     *' dump '*) case "$*" in
@@ -3466,6 +3469,24 @@ esac`);
     expect(create[2]).toContain('bosun-restore-');
   });
 
+  it.skipIf(!hasSh)('restores only a snapshot that belongs to the container or stack it names', () => {
+    backupDocker({ snapshotTags: '{"tags":["bosun:kind=stack","bosun:stack=other"]}' });
+    const r = run('backup_restore.sh', {
+      mode: 'restore', kind: 'stack', name: 'demo', snapshot: SNAP,
+      settings: 'pin_image=false\nrestore_mode=new_volume\nmode=restore',
+    }, env(repoPath()));
+    expect(r.stdout).toContain('ERROR: the backup ' + SNAP + ' is not a backup of the stack demo');
+    expect(dockerCalls().some(c => c[0] === 'run' && c.some(a => a.endsWith(' restore')))).toBe(false);
+    expect(verbs()).not.toContain('stop ' + CID);
+  });
+
+  it.skipIf(!hasSh)('deletes only a snapshot that belongs to the container or stack it names', () => {
+    backupDocker({ snapshotTags: '{"tags":["bosun:kind=container","bosun:container=other"]}' });
+    const r = run('backup_restore.sh', { mode: 'forget', kind: 'container', name: 'web', snapshot: SNAP }, env(repoPath()));
+    expect(r.stdout).toContain('ERROR: the backup ' + SNAP + ' is not a backup of the container web');
+    expect(dockerCalls().some(c => c[0] === 'run' && c.includes('forget'))).toBe(false);
+  });
+
   it.skipIf(!hasSh)('never puts the repository password or the credentials on a command line or in the output', () => {
     backupDocker();
     const secret = 'sup3r-secret-pw';
@@ -3644,6 +3665,7 @@ case "$1" in
   volume) exit 0 ;;
   network) exit 0 ;;
   run) case "$*" in
+    *' cat snapshot'*) printf '{"tags":["bosun:kind=container","bosun:container=web"]}\\n' ;;
     *'/bosun/meta/restore_map'*) printf 'web\\tvolume\\tdata\\t/data\\ttrue\\t/bosun/data/0-v1\\n' ;;
     *'/bosun/meta/pinned_map'*) printf 'web\\t-\\tnginx:1.2.3\\t1.2.3\\n' ;;
     *) exit 0 ;;
