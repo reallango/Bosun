@@ -261,13 +261,15 @@ export async function installPackage(opts: InstallOptions): Promise<InstallResul
   }
 
   // A new version can lower a widget's smallest size. Lower the floor stored on the instances already on dashboards
-  // too, so they can be made smaller without being removed and added again.
+  // too, so they can be made smaller without being removed and added again. An instance whose look asks for a larger
+  // floor keeps it.
   const declaredMin = new Map(manifest.widgets.map(w => [w.type, parseMinSize(w.columns.min_size)]));
+  const looksByType = new Map(manifest.widgets.map(w => [w.type, w.spec?.looks]));
   const instances = await rqlite.query(
-    `SELECT id, widget_type, grid_min_w, grid_min_h FROM widgets WHERE widget_type IN (${placeholders(newTypes.length)})`,
+    `SELECT id, widget_type, grid_min_w, grid_min_h, config FROM widgets WHERE widget_type IN (${placeholders(newTypes.length)})`,
     newTypes,
   );
-  stmts.push(...minSizeStatements(rowsToObjects(instances) as unknown as MinSizeRow[], declaredMin));
+  stmts.push(...minSizeStatements(rowsToObjects(instances) as unknown as MinSizeRow[], declaredMin, looksByType));
 
   await rqlite.executeBatch(stmts as { sql: string; params?: never[] }[], { transaction: true });
   await unmarkBundledRemoved(manifest.id).catch(() => {});

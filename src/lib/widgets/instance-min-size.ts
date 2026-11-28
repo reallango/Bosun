@@ -1,3 +1,5 @@
+import { lookMinSize, type LooksSpec } from '@/lib/widgets/runtime/looks';
+
 /**
  * A widget instance stores its package's `min_size` when it is added. A package upgrade can lower that minimum, but
  * the copy on the instance would keep the old, larger floor. These helpers lower the stored minimum of existing
@@ -14,6 +16,8 @@ export interface MinSizeRow {
   widget_type: string;
   grid_min_w: number;
   grid_min_h: number;
+  /** The instance's settings, as JSON; its `look` may ask for a floor of its own. */
+  config?: string | null;
 }
 
 /** A `custom_widgets.min_size` value; the installer's 4x4 is the fallback, like the column itself. */
@@ -29,17 +33,33 @@ export function parseMinSize(raw: unknown): MinSize {
   return { w: 4, h: 4 };
 }
 
-/** One UPDATE per instance whose stored minimum is above the package's; unchanged instances are left alone. */
+/** The look an instance has selected, from its stored settings (none when they are unreadable). */
+function selectedLook(row: MinSizeRow): string | undefined {
+  try {
+    const config = JSON.parse(String(row.config ?? '{}'));
+    return config && typeof config.look === 'string' ? config.look : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * One UPDATE per instance whose stored minimum is above the floor that applies to it; unchanged instances are left
+ * alone. The floor is the selected look's `min_size` when it has one (the settings route keeps an instance at that
+ * floor, see applyLookMinSize), and the package's own minimum otherwise.
+ */
 export function minSizeStatements(
   rows: MinSizeRow[],
   declared: Map<string, MinSize>,
+  looks?: Map<string, LooksSpec | undefined>,
 ): { sql: string; params: (string | number)[] }[] {
   const statements: { sql: string; params: (string | number)[] }[] = [];
   for (const row of rows) {
     const min = declared.get(row.widget_type);
     if (!min) continue;
-    const w = Math.min(row.grid_min_w, min.w);
-    const h = Math.min(row.grid_min_h, min.h);
+    const floor = lookMinSize(looks?.get(row.widget_type), selectedLook(row)) ?? min;
+    const w = Math.min(row.grid_min_w, floor.w);
+    const h = Math.min(row.grid_min_h, floor.h);
     if (w === row.grid_min_w && h === row.grid_min_h) continue;
     statements.push({ sql: 'UPDATE widgets SET grid_min_w = ?, grid_min_h = ? WHERE id = ?', params: [w, h, row.id] });
   }
