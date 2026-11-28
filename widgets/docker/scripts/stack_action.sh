@@ -15,6 +15,8 @@ fail() { printf 'ERROR: %s\n' "$*"; exit 0; }
 # never inherit them. git_auth <https url> sets AUTH to the Basic Authorization header for exactly that repository's host, or ''
 # when the entry is for another host; it reaches git only through gitrun's environment.
 GIT_HOST=${BOSUN_CRED_GIT_HOST-}; GIT_USER=${BOSUN_CRED_GIT_USERNAME-}; GIT_TOKEN=${BOSUN_CRED_GIT_TOKEN-}
+# Bosun picks the entry with a case-insensitive host, so the comparison below must be case-insensitive too.
+GIT_HOST=$(printf '%s' "$GIT_HOST" | tr 'A-Z' 'a-z')
 unset BOSUN_CRED_GIT_HOST BOSUN_CRED_GIT_SCOPE BOSUN_CRED_GIT_USERNAME BOSUN_CRED_GIT_TOKEN
 git_auth() {
   AUTH=''

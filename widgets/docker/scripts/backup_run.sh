@@ -276,7 +276,7 @@ resolve_version() { # $1 = image id, $2 = image ref, $3 = RepoDigests JSON, $4 =
 STOPPED=''
 start_stopped() {
   [ -z "$STOPPED" ] && return 0
-  for c in $STOPPED; do $D start "$c" >/dev/null 2>&1; done
+  for c in $STOPPED; do $D start "$c" >/dev/null 2>&1 || echo "[step] WARNING: the container $c did not start again"; done
   STOPPED=''
 }
 tmp=$(mktemp -d) || fail 'cannot create a temporary folder'
