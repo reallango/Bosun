@@ -152,7 +152,7 @@ function Inner({ widget, screenId }: { widget: WidgetRow; screenId: string }) {
         <ActionRunnerToasts notice={runner.notice} onShown={clearNotice} />
         {error ? <p className="text-sm text-muted-foreground">{error}</p>
           : !spec ? <LoadingSpinner />
-          : !screen ? <p className="text-sm text-muted-foreground">This widget has no screen called â€œ{screenId}â€.</p>
+          : !screen ? <p className="text-sm text-muted-foreground">This widget has no screen called &ldquo;{screenId}&rdquo;.</p>
           : jobId && !restore && !restoreError ? <LoadingSpinner />
           : <>
             {restoreError && <p role="alert" className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-200">{restoreError}. The screen is empty: fill it in again.</p>}

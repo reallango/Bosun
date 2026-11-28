@@ -146,9 +146,13 @@ export function describeRun(loaded: LoadedSpec, kind: ScheduleSpec): RunKindInfo
 }
 
 /** The values a dataset run loads with: the stored arguments plus the target's name. */
-export function datasetArgs(kind: ScheduleSpec, stored: StoredOptions, resourceName: string | null, targetParam: string | null): Record<string, ScheduleArg> {
+export function datasetArgs(
+  kind: ScheduleSpec, stored: StoredOptions, resourceName: string | null, targetParam: string | null,
+  resourceKind?: 'stack' | 'container' | null, targetKindParam?: string | null,
+): Record<string, ScheduleArg> {
   const out: Record<string, ScheduleArg> = { ...(kind.options?.args ?? {}), ...(stored.args ?? {}) };
   if (resourceName && targetParam) out[targetParam] = resourceName;
+  if (resourceKind && targetKindParam) out[targetKindParam] = resourceKind;
   return out;
 }
 

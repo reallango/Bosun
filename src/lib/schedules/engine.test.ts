@@ -156,6 +156,24 @@ describe('a dataset run', () => {
   });
 });
 
+describe('a dataset run for a target that takes its kind from a parameter', () => {
+  it('passes the stored name and kind to the dataset', async () => {
+    const byKind = loaded();
+    byKind.spec.scripts.check.params = { name: { type: 'string', maxLength: 100 }, kind: { type: 'string', values: ['stack', 'container'] } } as never;
+    byKind.spec.datasets.findings = { script: 'check', permission: 'pkg.view', target: { byKind: 'kind', param: 'name' } } as never;
+    loadWidgetSpec.mockResolvedValue(byKind);
+    db.query.mockImplementation(async (sql: string) => {
+      if (sql.startsWith('SELECT * FROM schedules')) return { rows: [row({ resource_kind: 'stack', resource_name: 'web' })], values: [] };
+      if (sql.startsWith('SELECT name FROM servers')) return { values: [['alpha']], rows: [] };
+      return { rows: [], values: [] };
+    });
+    const out = await executeScheduleRun('s1', { trigger: 'schedule' });
+    expect(out).toMatchObject({ started: true });
+    // Without the kind the script refuses the run ("missing parameter kind"), so every occurrence fails.
+    expect(loadDataset).toHaveBeenCalledWith('srv1', expect.objectContaining({ packageId: 'pkg' }), 'findings', { name: 'web', kind: 'stack' });
+  });
+});
+
 describe('the engine tick', () => {
   it('does nothing off the leader', async () => {
     db.getStatus.mockResolvedValue({ store: { raft: { state: 'Follower' } } });

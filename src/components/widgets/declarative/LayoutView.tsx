@@ -318,12 +318,12 @@ function gaugeValueClass(blockSize: BlockSize): string {
  */
 function useCardSize() {
   const [size, setSize] = useState({ width: 0, height: 0 });
-  const elRef = useRef<HTMLElement | null>(null);
-  const ref = useCallback((el: HTMLElement | null) => {
-    elRef.current = el;
-  }, []);
+  // The card can arrive after the first commit (every item was hidden by `when`) or be replaced by another node (a
+  // look with a different first item), so the measured node is state: the observer follows it instead of being
+  // attached once on mount and left on a node that is no longer on the page.
+  const [el, setEl] = useState<HTMLElement | null>(null);
+  const ref = useCallback((node: HTMLElement | null) => setEl(node), []);
   useEffect(() => {
-    const el = elRef.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
     const ro = new ResizeObserver(entries => {
       const box = entries[0]?.contentRect;
@@ -334,7 +334,7 @@ function useCardSize() {
     });
     ro.observe(el);
     return () => ro.disconnect();
-  }, []);
+  }, [el]);
   return { ref, width: size.width, height: size.height };
 }
 

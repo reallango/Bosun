@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { lookConfigField, lookMinSize, lookSizesProblem, validateLooks, withLookDefault } from './looks';
+import { lookConfigField, lookMinSize, lookSizesProblem, readLookSize, validateLooks, withLookDefault } from './looks';
 
 const looks = {
   default: 'tiles',
@@ -72,6 +72,15 @@ describe('per-look sizes', () => {
     expect(validateLooks({ default: 'a', options: [{ id: 'a', label: 'A', min_size: { w: 0, h: 2 } }] }).ok).toBe(false);
     expect(validateLooks({ default: 'a', options: [{ id: 'a', label: 'A', min_size: { w: 2 } }] }).ok).toBe(false);
     expect(validateLooks({ default: 'a', options: [{ id: 'a', label: 'A', min_size: { w: 3, h: 3 }, default_size: { w: 2, h: 3 } }] }).ok).toBe(false);
+  });
+
+  it('refuses a size that is not a number, instead of rounding it into one', () => {
+    // Number(true) is 1 and Number("8") is 8: a typo in a manifest must not become a size.
+    expect(validateLooks({ default: 'a', options: [{ id: 'a', label: 'A', min_size: { w: true, h: 2 } }] }).ok).toBe(false);
+    expect(validateLooks({ default: 'a', options: [{ id: 'a', label: 'A', min_size: { w: '8', h: 6 } }] }).ok).toBe(false);
+    expect(validateLooks({ default: 'a', options: [{ id: 'a', label: 'A', default_size: { w: 4, h: null } }] }).ok).toBe(false);
+    expect(readLookSize({ w: true, h: 2 })).toBeNull();
+    expect(readLookSize({ w: 8, h: 6 })).toEqual({ w: 8, h: 6 });
   });
 
   it('allows a look to need more room than the widget default, but not more than its max', () => {
