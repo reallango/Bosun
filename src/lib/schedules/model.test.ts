@@ -79,4 +79,10 @@ describe('arguments a run sends', () => {
     expect(actionParams(actionKind, { params: { name: 'api' } }, null, null)).toEqual({ name: 'api' });
     expect(actionParams(actionKind, {}, 'demo', 'name', 'stack', 'kind')).toEqual({ name: 'demo', kind: 'stack' });
   });
+
+  it('gives a dataset the kind a target reads it from, like an action', () => {
+    expect(datasetArgs(kind(), {}, 'demo', 'name', 'container', 'kind')).toEqual({ all: true, name: 'demo', kind: 'container' });
+    // No stored kind (a target that names one): nothing extra is passed.
+    expect(datasetArgs(kind(), {}, 'demo', 'name', null, 'kind')).toEqual({ all: true, name: 'demo' });
+  });
 });
