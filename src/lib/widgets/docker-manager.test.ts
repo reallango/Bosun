@@ -45,7 +45,7 @@ describe('the Docker manager package', () => {
     expect(tab('images').blocks[0]).toMatchObject({ type: 'form', open: 'dialog', label: 'Pull image' });
     expect(tab('volumes').blocks[0]).toMatchObject({ type: 'editor', open: 'dialog', label: 'New volume' });
     expect(tab('networks').blocks[0]).toMatchObject({ type: 'editor', open: 'dialog', label: 'New network' });
-    expect(manifest.requires).toEqual({ api: 9 }); // level 9: a preparatory script before an action's own script
+    expect(manifest.requires).toEqual({ api: 11 }); // level 11: block footers and adaptive stat/gauge items
   });
 
   it('has a Backups tab over the backups dataset, with the destination state and the pinned image', () => {
@@ -115,8 +115,10 @@ describe('the Docker manager package', () => {
     expect(editor.fields.find(f => f.name === 'stack_files')?.when).toEqual({ field: 'values.kind', equals: 'stack' });
     expect(editor.fields.find(f => f.name === 'keep_daily')).toBeDefined();
 
-    expect(spec.view.row?.actions).toContain('backup_run');
-    expect(spec.view.row?.actions).toContain('backup_dialog');
+    const list = (spec.view as unknown as { blocks: Array<{ type: string; view?: { row?: { actions?: string[] } } }> })
+      .blocks.find(b => b.type === 'view')!.view!;
+    expect(list.row?.actions).toContain('backup_run');
+    expect(list.row?.actions).toContain('backup_dialog');
     const manage = spec.screens!.manage;
     const tabs = manage.blocks.find(b => b.type === 'tabs') as Extract<Block, { type: 'tabs' }>;
     for (const id of ['containers', 'stacks']) {

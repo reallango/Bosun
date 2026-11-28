@@ -2,11 +2,11 @@
   "schema": 1,
   "id": "system_services",
   "name": "System Services",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "System services with their status. Counts the running and failed ones, or shows the full list.",
   "author": "Bosun",
   "requires": {
-    "api": 10
+    "api": 11
   },
   "permissions": [
     {
@@ -149,7 +149,37 @@
                     "warning": 1,
                     "danger": 5
                   },
-                  "sub": "need attention"
+                  "sub": "need attention",
+                  "when": {
+                    "count": {
+                      "path": "data",
+                      "where": {
+                        "field": "status",
+                        "equals": "failed"
+                      }
+                    },
+                    "gt": 0
+                  },
+                  "alternatives": [
+                    {
+                      "label": "Failed",
+                      "value": "0",
+                      "tone": "success",
+                      "sub": "all healthy",
+                      "when": {
+                        "count": {
+                          "path": "data"
+                        },
+                        "gt": 0
+                      }
+                    },
+                    {
+                      "label": "Failed",
+                      "value": "—",
+                      "sub": "no services",
+                      "emphasis": "muted"
+                    }
+                  ]
                 },
                 {
                   "label": "Stopped",

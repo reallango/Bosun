@@ -179,15 +179,27 @@ describe('the CPU/Memory reference adoption', () => {
   const spec = manifest.value.widgets[0].spec as WidgetSpec;
 
   it('needs the new API level and a version past the one it ever had', () => {
-    expect(manifest.value.requires).toEqual({ api: 7 });
-    expect(manifest.value.version).toBe('1.1.1');
+    expect(manifest.value.requires).toEqual({ api: 13 });
+    expect(manifest.value.version).toBe('1.2.0');
   });
 
-  it('offers Tiles and Gauges with Tiles as the default', () => {
+  it('offers Tiles, Gauges and Cores with Tiles as the default', () => {
     expect(spec.looks).toEqual({
       default: 'tiles',
-      options: [{ id: 'tiles', label: 'Tiles' }, { id: 'gauges', label: 'Gauges' }],
+      options: [
+        { id: 'tiles', label: 'Tiles' },
+        { id: 'gauges', label: 'Gauges' },
+        { id: 'cores', label: 'Cores', min_size: { w: 8, h: 6 }, default_size: { w: 10, h: 6 } },
+      ],
     });
+  });
+
+  it('draws one threshold-coloured bar per core, labelled with its number', () => {
+    const cores = spec.view.blocks?.find(b => b.type === 'meters') as Extract<Block, { type: 'meters' }> | undefined;
+    expect(cores?.path).toBe('cpu.cores');
+    expect(cores?.layout).toBe('grid');
+    expect(cores?.when).toEqual({ field: 'config.look', equals: 'cores' });
+    expect(cores?.item).toEqual({ label: '{id}', value: '{usagePercent}', unit: '%', thresholds: { warning: 75, danger: 90 } });
   });
 
   it('draws CPU and Memory as tiles with trends, bars and thresholds, and as ring gauges', () => {
@@ -197,13 +209,13 @@ describe('the CPU/Memory reference adoption', () => {
     expect(tiles.when).toEqual({ field: 'config.look', equals: 'tiles' });
     expect(gauges.when).toEqual({ field: 'config.look', equals: 'gauges' });
     expect(tiles.items.map(i => i.label)).toEqual(['CPU', 'Memory']);
-    expect(gauges.items.map(i => i.label)).toEqual(['CPU', 'Memory']);
+    expect(gauges.items!.map(i => i.label)).toEqual(['CPU', 'Memory']);
     for (const tile of tiles.items) {
       expect(tile.trend?.window).toBe('1h');
       expect(tile.bar).toBeDefined();
       expect(tile.thresholds).toEqual({ warning: 75, danger: 90 });
     }
-    for (const gauge of gauges.items) {
+    for (const gauge of gauges.items!) {
       expect(gauge.max).toBe(100);
       expect(gauge.thresholds).toEqual({ warning: 75, danger: 90 });
     }

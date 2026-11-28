@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatNumber, formatPercent, formatValueText, numberOf } from './number-format';
+import { formatNumber, formatPercent, formatStatValue, formatValueText, numberOf } from './number-format';
 
 describe('numberOf', () => {
   it('reads the text of one finite number, and nothing else', () => {
@@ -71,5 +71,18 @@ describe('formatValueText', () => {
     expect(formatValueText('n/a', '%', undefined)).toBe('n/a');
     expect(formatValueText('', '%', undefined)).toBe('');
     expect(formatValueText('—', '%', undefined)).toBe('—');
+  });
+});
+
+describe('formatStatValue', () => {
+  it('keeps a rate or byte unit apart so a narrow tile can put it on its own line', () => {
+    expect(formatStatValue(String(18_400_000), 'rate', undefined, undefined)).toEqual({ number: '18', unit: 'MB/s' });
+    expect(formatStatValue('512', 'bytes', undefined, undefined)).toEqual({ number: '512', unit: 'B' });
+  });
+
+  it('leaves a value without a unit, and every other format, in one piece', () => {
+    expect(formatStatValue('42.4', 'percent', undefined, undefined)).toEqual({ number: '42.4', unit: '%' });
+    expect(formatStatValue('7200', 'duration', undefined, undefined)).toEqual({ number: '2h 0m' });
+    expect(formatStatValue('1234', undefined, 'MB', undefined)).toEqual({ number: '1234', unit: 'MB' });
   });
 });

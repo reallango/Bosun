@@ -34,7 +34,7 @@ export type { ScheduleNotify, ScheduleOptions, ScheduleRun, ScheduleSpec, Schedu
 export const SPEC_VERSION = 1;
 /** Versions the validators accept. Version 2 adds scripts, state, lookups, script actions and layout views (spec-v2.ts). */
 export const SPEC_VERSIONS = [1, 2] as const;
-export const SNAPSHOT_SECTIONS = ['cpu_memory', 'disks', 'gpus', 'system', 'net_rates', 'network', 'services', 'metrics'] as const;
+export const SNAPSHOT_SECTIONS = ['cpu_memory', 'disks', 'disk_io', 'gpus', 'system', 'net_rates', 'network', 'network_headline', 'services', 'metrics'] as const;
 export const ICONS = ['play', 'square', 'rotate-cw', 'scroll-text', 'trash-2', 'download', 'upload', 'power', 'refresh-cw', 'terminal-square', 'pause', 'info', 'pencil', 'plus', 'copy', 'settings', 'external-link', 'layers'] as const;
 export const DOT_COLORS = ['green', 'amber', 'red', 'gray', 'blue'] as const;
 export const FORMATS = ['text', 'bytes', 'rate', 'percent', 'badge', 'bar', 'duration', 'mb', 'temp', 'ago', 'until'] as const;

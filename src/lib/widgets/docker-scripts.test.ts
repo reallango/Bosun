@@ -60,6 +60,28 @@ describe('Docker package scripts', () => {
     expect(calls()).toEqual(['docker logs --tail 50 web-1']);
   });
 
+  it.skipIf(!hasSh)('summary counts the containers, the errors, the health share and the average uptime', () => {
+    fake(`case "$1" in
+ps) if [ "$2" = "-a" ]; then case "$*" in *.Image*) exit 0 ;; esac; printf '%s\\n' 'id1|running|Up 3 hours (healthy)|shop' 'id2|running|Up 2 hours (unhealthy)|shop' 'id3|exited|Exited (0) 2 hours ago|' 'id4|exited|Exited (137) 5 minutes ago|' 'id5|restarting|Restarting (1) 10 seconds ago|'; exit 0; fi; [ "$2" = "-q" ] && echo id1; exit 0 ;;
+version) echo 27.1.1 ;;
+inspect) case "$*" in *StartedAt*) echo 2020-01-01T00:00:00Z ;; esac ;;
+image) exit 0 ;;
+buildx) exit 1 ;;
+esac`);
+    const lines = Object.fromEntries(run('summary.sh').stdout.trim().split('\n').map(l => {
+      const i = l.indexOf('=');
+      return [l.slice(0, i), l.slice(i + 1)];
+    }));
+    expect(lines['docker.version']).toBe('27.1.1');
+    expect(lines['docker.total']).toBe('5');
+    expect(lines['docker.running']).toBe('2');
+    expect(lines['docker.split']).toBe('2 running · 3 stopped');
+    expect(lines['docker.errors']).toBe('3');
+    expect(lines['docker.healthy']).toBe('1');
+    expect(lines['docker.health_total']).toBe('2');
+    expect(Number(lines['docker.avg_uptime'])).toBeGreaterThan(0);
+  });
+
   it.skipIf(!hasSh)('control runs the operation it was given and reports a failure with Docker\'s own message', () => {
     fake(`case "$1" in ps) exit 0 ;; restart) echo "docker $*" >> "$LOG" ;; stop) echo "Error: No such container: x" >&2; exit 1 ;; esac`);
     expect(parseScriptOutput(run('control.sh', { name: 'web', op: 'restart' }).stdout).done).toBe('restart: web');

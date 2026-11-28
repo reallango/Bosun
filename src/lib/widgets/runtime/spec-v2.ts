@@ -132,6 +132,8 @@ export interface InfoItem {
   label: string;
   /** A template over the screen's context. */
   value: string;
+  /** Level 12: write the value like a field (a byte count, a rate, a duration, a percentage ...). */
+  format?: ValueFormat;
   when?: Cond;
 }
 
@@ -229,7 +231,8 @@ export type Block = (
   | { type: 'section'; title: string; defaultOpen: boolean; badges: Badge[]; summary?: string; blocks: Block[]; when?: Cond }
   | { type: 'kv'; items: FieldSpec[]; when?: Cond }
   | { type: 'stat'; items: StatItem[]; size?: BlockSize; minItemWidth?: MinItemWidth; columns?: number; footer?: InfoItem[]; when?: Cond }
-  | { type: 'gauges'; items: GaugeItem[]; size?: BlockSize; minItemWidth?: MinItemWidth; columns?: number; thickness?: GaugeThickness; footer?: InfoItem[]; when?: Cond }
+  /** `items` draws fixed rings; `path` + `item` draws one ring per row of a data list (level 13). */
+  | { type: 'gauges'; items?: GaugeItem[]; path?: string; item?: GaugeItem; empty?: string; size?: BlockSize; minItemWidth?: MinItemWidth; columns?: number; thickness?: GaugeThickness; footer?: InfoItem[]; when?: Cond }
   | { type: 'meters'; path?: string; shape: MeterShape; layout?: MeterLayout; item: MeterItem; empty?: string; when?: Cond }
   | { type: 'info'; items: InfoItem[]; when?: Cond }
   | { type: 'text'; text: string; when?: Cond }
@@ -698,13 +701,20 @@ function validateInfoItems(raw: unknown, where: string): Validated<InfoItem[]> {
     const label = text(x.label, 40);
     const value = text(x.value, 200);
     if (!label || !value) return fail(`${where}: each item needs a "label" and a "value" template`);
+    let format: ValueFormat | undefined;
+    if (x.format !== undefined) {
+      if (typeof x.format !== 'string' || !(VALUE_FORMATS as readonly string[]).includes(x.format)) {
+        return fail(`${where}: item "${label}": "format" must be one of ${VALUE_FORMATS.join(', ')}`);
+      }
+      format = x.format as ValueFormat;
+    }
     let when: Cond | undefined;
     if (x.when !== undefined) {
       const c = cond(x.when, `${where} item "${label}" "when"`);
       if (!c.ok) return c;
       when = c.value;
     }
-    items.push({ label, value, ...(when ? { when } : {}) });
+    items.push({ label, value, ...(format ? { format } : {}), ...(when ? { when } : {}) });
   }
   return { ok: true, value: items };
 }
@@ -775,20 +785,42 @@ export function validateLayout(
           break;
         }
         case 'gauges': {
-          if (!Array.isArray(b.items) || b.items.length < 1 || b.items.length > 12) return fail(`${w}: "items" must list 1-12 ring gauges`);
           const sizing = validateBlockSizing(b, w);
           if (!sizing.ok) return sizing;
           const thickness = validateGaugeThickness(b.thickness, w);
           if (!thickness.ok) return thickness;
-          const items: GaugeItem[] = [];
-          for (const item of b.items as unknown[]) {
-            const g = validateGaugeItem(item, w);
+          const list = b.path !== undefined || b.item !== undefined;
+          if (list && b.items !== undefined) return fail(`${w}: give either "items" or "path" (with "item"), not both`);
+          let items: GaugeItem[] | undefined;
+          let path: string | undefined;
+          let item: GaugeItem | undefined;
+          let empty: string | undefined;
+          if (list) {
+            if (typeof b.path !== 'string' || !FIELD_RE.test(b.path)) return fail(`${w}: "path" must be a dotted path into the widget's data`);
+            path = b.path;
+            const g = validateGaugeItem(b.item, w);
             if (!g.ok) return g;
-            items.push(g.value);
+            item = g.value;
+            if (b.empty !== undefined) {
+              const e = text(b.empty, 80);
+              if (!e) return fail(`${w}: "empty" must be short text`);
+              empty = e;
+            }
+          } else {
+            if (!Array.isArray(b.items) || b.items.length < 1 || b.items.length > 12) return fail(`${w}: "items" must list 1-12 ring gauges, or give "path" and "item"`);
+            items = [];
+            for (const rawItem of b.items as unknown[]) {
+              const g = validateGaugeItem(rawItem, w);
+              if (!g.ok) return g;
+              items.push(g.value);
+            }
           }
           const footer = b.footer === undefined ? undefined : validateInfoItems(b.footer, `${w} footer`);
           if (footer && !footer.ok) return footer;
-          out.push({ type: 'gauges', items, ...sizing.value, ...(thickness.value ? { thickness: thickness.value } : {}), ...(footer && footer.value.length ? { footer: footer.value } : {}), ...base });
+          out.push({
+            type: 'gauges', ...(items ? { items } : { path: path!, item: item! }), ...(empty ? { empty } : {}), ...sizing.value,
+            ...(thickness.value ? { thickness: thickness.value } : {}), ...(footer && footer.value.length ? { footer: footer.value } : {}), ...base,
+          });
           break;
         }
         case 'meters': {

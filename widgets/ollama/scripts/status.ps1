@@ -12,10 +12,11 @@ try {
   # Like `ollama ps`: each loaded model also gets "processor" (its share on CPU and GPU) and "id" (the first 12 characters of its digest).
   $parts = $ps -split '(?=\{"name":)'
   $ps = $parts[0]
+  $vramUsed = 0.0
   foreach ($seg in ($parts | Select-Object -Skip 1)) {
     $size = 0.0; $vram = 0.0; $id = ''
     if ($seg -match '"size":(\d+)') { $size = [double]$Matches[1] }
-    if ($seg -match '"size_vram":(\d+)') { $vram = [double]$Matches[1] }
+    if ($seg -match '"size_vram":(\d+)') { $vram = [double]$Matches[1]; $vramUsed += $vram }
     if ($seg -match '"digest":"([0-9a-f]+)') { $id = $Matches[1].Substring(0, [Math]::Min(12, $Matches[1].Length)) }
     if ($size -le 0) { $proc = '' }
     elseif ($vram -ge $size) { $proc = '100% GPU' }
@@ -23,7 +24,7 @@ try {
     else { $cpu = [int][Math]::Floor(($size - $vram) * 100 / $size + 0.5); $proc = ('{0}%/{1}% CPU/GPU' -f $cpu, (100 - $cpu)) }
     $ps += '{"processor":"' + $proc + '","id":"' + $id + '",' + $seg.Substring(1)
   }
-  Write-Output ('{"version":"' + $version + '","tags":' + $tags + ',"ps":' + $ps + '}')
+  Write-Output ('{"version":"' + $version + '","tags":' + $tags + ',"ps":' + $ps + ',"vram_used":' + [long]$vramUsed + '}')
 } catch {
   Write-Output '{"down":true}'
 }

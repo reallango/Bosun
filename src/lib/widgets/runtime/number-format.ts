@@ -101,7 +101,13 @@ export function formatValue(v: unknown, format: string): string {
 export function formatStatValue(raw: string, format: ValueFormat | undefined, unit: string | undefined, decimals: number | undefined): { number: string; unit?: string } {
   if (format && format !== 'text') {
     if (format === 'percent') return { number: formatValueText(raw, '%', decimals) || '—', unit: '%' };
-    return { number: formatValue(raw, format) || '—' };
+    const formatted = formatValue(raw, format) || '—';
+    // A byte or rate value ends in its own unit ("18.4 MB/s"); keeping it apart lets a narrow tile put it on a second line.
+    if (format === 'rate' || format === 'bytes') {
+      const m = /^(.+?)\s([^\s]+)$/.exec(formatted);
+      if (m) return { number: m[1], unit: m[2] };
+    }
+    return { number: formatted };
   }
   return { number: formatValueText(raw, unit, decimals) || '—', unit };
 }
