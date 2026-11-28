@@ -64,7 +64,7 @@ describe('Docker package scripts', () => {
     fake(`case "$1" in
 ps) if [ "$2" = "-a" ]; then case "$*" in *.Image*) exit 0 ;; esac; printf '%s\\n' 'id1|running|Up 3 hours (healthy)|shop' 'id2|running|Up 2 hours (unhealthy)|shop' 'id3|exited|Exited (0) 2 hours ago|' 'id4|exited|Exited (137) 5 minutes ago|' 'id5|restarting|Restarting (1) 10 seconds ago|'; exit 0; fi; [ "$2" = "-q" ] && echo id1; exit 0 ;;
 version) echo 27.1.1 ;;
-inspect) case "$*" in *StartedAt*) echo 2020-01-01T00:00:00Z ;; esac ;;
+inspect) case "$*" in *StartedAt*) echo 2020-01-01T00:00:00.123456789Z ;; esac ;;
 image) exit 0 ;;
 buildx) exit 1 ;;
 esac`);

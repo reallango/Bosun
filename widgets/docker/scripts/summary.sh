@@ -45,13 +45,21 @@ $D ps -a --no-trunc --format '{{.ID}}|{{.State}}|{{.Status}}|{{.Label "com.docke
   }'
 
 # The average uptime of the running containers, in seconds (the time since each one started).
+# Docker prints RFC3339Nano (2026-11-28T04:12:33.123456789Z); busybox date has no -d for that, so strip the
+# fraction and Z, try busybox -D, then GNU -d.
+epoch() {
+  s=${1%%.*}; s=${s%Z}
+  date -u -D '%Y-%m-%dT%H:%M:%S' -d "$s" +%s 2>/dev/null ||
+    date -u -d "${s}Z" +%s 2>/dev/null
+}
 now=$(date +%s 2>/dev/null)
 if [ -n "$now" ]; then
   sum=0; n=0
   for id in $($D ps -q 2>/dev/null); do
     started=$($D inspect --format '{{.State.StartedAt}}' "$id" 2>/dev/null | tr -d '\r')
     [ -n "$started" ] || continue
-    t=$(date -d "$started" +%s 2>/dev/null) || continue
+    t=$(epoch "$started")
+    [ -n "$t" ] || continue
     [ "$t" -le "$now" ] || continue
     sum=$((sum + now - t)); n=$((n + 1))
   done
