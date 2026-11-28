@@ -589,6 +589,14 @@ curl -sS -X POST https://bosun.example.com/api/mcp \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
 ```
 
+**Behind Cloudflare Access or another proxy.** An MCP client that is refused (or reconnects) fetches
+`/.well-known/oauth-protected-resource` and `/.well-known/oauth-authorization-server` *without* the custom headers,
+so a proxy that guards every path answers those probes with a sign-in page and the client fails with
+`SDK auth failed: JSON Parse error`. Let the proxy pass `/.well-known/oauth-*` through unauthenticated: Bosun only
+answers a `404` JSON saying OAuth is not offered there (this endpoint is keyed, not OAuth). Keep `/api/mcp` behind
+the same protection as the rest of Bosun, and have the client send `Authorization: Bearer bosun_...` (and your
+Cloudflare Access service-token headers) on it.
+
 **Hiding servers and widgets.** A permission group can *deny* as well as allow. Denying *See a server* for a server
 (or a server group) hides it from everyone in that group: it is not listed, its dashboards and widgets are gone and
 every API route under it answers 404. Denying a package widget's data permission hides that widget. A deny beats any

@@ -17,7 +17,8 @@ export function middleware(request: NextRequest) {
         pathname === '/reset-password' ||
         pathname.startsWith('/api/') ||
         pathname.startsWith('/_next/') ||
-        pathname === '/favicon.ico'
+        pathname === '/favicon.ico' ||
+        isDiscoveryProbe(pathname)
     ) {
         return NextResponse.next();
     }
@@ -30,6 +31,22 @@ export function middleware(request: NextRequest) {
     }
 
     return NextResponse.next();
+}
+
+/**
+ * MCP clients probe these when a request is refused (401) or when they reconnect. The probes carry none of the
+ * custom headers (API key, Cloudflare Access service token), so they must reach their route handlers, which answer a
+ * "not supported" JSON 404, instead of being redirected to the HTML sign-in page. Exact prefixes only: anything else
+ * under /.well-known stays behind the sign-in check.
+ */
+const DISCOVERY_PREFIXES = [
+    '/.well-known/oauth-protected-resource',
+    '/.well-known/oauth-authorization-server',
+    '/.well-known/openid-configuration',
+];
+
+export function isDiscoveryProbe(pathname: string): boolean {
+    return DISCOVERY_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 }
 
 /**

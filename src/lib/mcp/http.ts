@@ -27,6 +27,12 @@ async function authFailure(response: NextResponse): Promise<NextResponse> {
   try { body = await response.json() as { error?: { message?: string; code?: string } }; } catch { /* not JSON */ }
   const headers = new Headers(response.headers);
   headers.set('Cache-Control', 'no-store');
+  // Never advertise an OAuth resource-metadata document: there is none, and a client that follows the pointer ends up
+  // probing /.well-known/oauth-protected-resource with no credentials. A plain Bearer challenge is all that is true.
+  if (headers.get('www-authenticate')?.includes('resource_metadata')) headers.delete('www-authenticate');
+  if (response.status === 401 && !headers.has('www-authenticate')) {
+    headers.set('WWW-Authenticate', 'Bearer realm="bosun"');
+  }
   return NextResponse.json(
     {
       jsonrpc: '2.0',

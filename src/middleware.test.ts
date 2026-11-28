@@ -27,3 +27,30 @@ describe('the sign-in redirect', () => {
     }
   });
 });
+
+describe('the MCP OAuth discovery probes', () => {
+  it('reach their JSON handlers without a session or any custom header', () => {
+    for (const path of [
+      '/.well-known/oauth-protected-resource',
+      '/.well-known/oauth-protected-resource/api/mcp',
+      '/.well-known/oauth-authorization-server',
+      '/.well-known/oauth-authorization-server/api/mcp',
+      '/.well-known/openid-configuration',
+    ]) {
+      const res = middleware(internal(path));
+      expect(res.headers.get('location')).toBeNull();
+    }
+  });
+
+  it('do not open up the rest of /.well-known or look-alike prefixes', () => {
+    for (const path of [
+      '/.well-known/anything-else',
+      '/.well-known/oauth-protected-resourcex',
+      '/.well-known/oauth-authorization-server-evil/metadata',
+    ]) {
+      const res = middleware(internal(path));
+      expect(res.status).toBe(307);
+      expect(res.headers.get('location')).toBe('http://localhost:3000/login');
+    }
+  });
+});
