@@ -60,6 +60,7 @@ export function seedBundledPackages(): Promise<void> {
 }
 
 async function seedOnce(): Promise<void> {
+  let installed = false;
   try {
     const { minimum } = await clusterApiState();
     const { packages, errors } = readBundledPackages();
@@ -77,6 +78,7 @@ async function seedOnce(): Promise<void> {
         // "preinstalled" (a stale `github` source would show a branch it no longer comes from) and the next
         // image keeps upgrading it.
         await installPackage({ manifest, files, source: 'bundled' });
+        installed = true;
         console.log(`[widgets] ${action === 'upgrade' ? 'upgraded' : 'installed'} bundled package ${manifest.id} ${manifest.version}`);
       } catch (err) {
         console.warn(`[widgets] could not install bundled package ${manifest.id}: ${err instanceof Error ? err.message : err}`);
@@ -86,6 +88,20 @@ async function seedOnce(): Promise<void> {
   } catch (err) {
     console.warn(`[widgets] bundled packages: ${err instanceof Error ? err.message : err}`);
   }
+  // The migration turns old package secrets into entries and reads the installed manifests, so it must follow the
+  // upgrade that brings the credential kinds. A deferred upgrade lands later, on the retry; running it once per process
+  // as well keeps a secret that survived an earlier run from being missed.
+  const g2 = globalThis as unknown as { __bosunCredentialMigrationRan?: boolean };
+  if (installed || !g2.__bosunCredentialMigrationRan) {
+    g2.__bosunCredentialMigrationRan = true;
+    await migrateCredentials();
+  }
+}
+
+/** Never throws: a failure here must not stop the dashboards from starting. */
+async function migrateCredentials(): Promise<void> {
+  const { migratePackageCredentials } = await import('@/lib/widgets/credentials');
+  await migratePackageCredentials().catch(err => console.warn('[widgets] credential migration failed:', err instanceof Error ? err.message : err));
 }
 
 /**

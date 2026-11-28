@@ -310,10 +310,14 @@ export function matchCredentialByUrl(entries: MatchableCredential[], url: string
   return candidates[0].entry;
 }
 
-/** The entry a server uses by default, if one is marked so. */
+/**
+ * The entry a server uses by default. When no entry is marked default, a server with exactly one choice uses that
+ * one: an older destination that was never marked default (or a migrated one) still configures the server instead
+ * of leaving it "Not configured".
+ */
 export function defaultCredentialForServer(entries: MatchableCredential[], serverId: string): MatchableCredential | null {
   const allowed = entries.filter(e => !e.servers.length || e.servers.includes(serverId));
-  return allowed.find(e => e.isDefault) ?? null;
+  return allowed.find(e => e.isDefault) ?? (allowed.length === 1 ? allowed[0] : null);
 }
 
 export interface LegacySecretValues { [secretId: string]: string | undefined }

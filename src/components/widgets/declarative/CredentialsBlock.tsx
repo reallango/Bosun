@@ -62,6 +62,16 @@ export function CredentialsBlock({ block, ui }: { block: Block; ui: LayoutUi }) 
     setDraft(null); setEditing(null); setError(null); void reload();
   };
 
+  const makeDefault = async (entry: CredentialEntryView) => {
+    if (!api) return;
+    setBusy(true);
+    const r = await api.save(block.kind, {
+      id: entry.id, name: entry.name, fields: { ...entry.fields }, secrets: {}, servers: [...entry.servers], isDefault: true,
+    });
+    setBusy(false);
+    if (!r.ok) setError(r.error); else { setError(null); void reload(); }
+  };
+
   const remove = async (entry: CredentialEntryView) => {
     if (!api) return;
     if (!window.confirm(`Delete the credential "${entry.name}"? Scripts that use it stop working until another one matches.`)) return;
@@ -112,7 +122,7 @@ export function CredentialsBlock({ block, ui }: { block: Block; ui: LayoutUi }) 
                     <tr key={entry.id} className="border-t border-border/60 align-top">
                       <td className="py-1 pr-2">
                         <span className="font-medium">{entry.name}</span>
-                        {entry.isDefault && <span className="ml-1 rounded bg-primary/10 px-1 text-[10px] text-primary">default</span>}
+                        {entry.isDefault && <span className="ml-1 rounded bg-primary/10 px-1 text-[10px] text-primary">Default</span>}
                       </td>
                       {publicFields.map(f => <td key={f.id} className="max-w-[16rem] truncate py-1 pr-2 font-mono" title={entry.fields[f.id] ?? ''}>{entry.fields[f.id] || <span className="text-muted-foreground">—</span>}</td>)}
                       <td className="py-1 pr-2">{entry.servers.length ? entry.servers.map(s => serverName.get(s) ?? s).join(', ') : <span className="text-muted-foreground">All servers</span>}</td>
@@ -126,6 +136,9 @@ export function CredentialsBlock({ block, ui }: { block: Block; ui: LayoutUi }) 
                       <td className="py-1 pr-2">
                         <div className="flex items-center justify-end gap-1">
                           {block.rowAction && <button type="button" className={buttonClass} onClick={() => runRowAction(entry)}>{block.rowAction.label}</button>}
+                          {kind.defaultPerServer && kind.canManage && !entry.isDefault && (
+                            <button type="button" className={buttonClass} disabled={busy} onClick={() => void makeDefault(entry)}>Make default</button>
+                          )}
                           {kind.canManage && <button type="button" className={buttonClass} onClick={() => startEdit(entry)}>Edit</button>}
                           {kind.canManage && <button type="button" className={`${iconButtonClass} text-destructive`} aria-label={`Delete ${entry.name}`} onClick={() => void remove(entry)}><Trash2 className="size-3" aria-hidden /></button>}
                         </div>

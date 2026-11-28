@@ -120,7 +120,7 @@ export async function DELETE(request: NextRequest, { params }: { params: Promise
     if (!existing) return fail('Credential not found', 404, 'NOT_FOUND');
     const denied = await requireKindManage(auth, ctx.kind, existing.servers);
     if (denied) return denied;
-    await deleteCredential(ctx.packageId, id);
+    await deleteCredential(ctx.packageId, id, ctx.kind);
     await logAudit({ userId: auth.userId, action: AuditActions.WIDGET_CREDENTIAL, status: 'success', ipAddress: clientIp(request) ?? undefined, details: `Deleted ${ctx.kind.id} credential "${existing.name}" of ${ctx.packageId}` });
     return ok({ deleted: true });
   } catch (error) {
