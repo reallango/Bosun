@@ -14,6 +14,7 @@ const h = vi.hoisted(() => ({
   sent: [] as Array<Record<string, unknown>>,
   terminalOutput: { output: 'done\n', more: false, password_required: false },
   closeFound: true,
+  requestAllowed: true,
 }));
 
 vi.mock('@/lib/permissions/authorize', () => ({
@@ -26,6 +27,7 @@ vi.mock('@/lib/permissions/authorize', () => ({
   },
 }));
 vi.mock('@/lib/permissions/store', () => ({ registeredPermissionDefs: async () => [] }));
+vi.mock('@/lib/access/limiter', () => ({ accessRequestLimiter: { consume: () => ({ allowed: h.requestAllowed }) } }));
 vi.mock('@/lib/access/requests', () => ({
   createRequest: async (_auth: unknown, input: Record<string, unknown>) => {
     h.requests.push(input);
@@ -69,7 +71,7 @@ function textOf(result: { content: Array<{ type: string; text?: string }> }): st
 }
 
 describe('server_command', () => {
-  beforeEach(() => { h.permissions = new Set(); h.runs.length = 0; h.requests.length = 0; });
+  beforeEach(() => { h.permissions = new Set(); h.runs.length = 0; h.requests.length = 0; h.requestAllowed = true; });
 
   it('runs as the non-admin account when the caller holds shell.user', async () => {
     h.permissions.add('shell.user');
@@ -94,6 +96,15 @@ describe('server_command', () => {
     expect(h.requests[0]).toMatchObject({ kind: 'command', serverId: 'srv-1', command: 'systemctl restart nginx', as: 'service', reason: 'restart' });
     expect(result.structuredContent).toMatchObject({ request_id: 'req-1', status: 'pending' });
     expect(textOf(result)).toContain('one-time access request req-1');
+  });
+
+  it('applies the access-request rate limit the REST route applies', async () => {
+    h.requestAllowed = false;
+    const result = await callHostTool(ctx, tool('server_command'), { server_id: 'srv-1', command: 'id', as: 'service' });
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain('RATE_LIMITED');
+    expect(h.requests).toHaveLength(0);
+    expect(h.runs).toHaveLength(0);
   });
 
   it('refuses a signed-in principal (host commands use API keys only)', async () => {
@@ -133,7 +144,7 @@ describe('container_exec', () => {
 describe('terminal tools', () => {
   beforeEach(() => {
     h.permissions = new Set(); h.requests.length = 0; h.openCalls.length = 0; h.sent.length = 0;
-    h.terminalOutput = { output: 'done\n', more: false, password_required: false }; h.closeFound = true;
+    h.terminalOutput = { output: 'done\n', more: false, password_required: false }; h.closeFound = true; h.requestAllowed = true;
   });
 
   it('creates a one-time terminal request without the permission', async () => {
@@ -141,6 +152,14 @@ describe('terminal tools', () => {
     expect(h.openCalls).toHaveLength(0);
     expect(h.requests[0]).toMatchObject({ kind: 'terminal', serverId: 'srv-1', as: 'service', container: null });
     expect(result.structuredContent).toMatchObject({ request_id: 'req-1' });
+  });
+
+  it('applies the access-request rate limit to a terminal request too', async () => {
+    h.requestAllowed = false;
+    const result = await callHostTool(ctx, tool('terminal_open'), { server_id: 'srv-1', as: 'user' });
+    expect(result.isError).toBe(true);
+    expect(textOf(result)).toContain('RATE_LIMITED');
+    expect(h.requests).toHaveLength(0);
   });
 
   it('opens a session when the caller holds the permission', async () => {
