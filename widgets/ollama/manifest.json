@@ -2,11 +2,11 @@
   "schema": 1,
   "id": "ollama",
   "name": "Ollama Status",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "Models, loaded models and their memory split; pull and delete models; shows how Ollama is installed (Windows service with nssm, systemd service, Docker container), updates it, starts and stops it, sets its startup method, restart policy and settings, and installs it.",
   "author": "Bosun",
   "requires": {
-    "api": 10
+    "api": 11
   },
   "network": [
     "api.github.com"
@@ -454,7 +454,11 @@
           "options": [
             {
               "id": "tiles",
-              "label": "Tiles"
+              "label": "Tiles",
+              "min_size": {
+                "w": 6,
+                "h": 5
+              }
             },
             {
               "id": "details",
@@ -1103,7 +1107,7 @@
                 "all": [
                   {
                     "field": "config.look",
-                    "equals": "tiles"
+                    "equals": "details"
                   },
                   {
                     "field": "data.version",
@@ -1160,7 +1164,43 @@
                   "count": {
                     "path": "data.tags.models"
                   },
-                  "sub": "installed"
+                  "sub": "installed",
+                  "when": {
+                    "field": "data.version",
+                    "exists": true
+                  },
+                  "alternatives": [
+                    {
+                      "label": "Ollama",
+                      "value": "Not installed",
+                      "sub": "open Details to install",
+                      "tone": "danger",
+                      "when": {
+                        "field": "state.install.kind",
+                        "equals": "none"
+                      }
+                    },
+                    {
+                      "label": "Ollama",
+                      "value": "Stopped",
+                      "sub": "open Details to start",
+                      "tone": "warning",
+                      "when": {
+                        "field": "state.install.kind",
+                        "in": [
+                          "service",
+                          "docker",
+                          "standard"
+                        ]
+                      }
+                    },
+                    {
+                      "label": "Ollama",
+                      "value": "—",
+                      "sub": "checking…",
+                      "emphasis": "muted"
+                    }
+                  ]
                 },
                 {
                   "label": "Loaded",
@@ -1171,16 +1211,90 @@
                     "metric": "ollama.loaded",
                     "window": "6h"
                   },
-                  "sub": "in memory"
+                  "sub": "in memory",
+                  "when": {
+                    "field": "data.version",
+                    "exists": true
+                  }
                 },
                 {
                   "label": "Version",
                   "value": "{data.version}",
-                  "emphasis": "muted",
-                  "sub": "Ollama"
+                  "sub": "Ollama",
+                  "when": {
+                    "field": "data.version",
+                    "exists": true
+                  }
+                },
+                {
+                  "label": "VRAM",
+                  "value": "{data.vram_used}",
+                  "format": "bytes",
+                  "sub": "in use",
+                  "when": {
+                    "all": [
+                      {
+                        "field": "data.version",
+                        "exists": true
+                      },
+                      {
+                        "field": "data.vram_used",
+                        "gt": 0
+                      }
+                    ]
+                  },
+                  "alternatives": [
+                    {
+                      "label": "VRAM",
+                      "value": "—",
+                      "sub": "nothing is loaded",
+                      "emphasis": "muted",
+                      "when": {
+                        "field": "data.version",
+                        "exists": true
+                      }
+                    }
+                  ]
                 }
               ],
-              "columns": 3
+              "footer": [
+                {
+                  "label": "Installed as",
+                  "value": "{state.install.kind}",
+                  "when": {
+                    "field": "state.install.kind",
+                    "in": [
+                      "service",
+                      "docker",
+                      "standard"
+                    ]
+                  }
+                },
+                {
+                  "label": "State",
+                  "value": "{state.install.state}",
+                  "when": {
+                    "field": "state.install.state",
+                    "exists": true
+                  }
+                },
+                {
+                  "label": "Latest",
+                  "value": "{lookups.latest}",
+                  "when": {
+                    "field": "lookups.latest",
+                    "exists": true
+                  }
+                },
+                {
+                  "label": "Ollama",
+                  "value": "not installed",
+                  "when": {
+                    "field": "state.install.kind",
+                    "equals": "none"
+                  }
+                }
+              ]
             },
             {
               "type": "jobProgress"

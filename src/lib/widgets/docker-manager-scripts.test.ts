@@ -52,9 +52,33 @@ const verbs = () => dockerCalls().map((c) => c.slice(0, 2).join(' '));
 const run = (file: string, params: Record<string, string> = {}, extraEnv: Record<string, string> = {}) => {
   // like the runtime: the text parameters travel on stdin with the script, the rest on the command line
   const inv = buildScriptInvocation('linux', script(file), params, { stdinParams: ['settings', 'input', 'yaml', 'env', 'override'] });
+  const env: Record<string, string> = { ...process.env as Record<string, string>, PATH: `${bin}${path.delimiter}${process.env.PATH}`, LOG: log, HOME: home, CAPTURE: capture, BOSUN_RECREATE_WAIT: '0', ...extraEnv };
+  // The host scripts now read the resolved credential, not the legacy package secrets: turn the old keys into the
+  // BOSUN_CRED_* environment the runtime would export, for the repository the call passes.
+  const repo = params.repo ?? '';
+  const host = (/^https:\/\/([^/]+)/i.exec(repo)?.[1] ?? '').toLowerCase();
+  const pickHost = (raw: string): string | null => {
+    for (const item of raw.split(/[\s,;]+/)) {
+      const eq = item.indexOf('=');
+      if (eq > 0 && item.slice(0, eq).toLowerCase() === host) return item.slice(eq + 1);
+    }
+    return null;
+  };
+  const gitCreds = env.BOSUN_SECRET_git_credentials;
+  let gitValue = gitCreds ? pickHost(gitCreds) : null;
+  if (gitValue === null && env.BOSUN_SECRET_git_token && host === 'github.com') gitValue = env.BOSUN_SECRET_git_token;
+  if (gitValue !== null && gitValue !== undefined) {
+    const colon = gitValue.indexOf(':');
+    env.BOSUN_CRED_GIT_HOST = host;
+    if (colon > 0) { env.BOSUN_CRED_GIT_USERNAME = gitValue.slice(0, colon); env.BOSUN_CRED_GIT_TOKEN = gitValue.slice(colon + 1); }
+    else env.BOSUN_CRED_GIT_TOKEN = gitValue;
+  }
+  if (env.BOSUN_SECRET_backup_repository !== undefined) env.BOSUN_CRED_BACKUP_DESTINATION_REPOSITORY = env.BOSUN_SECRET_backup_repository;
+  if (env.BOSUN_SECRET_backup_password !== undefined) env.BOSUN_CRED_BACKUP_DESTINATION_PASSWORD = env.BOSUN_SECRET_backup_password;
+  if (env.BOSUN_SECRET_backup_credentials !== undefined) env.BOSUN_CRED_BACKUP_DESTINATION_CREDENTIALS = env.BOSUN_SECRET_backup_credentials;
+  for (const k of ['BOSUN_SECRET_git_token', 'BOSUN_SECRET_git_credentials', 'BOSUN_SECRET_backup_repository', 'BOSUN_SECRET_backup_password', 'BOSUN_SECRET_backup_credentials']) delete env[k];
   return spawnSync('sh', ['-c', inv.command], {
-    input: inv.stdin, encoding: 'utf8', cwd: bin,
-    env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}`, LOG: log, HOME: home, CAPTURE: capture, BOSUN_RECREATE_WAIT: '0', ...extraEnv },
+    input: inv.stdin, encoding: 'utf8', cwd: bin, env,
   });
 };
 const out = (file: string, params: Record<string, string> = {}, extraEnv: Record<string, string> = {}) => parseScriptOutput(run(file, params, extraEnv).stdout);
@@ -760,8 +784,8 @@ describe('stacks', () => {
     fake(`case "$1" in ps) printf 'mine${t}web${t}running\\nmine${t}db${t}exited\\nmine${t}web${t}running\\next${t}app${t}running\\next${t}app2${t}running\\n' ;; esac`);
     const j = JSON.parse(run('stacks.sh').stdout);
     expect(j.map((s: { name: string }) => s.name)).toEqual(['ext', 'idle', 'mine', 'weird']);
-    expect(j.find((s: { name: string }) => s.name === 'mine')).toEqual({ name: 'mine', kind: 'stack', status: 'partial', services: 2, source: 'git', repo: 'https://github.com/o/r', branch: 'main', file: 'deploy/compose.yaml', updated: '2025-01-02T03:04:05Z' });
-    expect(j.find((s: { name: string }) => s.name === 'ext')).toEqual({ name: 'ext', kind: 'stack', status: 'running', services: 2, source: 'external', repo: '', branch: '', file: '', updated: '' });
+    expect(j.find((s: { name: string }) => s.name === 'mine')).toEqual({ name: 'mine', kind: 'stack', status: 'partial', services: 2, source: 'git', repo: 'https://github.com/o/r', branch: 'main', file: 'deploy/compose.yaml', updated: '2025-01-02T03:04:05Z', credential: '' });
+    expect(j.find((s: { name: string }) => s.name === 'ext')).toEqual({ name: 'ext', kind: 'stack', status: 'running', services: 2, source: 'external', repo: '', branch: '', file: '', updated: '', credential: '' });
     expect(j.find((s: { name: string }) => s.name === 'idle')).toMatchObject({ status: 'stopped', services: 0, source: 'editor' });
     expect(j.find((s: { name: string }) => s.name === 'weird')).toMatchObject({ repo: 'a"b\\c', branch: 'xY' });
     fs.rmSync(path.join(home, 'bosun-stacks'), { recursive: true });
@@ -825,7 +849,7 @@ exit 0`);
     expect(fs.readFileSync(path.join(d, 'compose.yaml'), 'utf8')).toBe('services:\n  web:\n    image: nginx\n');
     expect(fs.readFileSync(path.join(d, '.env'), 'utf8')).toBe('FOO=bar\n');
     expect(fs.existsSync(path.join(d, 'compose.yaml.new'))).toBe(false);
-    expect(fs.readFileSync(path.join(d, 'bosun.meta'), 'utf8')).toMatch(/^source=editor\nrepo=\nbranch=\nfile=\nupdated=\d{4}-\d\d-\d\dT[\d:]+Z\n$/);
+    expect(fs.readFileSync(path.join(d, 'bosun.meta'), 'utf8')).toMatch(/^source=editor\nrepo=\nbranch=\nfile=\ncredential=auto\nupdated=\d{4}-\d\d-\d\dT[\d:]+Z\n$/);
     const c = dockerCalls().filter((x) => x[0] === 'compose' && x[1] !== 'version');
     expect(c[0]).toEqual(['compose', '-p', 'demo', '--project-directory', sd, '-f', sd + '/compose.yaml.new', '--env-file', sd + '/.env.new', 'config', '--format', 'json']);
     expect(c[1]).toEqual(['compose', '-p', 'demo', '--project-directory', sd, '-f', sd + '/compose.yaml', '--env-file', sd + '/.env', 'up', '-d', '--remove-orphans']);
@@ -987,7 +1011,7 @@ exit 0`);
       const r = parseScriptOutput(deploy(g).stdout);
       expect(r.error).toBeNull();
       expect(gitCalls()).toEqual([['clone', '--depth', '1', '--single-branch', '--branch', 'main', '--', 'https://github.com/o/r', shDir('demo') + '/repo']]);
-      expect(fs.readFileSync(path.join(stackDir('demo'), 'bosun.meta'), 'utf8')).toMatch(/^source=git\nrepo=https:\/\/github.com\/o\/r\nbranch=main\nfile=deploy\/compose.yaml\nupdated=/);
+      expect(fs.readFileSync(path.join(stackDir('demo'), 'bosun.meta'), 'utf8')).toMatch(/^source=git\nrepo=https:\/\/github.com\/o\/r\nbranch=main\nfile=deploy\/compose.yaml\ncredential=auto\nupdated=/);
       const up = dockerCalls().filter((x) => x[0] === 'compose' && x.includes('up'))[0];
       expect(up).toEqual(['compose', '-p', 'demo', '--project-directory', shDir('demo') + '/repo/deploy', '-f', shDir('demo') + '/repo/deploy/compose.yaml', 'up', '-d', '--remove-orphans']);
       expect(envLines()).toContain('ENV GIT_ALLOW_PROTOCOL=https');
@@ -1046,7 +1070,7 @@ exit 0`);
       composeFake(config('      "ports": []'));
       fakeGit();
       fs.writeFileSync(log, '');
-      const r = out('stack_action.sh', { name: 'p', op: 'update' }, { BOSUN_SECRET_git_credentials: 'gitlab.com=glpat-XYZ', BOSUN_SECRET_git_token: TOKEN });
+      const r = out('stack_action.sh', { name: 'p', op: 'update' }, { BOSUN_CRED_GIT_HOST: 'gitlab.com', BOSUN_CRED_GIT_USERNAME: 'oauth2', BOSUN_CRED_GIT_TOKEN: 'glpat-XYZ' });
       expect(r.done).toBe('update: p');
       expect(envLines()).toContain(`ENV GIT_CONFIG_VALUE_0=Authorization: Basic ${Buffer.from('oauth2:glpat-XYZ').toString('base64')}`);
       expect(envLines()).toContain('ENV SECRET=');

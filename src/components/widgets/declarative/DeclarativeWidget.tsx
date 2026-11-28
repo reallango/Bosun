@@ -245,7 +245,7 @@ export function V1View({ view, data, widgetId, serverId, actions, allowed, busy,
               </div>
               <div className="flex shrink-0 items-center gap-0.5" onClick={e => e.stopPropagation()} onKeyDown={e => e.stopPropagation()}>
                 {busy !== null && <Loader2 className="size-4 animate-spin text-muted-foreground motion-reduce:animate-none" aria-label="Working" />}
-                {rowButtons(row, r.actions)}
+                {rowButtons(row, r.actions ?? [])}
               </div>
             </li>
           ))}

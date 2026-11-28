@@ -2,11 +2,11 @@
   "schema": 1,
   "id": "docker",
   "name": "Docker Containers",
-  "version": "1.0.29",
+  "version": "1.1.1",
   "description": "Containers on the host with logs, a shell, start, stop and restart; edit a container, create containers and stacks (a compose file, or one from a Git repository), back containers and stacks up with restic (volumes, mapped folders, stack files and the image, with the pinned image version) and restore them, update containers and stacks to newer images with a health check and automatic rollback, and a Manage page for images, volumes, networks and backups.",
   "author": "Bosun",
   "requires": {
-    "api": 9
+    "api": 12
   },
   "permissions": [
     {
@@ -84,7 +84,7 @@
     {
       "id": "docker.backup",
       "label": "Back up containers and stacks",
-      "description": "Create backups of containers and stacks, see the backups of this server and initialise the backup repository. The data goes to the destination set in the package secrets.",
+      "description": "Create backups of containers and stacks, see the backups of this server and initialise the backup repository. The data goes to the backup destination set for the server.",
       "group": "Docker",
       "defaultLevel": "admin",
       "risk": "high",
@@ -111,6 +111,24 @@
         "docker.backup",
         "docker.manage"
       ]
+    },
+    {
+      "id": "docker.credentials",
+      "label": "Manage Git credentials",
+      "description": "Create, edit and delete the Git access entries of the Docker package (a token for one host, organisation or repository). Deploying and updating a stack only needs the action's own permission.",
+      "group": "Docker",
+      "defaultLevel": "admin",
+      "risk": "high",
+      "scope": "server"
+    },
+    {
+      "id": "docker.backup_config",
+      "label": "Manage backup destinations",
+      "description": "Create, edit and delete the backup destinations of the Docker package (the restic repository, password and credentials of one server) and choose which one is the default.",
+      "group": "Docker",
+      "defaultLevel": "admin",
+      "risk": "high",
+      "scope": "server"
     }
   ],
   "widgets": [
@@ -565,12 +583,14 @@
                   "later"
                 ],
                 "maxLength": 10
+              },
+              "credential": {
+                "type": "string",
+                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "maxLength": 64,
+                "default": "auto"
               }
-            },
-            "secrets": [
-              "git_token",
-              "git_credentials"
-            ]
+            }
           },
           "stack_action": {
             "as": "service",
@@ -631,12 +651,20 @@
                 "max": 600,
                 "integer": true,
                 "default": 180
+              },
+              "repo": {
+                "type": "string",
+                "maxLength": 300,
+                "default": "-",
+                "pattern": "^(-|https://[!-~]{1,290})$"
+              },
+              "credential": {
+                "type": "string",
+                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "maxLength": 64,
+                "default": "auto"
               }
-            },
-            "secrets": [
-              "git_token",
-              "git_credentials"
-            ]
+            }
           },
           "stack_remove": {
             "as": "service",
@@ -716,12 +744,14 @@
                 "type": "string",
                 "pattern": "^https://[A-Za-z0-9.-]+(:[0-9]{1,5})?/[A-Za-z0-9._/-]+$",
                 "maxLength": 300
+              },
+              "credential": {
+                "type": "string",
+                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "maxLength": 64,
+                "default": "auto"
               }
-            },
-            "secrets": [
-              "git_token",
-              "git_credentials"
-            ]
+            }
           },
           "git_files": {
             "as": "service",
@@ -737,12 +767,14 @@
                 "type": "string",
                 "pattern": "^[A-Za-z0-9._/-]{1,100}$",
                 "maxLength": 100
+              },
+              "credential": {
+                "type": "string",
+                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "maxLength": 64,
+                "default": "auto"
               }
-            },
-            "secrets": [
-              "git_token",
-              "git_credentials"
-            ]
+            }
           },
           "git_services": {
             "as": "service",
@@ -763,12 +795,14 @@
                 "type": "string",
                 "pattern": "^[A-Za-z0-9._/-]{1,200}$",
                 "maxLength": 200
+              },
+              "credential": {
+                "type": "string",
+                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "maxLength": 64,
+                "default": "auto"
               }
-            },
-            "secrets": [
-              "git_token",
-              "git_credentials"
-            ]
+            }
           },
           "host_detect": {
             "as": "service",
@@ -817,13 +851,14 @@
                 "maxLines": 100,
                 "linePattern": "^(#.*|[a-z_]+=.*)$",
                 "default": ""
+              },
+              "destination": {
+                "type": "string",
+                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "maxLength": 64,
+                "default": "auto"
               }
-            },
-            "secrets": [
-              "backup_repository",
-              "backup_password",
-              "backup_credentials"
-            ]
+            }
           },
           "backup_restore": {
             "as": "service",
@@ -868,13 +903,20 @@
                 "maxLines": 20,
                 "linePattern": "^(#.*|[a-z_]+=.*)$",
                 "default": ""
+              },
+              "destination": {
+                "type": "string",
+                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "maxLength": 64,
+                "default": "auto"
               }
-            },
-            "secrets": [
-              "backup_repository",
-              "backup_password",
-              "backup_credentials"
-            ]
+            }
+          },
+          "summary": {
+            "as": "service",
+            "timeoutSec": 900,
+            "linux": "scripts/summary.sh",
+            "params": {}
           }
         },
         "data": {
@@ -914,70 +956,298 @@
           }
         ],
         "view": {
-          "type": "list",
-          "empty": "No containers",
-          "summary": [
+          "type": "layout",
+          "blocks": [
             {
-              "label": "running",
-              "where": {
-                "field": "state",
-                "equals": "running"
-              }
-            },
-            {
-              "label": "total"
-            }
-          ],
-          "filter": {
-            "fields": [
-              "name",
-              "image"
-            ],
-            "placeholder": "Filter",
-            "hideBelow": "sm"
-          },
-          "toggles": [
-            {
-              "key": "stopped",
-              "label": "stopped",
-              "default": true,
-              "hideWhen": {
-                "field": "state",
-                "notEquals": "running"
+              "type": "stat",
+              "when": {
+                "field": "config.look",
+                "equals": "tiles"
               },
-              "hideBelow": "sm"
-            }
-          ],
-          "row": {
-            "dot": {
-              "field": "state",
-              "colors": {
-                "running": "green",
-                "restarting": "amber",
-                "paused": "amber",
-                "created": "gray",
-                "exited": "gray",
-                "dead": "red"
+              "items": [
+                {
+                  "label": "Containers",
+                  "value": "{state.docker.total}",
+                  "sub": "{state.docker.split}",
+                  "when": {
+                    "field": "state.docker.total",
+                    "exists": true
+                  },
+                  "alternatives": [
+                    {
+                      "label": "Containers",
+                      "count": {
+                        "path": "data"
+                      },
+                      "sub": "containers"
+                    }
+                  ]
+                },
+                {
+                  "label": "Updates available",
+                  "value": "{state.docker.updates}",
+                  "tone": "warning",
+                  "sub": "images",
+                  "when": {
+                    "field": "state.docker.updates",
+                    "gt": 0
+                  },
+                  "alternatives": [
+                    {
+                      "label": "Updates available",
+                      "value": "—",
+                      "tone": "warning",
+                      "sub": "check incomplete",
+                      "when": {
+                        "field": "state.docker.updates_unknown",
+                        "gt": 0
+                      }
+                    },
+                    {
+                      "label": "Updates available",
+                      "value": "0",
+                      "tone": "success",
+                      "sub": "up to date",
+                      "when": {
+                        "field": "state.docker.updates",
+                        "exists": true
+                      }
+                    },
+                    {
+                      "label": "Updates available",
+                      "value": "—",
+                      "sub": "not checked yet",
+                      "emphasis": "muted"
+                    }
+                  ]
+                },
+                {
+                  "label": "Errors",
+                  "value": "{state.docker.errors}",
+                  "tone": "danger",
+                  "sub": "containers need attention",
+                  "when": {
+                    "field": "state.docker.errors",
+                    "gt": 0
+                  },
+                  "alternatives": [
+                    {
+                      "label": "Average uptime",
+                      "value": "{state.docker.avg_uptime}",
+                      "format": "duration",
+                      "sub": "running containers",
+                      "when": {
+                        "field": "state.docker.avg_uptime",
+                        "exists": true
+                      }
+                    },
+                    {
+                      "label": "Errors",
+                      "value": "0",
+                      "tone": "success",
+                      "sub": "all healthy",
+                      "when": {
+                        "field": "state.docker.errors",
+                        "exists": true
+                      }
+                    },
+                    {
+                      "label": "Errors",
+                      "value": "—",
+                      "sub": "checking…",
+                      "emphasis": "muted"
+                    }
+                  ]
+                }
+              ],
+              "footer": [
+                {
+                  "label": "Docker",
+                  "value": "{state.docker.version}",
+                  "when": {
+                    "field": "state.docker.version",
+                    "exists": true
+                  }
+                },
+                {
+                  "label": "Stacks",
+                  "value": "{state.docker.stacks}",
+                  "when": {
+                    "field": "state.docker.stacks",
+                    "exists": true
+                  }
+                }
+              ]
+            },
+            {
+              "type": "gauges",
+              "when": {
+                "field": "config.look",
+                "equals": "gauges"
+              },
+              "items": [
+                {
+                  "label": "Running",
+                  "value": "{state.docker.running_pct}",
+                  "max": 100,
+                  "unit": "%",
+                  "sub": "{state.docker.running} of {state.docker.total} running",
+                  "when": {
+                    "field": "state.docker.running_pct",
+                    "exists": true
+                  }
+                },
+                {
+                  "label": "Healthy",
+                  "value": "{state.docker.healthy_pct}",
+                  "max": 100,
+                  "unit": "%",
+                  "sub": "{state.docker.healthy} of {state.docker.health_total} with checks",
+                  "when": {
+                    "field": "state.docker.health_total",
+                    "gt": 0
+                  },
+                  "alternatives": [
+                    {
+                      "label": "Stopped",
+                      "value": "{state.docker.stopped_pct}",
+                      "max": 100,
+                      "unit": "%",
+                      "sub": "{state.docker.stopped} stopped",
+                      "when": {
+                        "field": "state.docker.stopped_pct",
+                        "exists": true
+                      }
+                    },
+                    {
+                      "label": "Health",
+                      "value": "—",
+                      "sub": "no health checks",
+                      "emphasis": "muted"
+                    }
+                  ]
+                }
+              ],
+              "footer": [
+                {
+                  "label": "Docker",
+                  "value": "{state.docker.version}",
+                  "when": {
+                    "field": "state.docker.version",
+                    "exists": true
+                  }
+                },
+                {
+                  "label": "Stacks",
+                  "value": "{state.docker.stacks}",
+                  "when": {
+                    "field": "state.docker.stacks",
+                    "exists": true
+                  }
+                }
+              ],
+              "minItemWidth": "xs",
+              "columns": 2
+            },
+            {
+              "type": "view",
+              "when": {
+                "field": "config.look",
+                "equals": "list"
+              },
+              "view": {
+                "type": "list",
+                "empty": "No containers",
+                "summary": [
+                  {
+                    "label": "running",
+                    "where": {
+                      "field": "state",
+                      "equals": "running"
+                    }
+                  },
+                  {
+                    "label": "total"
+                  }
+                ],
+                "filter": {
+                  "fields": [
+                    "name",
+                    "image"
+                  ],
+                  "placeholder": "Filter",
+                  "hideBelow": "sm"
+                },
+                "toggles": [
+                  {
+                    "key": "stopped",
+                    "label": "stopped",
+                    "default": true,
+                    "hideWhen": {
+                      "field": "state",
+                      "notEquals": "running"
+                    },
+                    "hideBelow": "sm"
+                  }
+                ],
+                "row": {
+                  "dot": {
+                    "field": "state",
+                    "colors": {
+                      "running": "green",
+                      "restarting": "amber",
+                      "paused": "amber",
+                      "created": "gray",
+                      "exited": "gray",
+                      "dead": "red"
+                    }
+                  },
+                  "title": "{name}",
+                  "subtitle": "{image} · {status}",
+                  "actions": [
+                    "logs",
+                    "shell",
+                    "edit",
+                    "backup_run",
+                    "backup_dialog",
+                    "restart",
+                    "stop",
+                    "start"
+                  ],
+                  "inline": {
+                    "xs": 0,
+                    "sm": 2,
+                    "md": 4
+                  }
+                }
               }
             },
-            "title": "{name}",
-            "subtitle": "{image} · {status}",
-            "actions": [
-              "logs",
-              "shell",
-              "edit",
-              "backup_run",
-              "backup_dialog",
-              "restart",
-              "stop",
-              "start"
-            ],
-            "inline": {
-              "xs": 0,
-              "sm": 2,
-              "md": 4
+            {
+              "type": "info",
+              "when": {
+                "field": "config.look",
+                "equals": "list"
+              },
+              "items": [
+                {
+                  "label": "Docker",
+                  "value": "{state.docker.version}",
+                  "when": {
+                    "field": "state.docker.version",
+                    "exists": true
+                  }
+                },
+                {
+                  "label": "Stacks",
+                  "value": "{state.docker.stacks}",
+                  "when": {
+                    "field": "state.docker.stacks",
+                    "exists": true
+                  }
+                }
+              ]
             }
-          }
+          ]
         },
         "actions": [
           {
@@ -1334,6 +1604,20 @@
                 "max": 600,
                 "integer": true,
                 "default": 180
+              },
+              "repo": {
+                "type": "string",
+                "maxLength": 300,
+                "default": "-",
+                "from": "repo",
+                "pattern": "^(-|https://[!-~]{1,290})$"
+              },
+              "credential": {
+                "type": "string",
+                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "maxLength": 64,
+                "default": "auto",
+                "from": "credential"
               }
             },
             "variants": [
@@ -1354,7 +1638,14 @@
                   "name": "param.stack",
                   "service": "param.service",
                   "health_timeout": "param.health_timeout"
-                }
+                },
+                "credentials": [
+                  {
+                    "kind": "git",
+                    "entry": "credential",
+                    "url": "repo"
+                  }
+                ]
               }
             ],
             "after": "refresh",
@@ -1409,6 +1700,26 @@
                 "maxLines": 100,
                 "linePattern": "^(#.*|[a-z_]+=.*)$",
                 "default": "volumes=true\nbinds=true\nstack_files=true\nimage=false\nconsistency=live\nkeep_last=0\nkeep_daily=7\nkeep_weekly=4\nkeep_monthly=6"
+              },
+              "repo": {
+                "type": "string",
+                "maxLength": 300,
+                "default": "-",
+                "from": "repo",
+                "pattern": "^(-|https://[!-~]{1,290})$"
+              },
+              "credential": {
+                "type": "string",
+                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "maxLength": 64,
+                "default": "auto",
+                "from": "credential"
+              },
+              "destination": {
+                "type": "string",
+                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "maxLength": 64,
+                "default": "auto"
               }
             },
             "variants": [
@@ -1446,8 +1757,22 @@
                     "kind": "literal:stack",
                     "name": "param.stack",
                     "settings": "param.settings"
+                  },
+                  "credentials": [
+                    {
+                      "kind": "backup_destination",
+                      "entry": "destination",
+                      "default": true
+                    }
+                  ]
+                },
+                "credentials": [
+                  {
+                    "kind": "git",
+                    "entry": "credential",
+                    "url": "repo"
                   }
-                }
+                ]
               }
             ],
             "after": "refresh",
@@ -1806,6 +2131,12 @@
                 "maxLines": 100,
                 "linePattern": "^(#.*|svc\\.[A-Za-z0-9_.-]+\\.(container_name|port|volume|network)=.+)$",
                 "default": ""
+              },
+              "credential": {
+                "type": "string",
+                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "maxLength": 64,
+                "default": "auto"
               }
             },
             "variants": [
@@ -1815,7 +2146,14 @@
                   "allow_risky": "literal:false",
                   "pull": "param.pull",
                   "start": "literal:now"
-                }
+                },
+                "credentials": [
+                  {
+                    "kind": "git",
+                    "entry": "credential",
+                    "url": "repo"
+                  }
+                ]
               }
             ],
             "icon": "upload",
@@ -1886,6 +2224,12 @@
                 "maxLines": 100,
                 "linePattern": "^(#.*|svc\\.[A-Za-z0-9_.-]+\\.(container_name|port|volume|network)=.+)$",
                 "default": ""
+              },
+              "credential": {
+                "type": "string",
+                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "maxLength": 64,
+                "default": "auto"
               }
             },
             "variants": [
@@ -1895,7 +2239,14 @@
                   "allow_risky": "literal:true",
                   "pull": "param.pull",
                   "start": "literal:now"
-                }
+                },
+                "credentials": [
+                  {
+                    "kind": "git",
+                    "entry": "credential",
+                    "url": "repo"
+                  }
+                ]
               }
             ],
             "icon": "upload",
@@ -1971,6 +2322,12 @@
                 "maxLines": 100,
                 "linePattern": "^(#.*|svc\\.[A-Za-z0-9_.-]+\\.(container_name|port|volume|network)=.+)$",
                 "default": ""
+              },
+              "credential": {
+                "type": "string",
+                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "maxLength": 64,
+                "default": "auto"
               }
             },
             "variants": [
@@ -1980,7 +2337,14 @@
                   "allow_risky": "literal:false",
                   "pull": "param.pull",
                   "start": "literal:later"
-                }
+                },
+                "credentials": [
+                  {
+                    "kind": "git",
+                    "entry": "credential",
+                    "url": "repo"
+                  }
+                ]
               }
             ],
             "icon": "upload",
@@ -2050,6 +2414,12 @@
                 "maxLines": 100,
                 "linePattern": "^(#.*|svc\\.[A-Za-z0-9_.-]+\\.(container_name|port|volume|network)=.+)$",
                 "default": ""
+              },
+              "credential": {
+                "type": "string",
+                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "maxLength": 64,
+                "default": "auto"
               }
             },
             "variants": [
@@ -2059,7 +2429,14 @@
                   "allow_risky": "literal:true",
                   "pull": "param.pull",
                   "start": "literal:later"
-                }
+                },
+                "credentials": [
+                  {
+                    "kind": "git",
+                    "entry": "credential",
+                    "url": "repo"
+                  }
+                ]
               }
             ],
             "icon": "upload",
@@ -2085,6 +2462,20 @@
                 "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
                 "maxLength": 63,
                 "from": "name"
+              },
+              "repo": {
+                "type": "string",
+                "maxLength": 300,
+                "default": "-",
+                "from": "repo",
+                "pattern": "^(-|https://[!-~]{1,290})$"
+              },
+              "credential": {
+                "type": "string",
+                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "maxLength": 64,
+                "default": "auto",
+                "from": "credential"
               }
             },
             "variants": [
@@ -2092,7 +2483,14 @@
                 "script": "stack_action",
                 "args": {
                   "op": "literal:start"
-                }
+                },
+                "credentials": [
+                  {
+                    "kind": "git",
+                    "entry": "credential",
+                    "url": "repo"
+                  }
+                ]
               }
             ],
             "icon": "play",
@@ -2114,6 +2512,20 @@
                 "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
                 "maxLength": 63,
                 "from": "name"
+              },
+              "repo": {
+                "type": "string",
+                "maxLength": 300,
+                "default": "-",
+                "from": "repo",
+                "pattern": "^(-|https://[!-~]{1,290})$"
+              },
+              "credential": {
+                "type": "string",
+                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "maxLength": 64,
+                "default": "auto",
+                "from": "credential"
               }
             },
             "variants": [
@@ -2121,7 +2533,14 @@
                 "script": "stack_action",
                 "args": {
                   "op": "literal:stop"
-                }
+                },
+                "credentials": [
+                  {
+                    "kind": "git",
+                    "entry": "credential",
+                    "url": "repo"
+                  }
+                ]
               }
             ],
             "icon": "square",
@@ -2147,6 +2566,20 @@
                 "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
                 "maxLength": 63,
                 "from": "name"
+              },
+              "repo": {
+                "type": "string",
+                "maxLength": 300,
+                "default": "-",
+                "from": "repo",
+                "pattern": "^(-|https://[!-~]{1,290})$"
+              },
+              "credential": {
+                "type": "string",
+                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "maxLength": 64,
+                "default": "auto",
+                "from": "credential"
               }
             },
             "variants": [
@@ -2154,7 +2587,14 @@
                 "script": "stack_action",
                 "args": {
                   "op": "literal:restart"
-                }
+                },
+                "credentials": [
+                  {
+                    "kind": "git",
+                    "entry": "credential",
+                    "url": "repo"
+                  }
+                ]
               }
             ],
             "icon": "rotate-cw",
@@ -2187,6 +2627,20 @@
                 "max": 600,
                 "integer": true,
                 "default": 180
+              },
+              "repo": {
+                "type": "string",
+                "maxLength": 300,
+                "default": "-",
+                "from": "repo",
+                "pattern": "^(-|https://[!-~]{1,290})$"
+              },
+              "credential": {
+                "type": "string",
+                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "maxLength": 64,
+                "default": "auto",
+                "from": "credential"
               }
             },
             "variants": [
@@ -2196,7 +2650,14 @@
                   "op": "literal:update_images",
                   "service": "literal:-",
                   "health_timeout": "param.health_timeout"
-                }
+                },
+                "credentials": [
+                  {
+                    "kind": "git",
+                    "entry": "credential",
+                    "url": "repo"
+                  }
+                ]
               }
             ],
             "icon": "download",
@@ -2237,6 +2698,26 @@
                 "maxLines": 100,
                 "linePattern": "^(#.*|[a-z_]+=.*)$",
                 "default": "volumes=true\nbinds=true\nstack_files=true\nimage=false\nconsistency=live\nkeep_last=0\nkeep_daily=7\nkeep_weekly=4\nkeep_monthly=6"
+              },
+              "repo": {
+                "type": "string",
+                "maxLength": 300,
+                "default": "-",
+                "from": "repo",
+                "pattern": "^(-|https://[!-~]{1,290})$"
+              },
+              "credential": {
+                "type": "string",
+                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "maxLength": 64,
+                "default": "auto",
+                "from": "credential"
+              },
+              "destination": {
+                "type": "string",
+                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "maxLength": 64,
+                "default": "auto"
               }
             },
             "variants": [
@@ -2254,8 +2735,22 @@
                     "kind": "literal:stack",
                     "name": "param.name",
                     "settings": "param.settings"
+                  },
+                  "credentials": [
+                    {
+                      "kind": "backup_destination",
+                      "entry": "destination",
+                      "default": true
+                    }
+                  ]
+                },
+                "credentials": [
+                  {
+                    "kind": "git",
+                    "entry": "credential",
+                    "url": "repo"
                   }
-                }
+                ]
               }
             ],
             "icon": "download",
@@ -2282,6 +2777,20 @@
                 "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
                 "maxLength": 63,
                 "from": "name"
+              },
+              "repo": {
+                "type": "string",
+                "maxLength": 300,
+                "default": "-",
+                "from": "repo",
+                "pattern": "^(-|https://[!-~]{1,290})$"
+              },
+              "credential": {
+                "type": "string",
+                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "maxLength": 64,
+                "default": "auto",
+                "from": "credential"
               }
             },
             "variants": [
@@ -2289,7 +2798,14 @@
                 "script": "stack_action",
                 "args": {
                   "op": "literal:update"
-                }
+                },
+                "credentials": [
+                  {
+                    "kind": "git",
+                    "entry": "credential",
+                    "url": "repo"
+                  }
+                ]
               }
             ],
             "icon": "refresh-cw",
@@ -2312,6 +2828,20 @@
                 "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
                 "maxLength": 63,
                 "from": "name"
+              },
+              "repo": {
+                "type": "string",
+                "maxLength": 300,
+                "default": "-",
+                "from": "repo",
+                "pattern": "^(-|https://[!-~]{1,290})$"
+              },
+              "credential": {
+                "type": "string",
+                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "maxLength": 64,
+                "default": "auto",
+                "from": "credential"
               }
             },
             "variants": [
@@ -2320,7 +2850,14 @@
                 "args": {
                   "op": "literal:update",
                   "allow_risky": "literal:true"
-                }
+                },
+                "credentials": [
+                  {
+                    "kind": "git",
+                    "entry": "credential",
+                    "url": "repo"
+                  }
+                ]
               }
             ],
             "icon": "power",
@@ -2348,6 +2885,20 @@
                 "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
                 "maxLength": 63,
                 "from": "name"
+              },
+              "repo": {
+                "type": "string",
+                "maxLength": 300,
+                "default": "-",
+                "from": "repo",
+                "pattern": "^(-|https://[!-~]{1,290})$"
+              },
+              "credential": {
+                "type": "string",
+                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "maxLength": 64,
+                "default": "auto",
+                "from": "credential"
               }
             },
             "variants": [
@@ -2355,7 +2906,14 @@
                 "script": "stack_action",
                 "args": {
                   "op": "literal:guard_up"
-                }
+                },
+                "credentials": [
+                  {
+                    "kind": "git",
+                    "entry": "credential",
+                    "url": "repo"
+                  }
+                ]
               }
             ],
             "icon": "refresh-cw"
@@ -2390,6 +2948,20 @@
                 "type": "string",
                 "pattern": "^[a-z0-9][a-z0-9._/:@-]{0,254}$",
                 "maxLength": 255
+              },
+              "repo": {
+                "type": "string",
+                "maxLength": 300,
+                "default": "-",
+                "from": "repo",
+                "pattern": "^(-|https://[!-~]{1,290})$"
+              },
+              "credential": {
+                "type": "string",
+                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "maxLength": 64,
+                "default": "auto",
+                "from": "credential"
               }
             },
             "variants": [
@@ -2400,7 +2972,14 @@
                   "image": "param.image",
                   "as": "param.as",
                   "service": "param.service"
-                }
+                },
+                "credentials": [
+                  {
+                    "kind": "git",
+                    "entry": "credential",
+                    "url": "repo"
+                  }
+                ]
               }
             ],
             "icon": "download"
@@ -2462,13 +3041,27 @@
             "label": "Initialise the backup repository",
             "permission": "docker.backup",
             "kind": "script",
-            "params": {},
+            "params": {
+              "destination": {
+                "type": "string",
+                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "maxLength": 64,
+                "default": "auto"
+              }
+            },
             "variants": [
               {
                 "script": "backup_run",
                 "args": {
                   "mode": "literal:init"
-                }
+                },
+                "credentials": [
+                  {
+                    "kind": "backup_destination",
+                    "entry": "destination",
+                    "default": true
+                  }
+                ]
               }
             ],
             "job": true,
@@ -2522,6 +3115,12 @@
                 "maxLines": 100,
                 "linePattern": "^(#.*|[a-z_]+=.*)$",
                 "default": ""
+              },
+              "destination": {
+                "type": "string",
+                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "maxLength": 64,
+                "default": "auto"
               }
             },
             "variants": [
@@ -2532,7 +3131,14 @@
                   "kind": "param.kind",
                   "name": "param.name",
                   "settings": "param.settings"
-                }
+                },
+                "credentials": [
+                  {
+                    "kind": "backup_destination",
+                    "entry": "destination",
+                    "default": true
+                  }
+                ]
               }
             ],
             "job": true,
@@ -2587,6 +3193,12 @@
                 "maxLines": 20,
                 "linePattern": "^(#.*|[a-z_]+=.*)$",
                 "default": ""
+              },
+              "destination": {
+                "type": "string",
+                "pattern": "^(auto|[A-Za-z0-9-]{1,64})$",
+                "maxLength": 64,
+                "default": "auto"
               }
             },
             "variants": [
@@ -2598,7 +3210,14 @@
                   "name": "param.name",
                   "snapshot": "param.snapshot",
                   "settings": "param.settings"
-                }
+                },
+                "credentials": [
+                  {
+                    "kind": "backup_destination",
+                    "entry": "destination",
+                    "default": true
+                  }
+                ]
               }
             ],
             "job": true,
@@ -2704,17 +3323,38 @@
           "git_branches": {
             "script": "git_branches",
             "cacheSec": 30,
-            "permission": "docker.manage"
+            "permission": "docker.manage",
+            "credentials": [
+              {
+                "kind": "git",
+                "entry": "credential",
+                "url": "repo"
+              }
+            ]
           },
           "git_files": {
             "script": "git_files",
             "cacheSec": 30,
-            "permission": "docker.manage"
+            "permission": "docker.manage",
+            "credentials": [
+              {
+                "kind": "git",
+                "entry": "credential",
+                "url": "repo"
+              }
+            ]
           },
           "git_services": {
             "script": "git_services",
             "cacheSec": 30,
-            "permission": "docker.manage"
+            "permission": "docker.manage",
+            "credentials": [
+              {
+                "kind": "git",
+                "entry": "credential",
+                "url": "repo"
+              }
+            ]
           },
           "host_detect": {
             "script": "host_detect",
@@ -2728,7 +3368,16 @@
             "resources": {
               "container": "container",
               "stack": "stack"
-            }
+            },
+            "credentials": [
+              {
+                "kind": "backup_destination",
+                "entry": "destination",
+                "default": true,
+                "required": false
+              }
+            ],
+            "args": {}
           }
         },
         "screens": {
@@ -3966,7 +4615,19 @@
                       "field": "values.source",
                       "equals": "git"
                     },
-                    "help": "Private repository? An admin sets the GitHub access token, or Git credentials for other hosts, under Settings, Widgets, Docker Containers (key icon)."
+                    "help": "Private repository? Add a Git access credential on the Docker widget's Manage page, Credentials tab."
+                  },
+                  {
+                    "name": "credential",
+                    "label": "Git credential",
+                    "input": "select",
+                    "credentialsKind": "git",
+                    "default": "auto",
+                    "when": {
+                      "field": "values.source",
+                      "equals": "git"
+                    },
+                    "help": "Automatic picks the entry whose host and owner/repository scope match the repository URL (the longest match wins). Pick an entry to pin it to this stack."
                   },
                   {
                     "name": "branch",
@@ -4203,7 +4864,19 @@
                       "field": "values.source",
                       "equals": "git"
                     },
-                    "help": "Private repository? An admin sets the GitHub access token, or Git credentials for other hosts, under Settings, Widgets, Docker Containers (key icon)."
+                    "help": "Private repository? Add a Git access credential on the Docker widget's Manage page, Credentials tab."
+                  },
+                  {
+                    "name": "credential",
+                    "label": "Git credential",
+                    "input": "select",
+                    "credentialsKind": "git",
+                    "default": "auto",
+                    "when": {
+                      "field": "values.source",
+                      "equals": "git"
+                    },
+                    "help": "Automatic picks the entry whose host and owner/repository scope match the repository URL (the longest match wins). Pick an entry to pin it to this stack."
                   },
                   {
                     "name": "branch",
@@ -5304,10 +5977,33 @@
                     ]
                   },
                   {
+                    "id": "credentials",
+                    "label": "Credentials",
+                    "blocks": [
+                      {
+                        "type": "credentials",
+                        "kind": "git",
+                        "title": "Git access",
+                        "description": "Tokens used when a stack is deployed or updated from a private repository. An entry covers one host, or one owner/repository on it; the longest match wins."
+                      }
+                    ]
+                  },
+                  {
                     "id": "backups",
                     "label": "Backups",
                     "count": "datasets.backups.rows",
                     "blocks": [
+                      {
+                        "type": "credentials",
+                        "kind": "backup_destination",
+                        "title": "Destinations",
+                        "description": "Where restic keeps the backups of this server. Several are allowed; the default is used when a backup does not name one.",
+                        "rowAction": {
+                          "action": "backup_init",
+                          "label": "Initialise",
+                          "icon": "download"
+                        }
+                      },
                       {
                         "type": "kv",
                         "items": [
@@ -5352,24 +6048,6 @@
                         }
                       },
                       {
-                        "type": "editor",
-                        "fields": [
-                          {
-                            "name": "h_init",
-                            "label": "Repository",
-                            "input": "heading"
-                          }
-                        ],
-                        "submits": [
-                          {
-                            "action": "backup_init",
-                            "label": "Initialise repository",
-                            "style": "primary",
-                            "params": {}
-                          }
-                        ]
-                      },
-                      {
                         "type": "view",
                         "path": "datasets.backups.rows",
                         "view": {
@@ -5380,7 +6058,8 @@
                             "fields": [
                               "name",
                               "included",
-                              "pinned_ref"
+                              "pinned_ref",
+                              "destination"
                             ],
                             "placeholder": "Filter"
                           },
@@ -5390,6 +6069,11 @@
                               "value": "{name}",
                               "format": "text",
                               "sort": "name"
+                            },
+                            {
+                              "title": "Destination",
+                              "value": "{destination}",
+                              "format": "text"
                             },
                             {
                               "title": "Kind",
@@ -5429,23 +6113,6 @@
                             }
                           ]
                         }
-                      },
-                      {
-                        "type": "editor",
-                        "fields": [
-                          {
-                            "name": "init",
-                            "label": "Initialise the backup repository (once per server)",
-                            "input": "heading"
-                          }
-                        ],
-                        "submits": [
-                          {
-                            "action": "backup_init",
-                            "label": "Initialise the repository",
-                            "params": {}
-                          }
-                        ]
                       }
                     ]
                   }
@@ -5500,6 +6167,15 @@
                 "param": "settings",
                 "fields": [
                   {
+                    "name": "destination",
+                    "label": "Backup destination",
+                    "input": "select",
+                    "credentialsKind": "backup_destination",
+                    "default": "auto",
+                    "help": "Automatic uses the server's default destination. Pick another one to keep this backup elsewhere.",
+                    "value": "context.destination_id"
+                  },
+                  {
                     "name": "mode",
                     "label": "Do",
                     "input": "select",
@@ -5545,7 +6221,8 @@
                       "mode": "values.mode",
                       "kind": "context.kind",
                       "name": "context.name",
-                      "snapshot": "context.id"
+                      "snapshot": "context.id",
+                      "destination": "values.destination"
                     }
                   }
                 ]
@@ -5563,6 +6240,14 @@
                 "type": "editor",
                 "param": "settings",
                 "fields": [
+                  {
+                    "name": "destination",
+                    "label": "Backup destination",
+                    "input": "select",
+                    "credentialsKind": "backup_destination",
+                    "default": "auto",
+                    "help": "Automatic uses the server's default destination. Pick another one to keep this backup elsewhere."
+                  },
                   {
                     "name": "kind",
                     "label": "Kind",
@@ -5787,7 +6472,8 @@
               "action": "backup_run",
               "params": {
                 "mode": "run",
-                "settings": "volumes=true\nbinds=true\nstack_files=true\nimage=false\nconsistency=live\nkeep_last=0\nkeep_daily=7\nkeep_weekly=4\nkeep_monthly=6"
+                "settings": "volumes=true\nbinds=true\nstack_files=true\nimage=false\nconsistency=live\nkeep_last=0\nkeep_daily=7\nkeep_weekly=4\nkeep_monthly=6",
+                "destination": "auto"
               }
             },
             "target": "byKind",
@@ -5806,7 +6492,9 @@
               "params": {
                 "stack": "",
                 "service": "",
-                "health_timeout": 180
+                "health_timeout": 180,
+                "repo": "-",
+                "credential": "auto"
               }
             },
             "target": "container",
@@ -5823,7 +6511,9 @@
             "run": {
               "action": "stack_update_images",
               "params": {
-                "health_timeout": 180
+                "health_timeout": 180,
+                "repo": "-",
+                "credential": "auto"
               }
             },
             "target": "stack",
@@ -5843,7 +6533,10 @@
                 "stack": "",
                 "service": "",
                 "health_timeout": 180,
-                "settings": "volumes=true\nbinds=true\nstack_files=true\nimage=false\nconsistency=live\nkeep_last=0\nkeep_daily=7\nkeep_weekly=4\nkeep_monthly=6"
+                "settings": "volumes=true\nbinds=true\nstack_files=true\nimage=false\nconsistency=live\nkeep_last=0\nkeep_daily=7\nkeep_weekly=4\nkeep_monthly=6",
+                "repo": "-",
+                "credential": "auto",
+                "destination": "auto"
               }
             },
             "target": "container",
@@ -5861,7 +6554,10 @@
               "action": "stack_update_images_backup",
               "params": {
                 "health_timeout": 180,
-                "settings": "volumes=true\nbinds=true\nstack_files=true\nimage=false\nconsistency=live\nkeep_last=0\nkeep_daily=7\nkeep_weekly=4\nkeep_monthly=6"
+                "settings": "volumes=true\nbinds=true\nstack_files=true\nimage=false\nconsistency=live\nkeep_last=0\nkeep_daily=7\nkeep_weekly=4\nkeep_monthly=6",
+                "repo": "-",
+                "credential": "auto",
+                "destination": "auto"
               }
             },
             "target": "stack",
@@ -5871,7 +6567,48 @@
               "severity": "info"
             }
           }
-        ]
+        ],
+        "looks": {
+          "default": "list",
+          "options": [
+            {
+              "id": "list",
+              "label": "List"
+            },
+            {
+              "id": "tiles",
+              "label": "Tiles"
+            },
+            {
+              "id": "gauges",
+              "label": "Gauges"
+            }
+          ]
+        },
+        "state": {
+          "script": "summary",
+          "periodSec": 1800,
+          "initialDelaySec": 120,
+          "fields": {
+            "docker.available": "boolean",
+            "docker.version": "string",
+            "docker.total": "number",
+            "docker.running": "number",
+            "docker.stopped": "number",
+            "docker.stacks": "number",
+            "docker.split": "string",
+            "docker.errors": "number",
+            "docker.health_total": "number",
+            "docker.healthy": "number",
+            "docker.running_pct": "number",
+            "docker.stopped_pct": "number",
+            "docker.healthy_pct": "number",
+            "docker.avg_uptime": "number",
+            "docker.updates": "number",
+            "docker.updates_checked": "number",
+            "docker.updates_unknown": "number"
+          }
+        }
       }
     }
   ],
@@ -5879,27 +6616,133 @@
     {
       "id": "git_token",
       "label": "GitHub access token",
-      "description": "Lets stacks be deployed and updated from a private GitHub repository. Not needed for public repositories."
+      "description": "Lets stacks be deployed and updated from a private GitHub repository. Not needed for public repositories.",
+      "legacy": true
     },
     {
       "id": "git_credentials",
       "label": "Git credentials for other hosts",
-      "description": "For private repositories on GitLab, Gitea, Bitbucket or your own Git server: entries \"host=token\" or \"host=user:token\" separated by spaces, e.g. \"gitlab.com=glpat-xxx git.lan:3000=bosun:token\". Each is sent only to its own host."
+      "description": "For private repositories on GitLab, Gitea, Bitbucket or your own Git server: entries \"host=token\" or \"host=user:token\" separated by spaces, e.g. \"gitlab.com=glpat-xxx git.lan:3000=bosun:token\". Each is sent only to its own host.",
+      "legacy": true
     },
     {
       "id": "backup_repository",
       "label": "Backup destination",
-      "description": "Where restic keeps the backups: an absolute folder on the host (a mounted NAS counts, e.g. /mnt/backups/bosun), sftp:user@host:/path, or s3:https://endpoint/bucket/prefix. Used by the Backups tab of the Docker widget."
+      "description": "Where restic keeps the backups: an absolute folder on the host (a mounted NAS counts, e.g. /mnt/backups/bosun), sftp:user@host:/path, or s3:https://endpoint/bucket/prefix. Used by the Backups tab of the Docker widget.",
+      "legacy": true
     },
     {
       "id": "backup_password",
       "label": "Backup repository password",
-      "description": "The restic password of the backup repository. Store a copy somewhere else too: without it the backups cannot be read. Never shown again after saving."
+      "description": "The restic password of the backup repository. Store a copy somewhere else too: without it the backups cannot be read. Never shown again after saving.",
+      "legacy": true
     },
     {
       "id": "backup_credentials",
       "label": "Backup credentials",
-      "description": "For an SFTP destination: the private key, base64-encoded (base64 -w0 < key) or an absolute path to the key file on the host. For S3: ACCESS_KEY:SECRET_KEY. Not used for a local folder."
+      "description": "For an SFTP destination: the private key, base64-encoded (base64 -w0 < key) or an absolute path to the key file on the host. For S3: ACCESS_KEY:SECRET_KEY. Not used for a local folder.",
+      "legacy": true
+    }
+  ],
+  "credentials": [
+    {
+      "id": "git",
+      "label": "Git access",
+      "permission": "docker.credentials",
+      "view_permission": "docker.view",
+      "fields": [
+        {
+          "id": "host",
+          "label": "Host",
+          "type": "string",
+          "public": true,
+          "help": "The Git host: github.com, gitlab.com, git.lan:3000."
+        },
+        {
+          "id": "scope",
+          "label": "Owner or repository",
+          "type": "string",
+          "public": true,
+          "optional": true,
+          "help": "e.g. my-org or my-org/my-repo; empty = the whole host. The longest match wins."
+        },
+        {
+          "id": "username",
+          "label": "Username",
+          "type": "string",
+          "public": true,
+          "optional": true,
+          "help": "Some hosts need a user name with the token (GitLab: oauth2)."
+        },
+        {
+          "id": "token",
+          "label": "Token",
+          "type": "secret"
+        }
+      ],
+      "match": {
+        "url": "host+scope"
+      },
+      "servers": "optional",
+      "migrate": [
+        {
+          "name": "GitHub (migrated)",
+          "fields": {
+            "host": "literal:github.com",
+            "token": "secret:git_token"
+          }
+        },
+        {
+          "name": "{host} (migrated)",
+          "host_list": {
+            "secret": "git_credentials",
+            "hostField": "host",
+            "tokenField": "token",
+            "usernameField": "username"
+          }
+        }
+      ]
+    },
+    {
+      "id": "backup_destination",
+      "label": "Backup destination",
+      "permission": "docker.backup_config",
+      "view_permission": "docker.view",
+      "fields": [
+        {
+          "id": "repository",
+          "label": "Repository",
+          "type": "string",
+          "public": true,
+          "help": "An absolute folder on the host (a mounted NAS counts, e.g. /mnt/backups/bosun), sftp:user@host:/path, or s3:https://endpoint/bucket/prefix."
+        },
+        {
+          "id": "password",
+          "label": "Repository password",
+          "type": "secret",
+          "help": "The restic password. Store a copy somewhere else too: without it the backups cannot be read."
+        },
+        {
+          "id": "credentials",
+          "label": "Credentials",
+          "type": "secret",
+          "optional": true,
+          "help": "SFTP: the private key, base64-encoded (base64 -w0 < key) or an absolute path on the host. S3: ACCESS_KEY:SECRET_KEY. Not used for a local folder."
+        }
+      ],
+      "servers": "required",
+      "default_per_server": true,
+      "migrate": [
+        {
+          "name": "Backups (migrated)",
+          "fields": {
+            "repository": "secret:backup_repository",
+            "password": "secret:backup_password",
+            "credentials": "secret:backup_credentials"
+          },
+          "default_for_package_servers": true
+        }
+      ]
     }
   ]
 }

@@ -20,27 +20,23 @@
 # Progress: PROGRESS n/5 lines and plain `[step] text` lines that say what happens.
 fail() { printf 'ERROR: %s\n' "$*"; exit 0; }
 # >>> git credentials (the same text in stack_deploy.sh, stack_action.sh, git_branches.sh, git_files.sh and git_services.sh; a test compares them)
-# Bosun exports the package secrets git_token (GitHub) and git_credentials (entries "host=token" or "host=user:token", host with its
-# port when it has one, separated by spaces, commas or semicolons) only to scripts that name them. They are taken out of the
-# environment at once, so git, docker and compose never inherit them. git_auth <https url> sets AUTH to the Basic Authorization header
-# for exactly that repository's host, or '' when there is no credential for it; it reaches git only through gitrun's environment.
-GIT_TOKEN=${BOSUN_SECRET_git_token-}; GIT_CREDENTIALS=${BOSUN_SECRET_git_credentials-}
-unset BOSUN_SECRET_git_token BOSUN_SECRET_git_credentials
+# Bosun resolves the Git credential entry for this repository before the script runs: the entry of the host with the longest
+# matching owner/repository scope, limited to the servers it is allowed on. Only that entry's fields arrive, as
+# BOSUN_CRED_GIT_HOST, _SCOPE, _USERNAME and _TOKEN. They are taken out of the environment at once, so git, docker and compose
+# never inherit them. git_auth <https url> sets AUTH to the Basic Authorization header for exactly that repository's host, or ''
+# when the entry is for another host; it reaches git only through gitrun's environment.
+GIT_HOST=${BOSUN_CRED_GIT_HOST-}; GIT_USER=${BOSUN_CRED_GIT_USERNAME-}; GIT_TOKEN=${BOSUN_CRED_GIT_TOKEN-}
+unset BOSUN_CRED_GIT_HOST BOSUN_CRED_GIT_SCOPE BOSUN_CRED_GIT_USERNAME BOSUN_CRED_GIT_TOKEN
 git_auth() {
   AUTH=''
   gh=${1#https://}; gh=${gh%%/*}; gh=$(printf '%s' "$gh" | tr 'A-Z' 'a-z')
-  cred=''
-  set -f
-  for c in $(printf '%s' "$GIT_CREDENTIALS" | tr ',;' '  '); do
-    case "$c" in *=*) [ "$(printf '%s' "${c%%=*}" | tr 'A-Z' 'a-z')" = "$gh" ] && cred=${c#*=} ;; esac
-  done
-  set +f
-  if [ -z "$cred" ] && [ "$gh" = github.com ]; then cred=$GIT_TOKEN; fi
+  cred=$GIT_TOKEN
+  [ -z "$cred" ] || [ -z "$GIT_HOST" ] || [ "$GIT_HOST" = "$gh" ] || cred=''
   [ -n "$cred" ] || return 0
   case "$cred" in *[!A-Za-z0-9_.~+/=:@-]*) cred=''; fail 'a Git credential has unexpected characters' ;; esac
   case "$cred" in
     *:*) pair=$cred ;;
-    *) case "$gh" in github.com) u=x-access-token ;; bitbucket.org) u=x-token-auth ;; *gitlab*) u=oauth2 ;; *) u=git ;; esac; pair="$u:$cred" ;;
+    *) u=$GIT_USER; if [ -z "$u" ]; then case "$gh" in github.com) u=x-access-token ;; bitbucket.org) u=x-token-auth ;; *gitlab*) u=oauth2 ;; *) u=git ;; esac; fi; pair="$u:$cred" ;;
   esac
   if command -v base64 >/dev/null 2>&1; then b64=$(printf '%s' "$pair" | base64 | tr -d '\n')
   elif command -v openssl >/dev/null 2>&1; then b64=$(printf '%s' "$pair" | openssl base64 -A)
@@ -51,6 +47,7 @@ git_auth() {
 # <<< git credentials
 name=$BOSUN_PARAM_name; source=$BOSUN_PARAM_source
 repo=$BOSUN_PARAM_repo; branch=$BOSUN_PARAM_branch; file=$BOSUN_PARAM_file
+credential=${BOSUN_PARAM_credential:-auto}
 [ "$repo" != - ] || repo=; [ "$branch" != - ] || branch=; [ "$file" != - ] || file=
 case "$name" in ''|[!a-z0-9]*|*[!a-z0-9_-]*) fail 'invalid stack name (lower-case letters, digits, - and _; at most 63 characters)' ;; esac
 [ "${#name}" -le 63 ] || fail 'invalid stack name (at most 63 characters)'
@@ -418,6 +415,7 @@ else rm -f "$DIR/compose.override.yaml" "$DIR/bosun.override"; OF=''; fi
   printf 'repo=%s\n' "$repo"
   printf 'branch=%s\n' "$branch"
   printf 'file=%s\n' "$file"
+  printf 'credential=%s\n' "$credential"
   printf 'updated=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 } > "$DIR/bosun.meta"
 NEWDIR=0; GITFRESH=0; GITPREV=''

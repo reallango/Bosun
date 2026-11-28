@@ -14,15 +14,16 @@ import { Bar, Fields, Sparkline, type StatToneName } from './parts';
 import { fitsSize, type WidgetSize } from '@/lib/widgets/runtime/size';
 import { countRows, statTone, withUnit } from '@/lib/widgets/runtime/stat';
 import { thresholdTone } from '@/lib/widgets/runtime/thresholds';
-import { formatStatValue } from '@/lib/widgets/runtime/number-format';
+import { formatStatValue, formatValue } from '@/lib/widgets/runtime/number-format';
 import { meterRowView, visibleMeterRows } from '@/lib/widgets/runtime/meters';
 import { pickAdaptive, visibleInfo } from '@/lib/widgets/runtime/adaptive';
 import { gaugeLabelFontSize, labelFontSize, fitGaugeValues, fitTileValues, longestValueLength, unitOnOwnLine, type BlockSize, type MinItemWidth, type ValueFit, type ValueText } from '@/lib/widgets/runtime/sizing';
-import { gaugeGeometry, gaugeStroke, GAUGE_VIEWBOX, type GaugeItem } from '@/lib/widgets/runtime/gauges';
+import { gaugeGeometry, gaugeItemsFromRows, gaugeStroke, GAUGE_VIEWBOX, type GaugeItem } from '@/lib/widgets/runtime/gauges';
 import { useWidgetSize } from '@/components/dashboard/widget-size';
 import { useWidgetDensity, useWidgetFill } from './fill';
 import { CodeBlock, EditorBlock } from './EditorBlock';
 import { ItemGrid } from './ItemGrid';
+import { CredentialsBlock } from './CredentialsBlock';
 import {
   buttonClass, DIALOG_CONTENT, DIALOG_FOOTER, DIALOG_HEADER, DIALOG_OVERLAY, DIALOG_TITLE, DIALOG_WIDTH, FILL_CARD, FILL_CARD_COMPACT, FILL_GAUGE_CARD,
   FILL_GAUGE_CARD_COMPACT, FILL_GAUGE_LABEL, FILL_GAUGE_VALUE, FILL_GRID_COLUMNS, FILL_GRID_MIN, FILL_LABEL, FILL_SUB, FILL_VALUE,
@@ -64,6 +65,15 @@ export interface LayoutUi {
   large?: boolean;
   /** A full-page screen: tabs keep the open one in the URL. */
   page?: boolean;
+  /** The entries of a credential kind (a `credentials` block), their writes, and the server choices. */
+  credentials?: {
+    load: (kind: string) => Promise<import('@/lib/widgets/runtime/credential-view').CredentialResult<import('@/lib/widgets/runtime/credential-view').CredentialKindView>>;
+    save: (kind: string, entry: import('@/lib/widgets/runtime/credential-view').CredentialWriteView) => Promise<import('@/lib/widgets/runtime/credential-view').CredentialResult>;
+    remove: (kind: string, id: string) => Promise<import('@/lib/widgets/runtime/credential-view').CredentialResult>;
+    servers: () => Promise<{ id: string; name: string }[]>;
+  };
+  /** Options of a select bound to a credential kind: "Automatic" plus the entries the caller may see. */
+  credentialOptions?: (kind: string) => Promise<{ value: string; label: string }[]>;
 }
 
 /**
@@ -93,7 +103,7 @@ export function LayoutBlocks({ blocks, ctx, ui, groupToolbar }: { blocks: Block[
   return (
     <div className={fill ? 'flex h-full min-h-0 flex-col gap-2' : 'space-y-2'}>
       {shown.map((b, i) => (
-        <div key={i} className={fill && fillsBody(b) ? 'min-h-0 flex-1' : fill && b.type === 'info' ? 'mt-auto' : undefined}>
+        <div key={i} className={fill && fillsBody(b) ? 'min-h-0 flex-1 overflow-hidden' : fill && b.type === 'info' ? 'mt-auto shrink-0' : undefined}>
           <BlockView block={b} ctx={ctx} ui={ui} />
         </div>
       ))}
@@ -156,6 +166,7 @@ function BlockView({ block, ctx, ui, toolbar }: { block: Block; ctx: ViewContext
     case 'form': return block.open === 'dialog' ? <DialogBlock block={block} ctx={ctx} ui={ui} toolbar={toolbar} /> : <Form block={block} ctx={ctx} ui={ui} />;
     case 'select': return <SelectBlock block={block} ctx={ctx} ui={ui} />;
     case 'jobProgress': return <JobProgress job={ctx.job ?? null} ui={ui} />;
+    case 'credentials': return <CredentialsBlock block={block} ui={ui} />;
     case 'tabs': return <Tabs block={block} ctx={ctx} ui={ui} />;
     case 'editor': return block.open === 'dialog' ? <DialogBlock block={block} ctx={ctx} ui={ui} toolbar={toolbar} /> : <EditorBlock block={block} ctx={ctx} ui={ui} />;
     case 'code': return <CodeBlock title={block.title} text={String(pathOf(ctx, block.value) ?? '')} filename={block.filename} />;
@@ -268,6 +279,8 @@ const GAUGE_CARD = 'flex min-w-0 flex-col items-center gap-1 rounded-lg border b
 
 /** Below this measured widget body height (about three grid rows) tiles and gauges switch to their compact layout. */
 const COMPACT_HEIGHT = 160;
+/** A tile card shorter than this (its measured content box) drops its trend and sub, keeping the label, value and bar. */
+const CARD_COMPACT_HEIGHT = 80;
 
 /**
  * The grid class of a stat or gauge block: a fixed count, the auto-fit minimum of `minItemWidth`, or the size class outside
@@ -341,17 +354,23 @@ function ValueLines({ number, unit, fit, className, tone }: {
   );
 }
 
+/** The value of one info-line pair: its template, written in its `format` when it names one. */
+const infoValue = (item: InfoItem, ctx: ViewContext): string => {
+  const raw = text(item.value, ctx);
+  return item.format ? formatValue(raw, item.format) : raw;
+};
+
 /** The footer of a `stat` or `gauges` block: one muted line of label/value pairs, pinned under the block. */
 function InfoLine({ items, ctx }: { items: InfoItem[]; ctx: ViewContext }) {
   const shown = visibleInfo(items, ctx);
   if (!shown.length) return null;
-  const title = shown.map(i => `${i.label} ${text(i.value, ctx)}`.trim()).join(' · ');
+  const title = shown.map(i => `${text(i.label, ctx)} ${infoValue(i, ctx)}`.trim()).join(' · ');
   return (
     <div className="mt-auto min-w-0 shrink-0 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] leading-tight text-muted-foreground" title={title}>
       {shown.map((item, i) => (
         <span key={i}>
           {i > 0 && <span aria-hidden="true"> · </span>}
-          <span>{item.label}</span> <span className="text-foreground">{text(item.value, ctx)}</span>
+          <span>{text(item.label, ctx)}</span> <span className="text-foreground">{infoValue(item, ctx)}</span>
         </span>
       ))}
     </div>
@@ -363,10 +382,13 @@ function StatBlock({ block, ctx }: { block: Extract<Block, { type: 'stat' }>; ct
   const { size: widgetSize, height } = useWidgetSize();
   const fill = useWidgetFill();
   const density = useWidgetDensity();
+  const card = useCardSize();
   const compact = fill && (density === 'compact' || (height > 0 && height < COMPACT_HEIGHT));
+  const shortCard = fill && card.height > 0 && card.height < CARD_COMPACT_HEIGHT;
+  // A short card keeps its label, value and sub, but drops the trend line and uses the tight padding.
+  const tight = compact || shortCard;
   const selectTab = useContext(TabSelectContext);
   const blockSize = block.size ?? 'md';
-  const card = useCardSize();
   const items = block.items.map(item => pickAdaptive(item, ctx)).filter((item): item is NonNullable<typeof item> => item !== null);
   const shown = items.map(item => {
     const raw = item.count ? String(countRows(item.count, ctx)) : text(item.value ?? '', ctx);
@@ -375,19 +397,19 @@ function StatBlock({ block, ctx }: { block: Extract<Block, { type: 'stat' }>; ct
   // Every item in the block takes the same size and the same split decision, chosen from its widest value, so
   // neighbours stay balanced.
   const fit = fitTileValues(shown.map(({ number, unit }) => ({ number, unit })), {
-    size: blockSize, compact, width: card.width, height: card.height,
+    size: blockSize, compact: tight, width: card.width, height: card.height,
   });
   const valueChars = longestValueLength(shown.map(({ number, unit }) => withUnit(number, unit)));
   const grid = (
     <ItemGrid fill={fill} columns={block.columns} minItemWidth={block.minItemWidth} kind="stat" count={shown.length}
-      valueChars={valueChars} compact={compact} className={itemGridClass(fill, widgetSize, block)}>
+      valueChars={valueChars} compact={tight} className={itemGridClass(fill, widgetSize, block)}>
       {shown.map(({ item, number, unit }, i) => {
         const numeric = item.count ? countRows(item.count, ctx) : Number(fillTemplate(item.value ?? '', ctx));
         const tone = statTone(item.tone, ctx) ?? thresholdTone(numeric, item.thresholds);
         const bar = item.bar ? Number(fillTemplate(item.bar, ctx)) : NaN;
-        const cardClass = fill ? (compact ? FILL_CARD_COMPACT : FILL_CARD) : STAT_CARD;
+        const cardClass = fill ? (tight ? FILL_CARD_COMPACT : FILL_CARD) : STAT_CARD;
         const valueTone = tone ? STAT_TONE_CLASS[tone] : item.emphasis === 'muted' ? 'text-muted-foreground' : 'text-foreground';
-        const valueSize = fill ? (compact ? FILL_VALUE_COMPACT : FILL_VALUE) : tileValueClass(blockSize, widgetSize);
+        const valueSize = fill ? (tight ? FILL_VALUE_COMPACT : FILL_VALUE) : tileValueClass(blockSize, widgetSize);
         const content = (
           <>
             <div className={fill ? FILL_LABEL : tileLabelClass(blockSize)} style={fill ? { fontSize: labelFontSize(blockSize) } : undefined}>{item.label}</div>
@@ -396,7 +418,7 @@ function StatBlock({ block, ctx }: { block: Extract<Block, { type: 'stat' }>; ct
               : <div className={`${valueSize} font-semibold tabular-nums ${valueTone}`}>{withUnit(number, unit)}</div>}
             {Number.isFinite(bar) && <Bar value={bar} tone={tone} />}
             {/* A three-row tile has no room for a trend line; the number and bar are the parts that must stay. */}
-            {!compact && item.trend && <Sparkline trend={item.trend} tone={tone} />}
+            {!tight && item.trend && <Sparkline trend={item.trend} tone={tone} />}
             {!compact && item.sub && <div className={fill ? FILL_SUB : 'truncate text-xs text-muted-foreground'}>{text(item.sub, ctx)}</div>}
           </>
         );
@@ -462,7 +484,11 @@ function GaugeBlock({ block, ctx }: { block: Extract<Block, { type: 'gauges' }>;
   const compact = fill && (density === 'compact' || (height > 0 && height < COMPACT_HEIGHT));
   const blockSize = block.size ?? 'md';
   const card = useCardSize();
-  const items = block.items.map(item => pickAdaptive(item, ctx)).filter((item): item is NonNullable<typeof item> => item !== null);
+  // A block either lists its rings, or names a data list and draws one ring per row.
+  const items = block.path
+    ? (block.item ? gaugeItemsFromRows(block.item, /^(datasets|context)\./.test(block.path) ? pathOf(ctx, block.path) : pathOf(ctx.data, block.path)) : [])
+    : (block.items ?? []).map(item => pickAdaptive(item, ctx)).filter((item): item is NonNullable<typeof item> => item !== null);
+  if (!items.length) return <div className="py-4 text-center text-xs text-muted-foreground">{block.empty || 'Nothing to show'}</div>;
   const values: ValueText[] = items.map(item => {
     const value = text(item.value, ctx);
     return formatStatValue(value, item.format, item.unit, item.decimals);
@@ -581,7 +607,7 @@ function TextBlock({ block, ctx }: { block: Extract<Block, { type: 'text' }>; ct
 
 function Section({ block, ctx, ui }: { block: Extract<Block, { type: 'section' }>; ctx: ViewContext; ui: LayoutUi }) {
   const [open, setOpen] = useState(block.defaultOpen);
-  const badges = visibleBadges(block.badges, ctx);
+  const badges = visibleBadges(block.badges ?? [], ctx);
   const summary = block.summary ? text(block.summary, ctx) : '';
   return (
     <section className="rounded-lg border border-border">

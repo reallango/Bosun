@@ -16,10 +16,13 @@ fail() { printf 'ERROR: %s\n' "$*"; exit 0; }
 # private key and the S3 keys are written to files only this account can read and mounted read-only; they never appear on a
 # command line or in the output. The destination, the password and the credentials are package secrets.
 RESTIC_IMAGE=restic/restic:0.17.3
-BACKUP_REPOSITORY=${BOSUN_SECRET_backup_repository-}
-BACKUP_PASSWORD=${BOSUN_SECRET_backup_password-}
-BACKUP_CREDENTIALS=${BOSUN_SECRET_backup_credentials-}
-unset BOSUN_SECRET_backup_repository BOSUN_SECRET_backup_password BOSUN_SECRET_backup_credentials
+# Bosun resolves the backup destination for this server (the entry the action chose, or the server's default) and
+# exports its fields. They are taken out of the environment at once, so nothing else inherits them.
+BACKUP_REPOSITORY=${BOSUN_CRED_BACKUP_DESTINATION_REPOSITORY-}
+BACKUP_PASSWORD=${BOSUN_CRED_BACKUP_DESTINATION_PASSWORD-}
+BACKUP_CREDENTIALS=${BOSUN_CRED_BACKUP_DESTINATION_CREDENTIALS-}
+BACKUP_DESTINATION_ID=${BOSUN_CRED_BACKUP_DESTINATION_ID-}
+unset BOSUN_CRED_BACKUP_DESTINATION_REPOSITORY BOSUN_CRED_BACKUP_DESTINATION_PASSWORD BOSUN_CRED_BACKUP_DESTINATION_CREDENTIALS BOSUN_CRED_BACKUP_DESTINATION_ID
 RESTIC_STATE=''
 RESTIC_DOCKER_ARGS=''
 RESTIC_EXTRA_ARGS=''
@@ -31,7 +34,7 @@ restic_add_docker() { printf '%s\n' "$1" >> "$RESTIC_DOCKER_ARGS"; }
 restic_add_extra() { printf '%s\n' "$1" >> "$RESTIC_EXTRA_ARGS"; }
 restic_prepare() {
   [ -n "$RESTIC_STATE" ] && return 0
-  restic_configured || fail 'the backup destination and password are not set (Settings -> Widgets -> Docker -> Secrets)'
+  restic_configured || fail 'the backup destination and password are not set (Docker -> Manage -> Backups -> Destinations)'
   case "$BACKUP_REPOSITORY" in
     /*) case "$BACKUP_REPOSITORY" in *[[:cntrl:]]*|*..*) fail 'the backup destination is not a plain absolute path' ;; esac ;;
     sftp:*) case "$BACKUP_REPOSITORY" in *[[:cntrl:]]*) fail 'the backup destination has an unexpected character' ;; esac ;;
@@ -56,7 +59,7 @@ restic_prepare() {
     sftp:*)
       case "$BACKUP_CREDENTIALS" in
         /*) [ -f "$BACKUP_CREDENTIALS" ] || fail 'the SSH key file of the backup destination is missing'; cp "$BACKUP_CREDENTIALS" "$RESTIC_STATE/id" ;;
-        '') fail 'an SSH key is needed for an SFTP backup destination (Settings -> Widgets -> Docker -> Secrets)' ;;
+        '') fail 'an SSH key is needed for an SFTP backup destination (Docker -> Manage -> Backups -> Destinations)' ;;
         *) if command -v base64 >/dev/null 2>&1; then printf '%s' "$BACKUP_CREDENTIALS" | base64 -d > "$RESTIC_STATE/id" 2>/dev/null
            elif command -v openssl >/dev/null 2>&1; then printf '%s' "$BACKUP_CREDENTIALS" | openssl base64 -d -A > "$RESTIC_STATE/id" 2>/dev/null
            else fail 'neither base64 nor openssl is available to read the SSH key of the backup destination'; fi
@@ -71,7 +74,7 @@ restic_prepare() {
     s3:*)
       case "$BACKUP_CREDENTIALS" in
         *:*) ak=${BACKUP_CREDENTIALS%%:*}; sk=${BACKUP_CREDENTIALS#*:} ;;
-        *) fail 'S3 credentials must be ACCESS_KEY:SECRET_KEY (Settings -> Widgets -> Docker -> Secrets)' ;;
+        *) fail 'S3 credentials must be ACCESS_KEY:SECRET_KEY (Docker -> Manage -> Backups -> Destinations)' ;;
       esac
       case "$ak" in ''|*[[:cntrl:]]*) fail 'the S3 access key has an unexpected character' ;; esac
       case "$sk" in ''|*[[:cntrl:]]*) fail 'the S3 secret key has an unexpected character' ;; esac

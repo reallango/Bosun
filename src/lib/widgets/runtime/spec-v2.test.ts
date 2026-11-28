@@ -440,3 +440,25 @@ describe('level 11: adaptive items, footers and info lines', () => {
     expect(layout([{ type: 'meters', shape: 'ring', item: { label: '{x}', value: '{y}' } }]).ok).toBe(true);
   });
 });
+
+describe('level 13: gauges over a list, and a format on info pairs', () => {
+  const layout = (blocks: unknown[]) => check(s => { s.view = { type: 'layout', blocks }; });
+
+  it('draws one ring per row with path and item', () => {
+    expect(layout([{ type: 'gauges', path: 'data.disks', empty: 'No disk data', item: { label: '{mountPoint}', value: '{usagePercent}', unit: '%', thresholds: { warning: 80 } } }]).ok).toBe(true);
+    expect(layout([{ type: 'gauges', items: [{ label: 'CPU', value: '{p}' }] }]).ok).toBe(true);
+  });
+
+  it('refuses both forms at once, a missing item and a malformed path', () => {
+    expect(layout([{ type: 'gauges', items: [{ label: 'CPU', value: '{p}' }], path: 'data.disks', item: { label: '{m}', value: '{u}' } }]).ok).toBe(false);
+    expect(layout([{ type: 'gauges', path: 'data.disks' }]).ok).toBe(false);
+    expect(layout([{ type: 'gauges', path: 'data[0]', item: { label: '{m}', value: '{u}' } }]).ok).toBe(false);
+  });
+
+  it('accepts a format on an info or footer pair', () => {
+    const footer = [{ label: 'Uptime', value: '{s}', format: 'duration' }];
+    expect(layout([{ type: 'info', items: footer }]).ok).toBe(true);
+    expect(layout([{ type: 'stat', items: [{ label: 'CPU', value: '{p}' }], footer }]).ok).toBe(true);
+    expect(layout([{ type: 'info', items: [{ label: 'Uptime', value: '{s}', format: 'nope' }] }]).ok).toBe(false);
+  });
+});

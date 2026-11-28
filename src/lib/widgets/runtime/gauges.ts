@@ -6,7 +6,8 @@ import { cond, fail, isObj, text, type Validated } from './spec-util';
 import { validateDecimals, validateEmphasis, validateGaugeThickness, type Emphasis, type GaugeThickness } from './sizing';
 import { validateThresholds, type Thresholds } from './thresholds';
 import { VALUE_FORMATS, type ValueFormat } from './number-format';
-import type { Cond } from './spec';
+import { evalCond, fillTemplate, type Cond } from './spec';
+import { meterRows } from './meters';
 
 export const GAUGE_VIEWBOX = 100;
 export const GAUGE_STROKE = 10;
@@ -102,6 +103,35 @@ export function validateGaugeItem(raw: unknown, where: string, depth = 0): Valid
       ...(alternatives ? { alternatives } : {}),
     },
   };
+}
+
+/** The gauge to draw for one row: the template itself while its `when` holds, else the first alternative that does. */
+function pickRowGauge(item: GaugeItem, row: Record<string, unknown>): GaugeItem | null {
+  if (!item.when || evalCond(item.when, row)) return item;
+  for (const alternative of item.alternatives ?? []) {
+    const picked = pickRowGauge(alternative, row);
+    if (picked) return picked;
+  }
+  return null;
+}
+
+/**
+ * The rings of a `gauges` block that names a list (`path` + `item`): one gauge per row, with the row's `{field}`
+ * templates filled and the item's `when` and `alternatives` read against that row.
+ */
+export function gaugeItemsFromRows(item: GaugeItem, source: unknown): GaugeItem[] {
+  const out: GaugeItem[] = [];
+  for (const row of meterRows(source)) {
+    const picked = pickRowGauge(item, row);
+    if (!picked) continue;
+    out.push({
+      ...picked,
+      label: fillTemplate(picked.label, row),
+      value: fillTemplate(picked.value, row),
+      ...(picked.sub ? { sub: fillTemplate(picked.sub, row) } : {}),
+    });
+  }
+  return out;
 }
 
 export interface GaugeGeometry {

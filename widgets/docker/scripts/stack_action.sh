@@ -9,27 +9,23 @@
 # Parameters: name, op, allow_risky.
 fail() { printf 'ERROR: %s\n' "$*"; exit 0; }
 # >>> git credentials (the same text in stack_deploy.sh, stack_action.sh, git_branches.sh, git_files.sh and git_services.sh; a test compares them)
-# Bosun exports the package secrets git_token (GitHub) and git_credentials (entries "host=token" or "host=user:token", host with its
-# port when it has one, separated by spaces, commas or semicolons) only to scripts that name them. They are taken out of the
-# environment at once, so git, docker and compose never inherit them. git_auth <https url> sets AUTH to the Basic Authorization header
-# for exactly that repository's host, or '' when there is no credential for it; it reaches git only through gitrun's environment.
-GIT_TOKEN=${BOSUN_SECRET_git_token-}; GIT_CREDENTIALS=${BOSUN_SECRET_git_credentials-}
-unset BOSUN_SECRET_git_token BOSUN_SECRET_git_credentials
+# Bosun resolves the Git credential entry for this repository before the script runs: the entry of the host with the longest
+# matching owner/repository scope, limited to the servers it is allowed on. Only that entry's fields arrive, as
+# BOSUN_CRED_GIT_HOST, _SCOPE, _USERNAME and _TOKEN. They are taken out of the environment at once, so git, docker and compose
+# never inherit them. git_auth <https url> sets AUTH to the Basic Authorization header for exactly that repository's host, or ''
+# when the entry is for another host; it reaches git only through gitrun's environment.
+GIT_HOST=${BOSUN_CRED_GIT_HOST-}; GIT_USER=${BOSUN_CRED_GIT_USERNAME-}; GIT_TOKEN=${BOSUN_CRED_GIT_TOKEN-}
+unset BOSUN_CRED_GIT_HOST BOSUN_CRED_GIT_SCOPE BOSUN_CRED_GIT_USERNAME BOSUN_CRED_GIT_TOKEN
 git_auth() {
   AUTH=''
   gh=${1#https://}; gh=${gh%%/*}; gh=$(printf '%s' "$gh" | tr 'A-Z' 'a-z')
-  cred=''
-  set -f
-  for c in $(printf '%s' "$GIT_CREDENTIALS" | tr ',;' '  '); do
-    case "$c" in *=*) [ "$(printf '%s' "${c%%=*}" | tr 'A-Z' 'a-z')" = "$gh" ] && cred=${c#*=} ;; esac
-  done
-  set +f
-  if [ -z "$cred" ] && [ "$gh" = github.com ]; then cred=$GIT_TOKEN; fi
+  cred=$GIT_TOKEN
+  [ -z "$cred" ] || [ -z "$GIT_HOST" ] || [ "$GIT_HOST" = "$gh" ] || cred=''
   [ -n "$cred" ] || return 0
   case "$cred" in *[!A-Za-z0-9_.~+/=:@-]*) cred=''; fail 'a Git credential has unexpected characters' ;; esac
   case "$cred" in
     *:*) pair=$cred ;;
-    *) case "$gh" in github.com) u=x-access-token ;; bitbucket.org) u=x-token-auth ;; *gitlab*) u=oauth2 ;; *) u=git ;; esac; pair="$u:$cred" ;;
+    *) u=$GIT_USER; if [ -z "$u" ]; then case "$gh" in github.com) u=x-access-token ;; bitbucket.org) u=x-token-auth ;; *gitlab*) u=oauth2 ;; *) u=git ;; esac; fi; pair="$u:$cred" ;;
   esac
   if command -v base64 >/dev/null 2>&1; then b64=$(printf '%s' "$pair" | base64 | tr -d '\n')
   elif command -v openssl >/dev/null 2>&1; then b64=$(printf '%s' "$pair" | openssl base64 -A)
@@ -389,7 +385,7 @@ if [ "$op" = update ] && [ "$(meta_get source)" = git ]; then
   [ -d "$DIR/repo/.git" ] || fail "the stored checkout of the stack $name is missing"
   prev=$(git -C "$DIR/repo" rev-parse HEAD 2>/dev/null) || fail "the stored checkout of the stack $name is damaged"
   echo '[step] Fetching the latest source'
-  # the stored repository's own credential (git_token for github.com, git_credentials for other hosts), as for a deployment
+  # the Git access credential Bosun resolved for the stored repository, as for a deployment
   ur=$(meta_get repo)
   case "$ur" in https://*) git_auth "$ur" ;; esac   # (an older record without the address: fetched without a credential)
   ( export GIT_TERMINAL_PROMPT=0 GIT_ALLOW_PROTOCOL=https GIT_LFS_SKIP_SMUDGE=1 GIT_ASKPASS=/bin/true
@@ -398,7 +394,7 @@ if [ "$op" = update ] && [ "$(meta_get source)" = git ]; then
     fi
     git -c core.hooksPath=/dev/null -C "$DIR/repo" fetch --depth 1 origin "$ub" >/dev/null 2>"$errf" < /dev/null \
       && git -c core.hooksPath=/dev/null -C "$DIR/repo" reset --hard FETCH_HEAD >/dev/null 2>>"$errf" < /dev/null ) \
-    || fail "fetching the source failed (for a private repository, set the Git token or Git credentials of the Docker package): $(lastline)"
+    || fail "fetching the source failed (for a private repository, add a Git access credential on the Docker widget's Manage page): $(lastline)"
   AUTH=''
   restore() { git -C "$DIR/repo" reset --hard "$prev" >/dev/null 2>&1; }
   [ -f "$CF" ] || { restore; fail "the new version has no $(meta_get file); the stack was left as it was"; }

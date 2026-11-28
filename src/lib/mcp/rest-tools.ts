@@ -749,6 +749,69 @@ export function restTools(): CatalogTool[] {
       required: ['widget_id'],
     }),
 
+    // ---- Package credentials (public fields only; secrets are write-only) -----------------------------------
+    def({
+      name: 'credentials_list', title: 'List package credentials', method: 'GET', route: 'widgets/[widgetId]/credentials',
+      path: { widgetId: 'widget_type' }, query: ['kind', 'server_id'], readOnly: true,
+      description: 'Credential entries of a widget package (for example Git access or backup destinations): public fields, whether each secret is set, the server scope and last use. Never a secret value.',
+      properties: {
+        widget_type: str('The widget type of the package (see widget_instances_list).', { minLength: 1, maxLength: 64 }),
+        kind: str('One credential kind; leave out for every kind you may view.'),
+        server_id: SERVER_ID,
+      },
+      required: ['widget_type'],
+    }),
+    def({
+      name: 'credentials_servers_list', title: 'List credential server choices', method: 'GET', route: 'widgets/[widgetId]/credentials/servers',
+      path: { widgetId: 'widget_type' }, readOnly: true,
+      description: 'The servers a credential entry may be scoped to (the ones the caller may see).',
+      properties: { widget_type: str('The widget type of the package.', { minLength: 1, maxLength: 64 }) },
+      required: ['widget_type'],
+    }),
+    def({
+      name: 'credentials_create', title: 'Create a package credential', method: 'POST', route: 'widgets/[widgetId]/credentials',
+      path: { widgetId: 'widget_type' },
+      description: 'Create one credential entry. Needs the credential kind\'s permission on every server it applies to. Secrets are write-only and never returned.',
+      properties: {
+        widget_type: str('The widget type of the package.', { minLength: 1, maxLength: 64 }),
+        kind: str('Credential kind id.', { minLength: 1, maxLength: 40 }),
+        name: str('Display name.', { minLength: 1, maxLength: 80 }),
+        fields: obj('Public field id -> value.'),
+        secrets: obj('Secret field id -> value (write-only).'),
+        servers: arr('Servers the entry applies to (empty: every server, where the kind allows it).', { type: 'string' }),
+        isDefault: bool('Make it the default for its servers (when the kind has a per-server default).'),
+      },
+      required: ['widget_type', 'kind', 'name'],
+    }),
+    def({
+      name: 'credentials_update', title: 'Update a package credential', method: 'PUT', route: 'widgets/[widgetId]/credentials',
+      path: { widgetId: 'widget_type' },
+      description: 'Edit one credential entry. Leave a secret out (or send "") to keep it unchanged. Needs the credential kind\'s permission.',
+      properties: {
+        widget_type: str('The widget type of the package.', { minLength: 1, maxLength: 64 }),
+        kind: str('Credential kind id.', { minLength: 1, maxLength: 40 }),
+        id: ID('Credential'),
+        name: str('Display name.', { minLength: 1, maxLength: 80 }),
+        fields: obj('Public field id -> value.'),
+        secrets: obj('Secret field id -> value (write-only).'),
+        servers: arr('Servers the entry applies to.', { type: 'string' }),
+        isDefault: bool('Make it the default for its servers.'),
+      },
+      required: ['widget_type', 'kind', 'id'],
+    }),
+    def({
+      name: 'credentials_delete', title: 'Delete a package credential', method: 'DELETE', route: 'widgets/[widgetId]/credentials',
+      path: { widgetId: 'widget_type' }, query: ['kind', 'id'], destructive: true,
+      confirmText: 'The credential entry and its stored secrets are removed.',
+      description: 'Delete one credential entry. Needs the credential kind\'s permission. Requires confirm: true.',
+      properties: {
+        widget_type: str('The widget type of the package.', { minLength: 1, maxLength: 64 }),
+        kind: str('Credential kind id.', { minLength: 1, maxLength: 40 }),
+        id: ID('Credential'),
+      },
+      required: ['widget_type', 'kind', 'id'],
+    }),
+
     // ---- Widget definitions and runtime ----------------------------------------------------------------------
     def({
       name: 'widget_definitions_list', title: 'List widget definitions', method: 'GET', route: 'widget-definitions',

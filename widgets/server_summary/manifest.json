@@ -2,11 +2,11 @@
   "schema": 1,
   "id": "server_summary",
   "name": "Server Summary",
-  "version": "1.2.1",
+  "version": "1.3.0",
   "description": "Compact overview: online status, address, operating system and the main vitals.",
   "author": "Bosun",
   "requires": {
-    "api": 10
+    "api": 13
   },
   "permissions": [
     {
@@ -43,7 +43,8 @@
           "source": "snapshot",
           "section": "metrics",
           "also": [
-            "system"
+            "system",
+            "network_headline"
           ],
           "server": true,
           "permission": "server_summary.view"
@@ -56,8 +57,28 @@
               "label": "Tiles"
             },
             {
+              "id": "gauges",
+              "label": "Gauges",
+              "min_size": {
+                "w": 8,
+                "h": 4
+              },
+              "default_size": {
+                "w": 8,
+                "h": 4
+              }
+            },
+            {
               "id": "details",
-              "label": "Details"
+              "label": "Details",
+              "min_size": {
+                "w": 6,
+                "h": 3
+              },
+              "default_size": {
+                "w": 8,
+                "h": 6
+              }
             }
           ]
         },
@@ -72,23 +93,6 @@
                 "field": "data.server.is_online",
                 "equals": false
               }
-            },
-            {
-              "type": "text",
-              "text": "Online · {data.server.name} · {data.system.prettyName}",
-              "when": {
-                "all": [
-                  {
-                    "field": "data.server.is_online",
-                    "equals": true
-                  },
-                  {
-                    "field": "config.look",
-                    "equals": "tiles"
-                  }
-                ]
-              },
-              "hideBelow": "md"
             },
             {
               "type": "stat",
@@ -138,23 +142,132 @@
                     "warning": 80,
                     "danger": 90
                   }
+                },
+                {
+                  "label": "Rx",
+                  "value": "{data.metrics.net.rx_bps}",
+                  "format": "rate",
+                  "trend": {
+                    "metric": "net.rx_bps",
+                    "window": "1h"
+                  }
+                },
+                {
+                  "label": "Tx",
+                  "value": "{data.metrics.net.tx_bps}",
+                  "format": "rate",
+                  "trend": {
+                    "metric": "net.tx_bps",
+                    "window": "1h"
+                  }
                 }
               ],
-              "columns": 3
-            },
-            {
-              "type": "kv",
-              "when": {
-                "field": "config.look",
-                "equals": "tiles"
-              },
-              "items": [
+              "footer": [
+                {
+                  "label": "OS",
+                  "value": "{data.system.prettyName}",
+                  "when": {
+                    "field": "data.system.prettyName",
+                    "exists": true
+                  }
+                },
                 {
                   "label": "Uptime",
                   "value": "{data.metrics.sys.uptime_s}",
-                  "format": "duration"
+                  "format": "duration",
+                  "when": {
+                    "field": "data.metrics.sys.uptime_s",
+                    "exists": true
+                  }
+                },
+                {
+                  "label": "{data.network_headline.name}",
+                  "value": "{data.network_headline.ipv4}",
+                  "when": {
+                    "field": "data.network_headline.ipv4",
+                    "exists": true
+                  }
                 }
-              ]
+              ],
+              "columns": 5
+            },
+            {
+              "type": "gauges",
+              "when": {
+                "field": "config.look",
+                "equals": "gauges"
+              },
+              "items": [
+                {
+                  "label": "CPU",
+                  "value": "{data.metrics.cpu.usage}",
+                  "max": 100,
+                  "unit": "%",
+                  "thresholds": {
+                    "warning": 75,
+                    "danger": 90
+                  },
+                  "sub": "{data.system.cpuThreads} threads"
+                },
+                {
+                  "label": "Memory",
+                  "value": "{data.metrics.mem.used_pct}",
+                  "max": 100,
+                  "unit": "%",
+                  "thresholds": {
+                    "warning": 80,
+                    "danger": 90
+                  }
+                },
+                {
+                  "label": "Disk",
+                  "value": "{data.metrics.disk.root_used_pct}",
+                  "max": 100,
+                  "unit": "%",
+                  "thresholds": {
+                    "warning": 80,
+                    "danger": 90
+                  }
+                }
+              ],
+              "footer": [
+                {
+                  "label": "Uptime",
+                  "value": "{data.metrics.sys.uptime_s}",
+                  "format": "duration",
+                  "when": {
+                    "field": "data.metrics.sys.uptime_s",
+                    "exists": true
+                  }
+                },
+                {
+                  "label": "{data.network_headline.name}",
+                  "value": "{data.network_headline.ipv4}",
+                  "when": {
+                    "field": "data.network_headline.ipv4",
+                    "exists": true
+                  }
+                },
+                {
+                  "label": "Rx",
+                  "value": "{data.metrics.net.rx_bps}",
+                  "format": "rate",
+                  "when": {
+                    "field": "data.metrics.net.rx_bps",
+                    "exists": true
+                  }
+                },
+                {
+                  "label": "Tx",
+                  "value": "{data.metrics.net.tx_bps}",
+                  "format": "rate",
+                  "when": {
+                    "field": "data.metrics.net.tx_bps",
+                    "exists": true
+                  }
+                }
+              ],
+              "minItemWidth": "xs"
             },
             {
               "type": "view",

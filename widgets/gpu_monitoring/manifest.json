@@ -2,11 +2,11 @@
   "schema": 1,
   "id": "gpu_monitoring",
   "name": "GPU Monitoring",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "NVIDIA GPU utilisation, memory, temperature and power. Tracks each GPU as history.",
   "author": "Bosun",
   "requires": {
-    "api": 10
+    "api": 11
   },
   "permissions": [
     {
@@ -99,10 +99,31 @@
           "type": "layout",
           "blocks": [
             {
+              "type": "notice",
+              "level": "info",
+              "text": "No GPU detected on this host.",
+              "when": {
+                "count": {
+                  "path": "data.gpus"
+                },
+                "equals": 0
+              }
+            },
+            {
               "type": "gauges",
               "when": {
-                "field": "config.look",
-                "equals": "gauges"
+                "all": [
+                  {
+                    "field": "config.look",
+                    "equals": "gauges"
+                  },
+                  {
+                    "count": {
+                      "path": "data.gpus"
+                    },
+                    "gt": 0
+                  }
+                ]
               },
               "thickness": "normal",
               "items": [
@@ -139,13 +160,29 @@
                   }
                 }
               ],
-              "minItemWidth": "xs"
+              "minItemWidth": "xs",
+              "footer": [
+                {
+                  "label": "GPUs",
+                  "value": "{data.gpus.length}"
+                }
+              ]
             },
             {
               "type": "stat",
               "when": {
-                "field": "config.look",
-                "equals": "tiles"
+                "all": [
+                  {
+                    "field": "config.look",
+                    "equals": "tiles"
+                  },
+                  {
+                    "count": {
+                      "path": "data.gpus"
+                    },
+                    "gt": 0
+                  }
+                ]
               },
               "minItemWidth": "xs",
               "items": [
@@ -192,13 +229,29 @@
                     "danger": 85
                   }
                 }
+              ],
+              "footer": [
+                {
+                  "label": "GPUs",
+                  "value": "{data.gpus.length}"
+                }
               ]
             },
             {
               "type": "meters",
               "when": {
-                "field": "config.look",
-                "equals": "gpus"
+                "all": [
+                  {
+                    "field": "config.look",
+                    "equals": "gpus"
+                  },
+                  {
+                    "count": {
+                      "path": "data.gpus"
+                    },
+                    "gt": 0
+                  }
+                ]
               },
               "path": "gpus",
               "shape": "ring",
@@ -215,10 +268,43 @@
               }
             },
             {
+              "type": "info",
+              "items": [
+                {
+                  "label": "GPUs",
+                  "value": "{data.gpus.length}"
+                }
+              ],
+              "when": {
+                "all": [
+                  {
+                    "field": "config.look",
+                    "equals": "gpus"
+                  },
+                  {
+                    "count": {
+                      "path": "data.gpus"
+                    },
+                    "gt": 0
+                  }
+                ]
+              }
+            },
+            {
               "type": "view",
               "when": {
-                "field": "config.look",
-                "equals": "list"
+                "all": [
+                  {
+                    "field": "config.look",
+                    "equals": "list"
+                  },
+                  {
+                    "count": {
+                      "path": "data.gpus"
+                    },
+                    "gt": 0
+                  }
+                ]
               },
               "path": "gpus",
               "view": {
@@ -257,6 +343,29 @@
                   ],
                   "actions": []
                 }
+              }
+            },
+            {
+              "type": "info",
+              "items": [
+                {
+                  "label": "GPUs",
+                  "value": "{data.gpus.length}"
+                }
+              ],
+              "when": {
+                "all": [
+                  {
+                    "field": "config.look",
+                    "equals": "list"
+                  },
+                  {
+                    "count": {
+                      "path": "data.gpus"
+                    },
+                    "gt": 0
+                  }
+                ]
               }
             }
           ]
