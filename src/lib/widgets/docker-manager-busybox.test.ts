@@ -8,7 +8,14 @@ import path from 'path';
 // not GNU. These tests run the changed scripts under busybox sh with every applet (not the GNU tool of the same name) on
 // PATH, and a fake docker/git that records what the script asked for.
 const scripts = path.join(process.cwd(), 'widgets', 'docker', 'scripts');
-const hasBusybox = spawnSync('busybox', ['true'], { stdio: 'ignore' }).status === 0;
+// Alpine ships busybox as one binary without the installer applet, so `--install -s` is not an option there: the applets
+// are symlinks to the real binary here instead, which busybox dispatches on argv[0] exactly the same way.
+const busyboxList = spawnSync('busybox', ['--list'], { encoding: 'utf8' });
+const applets = busyboxList.status === 0 ? (busyboxList.stdout ?? '').split('\n').map(l => l.trim()).filter(Boolean) : [];
+const hasBusybox = applets.includes('awk') && applets.includes('sh');
+const realBusybox = hasBusybox
+  ? execFileSync('sh', ['-c', 'command -v busybox'], { encoding: 'utf8' }).trim()
+  : '';
 
 let root = '';
 let bin = '';
@@ -20,7 +27,10 @@ const setup = () => {
   home = path.join(root, 'home');
   fs.mkdirSync(bin);
   fs.mkdirSync(home);
-  execFileSync('busybox', ['--install', '-s', bin], { stdio: 'ignore' });
+  for (const applet of applets) {
+    if (applet.includes('/')) continue;
+    fs.symlinkSync(realBusybox, path.join(bin, applet));
+  }
 };
 
 const stub = (name: string, body: string) => {
