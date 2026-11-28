@@ -146,6 +146,36 @@ sensitive() {
 }
 RISKS=$nl
 add_risk() { case "$RISKS" in *"$nl$1$nl"*) ;; *) RISKS="$RISKS$1$nl" ;; esac; }
+# >>> risk classification (the same text in container_create.sh, container_recreate.sh, inspect.sh, stack_action.sh and
+# stack_deploy.sh; a test compares them)
+# Only an added capability outside Docker's default set is elevated, and only a security option that weakens isolation is.
+# cap_add: ALL is every capability; cap_drop never is. An option this does not know stays elevated (the safe default).
+cap_risky() {
+  _cap=$(printf '%s' "$1" | tr '[:lower:]' '[:upper:]')
+  case "$_cap" in CAP_*) _cap=${_cap#CAP_} ;; esac
+  case "$_cap" in ALL) return 0 ;; esac
+  for _capd in CHOWN DAC_OVERRIDE FSETID FOWNER MKNOD NET_RAW SETGID SETUID SETFCAP SETPCAP NET_BIND_SERVICE SYS_CHROOT KILL AUDIT_WRITE; do
+    [ "$_cap" = "$_capd" ] && return 1
+  done
+  return 0
+}
+secopt_risky() {
+  _so=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+  case "$_so" in
+    *=*) _sok=${_so%%=*}; _sov=${_so#*=} ;;
+    *:*) _sok=${_so%%:*}; _sov=${_so#*:} ;;
+    *) _sok=$_so; _sov='' ;;
+  esac
+  case "$_sok" in
+    seccomp) case "$_sov" in ''|default) return 1 ;; esac; return 0 ;;
+    apparmor) case "$_sov" in unconfined) return 0 ;; esac; return 1 ;;
+    label) case "$_sov" in disable) return 0 ;; esac; return 1 ;;
+    systempaths) case "$_sov" in unconfined) return 0 ;; esac; return 1 ;;
+    no-new-privileges) case "$_sov" in false|0|no) return 0 ;; esac; return 1 ;;
+    *) return 0 ;;
+  esac
+}
+# <<< risk classification
 is_int() { case "$1" in ''|*[!0-9]*) return 1 ;; esac; [ "${#1}" -le 18 ]; }
 dur() { # nanoseconds -> 30s / 500ms
   DUR=''
@@ -224,10 +254,10 @@ while IFS= read -r line; do
     PRIV) PRIV=$rest ;;
     PIDM) PIDM=$rest ;;
     IPCM) IPCM=$rest ;;
-    CAPADD) CAPADD=$(j "$CAPADD" "$rest"); unq "$rest"; add_risk "capability $u" ;;
+    CAPADD) CAPADD=$(j "$CAPADD" "$rest"); unq "$rest"; if cap_risky "$u"; then add_risk "capability $u"; fi ;;
     CAPDROP) CAPDROP=$(j "$CAPDROP" "$rest") ;;
     DEVICE) DEVICE=$(j "$DEVICE" "$rest"); unq "$rest"; add_risk "device $u" ;;
-    SECOPT) SECOPT=$(j "$SECOPT" "$rest"); unq "$rest"; add_risk "security option $u" ;;
+    SECOPT) SECOPT=$(j "$SECOPT" "$rest"); unq "$rest"; if secopt_risky "$u"; then add_risk "security option $u"; fi ;;
     SYSCTL) SYSCTL=$(j "$SYSCTL" "$rest"); unq "$rest"; add_risk "sysctl ${u%%=*}" ;;
     GPU) GPU=$rest ;;
     PRES) PRES=$(j "$PRES" "$rest") ;;

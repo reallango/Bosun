@@ -20,6 +20,36 @@ valid_dur() { d1=${1%%[a-z]*}; d2=${1#"$d1"}; is_num "$d1" || return 1; case "$d
 valid_portnum() { case "$1" in ''|*[!0-9-]*|-*|*-|*-*-*) return 1 ;; esac; [ "${#1}" -le 11 ]; }
 RISKY=''
 add_risk() { case "$RISKY" in *"$1"*) ;; *) RISKY="${RISKY:+$RISKY, }$1" ;; esac; }
+# >>> risk classification (the same text in container_create.sh, container_recreate.sh, inspect.sh, stack_action.sh and
+# stack_deploy.sh; a test compares them)
+# Only an added capability outside Docker's default set is elevated, and only a security option that weakens isolation is.
+# cap_add: ALL is every capability; cap_drop never is. An option this does not know stays elevated (the safe default).
+cap_risky() {
+  _cap=$(printf '%s' "$1" | tr '[:lower:]' '[:upper:]')
+  case "$_cap" in CAP_*) _cap=${_cap#CAP_} ;; esac
+  case "$_cap" in ALL) return 0 ;; esac
+  for _capd in CHOWN DAC_OVERRIDE FSETID FOWNER MKNOD NET_RAW SETGID SETUID SETFCAP SETPCAP NET_BIND_SERVICE SYS_CHROOT KILL AUDIT_WRITE; do
+    [ "$_cap" = "$_capd" ] && return 1
+  done
+  return 0
+}
+secopt_risky() {
+  _so=$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')
+  case "$_so" in
+    *=*) _sok=${_so%%=*}; _sov=${_so#*=} ;;
+    *:*) _sok=${_so%%:*}; _sov=${_so#*:} ;;
+    *) _sok=$_so; _sov='' ;;
+  esac
+  case "$_sok" in
+    seccomp) case "$_sov" in ''|default) return 1 ;; esac; return 0 ;;
+    apparmor) case "$_sov" in unconfined) return 0 ;; esac; return 1 ;;
+    label) case "$_sov" in disable) return 0 ;; esac; return 1 ;;
+    systempaths) case "$_sov" in unconfined) return 0 ;; esac; return 1 ;;
+    no-new-privileges) case "$_sov" in false|0|no) return 0 ;; esac; return 1 ;;
+    *) return 0 ;;
+  esac
+}
+# <<< risk classification
 # Is this host path (after resolving . and .. in its text) a sensitive one, or inside one? The path arrives in the environment, never in the awk program.
 sensitive() {
   P=$1 awk 'BEGIN {
@@ -198,7 +228,7 @@ while IFS= read -r line; do
       esac ;;
     cap_add) [ -n "$v" ] || continue
       case "$v" in *[!A-Za-z_]*) fail 'cap_add: invalid capability name' ;; esac
-      add_risk "capability $v"; set -- "$@" "--cap-add=$v" ;;
+      if cap_risky "$v"; then add_risk "capability $v"; fi; set -- "$@" "--cap-add=$v" ;;
     cap_drop) [ -n "$v" ] || continue
       case "$v" in *[!A-Za-z_]*) fail 'cap_drop: invalid capability name' ;; esac
       set -- "$@" "--cap-drop=$v" ;;
@@ -208,7 +238,7 @@ while IFS= read -r line; do
       add_risk "device $v"; set -- "$@" "--device=$v" ;;
     security_opt) [ -n "$v" ] || continue
       case "$v" in *[!A-Za-z0-9_.:=/,@-]*) fail 'security_opt: invalid option' ;; esac
-      add_risk "security option $v"; set -- "$@" "--security-opt=$v" ;;
+      if secopt_risky "$v"; then add_risk "security option $v"; fi; set -- "$@" "--security-opt=$v" ;;
     sysctl) [ -n "$v" ] || continue
       case "$v" in *=*) ;; *) fail 'sysctl: use key=value' ;; esac
       case "${v%%=*}" in ''|*[!A-Za-z0-9_.]*) fail 'sysctl: invalid key' ;; esac
@@ -225,7 +255,7 @@ EOS
 if [ "$EPCLEAR" -eq 1 ]; then set -- "$@" '--entrypoint='; elif [ -n "$EPFIRST" ]; then set -- "$@" "--entrypoint=$EPFIRST"; fi
 case "$BOSUN_PARAM_allow_risky" in
   true) ;;
-  *) [ -z "$RISKY" ] || fail "needs the permission to use elevated container options: $RISKY" ;;
+  *) [ -z "$RISKY" ] || fail "needs elevated container options ($RISKY)" ;;
 esac
 # <<< settings parser
 

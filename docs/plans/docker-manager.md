@@ -63,7 +63,7 @@ A setting is **risky** when it is one of the **risky** keys above, when `network
 `/var/run/docker.sock`, `/`, `/etc*`, `/root*`, `/home/*/.ssh*`, `/proc*`, `/sys*`, `/boot*`, `/usr*`, `/var/lib/docker*`
 (after removing `..` segments), or any `containerd.sock`. The scripts refuse risky settings unless the parameter `allow_risky`
 is `true`; only the action variant guarded by the permission `docker.privileged` passes it. The refusal message lists what is
-risky ("needs the permission to use elevated container options: privileged, host path /etc").
+risky ("needs elevated container options (privileged, host path /etc)").
 
 ### Datasets (read-only, JSON on stdout, `as: service`)
 

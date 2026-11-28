@@ -13,6 +13,7 @@ import { storeActionData } from '@/lib/widgets/runtime/store-data';
 import { rqlite } from '@/lib/db/rqlite-client';
 import type { ActionSpec } from '@/lib/widgets/runtime/spec';
 import { createJob, finishJob, getJob, JobConflictError, reportProgress, requestCancel, type JobRecord, type JobStatus } from '@/lib/widgets/jobs/store';
+import { explainElevatedFor } from '@/lib/widgets/runtime/elevated';
 
 /** How often a running job reports its progress (changed by tests only). */
 export const timing = { flushMs: 1500 };
@@ -121,6 +122,7 @@ async function run(job: JobRecord, input: StartJobInput, controller: AbortContro
       onData: (text, isErr) => { if (out.length < MAX_BUFFER) { out += isErr ? `[error output] ${text}` : text; dirty = true; } },
     });
     ({ status, message } = outcomeOf(r));
+    if (status === 'error') message = (await explainElevatedFor(message, action, loaded.spec.actions)) ?? message;
     if (!out) out = r.stdout + (r.stderr ? `\n[error output] ${r.stderr}` : '');
     if (status === 'success') await afterSuccess(input, r.stdout);
   } catch (err) {

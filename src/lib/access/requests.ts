@@ -25,6 +25,7 @@ import { redactParams } from '@/lib/widgets/jobs/store';
 import { audienceFor, describeRequest, MAX_PENDING_PER_REQUESTER, REQUEST_TTL_HOURS, type RequestInput } from './validate';
 import { requesterPayload } from './requester';
 import { CONTAINER_SHELL_PERMISSION } from '@/lib/exec/container-permission';
+import { elevatedHint } from '@/lib/widgets/runtime/elevated';
 
 export class RequestError extends Error {
   constructor(message: string, readonly status = 400, readonly code = 'INVALID_REQUEST') { super(message); }
@@ -202,7 +203,8 @@ export async function createRequest(auth: TokenPayload, input: RequestInput): Pr
       resource = { kind: ctx.kind, name: ctx.name };
     }
     if (await hasPermission(auth, permission, input.serverId, ctx)) {
-      throw new RequestError('You already hold this permission there: run the action directly', 409, 'ALREADY_GRANTED');
+      const hint = elevatedHint(a, loaded.spec.actions, id => permissionDef(id, defs)?.label ?? id);
+      throw new RequestError(`You already hold this permission there: run the action directly.${hint}`, 409, 'ALREADY_GRANTED');
     }
     action = JSON.stringify({ widgetType: input.widgetType, actionId: input.actionId, label: a.label, params: input.params });
   }

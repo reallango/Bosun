@@ -15,6 +15,7 @@ import { storeActionData } from '@/lib/widgets/runtime/store-data';
 import { ParamError } from '@/lib/widgets/runtime/command';
 import { decryptOrigin, editorFieldsOf, encryptOrigin, maskValues, resolveTokens, sanitizeOrigin } from '@/lib/widgets/jobs/origin';
 import { getJob, getOriginEnc, redactParams } from '@/lib/widgets/jobs/store';
+import { explainElevatedFor } from '@/lib/widgets/runtime/elevated';
 
 export interface ActionBody { params?: unknown; confirm?: unknown; ref?: unknown; widgetId?: unknown; origin?: unknown; savedFrom?: unknown }
 
@@ -83,7 +84,8 @@ export async function runWidgetAction(
           details: JSON.stringify({ widget: widgetType, action: actionId, ...(opts.approvedBy ? { approved_by: opts.approvedBy, request: opts.requestId } : {}), as: action.as, params: auditParams, exitCode: r.exitCode, output: r.stdout.slice(0, 200) }).slice(0, 900),
           durationMs: Date.now() - started, ipAddress: ip,
         });
-        return ok({ success: r.success && !r.protocol.error, output: r.stdout, error: r.stderr, exitCode: r.exitCode, timedOut: r.timedOut, message: r.protocol.done ?? r.protocol.error });
+        const message = r.protocol.error ? await explainElevatedFor(r.protocol.error, action, loaded.spec.actions) : r.protocol.done;
+        return ok({ success: r.success && !r.protocol.error, output: r.stdout, error: r.stderr, exitCode: r.exitCode, timedOut: r.timedOut, message });
       } catch (error) {
         await logAudit({
           userId: auth.userId, serverId, action: AuditActions.WIDGET_ACTION, status: 'failure',
