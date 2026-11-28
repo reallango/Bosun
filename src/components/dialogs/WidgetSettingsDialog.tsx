@@ -36,6 +36,9 @@ export function WidgetSettingsDialog({ widgetId, open, onOpenChange, onSave }: W
   const [data, setData] = useState<any>(null);
   const [selectedSize, setSelectedSize] = useState<SizePreset | null>(null);
   const [sizeTouched, setSizeTouched] = useState(false);
+  // A look may suggest a size that is not one of the presets; keep it selectable instead of falling back to the first one.
+  const presetMatch = selectedSize ? SIZE_PRESETS.find(p => p.id === selectedSize.id) : undefined;
+  const sizeValue = selectedSize ? (presetMatch ? selectedSize.id : 'look') : 'custom';
   const [config, setConfig] = useState<Record<string, unknown>>({});
   const [configSchema, setConfigSchema] = useState<WidgetConfigField[]>([]);
   const setConfigValue = (key: string, value: unknown) => setConfig(prev => ({ ...prev, [key]: value }));
@@ -190,13 +193,17 @@ export function WidgetSettingsDialog({ widgetId, open, onOpenChange, onSave }: W
                 <select
                   id={`ws-size-${widgetId}`}
                   className="form-select"
-                  value={selectedSize?.id || 'custom'}
+                  value={sizeValue}
                   onChange={e => {
-                    const preset = SIZE_PRESETS.find(p => p.id === e.target.value);
                     setSizeTouched(true);
+                    if (e.target.value === 'look') return;
+                    const preset = SIZE_PRESETS.find(p => p.id === e.target.value);
                     setSelectedSize(preset || null);
                   }}
                 >
+                  {selectedSize && !presetMatch && (
+                    <option value="look">{selectedSize.name} ({selectedSize.description})</option>
+                  )}
                   {!selectedSize && <option value="custom">Custom ({data?.grid_w}x{data?.grid_h})</option>}
                   {SIZE_PRESETS.map(preset => (
                     <option key={preset.id} value={preset.id}>

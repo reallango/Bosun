@@ -92,7 +92,7 @@ export function LayoutBlocks({ blocks, ctx, ui, groupToolbar }: { blocks: Block[
   return (
     <div className={fill ? 'flex h-full min-h-0 flex-col gap-2' : 'space-y-2'}>
       {shown.map((b, i) => (
-        <div key={i} className={fill && fillsBody(b) ? 'min-h-0 flex-1' : undefined}>
+        <div key={i} className={fill && fillsBody(b) ? 'min-h-0 flex-1' : fill && b.type === 'info' ? 'mt-auto' : undefined}>
           <BlockView block={b} ctx={ctx} ui={ui} />
         </div>
       ))}
