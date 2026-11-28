@@ -39,7 +39,7 @@ vi.mock('@/lib/permissions/authorize', () => ({
   requirePermission: vi.fn(async () => null),
 }));
 
-import { canManageKind, canViewKind, kindForType, publicKind, serverChoices } from './credential-access';
+import { canManageKind, canViewKind, kindForType, manageTargets, publicKind, serverChoices } from './credential-access';
 
 const raw = [{
   id: 'git', label: 'Git access', permission: 'docker.credentials', view_permission: 'docker.view',
@@ -82,6 +82,16 @@ describe('who may view and manage credentials', () => {
     h.visible = new Set(['s1']);
     expect(await canViewKind(user, git)).toBe(false);
     expect(await canManageKind(user, git)).toBe(false);
+  });
+});
+
+describe('the servers an edit must be allowed on', () => {
+  it('keeps the old and the new scope, and asks for every server when the entry is widened to all of them', () => {
+    expect(manageTargets(['s1'], null)).toEqual(['s1']);
+    expect(manageTargets(['s1'], ['s2'])).toEqual(['s1', 's2']);
+    expect(manageTargets([], ['s1'])).toEqual(['s1']);
+    expect(manageTargets(['s1'], [])).toEqual([]);
+    expect(manageTargets([], [])).toEqual([]);
   });
 });
 

@@ -7,7 +7,9 @@ import { getInstalledPackage } from '@/lib/widgets/package-store';
 import {
   createCredential, deleteCredential, getCredentialEntry, listCredentialEntries, updateCredential,
 } from '@/lib/widgets/credentials';
-import { canManageKind, entryViewable, kindForType, publicKind, requireKindManage, viewTargets } from '@/lib/widgets/credential-access';
+import {
+  canManageKind, entryViewable, kindForType, manageTargets, publicKind, requireKindManage, viewTargets,
+} from '@/lib/widgets/credential-access';
 import type { CredentialKindDef } from '@/lib/widgets/credentials-schema';
 
 /**
@@ -94,8 +96,8 @@ export async function PUT(request: NextRequest, { params }: { params: Promise<{ 
     if (!ctx || !id) return fail('Unknown credential kind', 404, 'NOT_FOUND');
     const existing = await getCredentialEntry(ctx.packageId, ctx.kind, id);
     if (!existing) return fail('Credential not found', 404, 'NOT_FOUND');
-    const servers = Array.isArray(b.servers) ? b.servers.filter((s): s is string => typeof s === 'string') : existing.servers;
-    const denied = await requireKindManage(auth, ctx.kind, Array.from(new Set([...existing.servers, ...servers])));
+    const nextServers = Array.isArray(b.servers) ? b.servers.filter((s): s is string => typeof s === 'string') : null;
+    const denied = await requireKindManage(auth, ctx.kind, manageTargets(existing.servers, nextServers));
     if (denied) return denied;
     const entry = await updateCredential(ctx.packageId, ctx.kind, id, {
       name: b.name, fields: b.fields, secrets: b.secrets, servers: b.servers, isDefault: b.isDefault,
