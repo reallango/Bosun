@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "docker",
   "name": "Docker Containers",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "description": "Containers on the host with logs, a shell, start, stop and restart; edit a container, create containers and stacks (a compose file, or one from a Git repository), back containers and stacks up with restic (volumes, mapped folders, stack files and the image, with the pinned image version) and restore them, update containers and stacks to newer images with a health check and automatic rollback, and a Manage page for images, volumes, networks and backups.",
   "author": "Bosun",
   "requires": {
@@ -1604,20 +1604,6 @@
                 "max": 600,
                 "integer": true,
                 "default": 180
-              },
-              "repo": {
-                "type": "string",
-                "maxLength": 300,
-                "default": "-",
-                "from": "repo",
-                "pattern": "^(-|https://[!-~]{1,290})$"
-              },
-              "credential": {
-                "type": "string",
-                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
-                "maxLength": 64,
-                "default": "auto",
-                "from": "credential"
               }
             },
             "variants": [
@@ -1638,14 +1624,7 @@
                   "name": "param.stack",
                   "service": "param.service",
                   "health_timeout": "param.health_timeout"
-                },
-                "credentials": [
-                  {
-                    "kind": "git",
-                    "entry": "credential",
-                    "url": "repo"
-                  }
-                ]
+                }
               }
             ],
             "after": "refresh",
@@ -1701,20 +1680,6 @@
                 "linePattern": "^(#.*|[a-z_]+=.*)$",
                 "default": "volumes=true\nbinds=true\nstack_files=true\nimage=false\nconsistency=live\nkeep_last=0\nkeep_daily=7\nkeep_weekly=4\nkeep_monthly=6"
               },
-              "repo": {
-                "type": "string",
-                "maxLength": 300,
-                "default": "-",
-                "from": "repo",
-                "pattern": "^(-|https://[!-~]{1,290})$"
-              },
-              "credential": {
-                "type": "string",
-                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
-                "maxLength": 64,
-                "default": "auto",
-                "from": "credential"
-              },
               "destination": {
                 "type": "string",
                 "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
@@ -1765,14 +1730,7 @@
                       "default": true
                     }
                   ]
-                },
-                "credentials": [
-                  {
-                    "kind": "git",
-                    "entry": "credential",
-                    "url": "repo"
-                  }
-                ]
+                }
               }
             ],
             "after": "refresh",
@@ -2462,20 +2420,6 @@
                 "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
                 "maxLength": 63,
                 "from": "name"
-              },
-              "repo": {
-                "type": "string",
-                "maxLength": 300,
-                "default": "-",
-                "from": "repo",
-                "pattern": "^(-|https://[!-~]{1,290})$"
-              },
-              "credential": {
-                "type": "string",
-                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
-                "maxLength": 64,
-                "default": "auto",
-                "from": "credential"
               }
             },
             "variants": [
@@ -2483,14 +2427,7 @@
                 "script": "stack_action",
                 "args": {
                   "op": "literal:start"
-                },
-                "credentials": [
-                  {
-                    "kind": "git",
-                    "entry": "credential",
-                    "url": "repo"
-                  }
-                ]
+                }
               }
             ],
             "icon": "play",
@@ -2512,20 +2449,6 @@
                 "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
                 "maxLength": 63,
                 "from": "name"
-              },
-              "repo": {
-                "type": "string",
-                "maxLength": 300,
-                "default": "-",
-                "from": "repo",
-                "pattern": "^(-|https://[!-~]{1,290})$"
-              },
-              "credential": {
-                "type": "string",
-                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
-                "maxLength": 64,
-                "default": "auto",
-                "from": "credential"
               }
             },
             "variants": [
@@ -2533,14 +2456,7 @@
                 "script": "stack_action",
                 "args": {
                   "op": "literal:stop"
-                },
-                "credentials": [
-                  {
-                    "kind": "git",
-                    "entry": "credential",
-                    "url": "repo"
-                  }
-                ]
+                }
               }
             ],
             "icon": "square",
@@ -2566,20 +2482,6 @@
                 "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
                 "maxLength": 63,
                 "from": "name"
-              },
-              "repo": {
-                "type": "string",
-                "maxLength": 300,
-                "default": "-",
-                "from": "repo",
-                "pattern": "^(-|https://[!-~]{1,290})$"
-              },
-              "credential": {
-                "type": "string",
-                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
-                "maxLength": 64,
-                "default": "auto",
-                "from": "credential"
               }
             },
             "variants": [
@@ -2587,14 +2489,7 @@
                 "script": "stack_action",
                 "args": {
                   "op": "literal:restart"
-                },
-                "credentials": [
-                  {
-                    "kind": "git",
-                    "entry": "credential",
-                    "url": "repo"
-                  }
-                ]
+                }
               }
             ],
             "icon": "rotate-cw",
@@ -2627,20 +2522,6 @@
                 "max": 600,
                 "integer": true,
                 "default": 180
-              },
-              "repo": {
-                "type": "string",
-                "maxLength": 300,
-                "default": "-",
-                "from": "repo",
-                "pattern": "^(-|https://[!-~]{1,290})$"
-              },
-              "credential": {
-                "type": "string",
-                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
-                "maxLength": 64,
-                "default": "auto",
-                "from": "credential"
               }
             },
             "variants": [
@@ -2650,14 +2531,7 @@
                   "op": "literal:update_images",
                   "service": "literal:-",
                   "health_timeout": "param.health_timeout"
-                },
-                "credentials": [
-                  {
-                    "kind": "git",
-                    "entry": "credential",
-                    "url": "repo"
-                  }
-                ]
+                }
               }
             ],
             "icon": "download",
@@ -2699,20 +2573,6 @@
                 "linePattern": "^(#.*|[a-z_]+=.*)$",
                 "default": "volumes=true\nbinds=true\nstack_files=true\nimage=false\nconsistency=live\nkeep_last=0\nkeep_daily=7\nkeep_weekly=4\nkeep_monthly=6"
               },
-              "repo": {
-                "type": "string",
-                "maxLength": 300,
-                "default": "-",
-                "from": "repo",
-                "pattern": "^(-|https://[!-~]{1,290})$"
-              },
-              "credential": {
-                "type": "string",
-                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
-                "maxLength": 64,
-                "default": "auto",
-                "from": "credential"
-              },
               "destination": {
                 "type": "string",
                 "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
@@ -2743,14 +2603,7 @@
                       "default": true
                     }
                   ]
-                },
-                "credentials": [
-                  {
-                    "kind": "git",
-                    "entry": "credential",
-                    "url": "repo"
-                  }
-                ]
+                }
               }
             ],
             "icon": "download",
@@ -2885,20 +2738,6 @@
                 "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
                 "maxLength": 63,
                 "from": "name"
-              },
-              "repo": {
-                "type": "string",
-                "maxLength": 300,
-                "default": "-",
-                "from": "repo",
-                "pattern": "^(-|https://[!-~]{1,290})$"
-              },
-              "credential": {
-                "type": "string",
-                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
-                "maxLength": 64,
-                "default": "auto",
-                "from": "credential"
               }
             },
             "variants": [
@@ -2906,14 +2745,7 @@
                 "script": "stack_action",
                 "args": {
                   "op": "literal:guard_up"
-                },
-                "credentials": [
-                  {
-                    "kind": "git",
-                    "entry": "credential",
-                    "url": "repo"
-                  }
-                ]
+                }
               }
             ],
             "icon": "refresh-cw"
@@ -2948,20 +2780,6 @@
                 "type": "string",
                 "pattern": "^[a-z0-9][a-z0-9._/:@-]{0,254}$",
                 "maxLength": 255
-              },
-              "repo": {
-                "type": "string",
-                "maxLength": 300,
-                "default": "-",
-                "from": "repo",
-                "pattern": "^(-|https://[!-~]{1,290})$"
-              },
-              "credential": {
-                "type": "string",
-                "pattern": "^(auto|-|[A-Za-z0-9-]{1,64})$",
-                "maxLength": 64,
-                "default": "auto",
-                "from": "credential"
               }
             },
             "variants": [
@@ -2972,14 +2790,7 @@
                   "image": "param.image",
                   "as": "param.as",
                   "service": "param.service"
-                },
-                "credentials": [
-                  {
-                    "kind": "git",
-                    "entry": "credential",
-                    "url": "repo"
-                  }
-                ]
+                }
               }
             ],
             "icon": "download"
@@ -6492,9 +6303,7 @@
               "params": {
                 "stack": "",
                 "service": "",
-                "health_timeout": 180,
-                "repo": "-",
-                "credential": "auto"
+                "health_timeout": 180
               }
             },
             "target": "container",
@@ -6511,9 +6320,7 @@
             "run": {
               "action": "stack_update_images",
               "params": {
-                "health_timeout": 180,
-                "repo": "-",
-                "credential": "auto"
+                "health_timeout": 180
               }
             },
             "target": "stack",
@@ -6534,8 +6341,6 @@
                 "service": "",
                 "health_timeout": 180,
                 "settings": "volumes=true\nbinds=true\nstack_files=true\nimage=false\nconsistency=live\nkeep_last=0\nkeep_daily=7\nkeep_weekly=4\nkeep_monthly=6",
-                "repo": "-",
-                "credential": "auto",
                 "destination": "auto"
               }
             },
@@ -6555,8 +6360,6 @@
               "params": {
                 "health_timeout": 180,
                 "settings": "volumes=true\nbinds=true\nstack_files=true\nimage=false\nconsistency=live\nkeep_last=0\nkeep_daily=7\nkeep_weekly=4\nkeep_monthly=6",
-                "repo": "-",
-                "credential": "auto",
                 "destination": "auto"
               }
             },
