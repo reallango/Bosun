@@ -21,7 +21,7 @@ import { stackManager } from '@/lib/portainer/import';
 import { loadDataset, loadRuntimeData } from '@/lib/widgets/runtime/execute';
 import { runWidgetAction } from '@/lib/widgets/runtime/run-action';
 import { imageRevision } from './registry';
-import { health, listNodes, type NodeStatus } from './nodes';
+import { health, listNodes, configuredWebPort, type NodeStatus } from './nodes';
 import { bosunVersion, commitTag } from './version';
 import { UpdateError } from './errors';
 import { previousCommit, rollbackImageProblem, rollbackTarget, rolloutRunning, sameCommit, usableCommit, type RolloutKind } from './rollback';
@@ -46,12 +46,12 @@ const IMAGE_RE = /^[a-z0-9.-]+\.[a-z]{2,}(:\d+)?\/[a-z0-9._/-]+$/;
 const CHANNEL_RE = /^[A-Za-z0-9._-]{1,60}$/;
 
 export async function getUpdateConfig(): Promise<UpdateConfig> {
-  const [image, channel, port] = await Promise.all([getConfig('update.image'), getConfig('update.channel'), getConfig('update.web_port')]);
+  const [image, channel, webPort] = await Promise.all([getConfig('update.image'), getConfig('update.channel'), configuredWebPort()]);
   const own = bosunVersion().channel;
   return {
     image: image && IMAGE_RE.test(image) ? image : 'ghcr.io/reallango/bosun',
     channel: channel && CHANNEL_RE.test(channel) ? channel : (own !== 'local' && CHANNEL_RE.test(own) ? own : 'main'),
-    webPort: Number(port) > 0 && Number(port) < 65536 ? Number(port) : 3042,
+    webPort,
   };
 }
 
@@ -280,6 +280,11 @@ async function finish(r: Rollout): Promise<void> {
   await saveRollout(r);
   const verb = r.kind === 'rollback' ? 'rolled back to' : 'updated to';
   await notify({ kind: 'bosun_update', severity: 'success', title: `Bosun ${verb} ${r.target.slice(0, 7)}`, message: `Every node now runs ${r.image} (started by ${r.started_by}).`, audience: 'admin', link: '/settings/updates', dedupeKey: `bosun-updated:${r.id}` });
+  // Every node can now run the packages the new build ships: install the bundled versions that were deferred while
+  // the cluster was mixed (see lib/widgets/bundled-seed.ts). The leader's timer retries if this node cannot write.
+  await import('@/lib/widgets/bundled-seed')
+    .then(m => m.retryDeferredBundledPackages())
+    .catch(err => console.warn('[widgets] deferred packages after the rollout:', err instanceof Error ? err.message : err));
 }
 
 /** On startup: if this node was the last step of a running update and now runs the target, close the record. */

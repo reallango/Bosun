@@ -25,6 +25,13 @@ export interface ToolUse {
 
 export type CanUse = (permission: string, use: ToolUse) => boolean;
 
+/** A widget type whose installed package needs a newer Bosun on this node: its tools cannot be built from the spec. */
+export interface BlockedWidgetSource {
+  type: string;
+  displayName: string;
+  reason: string;
+}
+
 const TOOL_NAME_RE = /^[A-Za-z0-9_.-]{1,128}$/;
 
 function takeName(used: Set<string>, base: string, suffix: 'data' | 'action'): string | null {
@@ -38,9 +45,24 @@ function takeName(used: Set<string>, base: string, suffix: 'data' | 'action'): s
   return null;
 }
 
-export function buildWidgetTools(sources: WidgetToolSource[], canUse: CanUse): CatalogTool[] {
+export function buildWidgetTools(sources: WidgetToolSource[], canUse: CanUse, blocked: BlockedWidgetSource[] = []): CatalogTool[] {
   const out: CatalogTool[] = [];
   const used = new Set<string>();
+  for (const b of blocked) {
+    const name = takeName(used, `${b.type}__unavailable`, 'data');
+    if (!name) continue;
+    out.push({
+      kind: 'blocked',
+      name,
+      title: `${b.displayName}: unavailable`,
+      description: `${b.reason} This node cannot read the package's tools until every node in the cluster runs the newer Bosun.`,
+      inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+      annotations: { readOnlyHint: true, openWorldHint: false },
+      widgetType: b.type,
+      widgetDisplayName: b.displayName,
+      blockedReason: b.reason,
+    });
+  }
   for (const w of sources) {
     for (const [datasetId, ds] of Object.entries(w.spec.datasets ?? {})) {
       const wholeServerOnly = !ds.target && !ds.resources;

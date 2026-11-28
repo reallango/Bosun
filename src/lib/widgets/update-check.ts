@@ -9,6 +9,8 @@
 import { compareVersions } from '@/lib/widgets/package-manifest';
 import { notify, resolveByKeyPrefix } from '@/lib/notifications/store';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
+import { requiredApiLevel } from '@/lib/widgets/api-level';
+import { clusterApiState, clusterCanRun } from '@/lib/widgets/cluster-level';
 
 const CHECK_EVERY_MS = 6 * 60 * 60 * 1000;
 const FIRST_CHECK_MS = 2 * 60 * 1000;
@@ -98,7 +100,11 @@ export async function checkWidgetUpdates(): Promise<number> {
     const ref = await configuredRef();
     const listing = await listRemotePackagesCached(ref, true);
     const installed = (await listInstalledPackages()).map(p => ({ id: p.id, name: p.name, version: p.version }));
-    const remote = listing.packages.map(p => ({ id: p.id, name: p.manifest.name, version: p.manifest.version }));
+    // Do not offer an upgrade that a node still on an older Bosun cannot run: it is deferred until the cluster catches up.
+    const { minimum } = await clusterApiState();
+    const remote = listing.packages
+      .map(p => ({ id: p.id, name: p.manifest.name, version: p.manifest.version, requiresApi: requiredApiLevel(p.manifest.requires) }))
+      .filter(p => clusterCanRun(p.requiresApi, minimum));
     const n = await announceUpdates(pendingUpdates(installed, remote), ref);
     if (n) console.log(`[widgets] ${n} widget update${n === 1 ? '' : 's'} available`);
     return n;

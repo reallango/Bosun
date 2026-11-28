@@ -5,23 +5,30 @@ import { effectiveGrants } from '@/lib/permissions/effective';
 import { grantsAllow } from '@/lib/permissions/evaluate';
 import { allServerContexts, registeredPermissionDefs } from '@/lib/permissions/store';
 import { loadWidgetSpec } from '@/lib/widgets/runtime/execute';
+import { widgetTypeApiProblem } from '@/lib/widgets/package-api-level';
 import type { TokenPayload } from '@/lib/auth/jwt';
-import { buildWidgetTools, coreTools, type CanUse, type WidgetToolSource } from './tools';
+import { buildWidgetTools, coreTools, type BlockedWidgetSource, type CanUse, type WidgetToolSource } from './tools';
 import { buildCatalog, type McpToolCatalog } from './types';
 
-async function loadWidgetSources(): Promise<WidgetToolSource[]> {
+async function loadWidgetSources(): Promise<{ sources: WidgetToolSource[]; blocked: BlockedWidgetSource[] }> {
   const rows = rowsToObjects(await rqlite.query(
     'SELECT type, display_name FROM custom_widgets WHERE package_id IS NOT NULL AND spec IS NOT NULL AND enabled = 1 ORDER BY display_name',
   ));
   const defs = [...CATALOG, ...(await registeredPermissionDefs())];
   const permissionLabels = Object.fromEntries(defs.map(d => [d.id, d.label]));
   const permissionRisks = Object.fromEntries(defs.map(d => [d.id, d.risk])) as Record<string, 'low' | 'medium' | 'high'>;
-  const out: WidgetToolSource[] = [];
+  const sources: WidgetToolSource[] = [];
+  const blocked: BlockedWidgetSource[] = [];
   for (const row of rows) {
     const type = String(row.type);
     const loaded = await loadWidgetSpec(type).catch(() => null);
-    if (!loaded) continue;
-    out.push({
+    if (!loaded) {
+      // Not silently gone: a package that needs a newer Bosun here keeps a tool that says so (see package-api-level.ts).
+      const reason = await widgetTypeApiProblem(type).catch(() => null);
+      if (reason) blocked.push({ type, displayName: String(row.display_name || type), reason });
+      continue;
+    }
+    sources.push({
       type: loaded.type,
       displayName: String(row.display_name || type),
       packageId: loaded.packageId,
@@ -30,7 +37,7 @@ async function loadWidgetSources(): Promise<WidgetToolSource[]> {
       permissionRisks,
     });
   }
-  return out;
+  return { sources, blocked };
 }
 
 /**
@@ -54,6 +61,6 @@ async function permissionChecker(auth: TokenPayload): Promise<CanUse> {
 }
 
 export async function loadToolCatalog(auth: TokenPayload): Promise<McpToolCatalog> {
-  const [sources, canUse] = await Promise.all([loadWidgetSources(), permissionChecker(auth)]);
-  return buildCatalog([...coreTools(), ...buildWidgetTools(sources, canUse)]);
+  const [widgets, canUse] = await Promise.all([loadWidgetSources(), permissionChecker(auth)]);
+  return buildCatalog([...coreTools(), ...buildWidgetTools(widgets.sources, canUse, widgets.blocked)]);
 }

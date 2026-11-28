@@ -392,7 +392,17 @@ widget's code from core and are independently releasable.
 4. **File limits and the database.** Larger packages mean larger rows in the replicated database; measure replication
    cost, keep files compressed in the row if needed.
 5. **Partial upgrades.** A rolling cluster upgrade can have nodes on different Bosun versions reading the same
-   package; spec versions and a `requires: { bosun: ">=x" }` field in the manifest should gate that.
+   package. `requires.api` now gates writes, not only this node: before the bundled seed, an install from GitHub, a
+   zip import, or an "update available" offer writes a version, it is compared with the lowest `widget_api_level`
+   among the current voter nodes (each node reports it in `GET /api/health`; a node that cannot be asked counts as
+   behind, and one that left the cluster is not in the list). The bundled seed defers such a version, leaves the
+   installed one in place, logs `[widgets] deferred <id> <version>: needs API <n>, cluster minimum is <m>`, and
+   retries when the rollout finishes and every few minutes on the leader, so a cluster updated by hand catches up.
+   A manual install is refused, naming the nodes that are behind. A node that still ends up below an installed
+   package's level (for example one restored from an old backup) shows "This widget needs a newer Bosun on this node
+   (API level N; this node has M). Finish updating the cluster." instead of "Unknown widget type", and keeps one MCP
+   tool per blocked widget that returns that message instead of dropping the package's tools silently. See
+   `src/lib/widgets/cluster-level.ts`.
 6. **Windows variance.** PowerShell 5.1 only; winget behaviour differs between accounts and Windows editions; keep the
    fallbacks (nssm download) but test them.
 7. **Poller load.** Package state probes add SSH work per server; keep per-package periods, run only for servers with

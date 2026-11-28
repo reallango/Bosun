@@ -6,6 +6,7 @@ import { loadWidgetSpec, loadRuntimeData, RuntimeError } from '@/lib/widgets/run
 import { withLookDefault } from '@/lib/widgets/runtime/looks';
 import { serverVisible } from '@/lib/permissions/effective';
 import { filterRows, viewFilter } from '@/lib/widgets/runtime/resource-check';
+import { widgetTypeApiProblem } from '@/lib/widgets/package-api-level';
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
@@ -61,6 +62,8 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       }
     }
 
+    const newer = await widgetTypeApiProblem(widget.widget_type);
+    if (newer) return NextResponse.json({ error: { message: newer, code: 'NEWER_BOSUN_REQUIRED' } }, { status: 422 });
     return NextResponse.json({ error: { message: `Unknown widget type: ${widget.widget_type}` } }, { status: 400 });
   } catch (error) {
     console.error('Widget data error:', error);

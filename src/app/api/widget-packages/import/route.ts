@@ -3,7 +3,8 @@ import { ok, fail, failFrom } from '@/lib/api/response';
 import { logAudit, AuditActions } from '@/lib/audit/logger';
 import { readZip, ZipError } from '@/lib/widgets/zip';
 import { validateManifest, validateFiles } from '@/lib/widgets/package-manifest';
-import { apiLevelProblem } from '@/lib/widgets/api-level';
+import { apiLevelProblem, requiredApiLevel } from '@/lib/widgets/api-level';
+import { clusterInstallProblem } from '@/lib/widgets/cluster-level';
 import { reservedPackageNames } from '@/lib/widgets/system-packages';
 import { installPackage, getInstalledPackage, secretsWouldBeCleared } from '@/lib/widgets/package-store';
 import { reviewPackage } from '@/lib/widgets/runtime/review';
@@ -49,6 +50,9 @@ export async function POST(request: NextRequest) {
     if (!manifest.ok) return fail(manifest.error, 422, 'INVALID_MANIFEST');
     const blockedReason = apiLevelProblem(manifest.value.requires);
     if (blockedReason) return fail(blockedReason, 422, 'NEWER_BOSUN_REQUIRED');
+    // Nodes still on an older Bosun cannot use this version; refuse rather than break the widget there.
+    const clusterProblem = await clusterInstallProblem(requiredApiLevel(manifest.value.requires));
+    if (clusterProblem) return fail(clusterProblem.message, clusterProblem.status, clusterProblem.code);
     const rest = { ...entries };
     delete rest['manifest.json'];
     const files = validateFiles(rest);

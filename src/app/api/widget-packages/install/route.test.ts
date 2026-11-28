@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { NextRequest } from 'next/server';
 
 const install = vi.hoisted(() => vi.fn());
+const clusterProblem = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/widgets/package-routes', () => ({
   requirePackageAdmin: async () => ({ userId: 'u1' }),
@@ -13,6 +14,7 @@ vi.mock('@/lib/audit/logger', () => ({
   AuditActions: { WIDGET_PACKAGE_INSTALL: 'widget_package.install' },
 }));
 vi.mock('@/lib/widgets/package-store', () => ({ installPackage: install }));
+vi.mock('@/lib/widgets/cluster-level', () => ({ clusterInstallProblem: clusterProblem }));
 
 import { POST } from './route';
 import { manifestHashOf } from '@/lib/widgets/package-source';
@@ -53,6 +55,7 @@ const installRequest = (manifestHash: string) => POST(new NextRequest('http://lo
 }));
 
 beforeEach(() => {
+  clusterProblem.mockReset().mockResolvedValue(null);
   install.mockReset().mockResolvedValue({
     id: 'alpha', version: '1.0.0', previousVersion: null, widgetTypes: ['alpha_w'], permissions: [], secretsCleared: false,
   });
@@ -77,5 +80,28 @@ describe('POST /api/widget-packages/install and the widget API level', () => {
       expect(res.status).toBe(201);
       expect(install).toHaveBeenCalledTimes(1);
     }
+  });
+});
+
+describe('POST /api/widget-packages/install and the cluster minimum', () => {
+  it('refuses a version a node that is behind cannot run, naming that node', async () => {
+    const raw = manifest({ requires: { api: 9 } });
+    vi.stubGlobal('fetch', fakeGithub(raw));
+    const message = 'This package needs widget API level 9, but these cluster nodes cannot run it: b (level 8). Finish updating the cluster first.';
+    clusterProblem.mockResolvedValueOnce({ message, status: 422, code: 'CLUSTER_BEHIND' });
+    const res = await installRequest(hashOf(raw));
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ error: { message, code: 'CLUSTER_BEHIND' } });
+    expect(install).not.toHaveBeenCalled();
+    expect(clusterProblem).toHaveBeenCalledWith(9);
+  });
+
+  it('proceeds when every voter can run it', async () => {
+    const raw = manifest({ requires: { api: 9 } });
+    vi.stubGlobal('fetch', fakeGithub(raw));
+    const res = await installRequest(hashOf(raw));
+    expect(res.status).toBe(201);
+    expect(clusterProblem).toHaveBeenCalledWith(9);
+    expect(install).toHaveBeenCalledTimes(1);
   });
 });

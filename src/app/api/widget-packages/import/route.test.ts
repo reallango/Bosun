@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { NextRequest } from 'next/server';
 
 const install = vi.hoisted(() => vi.fn());
+const clusterProblem = vi.hoisted(() => vi.fn());
 
 vi.mock('@/lib/widgets/package-routes', () => ({
   requirePackageAdmin: async () => ({ userId: 'u1' }),
@@ -16,6 +17,7 @@ vi.mock('@/lib/widgets/package-store', () => ({
   getInstalledPackage: async () => null,
   secretsWouldBeCleared: async () => false,
 }));
+vi.mock('@/lib/widgets/cluster-level', () => ({ clusterInstallProblem: clusterProblem }));
 
 import { POST } from './route';
 import { writeZip } from '@/lib/widgets/zip';
@@ -32,6 +34,7 @@ const importZip = (raw: unknown, query = '') => {
 };
 
 beforeEach(() => {
+  clusterProblem.mockReset().mockResolvedValue(null);
   install.mockReset().mockResolvedValue({
     id: 'alpha', version: '1.0.0', previousVersion: null, widgetTypes: ['alpha_w'], permissions: [], secretsCleared: false,
   });
@@ -62,5 +65,23 @@ describe('POST /api/widget-packages/import and the widget API level', () => {
       expect(install).toHaveBeenCalledTimes(1);
       expect(install.mock.calls[0][0].manifest.requires).toEqual((extra as { requires?: unknown }).requires);
     }
+  });
+});
+
+describe('POST /api/widget-packages/import and the cluster minimum', () => {
+  it('refuses a package a node that is behind cannot run, naming that node', async () => {
+    const message = 'This package needs widget API level 9, but these cluster nodes cannot run it: b (level 8). Finish updating the cluster first.';
+    clusterProblem.mockResolvedValueOnce({ message, status: 422, code: 'CLUSTER_BEHIND' });
+    const res = await importZip(manifest({ requires: { api: 9 } }));
+    expect(res.status).toBe(422);
+    expect(await res.json()).toEqual({ error: { message, code: 'CLUSTER_BEHIND' } });
+    expect(clusterProblem).toHaveBeenCalledWith(9);
+    expect(install).not.toHaveBeenCalled();
+  });
+
+  it('proceeds for a package that needs level 1', async () => {
+    const res = await importZip(manifest());
+    expect(res.status).toBe(201);
+    expect(install).toHaveBeenCalledTimes(1);
   });
 });

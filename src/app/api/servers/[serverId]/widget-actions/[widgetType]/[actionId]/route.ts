@@ -7,6 +7,7 @@ import { loadWidgetSpec, RuntimeError } from '@/lib/widgets/runtime/execute';
 import { openTerminalAction } from '@/lib/widgets/runtime/terminal-action';
 import { resolveTarget, TargetError } from '@/lib/widgets/runtime/resource-check';
 import { runWidgetAction, type ActionBody } from '@/lib/widgets/runtime/run-action';
+import { widgetTypeApiProblem } from '@/lib/widgets/package-api-level';
 /**
  * Run one action of a package widget: POST /api/servers/:serverId/widget-actions/:widgetType/:actionId
  * with { params: {...}, confirm: true }. This is the same call the widget's buttons make, so an API
@@ -22,8 +23,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
 
   try {
     const loaded = await loadWidgetSpec(widgetType);
-    const action = loaded?.spec.actions.find(a => a.id === actionId);
-    if (!loaded || !action) return fail('Unknown widget action', 404, 'NOT_FOUND');
+    if (!loaded) {
+      const newer = await widgetTypeApiProblem(widgetType);
+      return newer ? fail(newer, 422, 'NEWER_BOSUN_REQUIRED') : fail('Unknown widget action', 404, 'NOT_FOUND');
+    }
+    const action = loaded.spec.actions.find(a => a.id === actionId);
+    if (!action) return fail('Unknown widget action', 404, 'NOT_FOUND');
     // An action that names its stack or container (action.target) is checked against that exact one once the request
     // has been read, so a grant limited to some stacks or containers works; any other action needs the permission for
     // the whole server.

@@ -3,6 +3,8 @@ import { ok, fail, failFrom } from '@/lib/api/response';
 import { logAudit, AuditActions } from '@/lib/audit/logger';
 import { fetchRemotePackage, manifestHashOf } from '@/lib/widgets/package-source';
 import { installPackage } from '@/lib/widgets/package-store';
+import { requiredApiLevel } from '@/lib/widgets/api-level';
+import { clusterInstallProblem } from '@/lib/widgets/cluster-level';
 import { requirePackageAdmin, configuredRef, requestIp } from '@/lib/widgets/package-routes';
 
 /**
@@ -26,6 +28,9 @@ export async function POST(request: NextRequest) {
     if (pkg.manifest.version !== version || manifestHashOf(pkg.manifest) !== manifestHash) {
       return fail(`The package changed on the branch since it was reviewed (now version ${pkg.manifest.version}). Reload the list and review it again.`, 409, 'CHANGED_SINCE_REVIEW');
     }
+    // A node that is behind on Bosun cannot use this version; installing it would break the widget there.
+    const clusterProblem = await clusterInstallProblem(requiredApiLevel(pkg.manifest.requires));
+    if (clusterProblem) return fail(clusterProblem.message, clusterProblem.status, clusterProblem.code);
     const result = await installPackage({ manifest: pkg.manifest, files: pkg.files, source: 'github', sourceRef: ref, userId: auth.userId });
     await logAudit({ userId: auth.userId, action: AuditActions.WIDGET_PACKAGE_INSTALL, status: 'success', ipAddress: requestIp(request),
       details: `${result.id} ${result.previousVersion ? `${result.previousVersion} -> ` : ''}${result.version} from github:${ref}${result.secretsCleared ? ' (stored secrets cleared: different source)' : ''}` });

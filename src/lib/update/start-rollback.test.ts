@@ -43,7 +43,7 @@ vi.mock('@/lib/portainer/import', () => ({ stackManager: m.stackManager }));
 vi.mock('@/lib/widgets/runtime/execute', () => ({ loadDataset: m.loadDataset, loadRuntimeData: m.loadRuntimeData }));
 vi.mock('@/lib/widgets/runtime/run-action', () => ({ runWidgetAction: m.runWidgetAction }));
 vi.mock('./registry', () => ({ imageRevision: m.imageRevision }));
-vi.mock('./nodes', () => ({ listNodes: m.listNodes, health: async () => ({ healthy: false, commit: null, channel: null }) }));
+vi.mock('./nodes', () => ({ listNodes: m.listNodes, configuredWebPort: async () => 3042, health: async () => ({ healthy: false, commit: null, channel: null, apiLevel: null }) }));
 
 import { startRollback } from './rollout';
 

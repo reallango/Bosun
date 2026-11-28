@@ -22,6 +22,9 @@ export async function register() {
         // Self-update: where this node runs, closing a finished rolling update, and new Bosun images (lib/update/rollout.ts).
         const { startUpdateTasks } = await import('@/lib/update/rollout');
         startUpdateTasks();
+        // Retry bundled widget upgrades deferred while a rolling update left a node behind (lib/widgets/bundled-seed.ts).
+        const { startBundledSeedRetry } = await import('@/lib/widgets/bundled-seed');
+        startBundledSeedRetry();
         // Schedules: the leader runs what widget packages declare (lib/schedules/engine.ts).
         const { startScheduleEngine } = await import('@/lib/schedules/engine');
         startScheduleEngine();
