@@ -106,6 +106,7 @@ async function run(job: JobRecord, input: StartJobInput, controller: AbortContro
     if (prepared.before) {
       const b = await runScript(serverId, loaded, prepared.before.scriptId, prepared.before.args, {
         jobId: job.id,
+        credentials: prepared.before.credentials,
         signal: controller.signal,
         onData: (text, isErr) => { if (out.length < MAX_BUFFER) { out += isErr ? `[error output] ${text}` : text; dirty = true; } },
       });
@@ -115,6 +116,7 @@ async function run(job: JobRecord, input: StartJobInput, controller: AbortContro
     }
     const r = await runScript(serverId, loaded, prepared.scriptId, prepared.args, {
       jobId: job.id,
+      credentials: prepared.credentials,
       signal: controller.signal,
       onData: (text, isErr) => { if (out.length < MAX_BUFFER) { out += isErr ? `[error output] ${text}` : text; dirty = true; } },
     });

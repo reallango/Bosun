@@ -29,6 +29,11 @@
       "file": "src/lib/widgets/runtime/spec.ts",
       "names": ["cpu_memory", "network"],
       "reason": "SNAPSHOT_SECTIONS lists the sections the collectors write into every snapshot (generic host data any widget may read); sections are core data, not widget types."
+    },
+    {
+      "file": "src/lib/exec/container-permission.ts",
+      "names": ["docker.shell"],
+      "reason": "The core MCP container tools must gate on the permission that the Docker package registers; naming it once here keeps the literal out of every other core file."
     }
   ]
 }

@@ -12,10 +12,13 @@ fail() { printf 'ERROR: %s\n' "$*"; exit 0; }
 # private key and the S3 keys are written to files only this account can read and mounted read-only; they never appear on a
 # command line or in the output. The destination, the password and the credentials are package secrets.
 RESTIC_IMAGE=restic/restic:0.17.3
-BACKUP_REPOSITORY=${BOSUN_SECRET_backup_repository-}
-BACKUP_PASSWORD=${BOSUN_SECRET_backup_password-}
-BACKUP_CREDENTIALS=${BOSUN_SECRET_backup_credentials-}
-unset BOSUN_SECRET_backup_repository BOSUN_SECRET_backup_password BOSUN_SECRET_backup_credentials
+# Bosun resolves the backup destination for this server (the entry the action chose, or the server's default) and
+# exports its fields. They are taken out of the environment at once, so nothing else inherits them.
+BACKUP_REPOSITORY=${BOSUN_CRED_BACKUP_DESTINATION_REPOSITORY-}
+BACKUP_PASSWORD=${BOSUN_CRED_BACKUP_DESTINATION_PASSWORD-}
+BACKUP_CREDENTIALS=${BOSUN_CRED_BACKUP_DESTINATION_CREDENTIALS-}
+BACKUP_DESTINATION_ID=${BOSUN_CRED_BACKUP_DESTINATION_ID-}
+unset BOSUN_CRED_BACKUP_DESTINATION_REPOSITORY BOSUN_CRED_BACKUP_DESTINATION_PASSWORD BOSUN_CRED_BACKUP_DESTINATION_CREDENTIALS BOSUN_CRED_BACKUP_DESTINATION_ID
 RESTIC_STATE=''
 RESTIC_DOCKER_ARGS=''
 RESTIC_EXTRA_ARGS=''
@@ -27,7 +30,7 @@ restic_add_docker() { printf '%s\n' "$1" >> "$RESTIC_DOCKER_ARGS"; }
 restic_add_extra() { printf '%s\n' "$1" >> "$RESTIC_EXTRA_ARGS"; }
 restic_prepare() {
   [ -n "$RESTIC_STATE" ] && return 0
-  restic_configured || fail 'the backup destination and password are not set (Settings -> Widgets -> Docker -> Secrets)'
+  restic_configured || fail 'the backup destination and password are not set (Docker -> Manage -> Backups -> Destinations)'
   case "$BACKUP_REPOSITORY" in
     /*) case "$BACKUP_REPOSITORY" in *[[:cntrl:]]*|*..*) fail 'the backup destination is not a plain absolute path' ;; esac ;;
     sftp:*) case "$BACKUP_REPOSITORY" in *[[:cntrl:]]*) fail 'the backup destination has an unexpected character' ;; esac ;;
@@ -52,7 +55,7 @@ restic_prepare() {
     sftp:*)
       case "$BACKUP_CREDENTIALS" in
         /*) [ -f "$BACKUP_CREDENTIALS" ] || fail 'the SSH key file of the backup destination is missing'; cp "$BACKUP_CREDENTIALS" "$RESTIC_STATE/id" ;;
-        '') fail 'an SSH key is needed for an SFTP backup destination (Settings -> Widgets -> Docker -> Secrets)' ;;
+        '') fail 'an SSH key is needed for an SFTP backup destination (Docker -> Manage -> Backups -> Destinations)' ;;
         *) if command -v base64 >/dev/null 2>&1; then printf '%s' "$BACKUP_CREDENTIALS" | base64 -d > "$RESTIC_STATE/id" 2>/dev/null
            elif command -v openssl >/dev/null 2>&1; then printf '%s' "$BACKUP_CREDENTIALS" | openssl base64 -d -A > "$RESTIC_STATE/id" 2>/dev/null
            else fail 'neither base64 nor openssl is available to read the SSH key of the backup destination'; fi
@@ -67,7 +70,7 @@ restic_prepare() {
     s3:*)
       case "$BACKUP_CREDENTIALS" in
         *:*) ak=${BACKUP_CREDENTIALS%%:*}; sk=${BACKUP_CREDENTIALS#*:} ;;
-        *) fail 'S3 credentials must be ACCESS_KEY:SECRET_KEY (Settings -> Widgets -> Docker -> Secrets)' ;;
+        *) fail 'S3 credentials must be ACCESS_KEY:SECRET_KEY (Docker -> Manage -> Backups -> Destinations)' ;;
       esac
       case "$ak" in ''|*[[:cntrl:]]*) fail 'the S3 access key has an unexpected character' ;; esac
       case "$sk" in ''|*[[:cntrl:]]*) fail 'the S3 secret key has an unexpected character' ;; esac
@@ -142,8 +145,8 @@ D=docker; $D ps >/dev/null 2>&1 || { command -v sudo >/dev/null 2>&1 && sudo -n 
 jstr() { V=$1 awk 'BEGIN { s = ENVIRON["V"]; o = ""; n = length(s); for (i = 1; i <= n; i++) { c = substr(s, i, 1); if (c == "\\") o = o "\\\\"; else if (c == "\"") o = o "\\\""; else if (c < " " || c == "\177") o = o ""; else o = o c } printf "\"%s\"", o }'; }
 if ! $D ps >/dev/null 2>&1; then
   if [ "$mode" = list ]; then
-    printf '{"status":{"configured":%s,"initialised":false,"repository":%s,"snapshots":0,"size":"","size_bytes":0,"state":"Unavailable","message":"Docker is not available to this account"},"rows":[]}\n' \
-      "$(restic_configured && echo true || echo false)" "$(jstr "$BACKUP_REPOSITORY")"
+    printf '{"status":{"configured":%s,"initialised":false,"repository":%s,"snapshots":0,"size":"","size_bytes":0,"state":"Unavailable","message":"Docker is not available to this account","destination":%s},"rows":[]}\n' \
+      "$(restic_configured && echo true || echo false)" "$(jstr "$BACKUP_REPOSITORY")" "$(jstr "$BACKUP_REPOSITORY")"
     exit 0
   fi
   echo 'ERROR: Docker is not available to this account'; exit 0
@@ -626,7 +629,7 @@ trap 'start_stopped; rm -rf "$tmp"; restic_cleanup' EXIT
 
 # ---- list ----------------------------------------------------------------------------------------------------
 if [ "$mode" = list ]; then
-  configured=false; initialised=false; state='Not configured'; message='Set the backup destination and password in Settings -> Widgets -> Docker -> Secrets, then initialise the repository.'
+  configured=false; initialised=false; state='Not configured'; message='Set the backup destination and password in Docker -> Manage -> Backups -> Destinations, then initialise the repository.'
   size_bytes=0; snapshots=0; rows='[]'; errf="$tmp/err"; : > "$errf"
   if restic_configured; then
     configured=true; state='Not initialised'; message='The repository is not initialised yet: open Backups and run Initialise repository.'
@@ -636,7 +639,7 @@ if [ "$mode" = list ]; then
         jsn=$(restic_run -r "$RESTIC_REPO_ARG" snapshots --json 2>"$errf")
         if [ -n "$jsn" ]; then
           snapshots=$(printf '%s' "$jsn" | grep -o '"short_id"' | wc -l | tr -d ' ')
-          rows=$(printf '%s' "$jsn" | awk -v kindfilter="$kind" '
+          rows=$(printf '%s' "$jsn" | awk -v kindfilter="$kind" -v dest="$BACKUP_REPOSITORY" -v destid="$BACKUP_DESTINATION_ID" '
             function esc(s,   o, n, k, c) { o = ""; n = length(s); for (k = 1; k <= n; k++) { c = substr(s, k, 1); if (c == "\\") o = o "\\\\"; else if (c == "\"") o = o "\\\""; else if (c < " " || c == "\177") o = o ""; else o = o c } return o }
             function field(s, nm,   re, x) { re = "\"" nm "\"[ \t]*:[ \t]*\"([^\"]*)\""; if (!match(s, re)) return ""; x = substr(s, RSTART, RLENGTH); sub(/^[^:]*:[ \t]*"/, "", x); sub(/"$/, "", x); return x }
             function taglist(s,   x) { if (!match(s, /"tags"[ \t]*:[ \t]*\[[^]]*\]/)) return ""; x = substr(s, RSTART, RLENGTH); sub(/^[^[]*\[/, "", x); sub(/\].*$/, "", x); gsub(/"/, "", x); gsub(/,/, " ", x); return x }
@@ -675,7 +678,7 @@ if [ "$mode" = list ]; then
               fls = ""
               if (fl != "") { nf = split(fl, fa, "/"); if (nf == 3) fls = fa[1] " new, " fa[2] " changed, " fa[3] " unchanged" }
               nrows++
-              rows[nrows] = sprintf("{\"id\":\"%s\",\"short\":\"%s\",\"time\":\"%s\",\"kind\":\"%s\",\"name\":\"%s\",\"container\":\"%s\",\"stack\":\"%s\",\"size_bytes\":%.0f,\"size\":\"%s\",\"added_bytes\":%.0f,\"added\":\"%s\",\"size_added\":\"%s\",\"files\":\"%s\",\"included\":\"%s\",\"pinned_ref\":\"%s\",\"pinned_version\":\"%s\",\"hostname\":\"%s\"}", esc(id), esc(sid), esc(time), esc(kd), esc(nm), esc(cf), esc(sf), bb, esc(sz), ab, esc(adz), esc(sa), esc(fls), esc(inc), esc(pin), esc(ver), esc(host))
+              rows[nrows] = sprintf("{\"id\":\"%s\",\"short\":\"%s\",\"time\":\"%s\",\"kind\":\"%s\",\"name\":\"%s\",\"container\":\"%s\",\"stack\":\"%s\",\"size_bytes\":%.0f,\"size\":\"%s\",\"added_bytes\":%.0f,\"added\":\"%s\",\"size_added\":\"%s\",\"files\":\"%s\",\"included\":\"%s\",\"pinned_ref\":\"%s\",\"pinned_version\":\"%s\",\"hostname\":\"%s\",\"destination\":\"%s\",\"destination_id\":\"%s\"}", esc(id), esc(sid), esc(time), esc(kd), esc(nm), esc(cf), esc(sf), bb, esc(sz), ab, esc(adz), esc(sa), esc(fls), esc(inc), esc(pin), esc(ver), esc(host), esc(dest), esc(destid))
             }
             { buf = buf $0 "\n" }
             END {
@@ -702,8 +705,8 @@ if [ "$mode" = list ]; then
   fi
   size=''; [ "$size_bytes" -le 0 ] || size=$(human_bytes "$size_bytes")
   case "$rows" in \[*\]) ;; *) rows='[]' ;; esac
-  printf '{"status":{"configured":%s,"initialised":%s,"repository":%s,"snapshots":%d,"size":%s,"size_bytes":%d,"state":%s,"message":%s},"rows":%s}\n' \
-    "$configured" "$initialised" "$(jstr "$BACKUP_REPOSITORY")" "$snapshots" "$(jstr "$size")" "$size_bytes" "$(jstr "$state")" "$(jstr "$message")" "$rows"
+  printf '{"status":{"configured":%s,"initialised":%s,"repository":%s,"snapshots":%d,"size":%s,"size_bytes":%d,"state":%s,"message":%s,"destination":%s},"rows":%s}\n' \
+    "$configured" "$initialised" "$(jstr "$BACKUP_REPOSITORY")" "$snapshots" "$(jstr "$size")" "$size_bytes" "$(jstr "$state")" "$(jstr "$message")" "$(jstr "$BACKUP_REPOSITORY")" "$rows"
   exit 0
 fi
 

@@ -45,7 +45,7 @@ describe('the Docker manager package', () => {
     expect(tab('images').blocks[0]).toMatchObject({ type: 'form', open: 'dialog', label: 'Pull image' });
     expect(tab('volumes').blocks[0]).toMatchObject({ type: 'editor', open: 'dialog', label: 'New volume' });
     expect(tab('networks').blocks[0]).toMatchObject({ type: 'editor', open: 'dialog', label: 'New network' });
-    expect(manifest.requires).toEqual({ api: 11 }); // level 11: block footers and adaptive stat/gauge items
+    expect(manifest.requires).toEqual({ api: 12 }); // level 12: credential kinds on a package screen
   });
 
   it('has a Backups tab over the backups dataset, with the destination state and the pinned image', () => {
@@ -57,7 +57,7 @@ describe('the Docker manager package', () => {
     expect(spec.datasets!.backups).toMatchObject({ script: 'backup_restore', permission: 'docker.backup', resources: { container: 'container', stack: 'stack' } });
     const view = tab.blocks.find(b => b.type === 'view') as Extract<Block, { type: 'view' }>;
     expect(view.path).toBe('datasets.backups.rows');
-    expect((view.view as { columns?: { title: string }[] }).columns?.map(c => c.title)).toEqual(['Target', 'Kind', 'Time', 'Size', 'Added', 'Included', 'Pinned image', 'Snapshot']);
+    expect((view.view as { columns?: { title: string }[] }).columns?.map(c => c.title)).toEqual(['Target', 'Destination', 'Kind', 'Time', 'Size', 'Added', 'Included', 'Pinned image', 'Snapshot']);
     expect(view.view.open).toBe('restore_backup');
     const facts = tab.blocks.find(b => b.type === 'kv') as Extract<Block, { type: 'kv' }>;
     expect(facts.items.map(i => i.label)).toEqual(['Destination', 'State', 'Snapshots', 'Repository on disk']);
@@ -220,14 +220,22 @@ describe('the Docker manager package', () => {
     const values = editorInitial(ed.fields, { context: undefined });
     values.name = 'demo'; values.yaml = 'services:\n  web:\n    image: nginx\n';
     const params = spec.scripts!.stack_deploy.params;
-    expect(() => validateParamValues(params, { name: 'demo', source: 'editor', yaml: String(values.yaml), env: '', repo: '-', branch: '-', file: '-', pull: 'false', allow_risky: 'false', override: '', start: 'now' })).not.toThrow();
-    expect(() => validateParamValues(params, { name: 'demo', source: 'git', yaml: '', env: 'A=1', repo: 'https://github.com/owner/repo', branch: 'main', file: 'deploy/compose.yaml', pull: 'true', allow_risky: 'false', override: 'svc.web.port=8080:80/tcp\nsvc.web.container_name=site', start: 'later' })).not.toThrow();
-    expect(() => validateParamValues(params, { name: 'demo', source: 'git', yaml: '', env: '', repo: 'http://github.com/owner/repo', branch: 'main', file: 'a', pull: 'false', allow_risky: 'false', override: '' })).toThrow();   // https only
-    expect(() => validateParamValues(params, { name: 'Bad Name', source: 'editor', yaml: '', env: '', repo: '-', branch: '-', file: '-', pull: 'false', allow_risky: 'false', override: '' })).toThrow();
-    expect(() => validateParamValues(params, { name: 'demo', source: 'git', yaml: '', env: '', repo: 'https://github.com/owner/repo', branch: 'main', file: 'a.yml', pull: 'false', allow_risky: 'false', override: 'svc.web.volume=/etc:/etc\nrm -rf /' })).toThrow();   // an override line must be a svc.<service>.<setting>=value line
-    // only the stack and git scripts receive the GitHub token; the backup scripts get only the backup secrets
-    const withToken = ['stack_deploy', 'stack_action', 'git_branches', 'git_files', 'git_services'];
-    for (const [id, s] of Object.entries(spec.scripts!)) expect(Boolean(s.secrets?.includes('git_credentials')), id).toBe(withToken.includes(id));
-    for (const id of ['backup_run', 'backup_restore']) expect(spec.scripts![id].secrets, id).toEqual(['backup_repository', 'backup_password', 'backup_credentials']);
+    expect(() => validateParamValues(params, { name: 'demo', source: 'editor', yaml: String(values.yaml), env: '', repo: '-', branch: '-', file: '-', pull: 'false', allow_risky: 'false', override: '', start: 'now', credential: 'auto' })).not.toThrow();
+    expect(() => validateParamValues(params, { name: 'demo', source: 'git', yaml: '', env: 'A=1', repo: 'https://github.com/owner/repo', branch: 'main', file: 'deploy/compose.yaml', pull: 'true', allow_risky: 'false', override: 'svc.web.port=8080:80/tcp\nsvc.web.container_name=site', start: 'later', credential: 'auto' })).not.toThrow();
+    expect(() => validateParamValues(params, { name: 'demo', source: 'git', yaml: '', env: '', repo: 'http://github.com/owner/repo', branch: 'main', file: 'a', pull: 'false', allow_risky: 'false', override: '', credential: 'auto' })).toThrow();   // https only
+    expect(() => validateParamValues(params, { name: 'Bad Name', source: 'editor', yaml: '', env: '', repo: '-', branch: '-', file: '-', pull: 'false', allow_risky: 'false', override: '', credential: 'auto' })).toThrow();
+    expect(() => validateParamValues(params, { name: 'demo', source: 'git', yaml: '', env: '', repo: 'https://github.com/owner/repo', branch: 'main', file: 'a.yml', pull: 'false', allow_risky: 'false', override: 'svc.web.volume=/etc:/etc\nrm -rf /', credential: 'auto' })).toThrow();   // an override line must be a svc.<service>.<setting>=value line
+    // no script reads a package secret any more: the Git token and the backup destination are credential entries
+    for (const [id, s] of Object.entries(spec.scripts!)) expect(s.secrets, id).toBeUndefined();
+    const gitUsers = ['stack_deploy', 'stack_action', 'git_branches', 'git_files', 'git_services'];
+    const actions = (Array.isArray(spec.actions) ? spec.actions : Object.values(spec.actions ?? {})) as { id: string; variants?: { script: string; credentials?: unknown }[] }[];
+    expect(actions.length).toBeGreaterThan(0);
+    for (const a of actions) {
+      for (const v of a.variants ?? []) {
+        if (!gitUsers.includes(v.script)) continue;
+        expect(v.credentials, a.id).toEqual([{ kind: 'git', entry: 'credential', url: 'repo' }]);
+      }
+    }
+    expect(spec.datasets!.backups!.credentials).toMatchObject([{ kind: 'backup_destination', entry: 'destination', default: true }]);
   });
 });

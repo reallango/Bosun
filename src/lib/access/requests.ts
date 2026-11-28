@@ -24,6 +24,7 @@ import { notify, resolveByKeyPrefix } from '@/lib/notifications/store';
 import { redactParams } from '@/lib/widgets/jobs/store';
 import { audienceFor, describeRequest, MAX_PENDING_PER_REQUESTER, REQUEST_TTL_HOURS, type RequestInput } from './validate';
 import { requesterPayload } from './requester';
+import { CONTAINER_SHELL_PERMISSION } from '@/lib/exec/container-permission';
 
 export class RequestError extends Error {
   constructor(message: string, readonly status = 400, readonly code = 'INVALID_REQUEST') { super(message); }
@@ -39,7 +40,7 @@ export function requesterOf(auth: TokenPayload): Requester {
 
 export interface AccessRequestDto {
   id: string;
-  kind: 'grant' | 'one_time';
+  kind: 'grant' | 'one_time' | 'command' | 'terminal';
   status: string;
   requester: Requester;
   permission: string;
@@ -51,6 +52,8 @@ export interface AccessRequestDto {
   duration_hours: number | null;
   /** one_time: what will run (parameters with text and secret-looking values masked). */
   action: { widget_type: string; action_id: string; label: string; params: Record<string, unknown> } | null;
+  /** command/terminal: the exact command (verbatim) or terminal account, shown to the approver. */
+  command: { command: string; as: 'user' | 'service'; container: string | null } | null;
   reason: string | null;
   summary: string;
   created_at: string;
@@ -75,21 +78,37 @@ function parse<T>(s: unknown, fallback: T): T {
   try { return JSON.parse(s) as T; } catch { return fallback; }
 }
 
+type StoredAction = {
+  widgetType?: string; actionId?: string; label?: string; params?: Record<string, unknown>;
+  command?: string; as?: 'user' | 'service'; container?: string | null;
+};
+
 async function toDto(row: Record<string, unknown>, defs: readonly PermissionDef[], names: Map<string, string>): Promise<AccessRequestDto> {
   const def = permissionDef(String(row.permission), defs);
   const resource = row.resource_kind ? { kind: row.resource_kind as GrantResource['kind'], name: String(row.resource_name) } : null;
-  const action = parse<{ widgetType: string; actionId: string; label?: string; params?: Record<string, unknown> } | null>(row.action, null);
+  const stored = parse<StoredAction | null>(row.action, null);
+  const kind = String(row.kind);
+  const command = kind === 'command' || kind === 'terminal'
+    ? { command: stored?.command ?? '', as: stored?.as === 'service' ? 'service' as const : 'user' as const, container: stored?.container ?? null }
+    : null;
+  const action = kind === 'one_time' && stored?.widgetType && stored.actionId
+    ? { widgetType: stored.widgetType, actionId: stored.actionId, label: stored.label, params: stored.params }
+    : null;
   const sid = row.server_id ? String(row.server_id) : null;
   const sname = sid ? names.get(sid) ?? null : null;
   const durationHours = row.duration_hours === null || row.duration_hours === undefined ? null : Number(row.duration_hours);
   return {
-    id: String(row.id), kind: row.kind as AccessRequestDto['kind'], status: String(row.status),
+    id: String(row.id), kind: kind as AccessRequestDto['kind'], status: String(row.status),
     requester: { type: row.requester_type as Requester['type'], id: String(row.requester_id), name: String(row.requester_name) },
     permission: String(row.permission), permission_label: def?.label ?? String(row.permission), risk: def?.risk ?? 'high',
     server_id: sid, server_name: sname, resource, duration_hours: durationHours,
     action: action ? { widget_type: action.widgetType, action_id: action.actionId, label: action.label ?? action.actionId, params: redactParams(action.params ?? {}) } : null,
+    command,
     reason: row.reason ? String(row.reason) : null,
-    summary: describeRequest({ kind: String(row.kind), permissionLabel: def?.label ?? String(row.permission), serverName: sid ? (sname ?? 'a server') : null, resource, durationHours, actionLabel: action?.label }),
+    summary: describeRequest({
+      kind, permissionLabel: def?.label ?? String(row.permission), serverName: sid ? (sname ?? 'a server') : null, resource, durationHours,
+      actionLabel: action?.label, command: command?.command, commandAs: command?.as, container: command?.container,
+    }),
     created_at: String(row.created_at), expires_at: String(row.expires_at),
     decided_by: row.decided_by_name ? String(row.decided_by_name) : null, decided_at: row.decided_at ? String(row.decided_at) : null,
     decision_note: row.decision_note ? String(row.decision_note) : null,
@@ -133,12 +152,32 @@ export async function createRequest(auth: TokenPayload, input: RequestInput): Pr
   let resource: GrantResource | null = null;
   let action: string | null = null;
   let actionLabel: string | null = null;
+  let commandText: string | null = null;
+  let commandAs: 'user' | 'service' | null = null;
+  let container: string | null = null;
   if (input.kind === 'grant') {
     permission = input.permission;
     resource = input.resource;
     const ctx = contextOf(resource);
     if ((!resource || ctx) && await hasPermission(auth, permission, input.serverId, ctx)) {
       throw new RequestError('You already hold this permission there', 409, 'ALREADY_GRANTED');
+    }
+  } else if (input.kind === 'command') {
+    permission = input.as === 'user' ? 'shell.user' : 'exec.service';
+    commandText = input.command;
+    commandAs = input.as;
+    action = JSON.stringify({ command: input.command, as: input.as });
+    if (await hasPermission(auth, permission, input.serverId)) {
+      throw new RequestError('You already hold this permission there: run the command directly', 409, 'ALREADY_GRANTED');
+    }
+  } else if (input.kind === 'terminal') {
+    container = input.container;
+    permission = container ? CONTAINER_SHELL_PERMISSION : input.as === 'user' ? 'shell.user' : 'exec.service';
+    commandAs = container ? 'service' : input.as;
+    resource = container ? { kind: 'container', name: container } : null;
+    action = JSON.stringify({ as: commandAs, container });
+    if (await hasPermission(auth, permission, input.serverId, container ? { kind: 'container', name: container } : null)) {
+      throw new RequestError('You already hold this permission there: open the terminal directly', 409, 'ALREADY_GRANTED');
     }
   } else {
     const { loadWidgetSpec } = await import('@/lib/widgets/runtime/execute');
@@ -178,11 +217,15 @@ export async function createRequest(auth: TokenPayload, input: RequestInput): Pr
     [id, who.type, who.id, who.name, input.kind, permission, input.serverId, resource?.kind ?? '', resource?.name ?? '',
       input.kind === 'grant' ? input.durationHours : null, action, input.reason, created, expires]);
   const names = await serverNames();
-  const summary = describeRequest({ kind: input.kind, permissionLabel: def.label, serverName: input.serverId ? names.get(input.serverId) ?? 'a server' : null, resource, durationHours: input.kind === 'grant' ? input.durationHours : null, actionLabel });
+  const summary = describeRequest({
+    kind: input.kind, permissionLabel: def.label, serverName: input.serverId ? names.get(input.serverId) ?? 'a server' : null,
+    resource, durationHours: input.kind === 'grant' ? input.durationHours : null, actionLabel,
+    command: commandText, commandAs, container,
+  });
   await notify({
     kind: 'access_request', severity: def.risk === 'high' ? 'critical' : 'warning',
     title: `${who.name}${who.type === 'api_key' ? ' (API key)' : ''} asks for access`,
-    message: `${who.name} asks to ${input.kind === 'one_time' ? summary : `get ${summary}`}.${input.reason ? ` Reason: ${input.reason}` : ''}`,
+    message: `${who.name} asks to ${input.kind === 'grant' ? `get ${summary}` : summary}.${commandAs === 'service' ? ' This runs as the privileged service account.' : ''}${input.reason ? ` Reason: ${input.reason}` : ''}`,
     link: `/settings/access-requests?id=${id}`, dedupeKey: `access-request:${id}`, audience: audienceFor(def),
     serverId: input.serverId, data: { requestId: id },
   });
@@ -307,13 +350,14 @@ export async function decideRequest(approver: TokenPayload, id: string, decision
   if (!def) throw new RequestError('That permission no longer exists', 409, 'UNKNOWN_PERMISSION');
   const serverId = row.server_id ? String(row.server_id) : null;
   const resource: GrantResource | null = row.resource_kind ? { kind: row.resource_kind as GrantResource['kind'], name: String(row.resource_name) } : null;
-  const action = parse<{ widgetType: string; actionId: string; label?: string; params?: Record<string, unknown> } | null>(row.action, null);
+  const action = parse<StoredAction | null>(row.action, null);
 
   // The approver must hold what they give away, for that server and stack/container (a prefix: the whole server).
   if (serverId && !(await serverVisible(approver, serverId))) throw new RequestError('Request not found', 404, 'NOT_FOUND');
   if (audienceFor(def) === 'admin' && approver.role !== 'admin') throw new RequestError(`"${def.label}" is ${def.risk === 'high' ? 'high risk' : 'Full access only'}: only Full access can decide it`, 403, 'FORBIDDEN');
   let ctx = contextOf(resource);
-  if (row.kind === 'one_time' && action && serverId) {
+  if (row.kind === 'terminal' && action?.container) ctx = { kind: 'container', name: action.container };
+  if (row.kind === 'one_time' && action?.widgetType && action.actionId && serverId) {
     // The action's target as the action route sees it (a container with its stack, from the widget's data).
     const { loadWidgetSpec } = await import('@/lib/widgets/runtime/execute');
     const loaded = await loadWidgetSpec(action.widgetType);
@@ -355,7 +399,29 @@ export async function decideRequest(approver: TokenPayload, id: string, decision
         [crypto.randomUUID(), groupId, def.id, serverId ? 'server' : 'all', serverId ?? '', resource?.kind ?? '', resource?.name ?? '', expiresAt]);
       invalidatePermissionCache();
       result = { group_id: groupId, expires_at: expiresAt };
-    } else if (action) {
+    } else if (row.kind === 'command' && serverId && action?.command) {
+      try {
+        const { runServerCommand } = await import('@/lib/exec/run-command');
+        const r = await runServerCommand({
+          serverId, command: action.command, as: action.as === 'service' ? 'service' : 'user',
+          userId: requester.userId, approvedBy: approver.username, requestId: id, ip,
+        });
+        result = { exitCode: r.exitCode, stdout: r.stdout, stderr: r.stderr, timedOut: r.timedOut, account: r.account, as: r.as };
+      } catch (e) {
+        finalStatus = 'failed';
+        result = { error: e instanceof Error ? e.message : String(e) };
+      }
+    } else if (row.kind === 'terminal' && serverId) {
+      try {
+        const { getMcpTerminalManager, principalKey } = await import('@/lib/terminal/mcp-sessions');
+        result = await getMcpTerminalManager().open(principalKey(requester), requester, {
+          serverId, as: action?.as === 'service' ? 'service' : 'user', container: action?.container ?? null, ip,
+        });
+      } catch (e) {
+        finalStatus = 'failed';
+        result = { error: e instanceof Error ? e.message : String(e) };
+      }
+    } else if (action?.widgetType && action.actionId) {
       const { loadWidgetSpec } = await import('@/lib/widgets/runtime/execute');
       const { runWidgetAction } = await import('@/lib/widgets/runtime/run-action');
       const loaded = await loadWidgetSpec(action.widgetType);

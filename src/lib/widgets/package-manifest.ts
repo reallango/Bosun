@@ -11,6 +11,7 @@ import { validateWidgetSpec, type WidgetSpec } from '@/lib/widgets/runtime/spec'
 import { lookSizesProblem, readLookSize } from '@/lib/widgets/runtime/looks';
 import { lookupHosts } from '@/lib/widgets/runtime/spec-v2';
 import type { WidgetApiRequires } from '@/lib/widgets/api-level';
+import { validateCredentialKinds, type CredentialKindDef } from '@/lib/widgets/credentials-schema';
 
 export const MANIFEST_SCHEMA = 1;
 export const PACKAGE_ID_RE = /^[a-z][a-z0-9_]{1,39}$/;
@@ -55,11 +56,13 @@ export interface PackageManifest {
   network: string[];
   /** Secrets an admin sets for the package (a token); only scripts that name them receive them. */
   secrets: PackageSecret[];
+  /** Credential kinds: values per server or per repository, managed on a screen instead of Settings. */
+  credentials: CredentialKindDef[];
   /** The widget API level this package needs (`requires.api`); absent means level 1. */
   requires?: WidgetApiRequires;
 }
 
-export interface PackageSecret { id: string; label: string; description: string }
+export interface PackageSecret { id: string; label: string; description: string; /** Only read by the credential migration; not shown in Settings. */ legacy?: boolean }
 
 /** Text files shipped next to the manifest (relative path -> content). */
 export type PackageFiles = Record<string, string>;
@@ -117,6 +120,7 @@ export function validateManifest(
   }
 
   const permissions: PackagePermission[] = [];
+  const ownPermissions = new Set<string>();
   if (m.permissions !== undefined) {
     if (!Array.isArray(m.permissions) || m.permissions.length > 30) return fail('"permissions" must be a list of at most 30 entries');
     const catalogIds = new Set(CATALOG.map(p => p.id));
@@ -135,6 +139,7 @@ export function validateManifest(
       const implies = p.implies === undefined ? [] : p.implies;
       if (!Array.isArray(implies) || implies.some(i => typeof i !== 'string')) return fail(`permission "${pid}": implies must be a list of permission ids`);
       own.add(pid);
+      ownPermissions.add(pid);
       permissions.push({ id: pid, label, description: desc, group, defaultLevel: p.defaultLevel, risk: p.risk, scope: p.scope, implies: implies as string[] });
     }
     const levelRank = { viewer: 0, operator: 1, admin: 2 } as const;
@@ -162,9 +167,12 @@ export function validateManifest(
       const label = str(s.label, 80);
       const desc = s.description === undefined ? '' : str(s.description, 300);
       if (!label || desc === null) return fail(`secret "${sid}" needs a label (max 80 characters) and an optional description (max 300)`);
-      secrets.push({ id: sid, label, description: desc ?? '' });
+      secrets.push({ id: sid, label, description: desc ?? '', ...(s.legacy === true ? { legacy: true } : {}) });
     }
   }
+
+  const credentials = validateCredentialKinds(m.credentials, ownPermissions, new Set(secrets.map(s => s.id)));
+  if (!credentials.ok) return credentials;
 
   const network: string[] = [];
   if (m.network !== undefined) {
@@ -190,7 +198,7 @@ export function validateManifest(
     if (w.spec !== undefined) {
       if (!w.spec || typeof w.spec !== 'object' || Array.isArray(w.spec)) return fail(`widget "${type}": "spec" must be an object`);
       if (JSON.stringify(w.spec).length > MAX_SPEC_BYTES) return fail(`widget "${type}": "spec" is too large`);
-      const s = validateWidgetSpec(w.spec, permissions.map(p => p.id), id);
+      const s = validateWidgetSpec(w.spec, permissions.map(p => p.id), id, credentials.value.map(c => c.id));
       if (!s.ok) return fail(`widget "${type}": ${s.error}`);
       spec = s.value;
       for (const sc of Object.values(spec.scripts ?? {})) {
@@ -218,7 +226,7 @@ export function validateManifest(
     widgets.push({ type, columns: v.values, spec });
   }
 
-  return { ok: true, value: { schema: MANIFEST_SCHEMA, id, name, version, description, author, widgets, permissions, network, secrets, ...(requires ? { requires } : {}) } };
+  return { ok: true, value: { schema: MANIFEST_SCHEMA, id, name, version, description, author, widgets, permissions, network, secrets, credentials: credentials.value, ...(requires ? { requires } : {}) } };
 }
 
 /** Validate the extra files of a package: text only, sane names, bounded size. */
@@ -253,6 +261,11 @@ export function manifestToJson(m: PackageManifest): Record<string, unknown> {
     permissions: m.permissions,
     ...(m.network.length ? { network: m.network } : {}),
     ...(m.secrets.length ? { secrets: m.secrets } : {}),
+    ...(m.credentials.length ? { credentials: m.credentials.map(c => ({
+      id: c.id, label: c.label, permission: c.permission, ...(c.viewPermission !== c.permission ? { view_permission: c.viewPermission } : {}),
+      fields: c.fields, ...(c.match ? { match: c.match } : {}), servers: c.servers, ...(c.defaultPerServer ? { default_per_server: true } : {}),
+      ...(c.migrate.length ? { migrate: c.migrate.map(r => ({ name: r.name, ...(r.fields ? { fields: r.fields } : {}), ...(r.hostList ? { host_list: r.hostList } : {}), ...(r.defaultForPackageServers ? { default_for_package_servers: true } : {}) })) } : {}),
+    })) } : {}),
     widgets: m.widgets.map(w => {
       const c = w.columns;
       const j = (s: unknown) => { try { return JSON.parse(String(s)); } catch { return undefined; } };

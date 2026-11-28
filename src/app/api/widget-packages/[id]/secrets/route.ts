@@ -11,7 +11,7 @@ import { requirePackageAdmin, requestIp } from '@/lib/widgets/package-routes';
  */
 async function declared(id: string) {
   const found = await getInstalledPackage(id);
-  return found ? found.pkg.manifest.secrets : null;
+  return found ? found.pkg.manifest.secrets.filter(s => !s.legacy) : null;
 }
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ id: string }> }) {

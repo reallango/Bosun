@@ -723,6 +723,63 @@ const V20_SCHEDULES: string[] = [
     // One run per schedule at a time, enforced by the database as well as by startRunRow.
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_schedule_runs_one_running ON schedule_runs(schedule_id) WHERE status = 'running'`,
 ];
+const V22_WIDGET_CREDENTIALS: string[] = [
+    // Entries of a widget package's credential kinds (a Git token for one owner, a backup destination for one host).
+    // `secrets_enc` is never selected by a read path; only the runner decrypts one entry to hand it to its script.
+    `CREATE TABLE IF NOT EXISTS widget_credentials (
+        id TEXT PRIMARY KEY,
+        package_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        name TEXT NOT NULL,
+        public_fields TEXT NOT NULL DEFAULT '{}',
+        secrets_enc TEXT NOT NULL DEFAULT '{}',
+        servers TEXT NOT NULL DEFAULT '[]',
+        is_default INTEGER NOT NULL DEFAULT 0,
+        created_by TEXT,
+        created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_by TEXT,
+        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        last_used_at DATETIME,
+        last_used_by TEXT,
+        last_used_action TEXT
+    )`,
+    `CREATE INDEX IF NOT EXISTS idx_widget_credentials_kind ON widget_credentials(package_id, kind)`,
+    // A package's entries go with it.
+    `DELETE FROM widget_credentials WHERE package_id NOT IN (SELECT id FROM widget_packages)`,
+];
+// V21: access requests may also ask for one command or one terminal session. SQLite cannot alter a CHECK
+// constraint, so the table is rebuilt with the wider kind list; every existing row is copied across.
+const V21_ACCESS_REQUEST_KINDS: string[] = [
+    `CREATE TABLE access_requests_v21 (
+        id TEXT PRIMARY KEY,
+        requester_type TEXT NOT NULL CHECK (requester_type IN ('user', 'api_key')),
+        requester_id TEXT NOT NULL,
+        requester_name TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('grant', 'one_time', 'command', 'terminal')),
+        permission TEXT NOT NULL,
+        server_id TEXT,
+        resource_kind TEXT NOT NULL DEFAULT '',
+        resource_name TEXT NOT NULL DEFAULT '',
+        duration_hours INTEGER,
+        action TEXT,
+        reason TEXT,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'denied', 'expired', 'cancelled', 'failed')),
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        decided_by TEXT,
+        decided_by_name TEXT,
+        decided_at TEXT,
+        decision_note TEXT,
+        result TEXT
+    )`,
+    `INSERT INTO access_requests_v21 (id, requester_type, requester_id, requester_name, kind, permission, server_id, resource_kind, resource_name, duration_hours, action, reason, status, created_at, expires_at, decided_by, decided_by_name, decided_at, decision_note, result)
+     SELECT id, requester_type, requester_id, requester_name, kind, permission, server_id, resource_kind, resource_name, duration_hours, action, reason, status, created_at, expires_at, decided_by, decided_by_name, decided_at, decision_note, result FROM access_requests`,
+    `DROP TABLE access_requests`,
+    `ALTER TABLE access_requests_v21 RENAME TO access_requests`,
+    `CREATE INDEX IF NOT EXISTS idx_access_requests_status ON access_requests(status, created_at)`,
+    `CREATE INDEX IF NOT EXISTS idx_access_requests_requester ON access_requests(requester_type, requester_id)`,
+];
+
 export const MIGRATIONS: Migration[] = [
     {
         version: 1,
@@ -752,6 +809,8 @@ export const MIGRATIONS: Migration[] = [
     { version: 18, name: 'task_dismissals', statements: V18_TASK_DISMISSALS },
     { version: 19, name: 'widget_size_hints', statements: V19_WIDGET_SIZE_HINTS },
     { version: 20, name: 'schedules', statements: V20_SCHEDULES },
+    { version: 21, name: 'access_request_kinds', statements: V21_ACCESS_REQUEST_KINDS },
+    { version: 22, name: 'widget_credentials', statements: V22_WIDGET_CREDENTIALS },
 ];
 
 /** The schema version this build expects. */
@@ -793,6 +852,7 @@ export const CORE_TABLES: string[] = [
     'task_dismissals',
     'schedules',
     'schedule_runs',
+    'widget_credentials',
 ];
 
 export class LegacySchemaError extends Error {

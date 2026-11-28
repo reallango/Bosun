@@ -64,7 +64,7 @@ export async function runWidgetAction(
           return ok({ jobId: job.id, status: job.status }, { status: 202 });
         }
         if (prepared.before) {
-          const b = await runScript(serverId, loaded, prepared.before.scriptId, prepared.before.args);
+          const b = await runScript(serverId, loaded, prepared.before.scriptId, prepared.before.args, { credentials: prepared.before.credentials });
           if (!b.success || b.protocol.error) {
             const message = b.protocol.error || b.stderr.trim().split('\n').pop() || 'The script that must run first failed';
             await logAudit({
@@ -74,7 +74,7 @@ export async function runWidgetAction(
             return fail(`The action did not run because "${prepared.before.scriptId}" failed: ${message}`, 500, 'BEFORE_FAILED');
           }
         }
-        const r = await runScript(serverId, loaded, prepared.scriptId, prepared.args);
+        const r = await runScript(serverId, loaded, prepared.scriptId, prepared.args, { credentials: prepared.credentials });
         if (r.success && !r.protocol.error && action.stores === 'data') await storeActionData(serverId, loaded.type, loaded.spec.data, instance?.id, r.stdout);
         // The action changed something on the host: have the poller look again now (state and data), not at its next period.
         if (r.success && !r.protocol.error && action.after === 'refresh') await rqlite.execute('UPDATE servers SET poll_requested_at = ? WHERE id = ?', [Date.now(), serverId]).catch(() => undefined);

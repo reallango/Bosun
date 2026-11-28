@@ -13,6 +13,8 @@ import { accessRequestLimiter } from '@/lib/access/limiter';
 import { registeredPermissionDefs } from '@/lib/permissions/store';
 import { createSchedule, listSchedules, runScheduleNow } from '@/lib/schedules/service';
 import { listForViewer } from '@/lib/notifications/store';
+import { hasPermission } from '@/lib/permissions/authorize';
+import { allServerContexts } from '@/lib/permissions/store';
 import type { TokenPayload } from '@/lib/auth/jwt';
 import type { JobRecord } from '@/lib/widgets/jobs/store';
 import type { CatalogTool, ToolResult } from './types';
@@ -269,6 +271,8 @@ async function notificationsList(ctx: CoreContext, args: Record<string, unknown>
   });
   return textResult(lines.length ? lines.join('\n') : 'No notifications you may see.', { notifications });
 }
+
+
 
 export async function callCoreTool(ctx: CoreContext, tool: CatalogTool, args: Record<string, unknown>): Promise<ToolResult> {
   switch (tool.coreName) {
