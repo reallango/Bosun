@@ -524,9 +524,10 @@ instead (level 11).
 
 ### Filling the widget
 
-Inside a widget on a dashboard, `stat` tiles and `gauges` flow into a grid that grows its columns and rows to use the
-whole body. A `meters` block, and a `view` block that draws a list, table or chart, takes the room the other blocks
-leave instead (it scrolls inside it). Each card is a size container: the number in a tile, the value in a ring and the label above them scale
+Inside a widget on a dashboard, `stat` tiles and `gauges` flow into a grid that rearranges itself for the widget's width
+and height: the columns and rows are chosen so every row holds the same number of items (see [Arrangement](#arrangement)).
+A `meters` block, and a `view` block that draws a list, table or chart, takes the room the other blocks leave instead (it
+scrolls inside it). Each card is a size container: the number in a tile, the value in a ring and the label above them scale
 with the card's width and height (container query units), not with the screen, within a sensible minimum and maximum.
 The renderer also shortens a number for its own length: it counts the characters of the value and its unit and picks a
 size whose text stays inside the card (about 70% of the ring's inner circle). Every tile or gauge in one block takes
@@ -537,8 +538,8 @@ under it. A `%` is part of the number and stays attached ("89.9%") unless even t
 The decision is made once for the whole block from its widest value, so every tile or gauge in it has the same shape.
 A number with a `%` unit (and the `percent` format) shows at most one decimal and a whole number from 100 up, so a full
 ring reads "100%", never "100.0%"; this works whether the data arrives as a number or as a numeric string. A sparkline
-stretches to the tile's width and its height follows the card. At the smallest size class (`xs`) the tiles stay in one
-compact row so nothing overflows. In a dialog, a sheet or a full page the same blocks keep their normal reading size.
+stretches to the tile's width and its height follows the card. In a dialog, a sheet or a full page the same blocks keep
+their normal reading size.
 
 A widget of about three grid rows switches these blocks to a compact layout: the padding and gaps shrink, a tile drops
 its sparkline and sub-line (the number and bar stay), a gauge moves its label inside the ring under the value, and a
@@ -550,6 +551,41 @@ of the widgets already on dashboards, so they can be made smaller without removi
 Bosun applies these rules for every widget (they are not per widget). A spec only chooses the look and what each block
 shows; it does not need any layout CSS of its own.
 
+#### Arrangement
+
+The renderer measures the room a `stat` or `gauges` block has and lays its items out in **balanced rows**: every row holds
+the same number of items, so the column count always divides the item count and no row is left half empty. Only the
+items that actually render are counted, after `when` and `alternatives` have been resolved. The grid follows the widget
+while it is resized, and the item cards, labels, values and the footer info line keep their own rules.
+
+The candidates are the divisors of the item count, each with `rows = items / columns`. The renderer keeps the one that
+makes each item largest:
+
+- **Gauges** take the candidate with the largest `min(cellWidth, cellHeight)`, because the ring is square: a wide box
+  puts rings side by side, a tall narrow box stacks them.
+- **Stat tiles** take the candidate with the largest cell area, discounted by how far the cell's aspect is from about
+  1.4:1 (a little wider than tall). A tile is never made narrower than its widest value needs at the readable floor
+  (see above), so a long value moves a tile to a row of fewer, wider cells.
+- A tie goes to the arrangement with fewer rows, which uses the width first.
+
+| Items | Arrangements | In a wide box | In a tall box |
+| --- | --- | --- | --- |
+| 2 | 2x1 or 1x2 | 2x1 | 1x2 |
+| 3 | 3x1 or 1x3 (never 2 + 1) | 3x1 | 1x3 |
+| 4 | 4x1, 2x2 or 1x4 | 4x1 | 1x4 |
+| 5 | 5x1 or 1x5 | 5x1 | 1x5 |
+| 6 | 6x1, 3x2, 2x3 or 1x6 | 6x1 (gauges), 3x2 (tiles) | 1x6 |
+| 7 | 7x1 or 1x7 | 7x1 | 1x7 |
+
+The block's own keys still decide first:
+
+- `columns` (a fixed count) wins over the arrangement and keeps that many columns.
+- `minItemWidth` is a lower bound: a candidate whose cells would be narrower than it is left out. If every candidate is
+  narrower than the bound, the widest one wins, because width is then the binding constraint.
+- A compact widget (short height, or `density: "compact"`) uses the smaller gap, and the arrangement follows it.
+
+This is renderer behaviour, not a new key: a spec needs no extra `requires.api` level and no layout CSS of its own.
+
 #### Tuning sizes
 
 A widget author can adjust the sizes without CSS or class names. Every key below is validated like the rest of the
@@ -560,8 +596,8 @@ package that uses any of these keys must declare `"requires": { "api": 8 }`.
 | Key | Where | Values (default first) | What it does |
 | --- | --- | --- | --- |
 | `size` | `stat`, `gauges` | `"md"` (default), `"sm"`, `"lg"` | Scales the value and the label together. |
-| `minItemWidth` | `stat`, `gauges` | `"md"` (default), `"xs"`, `"sm"`, `"lg"` | The smallest width of a tile or gauge in the filling grid; a smaller value puts more items in one row. |
-| `columns` | `stat`, `gauges` | auto-fit (default), or a whole number 1-6 | A fixed number of columns instead of auto-fit. |
+| `minItemWidth` | `stat`, `gauges` | `"md"` (default), `"xs"`, `"sm"`, `"lg"` | The smallest width of a tile or gauge cell: the arrangement drops candidates narrower than it, and the fallback grid uses it before the body is measured. |
+| `columns` | `stat`, `gauges` | the balanced arrangement (default), or a whole number 1-6 | A fixed number of columns instead of the arrangement. |
 | `thickness` | `gauges` block or item | `"normal"` (default), `"thin"`, `"thick"` | The width of the ring stroke. An item overrides its block. |
 | `emphasis` | `stat` or `gauges` item | `"normal"` (default), `"muted"` | Dims the value of a secondary item. A tone still wins on the number. |
 | `decimals` | `stat` or `gauges` item | `%`: 1 (default); other values: as given; 0-3 | The most decimals the value shows; trailing zeros are dropped and a `%` value from 100 up is whole. |

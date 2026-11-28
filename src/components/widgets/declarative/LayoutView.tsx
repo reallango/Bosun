@@ -17,14 +17,15 @@ import { thresholdTone } from '@/lib/widgets/runtime/thresholds';
 import { formatStatValue } from '@/lib/widgets/runtime/number-format';
 import { meterRowView, visibleMeterRows } from '@/lib/widgets/runtime/meters';
 import { pickAdaptive, visibleInfo } from '@/lib/widgets/runtime/adaptive';
-import { gaugeLabelFontSize, labelFontSize, fitGaugeValues, fitTileValues, unitOnOwnLine, type BlockSize, type MinItemWidth, type ValueFit, type ValueText } from '@/lib/widgets/runtime/sizing';
+import { gaugeLabelFontSize, labelFontSize, fitGaugeValues, fitTileValues, longestValueLength, unitOnOwnLine, type BlockSize, type MinItemWidth, type ValueFit, type ValueText } from '@/lib/widgets/runtime/sizing';
 import { gaugeGeometry, gaugeStroke, GAUGE_VIEWBOX, type GaugeItem } from '@/lib/widgets/runtime/gauges';
 import { useWidgetSize } from '@/components/dashboard/widget-size';
 import { useWidgetDensity, useWidgetFill } from './fill';
 import { CodeBlock, EditorBlock } from './EditorBlock';
+import { ItemGrid } from './ItemGrid';
 import {
   buttonClass, DIALOG_CONTENT, DIALOG_FOOTER, DIALOG_HEADER, DIALOG_OVERLAY, DIALOG_TITLE, DIALOG_WIDTH, FILL_CARD, FILL_CARD_COMPACT, FILL_GAUGE_CARD,
-  FILL_GAUGE_CARD_COMPACT, FILL_GAUGE_LABEL, FILL_GAUGE_VALUE, FILL_GRID_COLUMNS, FILL_GRID_MIN, FILL_GRID_XS, FILL_LABEL, FILL_SUB, FILL_VALUE,
+  FILL_GAUGE_CARD_COMPACT, FILL_GAUGE_LABEL, FILL_GAUGE_VALUE, FILL_GRID_COLUMNS, FILL_GRID_MIN, FILL_LABEL, FILL_SUB, FILL_VALUE,
   FILL_VALUE_COMPACT, METER_GRID, METER_GRID_CELL, METER_GRID_TRACK, METER_LIST, METER_LIST_COMPACT, METER_RING, METER_RING_COMPACT, METER_RING_TRACK, METER_ROW, METER_SUB, METER_VALUE,
   STAT_GRID_COLUMNS,
   iconButtonClass, inputClass, NOTICE_CLASS as NOTICE, primarySubmitClass, toolbarButtonClass,
@@ -268,10 +269,13 @@ const GAUGE_CARD = 'flex min-w-0 flex-col items-center gap-1 rounded-lg border b
 /** Below this measured widget body height (about three grid rows) tiles and gauges switch to their compact layout. */
 const COMPACT_HEIGHT = 160;
 
-/** The grid of a stat or gauge block: a fixed count, the auto-fit minimum of `minItemWidth`, or the size class outside a widget. */
+/**
+ * The grid class of a stat or gauge block: a fixed count, the auto-fit minimum of `minItemWidth`, or the size class outside
+ * a widget. Inside a widget the measured balanced arrangement overrides the auto-fit template (see ItemGrid).
+ */
 function itemGridClass(fill: boolean, widgetSize: WidgetSize, block: { columns?: number; minItemWidth?: MinItemWidth }): string {
   if (block.columns) return fill ? FILL_GRID_COLUMNS[block.columns] : STAT_GRID_COLUMNS[block.columns];
-  if (fill) return widgetSize === 'xs' ? FILL_GRID_XS : FILL_GRID_MIN[block.minItemWidth ?? 'md'];
+  if (fill) return FILL_GRID_MIN[block.minItemWidth ?? 'md'];
   return `grid gap-2 ${STAT_COLUMNS[widgetSize] ?? STAT_COLUMNS.lg}`;
 }
 
@@ -373,8 +377,10 @@ function StatBlock({ block, ctx }: { block: Extract<Block, { type: 'stat' }>; ct
   const fit = fitTileValues(shown.map(({ number, unit }) => ({ number, unit })), {
     size: blockSize, compact, width: card.width, height: card.height,
   });
+  const valueChars = longestValueLength(shown.map(({ number, unit }) => withUnit(number, unit)));
   const grid = (
-    <div className={itemGridClass(fill, widgetSize, block)} style={fill && compact ? { gap: '0.375rem' } : undefined}>
+    <ItemGrid fill={fill} columns={block.columns} minItemWidth={block.minItemWidth} kind="stat" count={shown.length}
+      valueChars={valueChars} compact={compact} className={itemGridClass(fill, widgetSize, block)}>
       {shown.map(({ item, number, unit }, i) => {
         const numeric = item.count ? countRows(item.count, ctx) : Number(fillTemplate(item.value ?? '', ctx));
         const tone = statTone(item.tone, ctx) ?? thresholdTone(numeric, item.thresholds);
@@ -398,7 +404,7 @@ function StatBlock({ block, ctx }: { block: Extract<Block, { type: 'stat' }>; ct
           ? <button key={i} type="button" ref={i === 0 ? card.ref : undefined} onClick={() => selectTab(item.tab!)} className={`${cardClass} hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`}>{content}</button>
           : <div key={i} ref={i === 0 ? card.ref : undefined} className={cardClass}>{content}</div>;
       })}
-    </div>
+    </ItemGrid>
   );
   if (!block.footer?.length) return grid;
   return (
@@ -464,13 +470,15 @@ function GaugeBlock({ block, ctx }: { block: Extract<Block, { type: 'gauges' }>;
   // One size for the block, sized for its thickest ring so a mixed `thickness` still shares it.
   const stroke = Math.max(...items.map(item => gaugeStroke(item.thickness ?? block.thickness)));
   const fit = fitGaugeValues(values, { size: blockSize, stroke, width: card.width, height: card.height });
+  const valueChars = longestValueLength(values.map(value => withUnit(value.number, value.unit)));
   const grid = (
-    <div className={itemGridClass(fill, widgetSize, block)} style={fill && compact ? { gap: '0.375rem' } : undefined}>
+    <ItemGrid fill={fill} columns={block.columns} minItemWidth={block.minItemWidth} kind="gauges" count={items.length}
+      valueChars={valueChars} compact={compact} className={itemGridClass(fill, widgetSize, block)}>
       {items.map((item, i) => (
         <Gauge key={i} item={item} ctx={ctx} fill={fill} compact={compact} fit={fit} blockSize={blockSize} thickness={block.thickness}
           cardRef={fill && i === 0 ? card.ref : undefined} />
       ))}
-    </div>
+    </ItemGrid>
   );
   if (!block.footer?.length) return grid;
   return (

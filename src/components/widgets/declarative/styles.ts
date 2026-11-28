@@ -55,7 +55,8 @@ export const NOTICE_CLASS = {
  * blocks keep their normal reading size (see fill.ts).
  *
  * A block's `minItemWidth` picks one of these fixed classes; `columns` picks a fixed count instead (both are validated
- * keys, never CSS from a package).
+ * keys, never CSS from a package). Without `columns` the renderer replaces the auto-fit template with the balanced
+ * arrangement of the measured body (see arrangement.ts); these classes are what it shows before it is measured.
  */
 export const FILL_GRID_MIN: Record<MinItemWidth, string> = {
   xs: 'grid h-full min-h-0 auto-rows-fr gap-2 [grid-template-columns:repeat(auto-fit,minmax(min(100%,5.5rem),1fr))]',
@@ -82,9 +83,6 @@ export const STAT_GRID_COLUMNS: Record<number, string> = {
   1: 'grid gap-2 grid-cols-1', 2: 'grid gap-2 grid-cols-2', 3: 'grid gap-2 grid-cols-3',
   4: 'grid gap-2 grid-cols-4', 5: 'grid gap-2 grid-cols-5', 6: 'grid gap-2 grid-cols-6',
 };
-
-/** The same grid on the smallest widget: one compact row, so nothing overflows. */
-export const FILL_GRID_XS = 'grid h-full min-h-0 grid-flow-col auto-cols-fr grid-rows-1 gap-1.5';
 
 /** A tile or gauge card in a filling grid: a size container, so its text scales with its width and its height. */
 const FILL_CARD_BASE = 'flex min-w-0 flex-col overflow-hidden rounded-lg border border-border bg-card [container-type:size]';
