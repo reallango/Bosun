@@ -61,6 +61,17 @@ describe('MCP widget tools', () => {
     expect(seen).toContainEqual({ permission: 'sample.manage', wholeServerOnly: false });
     expect(seen).toContainEqual({ permission: 'sample.shell', wholeServerOnly: false });
   });
+
+  it('keeps a tool for a widget whose package needs a newer Bosun here, instead of removing it silently', () => {
+    const reason = 'This widget needs a newer Bosun on this node (API level 10; this node has 9). Finish updating the cluster.';
+    const tools = buildWidgetTools([], () => true, [{ type: 'docker', displayName: 'Docker', reason }]);
+    expect(tools).toHaveLength(1);
+    expect(tools[0]).toMatchObject({
+      kind: 'blocked', name: 'docker__unavailable', widgetType: 'docker', widgetDisplayName: 'Docker', blockedReason: reason,
+    });
+    expect(tools[0].description).toContain(reason);
+    expect(tools[0].inputSchema).toMatchObject({ type: 'object' });
+  });
 });
 
 describe('MCP core tools', () => {

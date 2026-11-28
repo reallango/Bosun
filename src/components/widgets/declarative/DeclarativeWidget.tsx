@@ -47,6 +47,7 @@ export interface PublicSpec {
 export function usePublicSpec(widgetType: string) {
   const [spec, setSpec] = useState<PublicSpec | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
   useEffect(() => {
     let live = true;
     (async () => {
@@ -55,14 +56,15 @@ export function usePublicSpec(widgetType: string) {
         const json = await readJson<{ data?: { spec: PublicSpec }; error?: { message?: string } }>(res);
         if (!live) return;
         if (!res.ok || !json.data) { setError(json.error?.message || 'This widget has no definition'); return; }
+        setError(null);
         setSpec(json.data.spec);
       } catch (err) {
         if (live) setError(err instanceof Error ? err.message : String(err));
       }
     })();
     return () => { live = false; };
-  }, [widgetType]);
-  return { spec, error };
+  }, [widgetType, attempt]);
+  return { spec, error, retry: () => setAttempt(n => n + 1) };
 }
 
 const MENU_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -381,7 +383,7 @@ export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
   const { can } = useAuth();
   const router = useRouter();
   const frame = useWidgetFrame();
-  const { spec, error: specError } = usePublicSpec(widgetType);
+  const { spec, error: specError, retry: retrySpec } = usePublicSpec(widgetType);
   const [screen, setScreen] = useState<{ id: string; row: Row | null } | null>(null);
   // A row's details, opened by clicking a table/list row whose view names a screen with `open` (shown in a side sheet).
   const [detail, setDetail] = useState<{ id: string; row: Row } | null>(null);
@@ -421,7 +423,7 @@ export function DeclarativeWidget({ widgetId, widgetType, serverId }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [frame, menuKey, can, serverId, widgetId]);
 
-  if (specError) return <div className="p-2 text-sm text-muted-foreground">{specError}</div>;
+  if (specError) return <WidgetError error={specError} onRetry={retrySpec} serverId={serverId} />;
   if (!spec || !view) return <WidgetLoading />;
   if (isLoading && data === null) return <WidgetLoading />;
   if (error) return <WidgetError error={error} onRetry={refresh} serverId={serverId} />;

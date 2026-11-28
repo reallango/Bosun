@@ -12,6 +12,16 @@ interface WidgetErrorProps {
 function getErrorDisplay(error: string): { icon: LucideIcon; title: string; description: string; actionHint?: string } {
     const lowerError = error.toLowerCase();
 
+    // A package the cluster already upgraded, on a node that is still on an older Bosun (see lib/widgets/cluster-level.ts).
+    if (lowerError.includes('needs a newer bosun on this node')) {
+        return {
+            icon: TriangleAlert,
+            title: 'Needs a newer Bosun',
+            description: error,
+            actionHint: 'Finish updating the cluster',
+        };
+    }
+
     if (lowerError.includes('no ssh key') || lowerError.includes('key not found')) {
         return {
             icon: KeyRound,

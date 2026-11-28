@@ -42,7 +42,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     // Nobody places a widget on a server they cannot see.
     if (!(await serverVisible(auth, String(server_id)))) return NextResponse.json({ error: { message: 'Server not found' } }, { status: 404 });
     const def = await resolveWidgetDefinition(widget_type);
-    if (!def) return NextResponse.json({ error: { message: `Unknown widget type: ${widget_type}` } }, { status: 400 });
+    if (!def) {
+      const { widgetTypeApiProblem } = await import('@/lib/widgets/package-api-level');
+      const newer = await widgetTypeApiProblem(String(widget_type)).catch(() => null);
+      return NextResponse.json({ error: { message: newer ?? `Unknown widget type: ${widget_type}`, ...(newer ? { code: 'NEWER_BOSUN_REQUIRED' } : {}) } }, { status: newer ? 422 : 400 });
+    }
     // A package widget needs its data permission for that server, so nobody can place a widget they could not see.
     if (def.packageId) {
       const dataSpec = (await loadWidgetSpec(widget_type))?.spec.data;

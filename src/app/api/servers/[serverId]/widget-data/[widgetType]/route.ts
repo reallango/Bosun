@@ -4,6 +4,7 @@ import { hasPermission, requirePermission } from '@/lib/permissions/authorize';
 import { ok, fail, failFrom } from '@/lib/api/response';
 import { loadRuntimeData, loadWidgetSpec, RuntimeError } from '@/lib/widgets/runtime/execute';
 import { filterRows, viewFilter } from '@/lib/widgets/runtime/resource-check';
+import { widgetTypeApiProblem } from '@/lib/widgets/package-api-level';
 
 /**
  * The data a package widget shows, for one server: GET /api/servers/:serverId/widget-data/:widgetType.
@@ -16,7 +17,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const { serverId, widgetType } = await params;
   try {
     const loaded = await loadWidgetSpec(widgetType);
-    if (!loaded) return fail('Unknown widget type', 404, 'NOT_FOUND');
+    if (!loaded) {
+      const newer = await widgetTypeApiProblem(widgetType);
+      return newer ? fail(newer, 422, 'NEWER_BOSUN_REQUIRED') : fail('Unknown widget type', 404, 'NOT_FOUND');
+    }
     // A view limited to some stacks/containers gets only their rows (data.resources); no view at all is a 403.
     const view = await viewFilter(auth, loaded.spec.data.permission, serverId, loaded.spec.data.resources);
     if (!view) return (await requirePermission(auth, loaded.spec.data.permission, serverId))!;

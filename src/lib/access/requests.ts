@@ -143,6 +143,11 @@ export async function createRequest(auth: TokenPayload, input: RequestInput): Pr
   } else {
     const { loadWidgetSpec } = await import('@/lib/widgets/runtime/execute');
     const loaded = await loadWidgetSpec(input.widgetType);
+    if (!loaded) {
+      const { widgetTypeApiProblem } = await import('@/lib/widgets/package-api-level');
+      const newer = await widgetTypeApiProblem(input.widgetType).catch(() => null);
+      if (newer) throw new RequestError(newer, 422, 'NEWER_BOSUN_REQUIRED');
+    }
     const a = loaded?.spec.actions.find(x => x.id === input.actionId);
     if (!loaded || !a) throw new RequestError('Unknown widget action (GET /api/openapi.json lists them)', 404, 'NOT_FOUND');
     if (a.kind !== 'script' && a.kind !== 'command') throw new RequestError('Only actions that run a command or script can be requested once (not screens or terminals)', 400, 'NOT_RUNNABLE');

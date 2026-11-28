@@ -9,6 +9,7 @@ import { consumeActionRateLimit } from '@/lib/utils/rate-limiter';
 import type { CatalogTool, ToolResult } from './types';
 import { callWidgetAction, callWidgetDataset, type ActionContext, type WidgetDeps } from './actions';
 import { callCoreTool } from './core';
+import { errorResult } from './format';
 
 export const defaultWidgetDeps: WidgetDeps = {
   loadWidgetSpec,
@@ -26,6 +27,7 @@ export const defaultWidgetDeps: WidgetDeps = {
 export async function callBosunTool(
   ctx: ActionContext, tool: CatalogTool, args: Record<string, unknown>, deps: WidgetDeps = defaultWidgetDeps,
 ): Promise<ToolResult> {
+  if (tool.kind === 'blocked') return errorResult(tool.blockedReason ?? 'This widget is unavailable on this node.');
   if (tool.kind === 'dataset') return callWidgetDataset(ctx, tool, args, deps);
   if (tool.kind === 'action') return callWidgetAction(ctx, tool, args, deps);
   return callCoreTool(ctx, tool, args);

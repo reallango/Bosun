@@ -27,7 +27,7 @@ export interface McpTool {
   annotations?: ToolAnnotations;
 }
 
-export type ToolKind = 'core' | 'dataset' | 'action';
+export type ToolKind = 'core' | 'dataset' | 'action' | 'blocked';
 
 /** A tool plus the Bosun metadata needed to run it. */
 export interface CatalogTool extends McpTool {
@@ -43,6 +43,8 @@ export interface CatalogTool extends McpTool {
   requiresConfirm?: boolean;
   job?: boolean;
   permission?: string;
+  /** A `blocked` tool: why this node cannot use the widget (an installed package needs a newer Bosun here). */
+  blockedReason?: string;
 }
 
 export interface ToolResult {

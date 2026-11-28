@@ -41,6 +41,23 @@ own on install, on upgrade from GitHub, on import from a file, and in the list o
 newer Bosun is still listed under Available (so the reason is visible) but cannot be installed or upgraded.
 `GET /api/health` reports the level as `widget_api_level`.
 
+Nodes in a cluster share one database, so a package version one node installs is read by every node at once. A
+version whose `requires.api` is above the lowest `widget_api_level` among the cluster's voter nodes is therefore not
+written yet:
+
+- the bundled seed leaves the installed version in place, logs
+  `[widgets] deferred <id> <version>: needs API <n>, cluster minimum is <m>`, and retries when a rolling update
+  finishes and every few minutes on the leader;
+- an install from GitHub or a zip is refused with a message naming the nodes that are behind (a node that cannot be
+  reached, or an old build without the field, counts as behind; a node that left the cluster is not in the voter
+  list);
+- the "update available" notice is not raised for it.
+
+A node can still end up below an installed package's level, for example one restored from an old backup. Its widgets
+then show "This widget needs a newer Bosun on this node (API level N; this node has M). Finish updating the cluster."
+instead of "Unknown widget type", and the package's MCP tools are replaced by one tool that returns the same message
+until the node is updated.
+
 | Level | What it added |
 | --- | --- |
 | 1 | The original spec: `data` (snapshot and command sources), `view` (list, table, fields, text), `actions` (command and terminal), `metrics`, data filters, the unavailable notice, fields and gauges, and the formats. |

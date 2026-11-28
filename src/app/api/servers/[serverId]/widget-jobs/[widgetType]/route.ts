@@ -5,6 +5,7 @@ import { ok, fail, failFrom } from '@/lib/api/response';
 import { loadWidgetSpec } from '@/lib/widgets/runtime/execute';
 import { getJob, latestJob, viewOf } from '@/lib/widgets/jobs/store';
 import { viewFilter } from '@/lib/widgets/runtime/resource-check';
+import { widgetTypeApiProblem } from '@/lib/widgets/package-api-level';
 
 /**
  * The state of a package widget's job on a server: GET /api/servers/:serverId/widget-jobs/:widgetType, the newest
@@ -17,7 +18,10 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
   const { serverId, widgetType } = await params;
   try {
     const loaded = await loadWidgetSpec(widgetType);
-    if (!loaded) return fail('Unknown widget type', 404, 'NOT_FOUND');
+    if (!loaded) {
+      const newer = await widgetTypeApiProblem(widgetType);
+      return newer ? fail(newer, 422, 'NEWER_BOSUN_REQUIRED') : fail('Unknown widget type', 404, 'NOT_FOUND');
+    }
     const view = await viewFilter(auth, loaded.spec.data.permission, serverId, loaded.spec.data.resources);
     if (!view) return (await requirePermission(auth, loaded.spec.data.permission, serverId))!;
     const id = new URL(request.url).searchParams.get('id');
