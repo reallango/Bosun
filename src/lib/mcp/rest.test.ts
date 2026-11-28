@@ -30,6 +30,9 @@ function harness() {
         return Response.json({ data: { ok: true, id } });
       },
     }),
+    'fake/direct': async () => ({
+      POST: async (_request: Request, { params }: { params: { id: string } }) => Response.json({ data: { direct: params.id } }),
+    }),
     'fake/binary': async () => ({
       GET: async () => new Response(Buffer.from('zipdata'), {
         headers: { 'content-type': 'application/zip', 'content-disposition': 'attachment; filename="export.zip"' },
@@ -79,6 +82,13 @@ describe('REST adapter', () => {
     });
     expect(calls[0].url).toBe('https://bosun.test/api/fake/a%20b%2Fc?q=1&dry=false');
     expect(result.structuredContent).toMatchObject({ ok: true });
+  });
+
+  it('passes path params to handlers that read them synchronously (Next 14 style)', async () => {
+    const { modules, ctx } = harness();
+    const t = tool({ rest: { route: 'fake/direct', method: 'POST', path: { id: 'thing_id' } } });
+    const result = await callRestTool(ctx, t, { thing_id: 'direct-id' }, modules);
+    expect(result.structuredContent).toMatchObject({ direct: 'direct-id' });
   });
 
   it('refuses a destructive tool without confirm: true, and never calls the route', async () => {
