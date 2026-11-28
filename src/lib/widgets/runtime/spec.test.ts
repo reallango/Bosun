@@ -56,6 +56,27 @@ describe('validateWidgetSpec', () => {
     expect(bad(s => { s.data.permission = 'nope.x'; }).ok).toBe(false);
   });
 
+  it('accepts a target whose kind comes from a parameter, and checks both parameter names', () => {
+    const good = dockerLike();
+    good.actions[1].params.kind = { type: 'string', values: ['container', 'stack'] };
+    good.actions[1].target = { byKind: 'kind', param: 'name' };
+    expect(ok(good).actions[1].target).toEqual({ byKind: 'kind', param: 'name' });
+
+    expect(bad(s => {
+      s.actions[1].params.kind = { type: 'string', values: ['container', 'stack'] };
+      s.actions[1].target = { kind: 'container', byKind: 'kind', param: 'name' };
+    }).ok).toBe(false);
+    expect(bad(s => { s.actions[1].target = { byKind: 'kind', param: 'name' }; }).ok).toBe(false);
+    expect(bad(s => {
+      s.actions[1].params.kind = { type: 'string', values: ['container', 'stack'] };
+      s.actions[1].target = { byKind: 'name', param: 'name' };
+    }).ok).toBe(false);
+    expect(bad(s => {
+      s.actions[1].params.kind = { type: 'string', values: ['container', 'stack'] };
+      s.actions[1].target = { byKind: 'kind', param: 'name', extra: true };
+    }).ok).toBe(false);
+  });
+
   it('forces an explicit account for every command', () => {
     expect(bad(s => { delete s.actions[0].as; }).ok).toBe(false);
     expect(bad(s => { s.actions[0].as = 'root'; }).ok).toBe(false);

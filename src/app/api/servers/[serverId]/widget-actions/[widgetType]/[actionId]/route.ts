@@ -35,9 +35,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     let body: ActionBody;
     try { body = await request.json(); } catch { body = {}; }
     if (action.target) {
-      const value = action.kind === 'terminal' ? body.ref : (body.params && typeof body.params === 'object' ? (body.params as Record<string, unknown>)[action.target.param] : undefined);
+      const params = body.params && typeof body.params === 'object' ? body.params as Record<string, unknown> : undefined;
+      const value = action.kind === 'terminal' ? body.ref : params?.[action.target.param];
+      const kindValue = 'byKind' in action.target ? (params?.[action.target.byKind] ?? action.params[action.target.byKind]?.default) : undefined;
       let resource;
-      try { resource = await resolveTarget(serverId, loaded, action.target, value); } catch (e) {
+      try { resource = await resolveTarget(serverId, loaded, action.target, value, kindValue); } catch (e) {
         if (e instanceof TargetError) return fail(e.message, e.status, e.code);
         throw e;
       }

@@ -169,6 +169,25 @@ describe('script actions', () => {
     expect(act({ variants: [{ script: 'a', args: { name: 'x; rm -rf /' } }] }).ok).toBe(false);
   });
 
+  it('may run a preparatory script first, with its own arguments checked like the main one', () => {
+    const withBefore = (before: unknown) => check(s => {
+      s.scripts.b = { as: 'service', linux: 'scripts/b.sh', params: { name: { type: 'string', pattern: '^[a-z]{1,10}$' } } };
+      s.scripts.c = { as: 'service', linux: 'scripts/c.sh', params: { other: { type: 'string', pattern: '^[a-z]{1,10}$' } } };
+      s.actions = [{ id: 'go', label: 'Go', permission: 'dk.run', kind: 'script', params: { name: { type: 'string', pattern: '^[a-z]{1,10}$' } }, variants: [{ script: 'a', before }] }];
+    });
+    expect(withBefore({ script: 'b', args: { name: 'param.name' } }).ok).toBe(true);
+    expect(withBefore({ script: 'b', args: { name: 'literal:fixed' } }).ok).toBe(true);
+    expect(withBefore({ script: 'nope', args: {} }).ok).toBe(false);
+    expect(withBefore({ script: 'b', args: { other: 'param.name' } }).ok).toBe(false);
+    expect(withBefore({ script: 'b', args: { name: 'x; rm -rf /' } }).ok).toBe(false);
+    expect(withBefore({ script: 'b' }).ok).toBe(true);            // the action parameter of the same name supplies it
+    expect(withBefore({ script: 'c' }).ok).toBe(false);           // nothing supplies "other"
+    expect(withBefore('b').ok).toBe(false);
+    const kept = withBefore({ script: 'b', args: { name: 'param.name' } });
+    if (!kept.ok) throw new Error(kept.error);
+    expect(kept.value.actions?.[0].variants?.[0].before).toEqual({ script: 'b', args: { name: 'param.name' } });
+  });
+
   it('cannot carry a command, need their own permission, and take only known flags', () => {
     expect(act({ command: 'ls' }).ok).toBe(false);
     expect(act({ windowsCommand: 'dir' }).ok).toBe(false);

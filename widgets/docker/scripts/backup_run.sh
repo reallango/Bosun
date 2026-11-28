@@ -169,6 +169,13 @@ jstr() { V=$1 awk 'BEGIN { s = ENVIRON["V"]; o = ""; n = length(s); for (i = 1; 
 lastline() { [ -f "$1" ] || return 0; tr -d '\r' < "$1" 2>/dev/null | sed '/^$/d' | tail -n 3 | tr '\n' ' ' | cut -c1-400; }
 human_bytes() { B=$1 awk 'BEGIN { b = ENVIRON["B"] + 0; split("B KiB MiB GiB TiB PiB", u, " "); i = 1; while (b >= 1024 && i < 6) { b = b / 1024; i++ } if (i == 1) printf "%d %s", b, u[i]; else printf "%.1f %s", b, u[i] }'; }
 now_iso() { date -u '+%Y-%m-%dT%H:%M:%SZ' 2>/dev/null || date '+%Y-%m-%dT%H:%M:%S'; }
+# The id of this target's latest snapshot, or nothing. restic picks the parent by host and paths, and every target uses
+# --host bosun and the same /bosun paths, so without this the parent would be another target's snapshot and all of this
+# target's unchanged files would be read and hashed again. A failed lookup just means no --parent.
+latest_snapshot_id() {
+  restic_run -r "$RESTIC_REPO_ARG" snapshots --json --latest 1 --tag "bosun:$kind=$name" 2>/dev/null |
+    sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{8,\}\)".*/\1/p' | tail -n 1
+}
 # The repository of an image reference (docker.io/library and the index names dropped, the tag removed).
 repo_of() {
   r=$1
@@ -285,7 +292,7 @@ if [ "$mode" = init ]; then
   fi
   echo 'PROGRESS 1/2'
   echo "[step] Initialising the backup repository $(restic_repo_display)"
-  if ! restic_run -r "$RESTIC_REPO_ARG" init >/dev/null 2>"$errf"; then
+  if ! restic_run -r "$RESTIC_REPO_ARG" init --repository-version 2 >/dev/null 2>"$errf"; then
     fail "initialising the backup repository failed: $(lastline "$errf")"
   fi
   echo 'PROGRESS 2/2'
@@ -446,6 +453,7 @@ echo "[step] Measuring the data"
 kb=$(restic_shell 'du -sk /bosun/data /bosun/stack /bosun/images 2>/dev/null | awk "{ s += \$1 } END { print s + 0 }"' 2>/dev/null | tail -n 1)
 case "$kb" in ''|*[!0-9]*) kb=0 ;; esac
 BYTES=$((kb * 1024))
+PARENT=$(latest_snapshot_id)
 echo "[step] Copying to the repository $(restic_repo_display)"
 set -- backup
 [ "$HAS_DATA" -eq 0 ] || set -- "$@" /bosun/data
@@ -461,14 +469,29 @@ if [ "$kind" = container ]; then set -- "$@" --tag "bosun:container=$name"; else
 [ "$BYTES" -le 0 ] || set -- "$@" --tag "bosun:bytes=$BYTES"
 for p in $PINS; do [ -n "$p" ] && set -- "$@" --tag "bosun:pinned=$p"; done
 for v in $VERSIONS; do [ -n "$v" ] && set -- "$@" --tag "bosun:version=$v"; done
+[ -z "$PARENT" ] || set -- "$@" --parent "$PARENT"
 outf="$tmp/restic.out"; errf="$tmp/restic.err"
 if ! restic_run -r "$RESTIC_REPO_ARG" "$@" > "$outf" 2> "$errf"; then
   if [ -s "$errf" ]; then fail "the backup failed: $(lastline "$errf")"; fi
   fail "the backup failed: $(lastline "$outf")"
 fi
 sid=$(sed -n 's/.*"snapshot_id"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{8,\}\)".*/\1/p' "$outf" | tail -n 1)
-if [ -z "$sid" ]; then
-  sid=$(restic_run -r "$RESTIC_REPO_ARG" snapshots --latest 1 --json --tag "bosun:$kind=$name" 2>/dev/null | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*"\([0-9a-f]\{8,\}\)".*/\1/p' | tail -n 1)
+if [ -z "$sid" ]; then sid=$(latest_snapshot_id); fi
+# The summary restic prints with --json: data_added is what this run wrote to the repository (not the full size), so
+# the Backups tab can show how little a repeat backup added. The file counts go with it.
+summary_num() { sed -n "s/.*\"$1\"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p" "$outf" | tail -n 1; }
+ADDED=$(summary_num data_added)
+[ -n "$ADDED" ] || ADDED=$(summary_num data_added_packed)
+FILES_NEW=$(summary_num files_new); FILES_CHANGED=$(summary_num files_changed); FILES_UNMODIFIED=$(summary_num files_unmodified)
+if [ -n "$sid" ]; then
+  set -- tag "$sid"
+  case "$ADDED" in ''|*[!0-9]*) ;; *) set -- "$@" --add "bosun:added=$ADDED" ;; esac
+  if [ -n "$FILES_NEW" ] && [ -n "$FILES_CHANGED" ] && [ -n "$FILES_UNMODIFIED" ]; then
+    set -- "$@" --add "bosun:added_files=$FILES_NEW/$FILES_CHANGED/$FILES_UNMODIFIED"
+  fi
+  if [ $# -gt 2 ] && ! restic_run -r "$RESTIC_REPO_ARG" "$@" >/dev/null 2>"$errf"; then
+    echo "[step] The backup is safe, but what it added could not be recorded: $(lastline "$errf")"
+  fi
 fi
 echo 'PROGRESS 3/4'
 echo '[step] Applying the retention'

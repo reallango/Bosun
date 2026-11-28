@@ -641,11 +641,11 @@ if [ "$mode" = list ]; then
             function field(s, nm,   re, x) { re = "\"" nm "\"[ \t]*:[ \t]*\"([^\"]*)\""; if (!match(s, re)) return ""; x = substr(s, RSTART, RLENGTH); sub(/^[^:]*:[ \t]*"/, "", x); sub(/"$/, "", x); return x }
             function taglist(s,   x) { if (!match(s, /"tags"[ \t]*:[ \t]*\[[^]]*\]/)) return ""; x = substr(s, RSTART, RLENGTH); sub(/^[^[]*\[/, "", x); sub(/\].*$/, "", x); gsub(/"/, "", x); gsub(/,/, " ", x); return x }
             function human(b,   i, u) { split("B KiB MiB GiB TiB PiB", u, " "); i = 1; while (b >= 1024 && i < 6) { b /= 1024; i++ } return (i == 1) ? sprintf("%d %s", b, u[i]) : sprintf("%.1f %s", b, u[i]) }
-            function process(o,   id, sid, time, host, tl, n, a, i, t, kd, cname, sname, inc, pin, ver, by, nm, cf, sf, bb, sz) {
+            function process(o,   id, sid, time, host, tl, n, a, i, t, kd, cname, sname, inc, pin, ver, by, ad, fl, nm, cf, sf, bb, sz, ab, adz, sa, fls, nf, fa) {
               id = field(o, "id"); if (id == "") return
               sid = field(o, "short_id"); time = field(o, "time"); host = field(o, "hostname"); tl = taglist(o)
               if (tl !~ /bosun:/) return
-              n = split(tl, a, " "); kd = ""; cname = ""; sname = ""; inc = ""; pin = ""; ver = ""; by = ""
+              n = split(tl, a, " "); kd = ""; cname = ""; sname = ""; inc = ""; pin = ""; ver = ""; by = ""; ad = ""; fl = ""
               for (i = 1; i <= n; i++) {
                 t = a[i]; if (t == "") continue
                 if (index(t, "bosun:kind=") == 1) kd = substr(t, 12)
@@ -658,6 +658,8 @@ if [ "$mode" = list ]; then
                 else if (index(t, "bosun:pinned=") == 1) pin = pin (pin == "" ? "" : ", ") substr(t, 14)
                 else if (index(t, "bosun:version=") == 1) ver = ver (ver == "" ? "" : ", ") substr(t, 15)
                 else if (index(t, "bosun:bytes=") == 1) by = substr(t, 13)
+                else if (index(t, "bosun:added_files=") == 1) fl = substr(t, 19)
+                else if (index(t, "bosun:added=") == 1) ad = substr(t, 13)
               }
               if (kindfilter != "all" && kd != kindfilter) return
               nm = (kd == "stack") ? sname : cname
@@ -666,8 +668,14 @@ if [ "$mode" = list ]; then
               sf = (kd == "stack") ? nm : sname
               bb = (by ~ /^[0-9]+$/) ? by + 0 : 0
               sz = (bb > 0) ? human(bb) : ""
+              ab = (ad ~ /^[0-9]+$/) ? ad + 0 : 0
+              adz = (ad ~ /^[0-9]+$/) ? human(ab) : ""
+              sa = sz
+              if (adz != "") sa = (sa == "" ? "" : sa " · ") "added " adz
+              fls = ""
+              if (fl != "") { nf = split(fl, fa, "/"); if (nf == 3) fls = fa[1] " new, " fa[2] " changed, " fa[3] " unchanged" }
               nrows++
-              rows[nrows] = sprintf("{\"id\":\"%s\",\"short\":\"%s\",\"time\":\"%s\",\"kind\":\"%s\",\"name\":\"%s\",\"container\":\"%s\",\"stack\":\"%s\",\"size_bytes\":%d,\"size\":\"%s\",\"included\":\"%s\",\"pinned_ref\":\"%s\",\"pinned_version\":\"%s\",\"hostname\":\"%s\"}", esc(id), esc(sid), esc(time), esc(kd), esc(nm), esc(cf), esc(sf), bb, esc(sz), esc(inc), esc(pin), esc(ver), esc(host))
+              rows[nrows] = sprintf("{\"id\":\"%s\",\"short\":\"%s\",\"time\":\"%s\",\"kind\":\"%s\",\"name\":\"%s\",\"container\":\"%s\",\"stack\":\"%s\",\"size_bytes\":%.0f,\"size\":\"%s\",\"added_bytes\":%.0f,\"added\":\"%s\",\"size_added\":\"%s\",\"files\":\"%s\",\"included\":\"%s\",\"pinned_ref\":\"%s\",\"pinned_version\":\"%s\",\"hostname\":\"%s\"}", esc(id), esc(sid), esc(time), esc(kd), esc(nm), esc(cf), esc(sf), bb, esc(sz), ab, esc(adz), esc(sa), esc(fls), esc(inc), esc(pin), esc(ver), esc(host))
             }
             { buf = buf $0 "\n" }
             END {

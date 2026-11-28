@@ -2,11 +2,11 @@
   "schema": 1,
   "id": "docker",
   "name": "Docker Containers",
-  "version": "1.0.26",
+  "version": "1.0.28",
   "description": "Containers on the host with logs, a shell, start, stop and restart; edit a container, create containers and stacks (a compose file, or one from a Git repository), back containers and stacks up with restic (volumes, mapped folders, stack files and the image, with the pinned image version) and restore them, update containers and stacks to newer images with a health check and automatic rollback, and a Manage page for images, volumes, networks and backups.",
   "author": "Bosun",
   "requires": {
-    "api": 6
+    "api": 9
   },
   "permissions": [
     {
@@ -98,6 +98,19 @@
       "defaultLevel": "admin",
       "risk": "high",
       "scope": "server"
+    },
+    {
+      "id": "docker.backup_update",
+      "label": "Back up, then update containers and stacks",
+      "description": "Take a restic backup before updating a container or stack to a newer image, and abort the update when the backup fails. Implies Back up and Manage.",
+      "group": "Docker",
+      "defaultLevel": "admin",
+      "risk": "high",
+      "scope": "server",
+      "implies": [
+        "docker.backup",
+        "docker.manage"
+      ]
     }
   ],
   "widgets": [
@@ -953,6 +966,8 @@
               "logs",
               "shell",
               "edit",
+              "backup_run",
+              "backup_dialog",
               "restart",
               "stop",
               "start"
@@ -1346,6 +1361,99 @@
             "confirm": {
               "title": "Update {container}?",
               "text": "Bosun pulls the image, replaces the container (or only the changed services of its stack) with the same settings on the new image, waits for it to be healthy and rolls back automatically if it is not. The previous image is kept.",
+              "destructive": false
+            },
+            "job": true
+          },
+          {
+            "id": "container_update_backup",
+            "label": "Back up, then update",
+            "icon": "download",
+            "permission": "docker.backup_update",
+            "target": {
+              "kind": "container",
+              "param": "name"
+            },
+            "when": {
+              "field": "update_available",
+              "equals": true
+            },
+            "kind": "script",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$",
+                "maxLength": 128,
+                "from": "container"
+              },
+              "stack": {
+                "type": "text",
+                "maxLength": 63,
+                "from": "stack"
+              },
+              "service": {
+                "type": "text",
+                "maxLength": 63,
+                "from": "service"
+              },
+              "health_timeout": {
+                "type": "number",
+                "min": 0,
+                "max": 600,
+                "integer": true,
+                "default": 180
+              },
+              "settings": {
+                "type": "text",
+                "maxLength": 4000,
+                "maxLines": 100,
+                "linePattern": "^(#.*|[a-z_]+=.*)$",
+                "default": "volumes=true\nbinds=true\nstack_files=true\nimage=false\nconsistency=live\nkeep_last=0\nkeep_daily=7\nkeep_weekly=4\nkeep_monthly=6"
+              }
+            },
+            "variants": [
+              {
+                "when": {
+                  "field": "param.stack",
+                  "equals": ""
+                },
+                "script": "container_update",
+                "args": {
+                  "health_timeout": "param.health_timeout"
+                },
+                "before": {
+                  "script": "backup_run",
+                  "args": {
+                    "mode": "literal:run",
+                    "kind": "literal:container",
+                    "name": "param.name",
+                    "settings": "param.settings"
+                  }
+                }
+              },
+              {
+                "script": "stack_action",
+                "args": {
+                  "op": "literal:update_images",
+                  "name": "param.stack",
+                  "service": "param.service",
+                  "health_timeout": "param.health_timeout"
+                },
+                "before": {
+                  "script": "backup_run",
+                  "args": {
+                    "mode": "literal:run",
+                    "kind": "literal:stack",
+                    "name": "param.stack",
+                    "settings": "param.settings"
+                  }
+                }
+              }
+            ],
+            "after": "refresh",
+            "confirm": {
+              "title": "Back up, then update {container}?",
+              "text": "Bosun takes a restic backup first and stops when it fails. Otherwise it pulls the image, replaces the container (or only the changed services of its stack) with the same settings on the new image, waits for it to be healthy and rolls back automatically if it is not. The previous image is kept.",
               "destructive": false
             },
             "job": true
@@ -2101,6 +2209,65 @@
             }
           },
           {
+            "id": "stack_update_images_backup",
+            "label": "Back up, then update images",
+            "permission": "docker.backup_update",
+            "target": {
+              "kind": "stack",
+              "param": "name"
+            },
+            "kind": "script",
+            "params": {
+              "name": {
+                "type": "string",
+                "pattern": "^[a-z0-9][a-z0-9_-]{0,62}$",
+                "maxLength": 63,
+                "from": "name"
+              },
+              "health_timeout": {
+                "type": "number",
+                "min": 0,
+                "max": 600,
+                "integer": true,
+                "default": 180
+              },
+              "settings": {
+                "type": "text",
+                "maxLength": 4000,
+                "maxLines": 100,
+                "linePattern": "^(#.*|[a-z_]+=.*)$",
+                "default": "volumes=true\nbinds=true\nstack_files=true\nimage=false\nconsistency=live\nkeep_last=0\nkeep_daily=7\nkeep_weekly=4\nkeep_monthly=6"
+              }
+            },
+            "variants": [
+              {
+                "script": "stack_action",
+                "args": {
+                  "op": "literal:update_images",
+                  "service": "literal:-",
+                  "health_timeout": "param.health_timeout"
+                },
+                "before": {
+                  "script": "backup_run",
+                  "args": {
+                    "mode": "literal:run",
+                    "kind": "literal:stack",
+                    "name": "param.name",
+                    "settings": "param.settings"
+                  }
+                }
+              }
+            ],
+            "icon": "download",
+            "job": true,
+            "after": "refresh",
+            "confirm": {
+              "title": "Back up, then update the images of {name}?",
+              "text": "Bosun takes a restic backup of the stack first and stops when it fails. Otherwise it pulls the images, recreates only the services whose image changed, waits for them to be healthy and rolls back automatically if one is not. The previous images are kept.",
+              "destructive": false
+            }
+          },
+          {
             "id": "stack_update",
             "label": "Update from source and redeploy",
             "permission": "docker.manage",
@@ -2291,6 +2458,33 @@
             }
           },
           {
+            "id": "backup_init",
+            "label": "Initialise the backup repository",
+            "permission": "docker.backup",
+            "kind": "script",
+            "params": {},
+            "variants": [
+              {
+                "script": "backup_run",
+                "args": {
+                  "mode": "literal:init"
+                }
+              }
+            ],
+            "job": true,
+            "icon": "download",
+            "result": "toast",
+            "after": "refresh"
+          },
+          {
+            "id": "backup_dialog",
+            "label": "Back up…",
+            "permission": "docker.backup",
+            "kind": "screen",
+            "screen": "backup_target",
+            "icon": "download"
+          },
+          {
             "id": "backup_run",
             "label": "Back up",
             "permission": "docker.backup",
@@ -2344,7 +2538,11 @@
             "job": true,
             "icon": "download",
             "result": "toast",
-            "after": "refresh"
+            "after": "refresh",
+            "target": {
+              "byKind": "kind",
+              "param": "name"
+            }
           },
           {
             "id": "backup_restore",
@@ -2411,6 +2609,10 @@
               "title": "Restore or delete this backup?",
               "text": "Restoring replaces the data in the volumes and mapped folders and restarts the container or stack; files created after the backup are removed. Deleting removes the snapshot and cannot be undone.",
               "destructive": true
+            },
+            "target": {
+              "byKind": "kind",
+              "param": "name"
             }
           }
         ],
@@ -4523,6 +4725,8 @@
                             "edit",
                             "logs",
                             "shell",
+                            "backup_run",
+                            "backup_dialog",
                             "restart",
                             "stop",
                             "start",
@@ -4579,10 +4783,12 @@
                                 }
                               ],
                               "rowActions": [
-                                "container_update"
+                                "container_update",
+                                "container_update_backup"
                               ],
                               "bulk": [
-                                "container_update"
+                                "container_update",
+                                "container_update_backup"
                               ]
                             }
                           }
@@ -5073,10 +5279,13 @@
                           ],
                           "rowActions": [
                             "stack_edit",
+                            "backup_run",
+                            "backup_dialog",
                             "stack_start",
                             "stack_stop",
                             "stack_restart",
                             "stack_update_images",
+                            "stack_update_images_backup",
                             "stack_update",
                             "stack_update_privileged",
                             "stack_remove"
@@ -5118,7 +5327,7 @@
                             "format": "text"
                           },
                           {
-                            "label": "Repository size",
+                            "label": "Repository on disk",
                             "value": "{datasets.backups.status.size}",
                             "format": "text"
                           }
@@ -5153,14 +5362,10 @@
                         ],
                         "submits": [
                           {
-                            "action": "backup_run",
+                            "action": "backup_init",
                             "label": "Initialise repository",
                             "style": "primary",
-                            "params": {
-                              "mode": "literal:init",
-                              "kind": "literal:container",
-                              "name": "literal:-"
-                            }
+                            "params": {}
                           }
                         ]
                       },
@@ -5203,6 +5408,11 @@
                               "format": "bytes"
                             },
                             {
+                              "title": "Added",
+                              "value": "{added}",
+                              "format": "text"
+                            },
+                            {
                               "title": "Included",
                               "value": "{included}",
                               "format": "text"
@@ -5222,7 +5432,6 @@
                       },
                       {
                         "type": "editor",
-                        "param": "settings",
                         "fields": [
                           {
                             "name": "init",
@@ -5232,13 +5441,9 @@
                         ],
                         "submits": [
                           {
-                            "action": "backup_run",
+                            "action": "backup_init",
                             "label": "Initialise the repository",
-                            "params": {
-                              "mode": "literal:init",
-                              "kind": "literal:container",
-                              "name": "literal:-"
-                            }
+                            "params": {}
                           }
                         ]
                       }
@@ -5265,8 +5470,13 @@
                   },
                   {
                     "label": "Size",
-                    "value": "{context.size_bytes}",
-                    "format": "bytes"
+                    "value": "{context.size_added}",
+                    "format": "text"
+                  },
+                  {
+                    "label": "Files",
+                    "value": "{context.files}",
+                    "format": "text"
                   },
                   {
                     "label": "Included",
@@ -5341,6 +5551,168 @@
                 ]
               }
             ]
+          },
+          "backup_target": {
+            "kind": "dialog",
+            "size": "md",
+            "title": "Back up {context.name}",
+            "description": "Choose what this backup includes and how many backups are kept. The engine runs as a short-lived restic container, so nothing is installed on the host.",
+            "load": {},
+            "blocks": [
+              {
+                "type": "editor",
+                "param": "settings",
+                "fields": [
+                  {
+                    "name": "kind",
+                    "label": "Kind",
+                    "input": "select",
+                    "value": "context.kind",
+                    "required": true,
+                    "transient": true,
+                    "options": [
+                      {
+                        "value": "container",
+                        "label": "Container"
+                      },
+                      {
+                        "value": "stack",
+                        "label": "Stack"
+                      }
+                    ]
+                  },
+                  {
+                    "name": "name",
+                    "label": "Name",
+                    "input": "text",
+                    "value": "context.name",
+                    "required": true,
+                    "transient": true
+                  },
+                  {
+                    "name": "h_what",
+                    "label": "What to include",
+                    "input": "heading"
+                  },
+                  {
+                    "name": "volumes",
+                    "label": "Named volumes",
+                    "input": "select",
+                    "options": [
+                      {
+                        "value": "true",
+                        "label": "Yes"
+                      },
+                      {
+                        "value": "false",
+                        "label": "No"
+                      }
+                    ]
+                  },
+                  {
+                    "name": "binds",
+                    "label": "Mapped host folders",
+                    "input": "select",
+                    "options": [
+                      {
+                        "value": "true",
+                        "label": "Yes"
+                      },
+                      {
+                        "value": "false",
+                        "label": "No"
+                      }
+                    ]
+                  },
+                  {
+                    "name": "stack_files",
+                    "label": "The stored compose, .env and override files",
+                    "input": "select",
+                    "when": {
+                      "field": "values.kind",
+                      "equals": "stack"
+                    },
+                    "options": [
+                      {
+                        "value": "true",
+                        "label": "Yes"
+                      },
+                      {
+                        "value": "false",
+                        "label": "No"
+                      }
+                    ]
+                  },
+                  {
+                    "name": "image",
+                    "label": "The container image (large)",
+                    "input": "checkbox",
+                    "help": "Saved with docker save. Useful when the registry may drop the version."
+                  },
+                  {
+                    "name": "h_when",
+                    "label": "Consistency",
+                    "input": "heading"
+                  },
+                  {
+                    "name": "consistency",
+                    "label": "While copying",
+                    "input": "select",
+                    "options": [
+                      {
+                        "value": "live",
+                        "label": "Leave it running"
+                      },
+                      {
+                        "value": "stop",
+                        "label": "Stop it, copy, start it again"
+                      }
+                    ]
+                  },
+                  {
+                    "name": "h_keep",
+                    "label": "Retention (0 = do not apply)",
+                    "input": "heading"
+                  },
+                  {
+                    "name": "keep_last",
+                    "label": "Keep the last",
+                    "input": "number",
+                    "placeholder": "0"
+                  },
+                  {
+                    "name": "keep_daily",
+                    "label": "Keep daily",
+                    "input": "number",
+                    "placeholder": "7"
+                  },
+                  {
+                    "name": "keep_weekly",
+                    "label": "Keep weekly",
+                    "input": "number",
+                    "placeholder": "4"
+                  },
+                  {
+                    "name": "keep_monthly",
+                    "label": "Keep monthly",
+                    "input": "number",
+                    "placeholder": "6"
+                  }
+                ],
+                "submits": [
+                  {
+                    "action": "backup_run",
+                    "label": "Back up now",
+                    "style": "primary",
+                    "params": {
+                      "mode": "literal:run",
+                      "kind": "values.kind",
+                      "name": "values.name"
+                    }
+                  }
+                ]
+              }
+            ]
           }
         },
         "menu": [
@@ -5404,6 +5776,98 @@
               },
               "title": "{count} image update(s) on {server}",
               "message": "The schedule {schedule} found {count} container(s) on {server} whose registry has a newer image for the same tag. See Docker → Manage → Containers.",
+              "severity": "info"
+            }
+          },
+          {
+            "id": "backup",
+            "label": "Back up a container or stack",
+            "description": "Runs a restic backup of one container or stack with the standard options and tells the bell when it finishes.",
+            "run": {
+              "action": "backup_run",
+              "params": {
+                "mode": "run",
+                "settings": "volumes=true\nbinds=true\nstack_files=true\nimage=false\nconsistency=live\nkeep_last=0\nkeep_daily=7\nkeep_weekly=4\nkeep_monthly=6"
+              }
+            },
+            "target": "byKind",
+            "notify": {
+              "title": "Scheduled backup on {server}",
+              "message": "The schedule {schedule} backed up {resource} on {server}: {message}",
+              "severity": "info"
+            }
+          },
+          {
+            "id": "image_update_container",
+            "label": "Update a container's image",
+            "description": "Pulls the newest image of the container's tag, recreates it with a health check and rolls back automatically if it is not healthy.",
+            "run": {
+              "action": "container_update",
+              "params": {
+                "stack": "",
+                "service": "",
+                "health_timeout": 180
+              }
+            },
+            "target": "container",
+            "notify": {
+              "title": "Scheduled image update on {server}",
+              "message": "The schedule {schedule} updated {resource} on {server}: {message}",
+              "severity": "info"
+            }
+          },
+          {
+            "id": "image_update_stack",
+            "label": "Update a stack's images",
+            "description": "Pulls the newest images of a Bosun-managed stack's services, recreates only the changed ones with a health check and rolls back automatically if one is not healthy.",
+            "run": {
+              "action": "stack_update_images",
+              "params": {
+                "health_timeout": 180
+              }
+            },
+            "target": "stack",
+            "notify": {
+              "title": "Scheduled image update on {server}",
+              "message": "The schedule {schedule} updated {resource} on {server}: {message}",
+              "severity": "info"
+            }
+          },
+          {
+            "id": "image_update_container_backup",
+            "label": "Back up, then update a container's image",
+            "description": "Takes a restic backup of the container first and aborts the update when it fails; otherwise updates the image with a health check and rollback.",
+            "run": {
+              "action": "container_update_backup",
+              "params": {
+                "stack": "",
+                "service": "",
+                "health_timeout": 180,
+                "settings": "volumes=true\nbinds=true\nstack_files=true\nimage=false\nconsistency=live\nkeep_last=0\nkeep_daily=7\nkeep_weekly=4\nkeep_monthly=6"
+              }
+            },
+            "target": "container",
+            "notify": {
+              "title": "Scheduled image update on {server}",
+              "message": "The schedule {schedule} updated {resource} on {server}: {message}",
+              "severity": "info"
+            }
+          },
+          {
+            "id": "image_update_stack_backup",
+            "label": "Back up, then update a stack's images",
+            "description": "Takes a restic backup of the stack first and aborts the update when it fails; otherwise updates the changed images with a health check and rollback.",
+            "run": {
+              "action": "stack_update_images_backup",
+              "params": {
+                "health_timeout": 180,
+                "settings": "volumes=true\nbinds=true\nstack_files=true\nimage=false\nconsistency=live\nkeep_last=0\nkeep_daily=7\nkeep_weekly=4\nkeep_monthly=6"
+              }
+            },
+            "target": "stack",
+            "notify": {
+              "title": "Scheduled image update on {server}",
+              "message": "The schedule {schedule} updated {resource} on {server}: {message}",
               "severity": "info"
             }
           }

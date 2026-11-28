@@ -30,7 +30,7 @@ import {
 
 const LINK = '/settings/schedules';
 const DEFAULT_KEEP_RUNS = 200;
-const JOB_WATCH_MS = 30 * 60_000;
+const JOB_WATCH_MS = 90 * 60_000;
 const JOB_POLL_MS = 5_000;
 
 export interface RunOutcome {
@@ -147,8 +147,28 @@ async function auditRun(row: ScheduleRow, userId: string | undefined, status: 's
   });
 }
 
+/** Raise the schedule kind's success notice for an action run (a failure always raises one through notifyFailure). */
+async function notifyActionSuccess(row: ScheduleRow, runId: string, kind: { notify?: { title: string; message: string; severity?: 'info' | 'warning' } }, message: string): Promise<void> {
+  if (!kind.notify) return;
+  try {
+    const notice = noticeFor(row, kind.notify, 1, await serverName(row.server_id), new Date(), {
+      resource: row.resource_name || undefined,
+      status: 'success',
+      message,
+      dedupeKey: `schedule-success:${row.id}:${runId}`,
+    });
+    await notify({
+      kind: 'alert', severity: notice.severity, audience: 'admin', link: LINK,
+      title: notice.title, message: notice.message, serverId: row.server_id,
+      dedupeKey: notice.dedupeKey, data: { scheduleId: row.id, runId, status: 'success' },
+    });
+  } catch (err) {
+    console.warn(`[schedules] could not raise the success notice of ${row.id}: ${err instanceof Error ? err.message : err}`);
+  }
+}
+
 /** Follow a job started by an action run until it finishes, then record its outcome. Never throws. */
-async function watchJob(runId: string, jobId: string, row: ScheduleRow): Promise<void> {
+async function watchJob(runId: string, jobId: string, row: ScheduleRow, kind: { notify?: { title: string; message: string; severity?: 'info' | 'warning' } }): Promise<void> {
   const until = Date.now() + JOB_WATCH_MS;
   while (Date.now() < until) {
     await new Promise(res => setTimeout(res, JOB_POLL_MS));
@@ -158,6 +178,7 @@ async function watchJob(runId: string, jobId: string, row: ScheduleRow): Promise
     const message = job.message || `Job ${job.status}`;
     await finishRun(runId, ok ? 'success' : 'failed', message, { jobId });
     if (!ok) await notifyFailure(row, runId, message);
+    else await notifyActionSuccess(row, runId, kind, message);
     await auditRun(row, job.userId ?? undefined, ok ? 'success' : 'failure', { run: runId, job: jobId, outcome: job.status, message });
     await pruneRuns(row.id, parseOptions(row.options).keepRuns ?? DEFAULT_KEEP_RUNS);
     return;
@@ -208,7 +229,7 @@ export async function executeScheduleRun(scheduleId: string, opts: { trigger: 's
     }
 
     const resource = resourceOf(row);
-    if (Boolean(resource) !== Boolean(run.targetKind)) {
+    if (Boolean(resource) !== Boolean(run.targetParam)) {
       const reason = resource
         ? 'The widget changed this schedule kind so it no longer runs for one stack or container.'
         : 'The widget changed this schedule kind to run for one stack or container, but this schedule names none.';
@@ -217,7 +238,7 @@ export async function executeScheduleRun(scheduleId: string, opts: { trigger: 's
       await auditRun(row, requester.userId, 'failure', { run: runId, reason });
       return { started: true, runId, status: 'skipped', message: reason };
     }
-    const ctx = resource && run.targetKind ? await resolveTarget(row.server_id, loaded, { kind: run.targetKind, param: run.targetParam ?? '' }, resource.name).catch(() => null) : null;
+    const ctx = resource && run.targetParam ? await resolveTarget(row.server_id, loaded, { kind: resource.kind, param: run.targetParam }, resource.name).catch(() => null) : null;
     if (!(await hasPermission(requester, run.permission, row.server_id, ctx))) {
       const reason = `${requester.username} no longer holds the permission this schedule needs (${run.permission}) on ${resource ? `${resource.kind} ${resource.name}` : 'this server'}, so it cannot run as them.`;
       await pause(row, reason, { userId: requester.userId, ip: opts.ip });
@@ -260,7 +281,7 @@ export async function executeScheduleRun(scheduleId: string, opts: { trigger: 's
       return { started: true, runId, status: 'success', message, matchedCount: matched };
     }
 
-    const params = actionParams(kind, stored, resource?.name ?? null, run.targetParam);
+    const params = actionParams(kind, stored, resource?.name ?? null, run.targetParam, resource?.kind ?? null, run.targetKindParam);
     if (!run.action) {
       const reason = 'The widget no longer offers this action.';
       await pause(row, reason, { userId: requester.userId, ip: opts.ip });
@@ -282,13 +303,14 @@ export async function executeScheduleRun(scheduleId: string, opts: { trigger: 's
       // Keep the run "running" until the job ends, so the schedule cannot start a second one meanwhile.
       await rqlite.execute('UPDATE schedule_runs SET job_id = ?, message = ? WHERE id = ?', [jobId, message, runId]);
       await auditRun(row, requester.userId, 'pending', { run: runId, job: jobId, started: true });
-      void watchJob(runId, jobId, row);
+      void watchJob(runId, jobId, row, kind);
       return { started: true, runId, status: 'running', message, jobId };
     }
     const ok = json?.data?.success !== false;
     const message = json?.data?.message || (ok ? 'The action finished' : 'The action reported a failure');
     await finishRun(runId, ok ? 'success' : 'failed', message);
     if (!ok) await notifyFailure(row, runId, message);
+    else await notifyActionSuccess(row, runId, kind, message);
     await auditRun(row, requester.userId, ok ? 'success' : 'failure', { run: runId, message });
     await pruneRuns(row.id, stored.keepRuns ?? DEFAULT_KEEP_RUNS);
     return { started: true, runId, status: ok ? 'success' : 'failed', message };

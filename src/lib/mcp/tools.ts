@@ -5,6 +5,7 @@
  * `canUse` is evaluated per caller: `tools/list` only shows what the caller may use on at least one server.
  */
 import type { WidgetSpec } from '@/lib/widgets/runtime/spec';
+import { targetLabel } from '@/lib/widgets/runtime/resources';
 import type { CatalogTool, JsonSchema, ObjectJsonSchema } from './types';
 import { actionInputSchema, datasetInputSchema } from './schema';
 
@@ -56,7 +57,7 @@ export function buildWidgetTools(sources: WidgetToolSource[], canUse: CanUse): C
         description: [
           `Read the "${datasetId}" dataset of the ${w.displayName} widget.`,
           `Needs the "${label}" permission.`,
-          ds.target ? `Acts on one ${ds.target.kind}; pass "${ds.target.param}".` : undefined,
+          ds.target ? `Acts on ${targetLabel(ds.target)}; pass "${ds.target.param}".` : undefined,
           ds.resources ? 'Rows are filtered to the stacks/containers you may see.' : undefined,
           'Use servers_list to find server ids.',
         ].filter(Boolean).join(' '),
@@ -91,7 +92,7 @@ export function buildWidgetTools(sources: WidgetToolSource[], canUse: CanUse): C
             : `Runs as the ${a.as === 'service' ? 'privileged service account' : 'non-admin shell account'}.`,
           a.confirm ? `Asks for confirmation: ${a.confirm.title}${a.confirm.text ? ` — ${a.confirm.text}` : ''} Send confirm: true.` : undefined,
           a.job ? 'Starts a job: use job_wait with the returned job_id to follow it.' : undefined,
-          a.target ? `Acts on one ${a.target.kind}; pass "${a.target.param}".` : undefined,
+          a.target ? `Acts on ${targetLabel(a.target)}; pass "${a.target.param}".` : undefined,
           'Use servers_list to find server ids.',
         ].filter(Boolean).join(' '),
         inputSchema: actionInputSchema(a),

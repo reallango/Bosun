@@ -237,7 +237,12 @@ export async function buildActionContext(serverId: string, loaded: LoadedSpec, i
   };
 }
 
-export interface PreparedScript { scriptId: string; args: Record<string, unknown> }
+export interface PreparedScript {
+  scriptId: string;
+  args: Record<string, unknown>;
+  /** A script to run first; the main one does not run when it fails. */
+  before?: { scriptId: string; args: Record<string, unknown> };
+}
 
 /** Validate the action's parameters, pick the variant that applies to this host and work out the script's arguments. */
 export async function prepareScriptAction(serverId: string, loaded: LoadedSpec, action: ActionSpec, rawParams: unknown, instance: InstanceRef | null): Promise<PreparedScript> {
@@ -247,7 +252,15 @@ export async function prepareScriptAction(serverId: string, loaded: LoadedSpec, 
   if (!variant) throw new RuntimeError(`"${action.label}" does not apply to this host right now`, 409, 'NOT_APPLICABLE');
   const script = loaded.spec.scripts?.[variant.script];
   if (!script) throw new RuntimeError(`The package has no script "${variant.script}"`, 404, 'SCRIPT_NOT_FOUND');
-  return { scriptId: variant.script, args: resolveScriptArgs(variant, script, ctx) };
+  const beforeScript = variant.before ? loaded.spec.scripts?.[variant.before.script] : undefined;
+  if (variant.before && !beforeScript) throw new RuntimeError(`The package has no script "${variant.before.script}"`, 404, 'SCRIPT_NOT_FOUND');
+  return {
+    scriptId: variant.script,
+    args: resolveScriptArgs(variant, script, ctx),
+    ...(variant.before && beforeScript ? {
+      before: { scriptId: variant.before.script, args: resolveScriptArgs({ script: variant.before.script, args: variant.before.args }, beforeScript, ctx) },
+    } : {}),
+  };
 }
 
 export interface RuntimeData {

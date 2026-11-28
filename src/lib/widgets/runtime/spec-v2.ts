@@ -71,6 +71,8 @@ export interface ActionVariant {
   script: string;
   /** Script parameter -> where its value comes from: `param.<action parameter>` or a path into the context. */
   args: Record<string, string>;
+  /** A package script to run before the main one; the action fails without running the main script when it fails. */
+  before?: { script: string; args: Record<string, string> };
 }
 
 export interface Badge { text: string; color: (typeof BADGE_COLORS)[number]; when?: Cond }
@@ -344,34 +346,57 @@ export function lookupHosts(lookups: Record<string, LookupSpec> | undefined): st
  * The variants of a `script` action: the first whose `when` holds is the one that runs. Every parameter of the
  * chosen script must be given, either by `args` or by an action parameter of the same name.
  */
+function validateVariantArgs(
+  raw: unknown, where: string, scriptId: string, script: ScriptSpec, actionParams: Record<string, ParamSpec>,
+): Validated<Record<string, string>> {
+  const args: Record<string, string> = {};
+  if (raw !== undefined) {
+    if (!isObj(raw)) return fail(`${where}: "args" must map script parameters to paths`);
+    for (const [name, path] of Object.entries(raw)) {
+      if (!(name in script.params)) return fail(`${where}: script "${scriptId}" has no parameter "${name}"`);
+      // A path into the context, or a fixed text written as "literal:<text>" (for a script that serves several settings).
+      const isLiteral = typeof path === 'string' && path.startsWith('literal:') && LITERAL_RE.test(path.slice(8));
+      if (typeof path !== 'string' || (!isLiteral && !FIELD_RE.test(path))) return fail(`${where}: argument "${name}" must be a path such as "state.install.name" or "param.value", or "literal:<text>"`);
+      if (path.startsWith('param.') && !(path.slice(6) in actionParams)) return fail(`${where}: argument "${name}" refers to the action parameter "${path.slice(6)}", which is not declared`);
+      args[name] = path;
+    }
+  }
+  for (const [name, p] of Object.entries(script.params)) {
+    // A parameter with a default of its own need not be mapped: the default is used.
+    if (!(name in args) && !(name in actionParams) && p.default === undefined) return fail(`${where}: script "${scriptId}" needs the parameter "${name}": map it in "args" or declare an action parameter with that name`);
+  }
+  return { ok: true, value: args };
+}
+
+function validateOneVariant(
+  raw: unknown, where: string, scripts: Record<string, ScriptSpec>, actionParams: Record<string, ParamSpec>,
+): Validated<ActionVariant> {
+  if (!isObj(raw)) return fail(`${where}: each variant must be an object`);
+  if (typeof raw.script !== 'string' || !(raw.script in scripts)) return fail(`${where}: a variant must name one of the package scripts`);
+  let when: Cond | undefined;
+  if (raw.when !== undefined) { const c = cond(raw.when, `${where} variant "when"`); if (!c.ok) return c; when = c.value; }
+  const args = validateVariantArgs(raw.args, where, raw.script, scripts[raw.script], actionParams);
+  if (!args.ok) return args;
+  let before: ActionVariant['before'];
+  if (raw.before !== undefined) {
+    if (!isObj(raw.before)) return fail(`${where}: "before" must be an object`);
+    if (typeof raw.before.script !== 'string' || !(raw.before.script in scripts)) return fail(`${where}: "before.script" must name one of the package scripts`);
+    const b = validateVariantArgs(raw.before.args, `${where} before`, raw.before.script, scripts[raw.before.script], actionParams);
+    if (!b.ok) return b;
+    before = { script: raw.before.script, args: b.value };
+  }
+  return { ok: true, value: { ...(when ? { when } : {}), script: raw.script, args: args.value, ...(before ? { before } : {}) } };
+}
+
 export function validateVariants(
   raw: unknown, where: string, scripts: Record<string, ScriptSpec>, actionParams: Record<string, ParamSpec>,
 ): Validated<ActionVariant[]> {
   if (!Array.isArray(raw) || raw.length < 1 || raw.length > 8) return fail(`${where}: "variants" must list 1-8 variants`);
   const out: ActionVariant[] = [];
   for (const v of raw as unknown[]) {
-    if (!isObj(v)) return fail(`${where}: each variant must be an object`);
-    if (typeof v.script !== 'string' || !(v.script in scripts)) return fail(`${where}: a variant must name one of the package scripts`);
-    const script = scripts[v.script];
-    let when: Cond | undefined;
-    if (v.when !== undefined) { const c = cond(v.when, `${where} variant "when"`); if (!c.ok) return c; when = c.value; }
-    const args: Record<string, string> = {};
-    if (v.args !== undefined) {
-      if (!isObj(v.args)) return fail(`${where}: "args" must map script parameters to paths`);
-      for (const [name, path] of Object.entries(v.args)) {
-        if (!(name in script.params)) return fail(`${where}: script "${v.script}" has no parameter "${name}"`);
-        // A path into the context, or a fixed text written as "literal:<text>" (for a script that serves several settings).
-        const isLiteral = typeof path === 'string' && path.startsWith('literal:') && LITERAL_RE.test(path.slice(8));
-        if (typeof path !== 'string' || (!isLiteral && !FIELD_RE.test(path))) return fail(`${where}: argument "${name}" must be a path such as "state.install.name" or "param.value", or "literal:<text>"`);
-        if (path.startsWith('param.') && !(path.slice(6) in actionParams)) return fail(`${where}: argument "${name}" refers to the action parameter "${path.slice(6)}", which is not declared`);
-        args[name] = path;
-      }
-    }
-    for (const [name, p] of Object.entries(script.params)) {
-      // A parameter with a default of its own need not be mapped: the default is used.
-      if (!(name in args) && !(name in actionParams) && p.default === undefined) return fail(`${where}: script "${v.script}" needs the parameter "${name}": map it in "args" or declare an action parameter with that name`);
-    }
-    out.push({ ...(when ? { when } : {}), script: v.script, args });
+    const one = validateOneVariant(v, where, scripts, actionParams);
+    if (!one.ok) return one;
+    out.push(one.value);
   }
   return { ok: true, value: out };
 }
