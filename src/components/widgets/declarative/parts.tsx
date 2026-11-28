@@ -3,7 +3,7 @@
 import { forwardRef } from 'react';
 import { Copy, Download, ExternalLink, Info, Layers, Pause, Pencil, Play, Plus, Power, RefreshCw, RotateCw, ScrollText, Settings, Square, TerminalSquare, Trash2, Upload } from 'lucide-react';
 import { evalCond, fillTemplate, type FieldSpec } from '@/lib/widgets/runtime/spec';
-import { formatPercent } from '@/lib/widgets/runtime/number-format';
+import { formatValue } from '@/lib/widgets/runtime/number-format';
 import { fitsSize } from '@/lib/widgets/runtime/size';
 import { shapeSparkline, sparklinePath, trendWindowSec, type TrendSpec } from '@/lib/widgets/runtime/trends';
 import { useWidgetSize } from '@/components/dashboard/widget-size';
@@ -24,45 +24,7 @@ export const DOT: Record<string, string> = {
 
 export type Row = Record<string, unknown>;
 
-export function formatValue(v: unknown, format: string): string {
-  if (v === undefined || v === null || v === '') return '';
-  const n = Number(v);
-  if (format === 'bytes' && Number.isFinite(n)) {
-    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-    let x = n;
-    let i = 0;
-    while (x >= 1024 && i < units.length - 1) { x /= 1024; i++; }
-    return `${x >= 10 || i === 0 ? Math.round(x) : x.toFixed(1)} ${units[i]}`;
-  }
-  if ((format === 'percent' || format === 'bar') && Number.isFinite(n)) return `${formatPercent(n)}%`;
-  if (format === 'mb' && Number.isFinite(n)) return n >= 1024 ? `${(n / 1024).toFixed(1)} GB` : `${Math.round(n)} MB`;
-  if (format === 'temp' && Number.isFinite(n)) return `${Math.round(n)}°C`;
-  if (format === 'duration' && Number.isFinite(n)) {
-    const d = Math.floor(n / 86400), h = Math.floor((n % 86400) / 3600), m = Math.floor((n % 3600) / 60);
-    return d > 0 ? `${d}d ${h}h` : h > 0 ? `${h}h ${m}m` : `${m}m`;
-  }
-  if (format === 'ago') {
-    const t = typeof v === 'number' ? v : new Date(String(v)).getTime();
-    if (!Number.isFinite(t)) return String(v);
-    const minutes = Math.floor(Math.max(0, Date.now() - t) / 60000);
-    if (minutes < 1) return 'just now';
-    if (minutes < 60) return `${minutes} min ago`;
-    const hours = Math.floor(minutes / 60);
-    return hours < 24 ? `${hours}h ago` : `${Math.floor(hours / 24)}d ago`;
-  }
-  if (format === 'until') {   // a moment in the future: "4 minutes from now" ("Forever" when it is years away)
-    const t = typeof v === 'number' ? v : new Date(String(v)).getTime();
-    if (!Number.isFinite(t)) return String(v);
-    const seconds = Math.round((t - Date.now()) / 1000);
-    if (seconds > 10 * 365 * 86400) return 'Forever';
-    if (seconds < 30) return 'now';
-    const minutes = Math.round(seconds / 60);
-    if (minutes < 60) return `${Math.max(1, minutes)} minute${minutes === 1 ? '' : 's'} from now`;
-    const hours = Math.round(minutes / 60);
-    return hours < 48 ? `${hours} hour${hours === 1 ? '' : 's'} from now` : `${Math.round(hours / 24)} days from now`;
-  }
-  return typeof v === 'object' ? JSON.stringify(v) : String(v);
-}
+export { formatValue };
 
 /** Bar colour by how full it is. */
 function barColor(pct: number): string {

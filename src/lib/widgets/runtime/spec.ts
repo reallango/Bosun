@@ -37,7 +37,7 @@ export const SPEC_VERSIONS = [1, 2] as const;
 export const SNAPSHOT_SECTIONS = ['cpu_memory', 'disks', 'gpus', 'system', 'net_rates', 'network', 'services', 'metrics'] as const;
 export const ICONS = ['play', 'square', 'rotate-cw', 'scroll-text', 'trash-2', 'download', 'upload', 'power', 'refresh-cw', 'terminal-square', 'pause', 'info', 'pencil', 'plus', 'copy', 'settings', 'external-link', 'layers'] as const;
 export const DOT_COLORS = ['green', 'amber', 'red', 'gray', 'blue'] as const;
-export const FORMATS = ['text', 'bytes', 'percent', 'badge', 'bar', 'duration', 'mb', 'temp', 'ago', 'until'] as const;
+export const FORMATS = ['text', 'bytes', 'rate', 'percent', 'badge', 'bar', 'duration', 'mb', 'temp', 'ago', 'until'] as const;
 export const PARSERS = ['json', 'jsonlines', 'lines', 'text'] as const;
 
 export type RunAs = 'service' | 'shell';
@@ -1060,9 +1060,15 @@ export function isNewerVersion(candidate: unknown, current: unknown): boolean {
 
 export function getPath(obj: unknown, path: string): unknown {
   let cur: unknown = obj;
-  for (const part of path.split('.')) {
-    if (cur === null || typeof cur !== 'object' || !Object.prototype.hasOwnProperty.call(cur, part)) return undefined;
-    cur = (cur as Obj)[part];
+  const parts = path.split('.');
+  for (let i = 0; i < parts.length; i++) {
+    if (cur === null || typeof cur !== 'object') return undefined;
+    // A data key may itself contain dots (metric names such as "cpu.usage"); the longest
+    // remaining path that is a real key wins, so `metrics.cpu.usage` reaches it.
+    const rest = parts.slice(i).join('.');
+    if (Object.prototype.hasOwnProperty.call(cur, rest)) return (cur as Obj)[rest];
+    if (!Object.prototype.hasOwnProperty.call(cur, parts[i])) return undefined;
+    cur = (cur as Obj)[parts[i]];
   }
   return cur;
 }

@@ -22,6 +22,8 @@ import {
 import { validateThresholds, type Thresholds } from './thresholds';
 import { validateTrend, type TrendSpec } from './trends';
 import { validateGaugeItem, type GaugeItem } from './gauges';
+import { validateMeters, type MeterItem, type MeterShape } from './meters';
+import { VALUE_FORMATS, type ValueFormat } from './number-format';
 import { cond, fail, FIELD_RE, ID_RE, intIn, isObj, PARAM_RE, text, validateParam, type Obj, type Validated } from './spec-util';
 
 export const SCRIPT_FILE_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*(\/[A-Za-z0-9][A-Za-z0-9._-]*)*$/;
@@ -89,16 +91,24 @@ export interface FormField {
 export const STAT_TONES = ['warning', 'danger', 'success'] as const;
 export type StatTone = (typeof STAT_TONES)[number];
 
+/** Count the rows of a list instead of reading one value: `path` (default: the widget's data) and an optional filter. */
+export interface StatCount {
+  path?: string;
+  where?: Cond;
+}
+
 /**
  * One card of a `stat` block. `value` and `sub` are templates over the screen's context (like other blocks). `tone` is
  * a fixed tone, or a map of tones to conditions whose first matching entry colours the number. `tab` names a tab of the
  * same screen: clicking the card switches to it (and updates `?tab=` on a page). `bar` is a template that gives 0-100
  * for a thin bar under the number, `unit` is appended to it, `trend` draws a small line of the metric's history and
- * `thresholds` colour the number and bar.
+ * `thresholds` colour the number and bar. `count` makes the number the size of a list (or of the rows matching `where`).
+ * `format` writes the value as a byte count, a rate, MB, °C or a duration, as the list and table views do.
  */
 export interface StatItem {
   label: string;
-  value: string;
+  value?: string;
+  count?: StatCount;
   sub?: string;
   tone?: StatTone | Partial<Record<StatTone, Cond>>;
   tab?: string;
@@ -110,6 +120,7 @@ export interface StatItem {
   decimals?: number;
   /** `muted` dims a secondary item's value. */
   emphasis?: Emphasis;
+  format?: ValueFormat;
 }
 
 export const EDITOR_INPUTS = ['text', 'number', 'select', 'checkbox', 'textarea', 'lines', 'pairs', 'rows', 'button', 'heading'] as const;
@@ -207,6 +218,7 @@ export type Block = (
   | { type: 'kv'; items: FieldSpec[]; when?: Cond }
   | { type: 'stat'; items: StatItem[]; size?: BlockSize; minItemWidth?: MinItemWidth; columns?: number; when?: Cond }
   | { type: 'gauges'; items: GaugeItem[]; size?: BlockSize; minItemWidth?: MinItemWidth; columns?: number; thickness?: GaugeThickness; when?: Cond }
+  | { type: 'meters'; path?: string; shape: MeterShape; item: MeterItem; empty?: string; when?: Cond }
   | { type: 'text'; text: string; when?: Cond }
   | { type: 'notice'; level: 'info' | 'warning' | 'error'; text: string; when?: Cond }
   | { type: 'buttons'; actions: string[]; when?: Cond }
@@ -620,8 +632,26 @@ export function validateLayout(
           for (const raw of b.items as unknown[]) {
             if (!isObj(raw)) return fail(`${w}: each stat item must be an object`);
             const label = text(raw.label, 40);
-            const value = text(raw.value, 200);
-            if (!label || !value) return fail(`${w}: each stat item needs a "label" and a "value"`);
+            if (!label) return fail(`${w}: each stat item needs a "label"`);
+            const value = raw.value === undefined ? undefined : text(raw.value, 200);
+            if (value === null) return fail(`${w}: stat "${label}": "value" must be a template`);
+            let count: StatCount | undefined;
+            if (raw.count !== undefined) {
+              if (!isObj(raw.count)) return fail(`${w}: stat "${label}": "count" must be an object like {"path": "data.items", "where": {...}}`);
+              let path: string | undefined;
+              if (raw.count.path !== undefined) {
+                if (typeof raw.count.path !== 'string' || !FIELD_RE.test(raw.count.path)) return fail(`${w}: stat "${label}": "count.path" must be a dotted path such as "data.items"`);
+                path = raw.count.path;
+              }
+              let where: Cond | undefined;
+              if (raw.count.where !== undefined) {
+                const c = cond(raw.count.where, `${w} stat "${label}" count "where"`);
+                if (!c.ok) return c;
+                where = c.value;
+              }
+              count = { ...(path ? { path } : {}), ...(where ? { where } : {}) };
+            }
+            if (!value && !count) return fail(`${w}: each stat item needs a "value" or a "count"`);
             const sub = raw.sub === undefined ? undefined : text(raw.sub, 200);
             if (sub === null) return fail(`${w}: stat "${label}": "sub" must be text`);
             let tone: StatItem['tone'];
@@ -663,10 +693,18 @@ export function validateLayout(
             if (!decimals.ok) return decimals;
             const emphasis = validateEmphasis(raw.emphasis, `${w} stat "${label}"`);
             if (!emphasis.ok) return emphasis;
+            let format: ValueFormat | undefined;
+            if (raw.format !== undefined) {
+              if (typeof raw.format !== 'string' || !(VALUE_FORMATS as readonly string[]).includes(raw.format)) {
+                return fail(`${w}: stat "${label}": "format" must be one of ${VALUE_FORMATS.join(', ')}`);
+              }
+              format = raw.format as ValueFormat;
+            }
             items.push({
-              label, value, ...(sub ? { sub } : {}), ...(tone ? { tone } : {}), ...(tab ? { tab } : {}),
+              label, ...(value ? { value } : {}), ...(count ? { count } : {}), ...(sub ? { sub } : {}), ...(tone ? { tone } : {}), ...(tab ? { tab } : {}),
               ...(bar ? { bar } : {}), ...(unit ? { unit } : {}), ...(trend.value ? { trend: trend.value } : {}), ...(thresholds.value ? { thresholds: thresholds.value } : {}),
               ...(decimals.value !== undefined ? { decimals: decimals.value } : {}), ...(emphasis.value ? { emphasis: emphasis.value } : {}),
+              ...(format ? { format } : {}),
             });
           }
           out.push({ type: 'stat', items, ...sizing.value, ...base });
@@ -685,6 +723,12 @@ export function validateLayout(
             items.push(g.value);
           }
           out.push({ type: 'gauges', items, ...sizing.value, ...(thickness.value ? { thickness: thickness.value } : {}), ...base });
+          break;
+        }
+        case 'meters': {
+          const meters = validateMeters(b, w);
+          if (!meters.ok) return meters;
+          out.push({ type: 'meters', ...meters.value, ...base });
           break;
         }
         case 'text': {
@@ -817,7 +861,7 @@ export function validateLayout(
           break;
         }
         default:
-          return fail(`${w}: unknown block type "${b.type}" (section, tabs, kv, stat, gauges, text, code, notice, buttons, form, editor, select, jobProgress or view)`);
+          return fail(`${w}: unknown block type "${b.type}" (section, tabs, kv, stat, gauges, meters, text, code, notice, buttons, form, editor, select, jobProgress or view)`);
       }
     }
     return { ok: true, value: out };

@@ -2,9 +2,12 @@
   "schema": 1,
   "id": "updates",
   "name": "OS Update Check",
-  "version": "1.0.1",
+  "version": "1.2.0",
   "description": "Check for and install operating system updates (apt, dnf and yum on Linux, Windows Update on Windows).",
   "author": "Bosun",
+  "requires": {
+    "api": 10
+  },
   "permissions": [
     {
       "id": "updates.view",
@@ -32,7 +35,9 @@
       "defaultLevel": "operator",
       "risk": "high",
       "scope": "server",
-      "implies": ["updates.check"]
+      "implies": [
+        "updates.check"
+      ]
     }
   ],
   "widgets": [
@@ -42,8 +47,14 @@
       "description": "Check for and install OS updates",
       "icon": "refresh-cw",
       "category": "system",
-      "default_size": { "w": 8, "h": 5 },
-      "min_size": { "w": 6, "h": 4 },
+      "default_size": {
+        "w": 8,
+        "h": 5
+      },
+      "min_size": {
+        "w": 6,
+        "h": 4
+      },
       "refresh_interval": 3600,
       "supports_linux": true,
       "supports_windows": true,
@@ -76,27 +87,194 @@
           "timeoutSec": 600,
           "permission": "updates.view"
         },
+        "looks": {
+          "default": "tiles",
+          "options": [
+            {
+              "id": "tiles",
+              "label": "Tiles"
+            },
+            {
+              "id": "details",
+              "label": "Details"
+            }
+          ]
+        },
         "view": {
           "type": "layout",
           "blocks": [
-            { "type": "notice", "level": "error", "text": "Could not check for updates: {data.error}", "when": { "field": "data.error", "exists": true } },
-            { "type": "notice", "level": "info", "text": "System up to date", "when": { "all": [{ "field": "data.updatesAvailable", "equals": 0 }, { "not": { "field": "data.error", "exists": true } }] } },
-            { "type": "notice", "level": "warning", "text": "{data.updatesAvailable} updates available, {data.securityUpdates} of them security updates", "when": { "field": "data.updatesAvailable", "gt": 0 } },
-            { "type": "notice", "level": "warning", "text": "A restart is required to finish installing updates.", "when": { "field": "data.rebootRequired", "equals": true } },
-            { "type": "kv", "items": [
-              { "label": "Package manager", "value": "{data.manager}", "format": "text" },
-              { "label": "Last checked", "value": "{collectedAt}", "format": "ago" }
-            ] },
-            { "type": "jobProgress" },
-            { "type": "buttons", "actions": ["check_now"] },
-            { "type": "buttons", "actions": ["install"], "when": { "field": "data.updatesAvailable", "gt": 0 } },
-            { "type": "section", "title": "Packages", "defaultOpen": false, "summary": "{data.updatesAvailable} pending", "when": { "field": "data.updatesAvailable", "gt": 0 }, "blocks": [
-              { "type": "view", "path": "packages", "view": { "type": "list", "empty": "Nothing pending", "row": {
-                "title": "{name}",
-                "subtitle": "{current_version} {new_version}",
-                "dot": { "field": "is_security", "colors": { "true": "red", "false": "gray" } }
-              } } }
-            ] }
+            {
+              "type": "notice",
+              "level": "error",
+              "text": "Could not check for updates: {data.error}",
+              "when": {
+                "field": "data.error",
+                "exists": true
+              }
+            },
+            {
+              "type": "stat",
+              "when": {
+                "field": "config.look",
+                "equals": "tiles"
+              },
+              "minItemWidth": "sm",
+              "items": [
+                {
+                  "label": "Updates",
+                  "value": "{data.updatesAvailable}",
+                  "thresholds": {
+                    "warning": 1
+                  },
+                  "sub": "pending"
+                },
+                {
+                  "label": "Security",
+                  "value": "{data.securityUpdates}",
+                  "thresholds": {
+                    "danger": 1
+                  },
+                  "sub": "security updates"
+                }
+              ]
+            },
+            {
+              "type": "kv",
+              "when": {
+                "field": "config.look",
+                "equals": "tiles"
+              },
+              "hideBelow": "md",
+              "items": [
+                {
+                  "label": "Package manager",
+                  "value": "{data.manager}",
+                  "format": "text"
+                },
+                {
+                  "label": "Last checked",
+                  "value": "{collectedAt}",
+                  "format": "ago"
+                }
+              ]
+            },
+            {
+              "type": "notice",
+              "level": "info",
+              "text": "System up to date",
+              "when": {
+                "all": [
+                  {
+                    "field": "config.look",
+                    "equals": "details"
+                  },
+                  {
+                    "field": "data.updatesAvailable",
+                    "equals": 0
+                  },
+                  {
+                    "not": {
+                      "field": "data.error",
+                      "exists": true
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "type": "notice",
+              "level": "warning",
+              "text": "{data.updatesAvailable} updates available, {data.securityUpdates} of them security updates",
+              "when": {
+                "all": [
+                  {
+                    "field": "config.look",
+                    "equals": "details"
+                  },
+                  {
+                    "field": "data.updatesAvailable",
+                    "gt": 0
+                  }
+                ]
+              }
+            },
+            {
+              "type": "notice",
+              "level": "warning",
+              "text": "A restart is required to finish installing updates.",
+              "when": {
+                "field": "data.rebootRequired",
+                "equals": true
+              }
+            },
+            {
+              "type": "buttons",
+              "actions": [
+                "check_now",
+                "install"
+              ]
+            },
+            {
+              "type": "kv",
+              "when": {
+                "field": "config.look",
+                "equals": "details"
+              },
+              "items": [
+                {
+                  "label": "Package manager",
+                  "value": "{data.manager}",
+                  "format": "text"
+                },
+                {
+                  "label": "Last checked",
+                  "value": "{collectedAt}",
+                  "format": "ago"
+                }
+              ]
+            },
+            {
+              "type": "jobProgress"
+            },
+            {
+              "type": "section",
+              "title": "Packages",
+              "defaultOpen": false,
+              "summary": "{data.updatesAvailable} pending",
+              "when": {
+                "all": [
+                  {
+                    "field": "config.look",
+                    "equals": "details"
+                  },
+                  {
+                    "field": "data.updatesAvailable",
+                    "gt": 0
+                  }
+                ]
+              },
+              "blocks": [
+                {
+                  "type": "view",
+                  "path": "packages",
+                  "view": {
+                    "type": "list",
+                    "empty": "Nothing pending",
+                    "row": {
+                      "title": "{name}",
+                      "subtitle": "{current_version} {new_version}",
+                      "dot": {
+                        "field": "is_security",
+                        "colors": {
+                          "true": "red",
+                          "false": "gray"
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            }
           ]
         },
         "actions": [
@@ -110,7 +288,12 @@
             "job": true,
             "stores": "data",
             "params": {},
-            "variants": [{ "script": "check", "args": {} }]
+            "variants": [
+              {
+                "script": "check",
+                "args": {}
+              }
+            ]
           },
           {
             "id": "install",
@@ -127,7 +310,16 @@
               "text": "This installs {data.updatesAvailable} updates on {server.name}. On Linux it uses sudo and the host may need a restart afterwards. On Windows it runs in the background on the host and is never restarted automatically. This action is logged.",
               "destructive": true
             },
-            "variants": [{ "script": "install", "args": {} }]
+            "variants": [
+              {
+                "script": "install",
+                "args": {}
+              }
+            ],
+            "when": {
+              "field": "data.updatesAvailable",
+              "gt": 0
+            }
           }
         ]
       }

@@ -2,9 +2,12 @@
   "schema": 1,
   "id": "system_services",
   "name": "System Services",
-  "version": "1.0.1",
-  "description": "System services with their status; show the running ones, the failed ones or all.",
+  "version": "1.2.1",
+  "description": "System services with their status. Counts the running and failed ones, or shows the full list.",
   "author": "Bosun",
+  "requires": {
+    "api": 10
+  },
   "permissions": [
     {
       "id": "system_services.view",
@@ -23,33 +26,182 @@
       "description": "System services with status",
       "icon": "settings",
       "category": "system",
-      "default_size": { "w": 8, "h": 6 },
-      "min_size": { "w": 6, "h": 4 },
+      "default_size": {
+        "w": 8,
+        "h": 4
+      },
+      "min_size": {
+        "w": 6,
+        "h": 3
+      },
       "refresh_interval": 30,
       "supports_linux": true,
       "supports_windows": true,
       "config_schema": [
-        { "key": "filter", "label": "Show", "type": "select", "options": ["running", "failed", "all"], "default": "running" }
+        {
+          "key": "filter",
+          "label": "Show",
+          "type": "select",
+          "options": [
+            "all",
+            "running",
+            "failed"
+          ],
+          "default": "all"
+        }
       ],
       "spec": {
-        "version": 1,
+        "version": 2,
         "data": {
           "source": "snapshot",
           "section": "services",
           "permission": "system_services.view",
-          "filter": [{ "field": "status", "config": "filter", "all": "all", "default": "running" }]
+          "filter": [
+            {
+              "field": "status",
+              "config": "filter",
+              "all": "all",
+              "default": "all"
+            }
+          ]
+        },
+        "metrics": [
+          {
+            "name": "system_services.running",
+            "label": "Running services",
+            "from": {
+              "agg": "count",
+              "where": {
+                "field": "status",
+                "equals": "running"
+              }
+            }
+          },
+          {
+            "name": "system_services.failed",
+            "label": "Failed services",
+            "from": {
+              "agg": "count",
+              "where": {
+                "field": "status",
+                "equals": "failed"
+              }
+            }
+          },
+          {
+            "name": "system_services.total",
+            "label": "Services",
+            "from": {
+              "agg": "count"
+            }
+          }
+        ],
+        "looks": {
+          "default": "tiles",
+          "options": [
+            {
+              "id": "tiles",
+              "label": "Tiles"
+            },
+            {
+              "id": "list",
+              "label": "List"
+            }
+          ]
         },
         "view": {
-          "type": "list",
-          "empty": "No services",
-          "summary": [{ "label": "shown" }],
-          "filter": { "fields": ["name", "description"], "placeholder": "Filter services" },
-          "row": {
-            "dot": { "field": "status", "colors": { "running": "green", "failed": "red", "stopped": "gray" } },
-            "title": "{name}",
-            "subtitle": "{description}",
-            "actions": []
-          }
+          "type": "layout",
+          "blocks": [
+            {
+              "type": "stat",
+              "when": {
+                "field": "config.look",
+                "equals": "tiles"
+              },
+              "items": [
+                {
+                  "label": "Running",
+                  "count": {
+                    "where": {
+                      "field": "status",
+                      "equals": "running"
+                    }
+                  },
+                  "trend": {
+                    "metric": "system_services.running",
+                    "window": "24h"
+                  },
+                  "sub": "services"
+                },
+                {
+                  "label": "Failed",
+                  "count": {
+                    "where": {
+                      "field": "status",
+                      "equals": "failed"
+                    }
+                  },
+                  "trend": {
+                    "metric": "system_services.failed",
+                    "window": "24h"
+                  },
+                  "thresholds": {
+                    "warning": 1,
+                    "danger": 5
+                  },
+                  "sub": "need attention"
+                },
+                {
+                  "label": "Stopped",
+                  "count": {
+                    "where": {
+                      "field": "status",
+                      "equals": "stopped"
+                    }
+                  },
+                  "emphasis": "muted",
+                  "sub": "not running"
+                }
+              ],
+              "columns": 3
+            },
+            {
+              "type": "view",
+              "when": {
+                "field": "config.look",
+                "equals": "list"
+              },
+              "view": {
+                "type": "list",
+                "empty": "No services",
+                "summary": [
+                  {
+                    "label": "shown"
+                  }
+                ],
+                "filter": {
+                  "fields": [
+                    "name",
+                    "description"
+                  ],
+                  "placeholder": "Filter services"
+                },
+                "row": {
+                  "dot": {
+                    "field": "status",
+                    "colors": {
+                      "running": "green",
+                      "failed": "red",
+                      "stopped": "gray"
+                    }
+                  },
+                  "title": "{name}",
+                  "subtitle": "{description}",
+                  "actions": []
+                }
+              }
+            }
+          ]
         }
       }
     }

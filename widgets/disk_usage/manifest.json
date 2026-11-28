@@ -2,9 +2,12 @@
   "schema": 1,
   "id": "disk_usage",
   "name": "Disk Usage",
-  "version": "1.0.1",
-  "description": "Per-mount disk usage with usage bars. Tracks the fullest disk and the root disk as history.",
+  "version": "1.2.1",
+  "description": "Per-mount disk usage as tiles, bars or a table. Tracks the fullest disk and the root disk as history.",
   "author": "Bosun",
+  "requires": {
+    "api": 10
+  },
   "permissions": [
     {
       "id": "disk_usage.view",
@@ -20,29 +23,162 @@
     {
       "type": "disk_usage",
       "display_name": "Disk Usage",
-      "description": "Per-mount disk usage with usage bars",
+      "description": "Per-mount disk usage with bars and rings",
       "icon": "hard-drive",
       "category": "system",
-      "default_size": { "w": 8, "h": 6 },
-      "min_size": { "w": 6, "h": 4 },
+      "default_size": {
+        "w": 8,
+        "h": 4
+      },
+      "min_size": {
+        "w": 6,
+        "h": 3
+      },
       "refresh_interval": 30,
       "supports_linux": true,
       "supports_windows": true,
       "spec": {
-        "version": 1,
-        "data": { "source": "snapshot", "section": "disks", "permission": "disk_usage.view" },
+        "version": 2,
+        "data": {
+          "source": "snapshot",
+          "section": "disks",
+          "also": [
+            "metrics"
+          ],
+          "permission": "disk_usage.view"
+        },
         "metrics": [
-          { "name": "disk.root_used_pct", "label": "Root disk used", "unit": "%" },
-          { "name": "disk.max_used_pct", "label": "Fullest disk used", "unit": "%" }
+          {
+            "name": "disk.root_used_pct",
+            "label": "Root disk used",
+            "unit": "%"
+          },
+          {
+            "name": "disk.max_used_pct",
+            "label": "Fullest disk used",
+            "unit": "%"
+          }
         ],
+        "looks": {
+          "default": "tiles",
+          "options": [
+            {
+              "id": "tiles",
+              "label": "Tiles"
+            },
+            {
+              "id": "bars",
+              "label": "Bars"
+            },
+            {
+              "id": "table",
+              "label": "Table"
+            }
+          ]
+        },
         "view": {
-          "type": "table",
-          "empty": "No disk data",
-          "columns": [
-            { "title": "Mount", "value": "{mountPoint}", "format": "text" },
-            { "title": "Used", "value": "{usedMB}", "format": "mb" },
-            { "title": "Size", "value": "{sizeMB}", "format": "mb" },
-            { "title": "Use", "value": "{usagePercent}", "format": "bar" }
+          "type": "layout",
+          "blocks": [
+            {
+              "type": "stat",
+              "when": {
+                "field": "config.look",
+                "equals": "tiles"
+              },
+              "items": [
+                {
+                  "label": "Root",
+                  "value": "{data.metrics.disk.root_used_pct}",
+                  "unit": "%",
+                  "bar": "{data.metrics.disk.root_used_pct}",
+                  "trend": {
+                    "metric": "disk.root_used_pct",
+                    "window": "24h"
+                  },
+                  "thresholds": {
+                    "warning": 80,
+                    "danger": 90
+                  }
+                },
+                {
+                  "label": "Fullest",
+                  "value": "{data.metrics.disk.max_used_pct}",
+                  "unit": "%",
+                  "bar": "{data.metrics.disk.max_used_pct}",
+                  "trend": {
+                    "metric": "disk.max_used_pct",
+                    "window": "24h"
+                  },
+                  "thresholds": {
+                    "warning": 80,
+                    "danger": 90
+                  }
+                },
+                {
+                  "label": "Mounts",
+                  "count": {
+                    "path": "data.disks"
+                  },
+                  "sub": "with data"
+                }
+              ],
+              "columns": 3
+            },
+            {
+              "type": "meters",
+              "when": {
+                "field": "config.look",
+                "equals": "bars"
+              },
+              "path": "disks",
+              "shape": "bar",
+              "empty": "No disk data",
+              "item": {
+                "label": "{mountPoint}",
+                "value": "{usagePercent}",
+                "unit": "%",
+                "sub": "{filesystem}",
+                "thresholds": {
+                  "warning": 80,
+                  "danger": 90
+                }
+              }
+            },
+            {
+              "type": "view",
+              "when": {
+                "field": "config.look",
+                "equals": "table"
+              },
+              "path": "disks",
+              "view": {
+                "type": "table",
+                "empty": "No disk data",
+                "columns": [
+                  {
+                    "title": "Mount",
+                    "value": "{mountPoint}",
+                    "format": "text"
+                  },
+                  {
+                    "title": "Used",
+                    "value": "{usedMB}",
+                    "format": "mb"
+                  },
+                  {
+                    "title": "Size",
+                    "value": "{sizeMB}",
+                    "format": "mb",
+                    "hideBelow": "md"
+                  },
+                  {
+                    "title": "Use",
+                    "value": "{usagePercent}",
+                    "format": "bar"
+                  }
+                ]
+              }
+            }
           ]
         }
       }

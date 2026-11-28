@@ -61,7 +61,7 @@ describe('GET /api/widget-packages/available and the widget API level', () => {
     const byId = new Map(body.data.packages.map((p: { id: string }) => [p.id, p]));
     expect(byId.get('future')).toMatchObject({
       installable: false,
-      blockedReason: 'This widget needs a newer Bosun (widget API level 99; this Bosun has 9). Update Bosun first.',
+      blockedReason: 'This widget needs a newer Bosun (widget API level 99; this Bosun has 10). Update Bosun first.',
     });
     expect(byId.get('current')).toMatchObject({ installable: true, blockedReason: null });
     expect(byId.get('plain')).toMatchObject({ installable: true, blockedReason: null });

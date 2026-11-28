@@ -2,9 +2,12 @@
   "schema": 1,
   "id": "network",
   "name": "Network",
-  "version": "1.0.1",
+  "version": "1.2.1",
   "description": "Network interfaces with their addresses and live traffic. Tracks total receive and transmit rates as history.",
   "author": "Bosun",
+  "requires": {
+    "api": 10
+  },
   "permissions": [
     {
       "id": "network.view",
@@ -23,31 +26,137 @@
       "description": "Network interfaces with IP addresses",
       "icon": "network",
       "category": "network",
-      "default_size": { "w": 8, "h": 5 },
-      "min_size": { "w": 4, "h": 4 },
+      "default_size": {
+        "w": 8,
+        "h": 4
+      },
+      "min_size": {
+        "w": 6,
+        "h": 3
+      },
       "refresh_interval": 30,
       "supports_linux": true,
       "supports_windows": true,
       "spec": {
-        "version": 1,
-        "data": { "source": "snapshot", "section": "network", "permission": "network.view" },
+        "version": 2,
+        "data": {
+          "source": "snapshot",
+          "section": "network",
+          "also": [
+            "metrics"
+          ],
+          "permission": "network.view"
+        },
         "metrics": [
-          { "name": "net.rx_bps", "label": "Receive rate", "unit": "B/s" },
-          { "name": "net.tx_bps", "label": "Transmit rate", "unit": "B/s" }
-        ],
-        "view": {
-          "type": "list",
-          "empty": "No network data",
-          "row": {
-            "dot": { "field": "state", "colors": { "UP": "green", "DOWN": "gray" } },
-            "title": "{name}",
-            "subtitle": "{ipv4} {macAddress}",
-            "fields": [
-              { "label": "Receive /s", "value": "{rxBps}", "format": "bytes", "when": { "field": "rxBps", "exists": true } },
-              { "label": "Transmit /s", "value": "{txBps}", "format": "bytes", "when": { "field": "txBps", "exists": true } }
-            ],
-            "actions": []
+          {
+            "name": "net.rx_bps",
+            "label": "Receive rate",
+            "unit": "B/s"
+          },
+          {
+            "name": "net.tx_bps",
+            "label": "Transmit rate",
+            "unit": "B/s"
           }
+        ],
+        "looks": {
+          "default": "tiles",
+          "options": [
+            {
+              "id": "tiles",
+              "label": "Tiles"
+            },
+            {
+              "id": "list",
+              "label": "Interfaces"
+            }
+          ]
+        },
+        "view": {
+          "type": "layout",
+          "blocks": [
+            {
+              "type": "stat",
+              "when": {
+                "field": "config.look",
+                "equals": "tiles"
+              },
+              "items": [
+                {
+                  "label": "Receive",
+                  "value": "{data.metrics.net.rx_bps}",
+                  "format": "rate",
+                  "trend": {
+                    "metric": "net.rx_bps",
+                    "window": "1h"
+                  },
+                  "sub": "right now"
+                },
+                {
+                  "label": "Transmit",
+                  "value": "{data.metrics.net.tx_bps}",
+                  "format": "rate",
+                  "trend": {
+                    "metric": "net.tx_bps",
+                    "window": "1h"
+                  },
+                  "sub": "right now"
+                },
+                {
+                  "label": "Interfaces",
+                  "count": {
+                    "path": "data.network"
+                  },
+                  "sub": "with an address"
+                }
+              ],
+              "columns": 3
+            },
+            {
+              "type": "view",
+              "when": {
+                "field": "config.look",
+                "equals": "list"
+              },
+              "path": "network",
+              "view": {
+                "type": "list",
+                "empty": "No network data",
+                "row": {
+                  "dot": {
+                    "field": "state",
+                    "colors": {
+                      "UP": "green",
+                      "DOWN": "gray"
+                    }
+                  },
+                  "title": "{name}",
+                  "subtitle": "{ipv4} {macAddress}",
+                  "fields": [
+                    {
+                      "label": "Receive /s",
+                      "value": "{rxBps}",
+                      "format": "rate",
+                      "when": {
+                        "field": "rxBps",
+                        "exists": true
+                      }
+                    },
+                    {
+                      "label": "Transmit /s",
+                      "value": "{txBps}",
+                      "format": "rate",
+                      "when": {
+                        "field": "txBps",
+                        "exists": true
+                      }
+                    }
+                  ],
+                  "actions": []
+                }
+              }
+            }
+          ]
         }
       }
     }

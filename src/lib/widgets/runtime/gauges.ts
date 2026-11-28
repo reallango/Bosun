@@ -5,6 +5,7 @@
 import { fail, isObj, text, type Validated } from './spec-util';
 import { validateDecimals, validateEmphasis, validateGaugeThickness, type Emphasis, type GaugeThickness } from './sizing';
 import { validateThresholds, type Thresholds } from './thresholds';
+import { VALUE_FORMATS, type ValueFormat } from './number-format';
 
 export const GAUGE_VIEWBOX = 100;
 export const GAUGE_STROKE = 10;
@@ -30,6 +31,8 @@ export interface GaugeItem {
   emphasis?: Emphasis;
   /** The ring stroke, overriding the block's `thickness`. */
   thickness?: GaugeThickness;
+  /** Write the value in this format (a byte count, a rate, MB, °C, a duration ...) instead of a plain number. */
+  format?: ValueFormat;
 }
 
 /** Validate one item of a `gauges` block. */
@@ -55,6 +58,13 @@ export function validateGaugeItem(raw: unknown, where: string): Validated<GaugeI
   if (!emphasis.ok) return emphasis;
   const thickness = validateGaugeThickness(raw.thickness, `${where} gauge "${label}"`);
   if (!thickness.ok) return thickness;
+  let format: ValueFormat | undefined;
+  if (raw.format !== undefined) {
+    if (typeof raw.format !== 'string' || !(VALUE_FORMATS as readonly string[]).includes(raw.format)) {
+      return fail(`${where}: gauge "${label}": "format" must be one of ${VALUE_FORMATS.join(', ')}`);
+    }
+    format = raw.format as ValueFormat;
+  }
   return {
     ok: true,
     value: {
@@ -63,6 +73,7 @@ export function validateGaugeItem(raw: unknown, where: string): Validated<GaugeI
       ...(decimals.value !== undefined ? { decimals: decimals.value } : {}),
       ...(emphasis.value ? { emphasis: emphasis.value } : {}),
       ...(thickness.value ? { thickness: thickness.value } : {}),
+      ...(format ? { format } : {}),
     },
   };
 }

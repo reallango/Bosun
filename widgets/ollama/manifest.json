@@ -2,9 +2,12 @@
   "schema": 1,
   "id": "ollama",
   "name": "Ollama Status",
-  "version": "1.0.3",
+  "version": "1.2.0",
   "description": "Models, loaded models and their memory split; pull and delete models; shows how Ollama is installed (Windows service with nssm, systemd service, Docker container), updates it, starts and stops it, sets its startup method, restart policy and settings, and installs it.",
   "author": "Bosun",
+  "requires": {
+    "api": 10
+  },
   "network": [
     "api.github.com"
   ],
@@ -55,11 +58,11 @@
       "category": "ai",
       "default_size": {
         "w": 8,
-        "h": 8
+        "h": 6
       },
       "min_size": {
         "w": 6,
-        "h": 5
+        "h": 4
       },
       "refresh_interval": 30,
       "supports_linux": true,
@@ -446,6 +449,19 @@
             }
           }
         ],
+        "looks": {
+          "default": "tiles",
+          "options": [
+            {
+              "id": "tiles",
+              "label": "Tiles"
+            },
+            {
+              "id": "details",
+              "label": "Details"
+            }
+          ]
+        },
         "actions": [
           {
             "id": "start",
@@ -1080,6 +1096,23 @@
           "type": "layout",
           "blocks": [
             {
+              "type": "notice",
+              "level": "warning",
+              "text": "Ollama is not reachable on this server.",
+              "when": {
+                "all": [
+                  {
+                    "field": "config.look",
+                    "equals": "tiles"
+                  },
+                  {
+                    "field": "data.version",
+                    "exists": false
+                  }
+                ]
+              }
+            },
+            {
               "type": "kv",
               "items": [
                 {
@@ -1109,7 +1142,45 @@
                     "exists": true
                   }
                 }
-              ]
+              ],
+              "when": {
+                "field": "config.look",
+                "equals": "details"
+              }
+            },
+            {
+              "type": "stat",
+              "when": {
+                "field": "config.look",
+                "equals": "tiles"
+              },
+              "items": [
+                {
+                  "label": "Models",
+                  "count": {
+                    "path": "data.tags.models"
+                  },
+                  "sub": "installed"
+                },
+                {
+                  "label": "Loaded",
+                  "count": {
+                    "path": "data.ps.models"
+                  },
+                  "trend": {
+                    "metric": "ollama.loaded",
+                    "window": "6h"
+                  },
+                  "sub": "in memory"
+                },
+                {
+                  "label": "Version",
+                  "value": "{data.version}",
+                  "emphasis": "muted",
+                  "sub": "Ollama"
+                }
+              ],
+              "columns": 3
             },
             {
               "type": "jobProgress"
@@ -1437,8 +1508,8 @@
               "title": "Models",
               "defaultOpen": false,
               "when": {
-                "field": "data.version",
-                "exists": true
+                "field": "config.look",
+                "equals": "details"
               },
               "blocks": [
                 {
@@ -1489,8 +1560,8 @@
               "title": "Loaded models",
               "defaultOpen": true,
               "when": {
-                "field": "data.version",
-                "exists": true
+                "field": "config.look",
+                "equals": "details"
               },
               "blocks": [
                 {
@@ -1501,22 +1572,29 @@
                     "empty": "No model is loaded",
                     "row": {
                       "title": "{name}",
-                      "subtitle": "{id}",
                       "fields": [
                         {
                           "label": "Size",
-                          "value": "{size}",
+                          "value": "{size_vram}",
                           "format": "bytes"
                         },
                         {
                           "label": "Processor",
                           "value": "{processor}",
-                          "format": "text"
+                          "format": "text",
+                          "when": {
+                            "field": "processor",
+                            "exists": true
+                          }
                         },
                         {
                           "label": "Context",
                           "value": "{context_length}",
-                          "format": "text"
+                          "format": "text",
+                          "when": {
+                            "field": "context_length",
+                            "exists": true
+                          }
                         },
                         {
                           "label": "Until",

@@ -2,9 +2,12 @@
   "schema": 1,
   "id": "os_info",
   "name": "OS Info",
-  "version": "1.0.1",
-  "description": "Operating system, kernel, architecture, hostname and uptime.",
+  "version": "1.2.0",
+  "description": "Operating system, kernel, architecture, hostname, processor and uptime.",
   "author": "Bosun",
+  "requires": {
+    "api": 10
+  },
   "permissions": [
     {
       "id": "os_info.view",
@@ -23,22 +26,117 @@
       "description": "Operating system, kernel, hostname, uptime",
       "icon": "monitor",
       "category": "system",
-      "default_size": { "w": 8, "h": 4 },
-      "min_size": { "w": 4, "h": 3 },
+      "default_size": {
+        "w": 8,
+        "h": 3
+      },
+      "min_size": {
+        "w": 6,
+        "h": 3
+      },
       "refresh_interval": 60,
       "supports_linux": true,
       "supports_windows": true,
       "spec": {
-        "version": 1,
-        "data": { "source": "snapshot", "section": "system", "also": ["metrics"], "permission": "os_info.view" },
+        "version": 2,
+        "data": {
+          "source": "snapshot",
+          "section": "system",
+          "also": [
+            "metrics"
+          ],
+          "permission": "os_info.view"
+        },
+        "looks": {
+          "default": "summary",
+          "options": [
+            {
+              "id": "details",
+              "label": "Details"
+            },
+            {
+              "id": "summary",
+              "label": "Summary"
+            }
+          ]
+        },
         "view": {
-          "type": "fields",
-          "fields": [
-            { "label": "OS", "value": "{system.prettyName}", "format": "text" },
-            { "label": "Kernel", "value": "{system.kernel}", "format": "text" },
-            { "label": "Arch", "value": "{system.architecture}", "format": "text" },
-            { "label": "Hostname", "value": "{system.hostname}", "format": "text" },
-            { "label": "Uptime", "value": "{metrics.sys.uptime_s}", "format": "duration" }
+          "type": "layout",
+          "blocks": [
+            {
+              "type": "kv",
+              "when": {
+                "field": "config.look",
+                "equals": "details"
+              },
+              "items": [
+                {
+                  "label": "OS",
+                  "value": "{data.system.prettyName}",
+                  "format": "text"
+                },
+                {
+                  "label": "Kernel",
+                  "value": "{data.system.kernel}",
+                  "format": "text"
+                },
+                {
+                  "label": "Arch",
+                  "value": "{data.system.architecture}",
+                  "format": "text"
+                },
+                {
+                  "label": "Hostname",
+                  "value": "{data.system.hostname}",
+                  "format": "text"
+                },
+                {
+                  "label": "CPU",
+                  "value": "{data.system.cpuModel}",
+                  "format": "text"
+                },
+                {
+                  "label": "Cores",
+                  "value": "{data.system.cpuCores} cores / {data.system.cpuThreads} threads",
+                  "format": "text",
+                  "hideBelow": "md"
+                },
+                {
+                  "label": "Uptime",
+                  "value": "{data.metrics.sys.uptime_s}",
+                  "format": "duration"
+                }
+              ]
+            },
+            {
+              "type": "kv",
+              "when": {
+                "field": "config.look",
+                "equals": "summary"
+              },
+              "items": [
+                {
+                  "label": "OS",
+                  "value": "{data.system.prettyName}",
+                  "format": "text"
+                },
+                {
+                  "label": "Kernel",
+                  "value": "{data.system.kernel}",
+                  "format": "text"
+                },
+                {
+                  "label": "CPU",
+                  "value": "{data.system.cpuModel}",
+                  "format": "text"
+                },
+                {
+                  "label": "Uptime",
+                  "value": "{data.metrics.sys.uptime_s}",
+                  "format": "duration"
+                }
+              ]
+            }
           ]
         }
       }
