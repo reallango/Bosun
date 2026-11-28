@@ -107,7 +107,7 @@ export function principalKey(auth: TokenPayload): string {
 
 const CONTROL_KEYS: Record<string, string> = {
   'ctrl-a': '\x01', 'ctrl-b': '\x02', 'ctrl-c': '\x03', 'ctrl-d': '\x04', 'ctrl-e': '\x05',
-  'ctrl-f': '\x06', 'ctrl-g': '\x07', 'ctrl-h': '\x08', 'ctrl-k': '\x0b', 'ctrl-l': '\x0c',
+  'ctrl-f': '\x06', 'ctrl-g': '\x07', 'ctrl-h': '\x08', 'ctrl-i': '\t', 'ctrl-j': '\n', 'ctrl-k': '\x0b', 'ctrl-l': '\x0c', 'ctrl-m': '\r',
   'ctrl-n': '\x0e', 'ctrl-o': '\x0f', 'ctrl-p': '\x10', 'ctrl-q': '\x11', 'ctrl-r': '\x12',
   'ctrl-s': '\x13', 'ctrl-t': '\x14', 'ctrl-u': '\x15', 'ctrl-v': '\x16', 'ctrl-w': '\x17',
   'ctrl-x': '\x18', 'ctrl-y': '\x19', 'ctrl-z': '\x1a',
@@ -256,7 +256,7 @@ export class TerminalSessionManager {
     const more = unread.length > shown.length;
     session.cursor += shown.length;
     const output = stripAnsi(shown);
-    const password_required = PASSWORD_RE.test(output) || PASSWORD_RE.test(stripAnsi(session.buffer.slice(Math.max(0, session.cursor - 400), session.cursor)));
+    const password_required = PASSWORD_RE.test(output);
     session.passwordPrompt = password_required;
     return { output, more, password_required };
   }

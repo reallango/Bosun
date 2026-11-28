@@ -90,15 +90,18 @@ export function restTools(): CatalogTool[] {
         name: str('Display name.', { minLength: 1, maxLength: 100 }),
         hostname: str('Hostname or IP address.', { minLength: 1, maxLength: 255 }),
         ssh_port: int('SSH port (default 22).', { minimum: 1, maximum: 65535 }),
-        ssh_user: str('SSH user.'),
-        ssh_key_id: str('SSH key id (see ssh_keys_list).'),
+        ssh_user: str('SSH user (the service account).'),
+        ssh_key_id: str('SSH key id for ssh_user (see ssh_keys_list).'),
+        shell_user: str('Non-admin shell account (give it with shell_key_id).'),
+        shell_key_id: str('SSH key id for the non-admin shell account.'),
         platform: str('Platform.', { enum: ['linux', 'windows'] }),
         notes: str('Notes.'),
         tags: arr('Tags.', { type: 'string' }),
         mac_address: str('Primary MAC address for Wake-on-LAN.'),
         mac_address_alt: str('Alternate MAC address.'),
+        host_key_fingerprint: str('Pinned host key (SHA256:...), optional.'),
       },
-      required: ['name', 'hostname'],
+      required: ['name', 'hostname', 'ssh_user'],
     }),
     def({
       name: 'server_update', title: 'Update a server', method: 'PATCH', route: 'servers/[serverId]',
@@ -107,10 +110,14 @@ export function restTools(): CatalogTool[] {
       properties: {
         server_id: SERVER_ID, name: str('Display name.'), hostname: str('Hostname or IP address.'),
         ssh_port: int('SSH port.', { minimum: 1, maximum: 65535 }), ssh_user: str('SSH user.'), ssh_key_id: str('SSH key id.'),
+        shell_user: str('Non-admin shell account (null clears it).'),
+        shell_key_id: str('SSH key id for the non-admin shell account (null clears it).'),
         platform: str('Platform.', { enum: ['linux', 'windows'] }), notes: str('Notes.'), tags: arr('Tags.', { type: 'string' }),
         poll_enabled: bool('Poll this server.'), poll_interval_sec: int('Poll interval in seconds.', { minimum: 5, maximum: 3600 }),
+        os_type: str('Detected OS type.'), os_version: str('Detected OS version.'), os_codename: str('Detected OS codename.'),
+        kernel_version: str('Detected kernel version.'),
         mac_address: str('Primary MAC address.'), mac_address_alt: str('Alternate MAC address.'),
-        host_key_fingerprint: { type: 'null', description: 'Set to null to trust the host key again.' },
+        host_key_fingerprint: { type: ['string', 'null'], description: 'Set to null to trust the host key again.' },
       },
       required: ['server_id'],
     }),
@@ -179,6 +186,8 @@ export function restTools(): CatalogTool[] {
         platform: str('Platform.', { enum: ['linux', 'windows'] }), service_account: str('Service account name.'),
         shell_account: str('Non-admin shell account name.'), ssh_user: str('Existing SSH user, when keeping a login.'),
         keep_key_id: str('Existing key to keep.'), fingerprints: arr('Host key fingerprints to accept.', { type: 'string' }),
+        replace_keys: bool('Replace existing Bosun keys.'), create_shell_account: bool('Create the non-admin shell account.'),
+        server_id: SERVER_ID,
       },
       required: ['name', 'hostname', 'admin_username', 'admin_password'],
     }),
@@ -273,7 +282,9 @@ export function restTools(): CatalogTool[] {
       path: { id: 'schedule_id' },
       description: 'Change a schedule (name, cron, timezone, enabled, options). Same body as PATCH /api/schedules/{id}.',
       properties: {
-        schedule_id: ID('Schedule'), name: str('Name.'), cron: str('Cron expression.'), timezone: str('IANA timezone.'),
+        schedule_id: ID('Schedule'), name: str('Name.'), widget_type: str('Widget type.'), schedule_kind: str('Schedule kind.'),
+        server_id: str('Server id.'), resource_kind: str('Resource kind.', { enum: ['stack', 'container'] }), resource_name: str('Resource name.'),
+        cron: str('Cron expression.'), timezone: str('IANA timezone.'),
         enabled: bool('Enabled.'), options: obj('Schedule options.'),
       },
       required: ['schedule_id'],
@@ -363,7 +374,8 @@ export function restTools(): CatalogTool[] {
       name: 'alert_rule_create', title: 'Create an alert rule', method: 'POST', route: 'alert-rules',
       description: 'Create an alert rule. Full access only.',
       properties: {
-        name: str('Rule name.', { minLength: 1, maxLength: 100 }), metric: str('Metric id.'),
+        name: str('Rule name.', { minLength: 1, maxLength: 100 }), description: str('Description.'),
+        metric: str('Metric id.'),
         condition: str('Comparison.', { enum: ['gt', 'gte', 'lt', 'lte'] }), threshold: { type: 'number', description: 'Threshold.' },
         server_id: str('Optional server id (omit for the whole fleet).'), severity: str('Severity.', { enum: ['info', 'warning', 'critical'] }),
         cooldown_sec: int('Cooldown seconds.', { minimum: 30 }), channels: arr('Channel ids.', { type: 'string' }),
@@ -453,7 +465,7 @@ export function restTools(): CatalogTool[] {
       description: 'Create a permission group. Full access only (signed-in).',
       properties: {
         name: str('Group name.', { minLength: 1, maxLength: 60 }), description: str('Description.'),
-        grants: arr('Grants.', obj('A grant.')), server_ids: arr('Server ids.', { type: 'string' }),
+        grants: arr('Grants.', obj('A grant.')),
       },
       required: ['name'],
     }),
@@ -466,10 +478,10 @@ export function restTools(): CatalogTool[] {
     def({
       name: 'permission_group_update', title: 'Update a permission group', method: 'PATCH', route: 'permission-groups/[groupId]',
       path: { groupId: 'group_id' },
-      description: 'Change a permission group\'s name, description, grants or server scope. Full access only (signed-in).',
+      description: 'Change a permission group\'s name, description or grants. Full access only (signed-in).',
       properties: {
         group_id: ID('Group'), name: str('Group name.'), description: str('Description.'),
-        grants: arr('Grants.', obj('A grant.')), server_ids: arr('Server ids.', { type: 'string' }),
+        grants: arr('Grants.', obj('A grant.')),
       },
       required: ['group_id'],
     }),
@@ -793,6 +805,21 @@ export function restTools(): CatalogTool[] {
       description: 'Which widget, dashboard and screen started a widget job.',
       properties: { job_id: ID('Job') }, required: ['job_id'],
     }),
+    def({
+      name: 'widget_job_latest', title: 'Widget job for a widget', method: 'GET', route: 'servers/[serverId]/widget-jobs/[widgetType]',
+      path: { serverId: 'server_id', widgetType: 'widget_type' }, query: ['id'], readOnly: true,
+      description: 'The newest job (running or finished) for one widget on a server, or ?id=... for a specific job. Needs the widget\'s data permission.',
+      properties: { server_id: SERVER_ID, widget_type: ID('Widget type'), id: ID('Job') },
+      required: ['server_id', 'widget_type'],
+    }),
+    def({
+      name: 'widget_job_cancel', title: 'Cancel a widget job', method: 'POST', route: 'servers/[serverId]/widget-jobs/[widgetType]/[jobId]/cancel',
+      path: { serverId: 'server_id', widgetType: 'widget_type', jobId: 'job_id' }, destructive: true,
+      confirmText: 'Stopping the job may leave the action half done.',
+      description: 'Cancel a running widget job. Whoever started it may cancel it; anyone else needs the action\'s permission. Requires confirm: true.',
+      properties: { server_id: SERVER_ID, widget_type: ID('Widget type'), job_id: ID('Job') },
+      required: ['server_id', 'widget_type', 'job_id'],
+    }),
 
     // ---- Widget packages -------------------------------------------------------------------------------------
     def({
@@ -879,8 +906,9 @@ export function restTools(): CatalogTool[] {
       description: 'Update SMTP settings. Full access only.',
       properties: {
         enabled: bool('Enable email.'), host: str('SMTP host.'), port: int('Port.', { minimum: 1, maximum: 65535 }),
-        secure: bool('Use TLS.'), username: str('Username.'), password: str('Password (never returned).'),
-        from_address: str('From address.'), app_url: str('App URL used in links.'),
+        security: str('Connection security.', { enum: ['none', 'starttls', 'tls'] }),
+        user: str('SMTP username.'), password: str('Password (never returned).'), clear_password: bool('Remove the stored password.'),
+        from: str('From address.'), app_url: str('App URL used in links.'),
       },
     }),
     def({
@@ -915,7 +943,7 @@ export function restTools(): CatalogTool[] {
       name: 'update_action', title: 'Check, start or roll back an update', method: 'POST', route: 'system/update',
       destructive: true, keepConfirm: true,
       confirmText: 'Starting a rollout restarts Bosun nodes; a rollback replaces the running version.',
-      description: 'Check for an update, start a rollout or roll back. action=start/rollback requires confirm: true. Full access (signed-in).',
+      description: 'Check for an update, start a rollout or roll back. Full access (signed-in). Requires confirm: true (check ignores it).',
       properties: {
         action: str('What to do.', { enum: ['check', 'start', 'rollback'] }), target: str('Target commit or version for a rollout.'),
       },
@@ -965,11 +993,12 @@ export function restTools(): CatalogTool[] {
     def({
       name: 'db_export', title: 'Export the database', method: 'GET', route: 'db/export',
       query: ['format', 'tables', { arg: 'includeSecrets', trueValue: 'true' }, { arg: 'excludeLarge', trueValue: 'true' }], readOnly: true, binary: 'raw',
-      description: 'Export a database backup, returned as base64 text (content_base64) with its content type. Full access (signed-in).',
+      description: 'Export a database backup, returned as base64 text (content_base64) with its content type. includeSecrets=true includes credentials and keys, so treat the result as sensitive. Full access (signed-in).',
       properties: {
         format: str('Format.', { enum: ['json', 'sqlite', 'sql'] }), tables: str('Comma-separated table names (JSON only).'),
         includeSecrets: bool('Include secrets (JSON only).'), excludeLarge: bool('Exclude large tables.'),
       },
+      required: ['format'],
     }),
     def({
       name: 'db_import', title: 'Import a database backup', method: 'POST', route: 'db/import',
