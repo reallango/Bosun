@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "network",
   "name": "Network",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Network interfaces with their addresses and live traffic. Tracks total receive and transmit rates as history.",
   "author": "Bosun",
   "requires": {
@@ -81,7 +81,6 @@
                 "field": "config.look",
                 "equals": "tiles"
               },
-              "minItemWidth": "sm",
               "items": [
                 {
                   "label": "Receive",
@@ -110,7 +109,8 @@
                   },
                   "sub": "with an address"
                 }
-              ]
+              ],
+              "columns": 3
             },
             {
               "type": "view",

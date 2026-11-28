@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "system_services",
   "name": "System Services",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "System services with their status. Counts the running and failed ones, or shows the full list.",
   "author": "Bosun",
   "requires": {
@@ -118,7 +118,6 @@
                 "field": "config.look",
                 "equals": "tiles"
               },
-              "minItemWidth": "sm",
               "items": [
                 {
                   "label": "Running",
@@ -163,7 +162,8 @@
                   "emphasis": "muted",
                   "sub": "not running"
                 }
-              ]
+              ],
+              "columns": 3
             },
             {
               "type": "view",

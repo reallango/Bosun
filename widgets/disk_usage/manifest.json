@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "disk_usage",
   "name": "Disk Usage",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Per-mount disk usage as tiles, bars or a table. Tracks the fullest disk and the root disk as history.",
   "author": "Bosun",
   "requires": {
@@ -85,7 +85,6 @@
                 "field": "config.look",
                 "equals": "tiles"
               },
-              "minItemWidth": "sm",
               "items": [
                 {
                   "label": "Root",
@@ -122,7 +121,8 @@
                   },
                   "sub": "with data"
                 }
-              ]
+              ],
+              "columns": 3
             },
             {
               "type": "meters",

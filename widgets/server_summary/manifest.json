@@ -2,7 +2,7 @@
   "schema": 1,
   "id": "server_summary",
   "name": "Server Summary",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Compact overview: online status, address, operating system and the main vitals.",
   "author": "Bosun",
   "requires": {
@@ -112,7 +112,7 @@
                   }
                 },
                 {
-                  "label": "Memory",
+                  "label": "RAM",
                   "value": "{data.metrics.mem.used_pct}",
                   "unit": "%",
                   "bar": "{data.metrics.mem.used_pct}",
@@ -138,15 +138,23 @@
                     "warning": 80,
                     "danger": 90
                   }
-                },
+                }
+              ],
+              "columns": 3
+            },
+            {
+              "type": "kv",
+              "when": {
+                "field": "config.look",
+                "equals": "tiles"
+              },
+              "items": [
                 {
                   "label": "Uptime",
                   "value": "{data.metrics.sys.uptime_s}",
-                  "format": "duration",
-                  "sub": "since boot"
+                  "format": "duration"
                 }
-              ],
-              "columns": 4
+              ]
             },
             {
               "type": "view",
