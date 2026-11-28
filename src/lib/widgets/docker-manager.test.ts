@@ -79,7 +79,7 @@ describe('the Docker manager package', () => {
     expect((view.view as { columns?: { title: string }[] }).columns?.map(c => c.title)).toEqual(['Target', 'Destination', 'Kind', 'Time', 'Size', 'Added', 'Included', 'Pinned image', 'Snapshot']);
     expect(view.view.open).toBe('restore_backup');
     const facts = tab.blocks.find(b => b.type === 'kv') as Extract<Block, { type: 'kv' }>;
-    expect(facts.items.map(i => i.label)).toEqual(['Destination', 'State', 'Snapshots', 'Repository on disk']);
+    expect(facts.items.map(i => i.label)).toEqual(['Destination', 'Repository', 'State', 'Snapshots', 'Repository on disk']);
     // The backup dialog sits on the container and stack tabs, with the inclusion and retention options.
     for (const [id, label] of [['containers', 'Back up a container'], ['stacks', 'Back up a stack']] as const) {
       const blocks = tabs.tabs.find(t => t.id === id)!.blocks;

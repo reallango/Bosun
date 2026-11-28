@@ -3374,7 +3374,7 @@ esac`);
       settings: 'pin_image=false\nrestore_mode=replace\nmode=restore',
     }, env(repoPath()));
     expect(r.stdout).not.toContain('ERROR:');
-    const restore = dockerCalls().find(c => c[0] === 'run' && c.includes('--entrypoint') && c.some(a => a.includes('restore')))!;
+    const restore = dockerCalls().find(c => c[0] === 'run' && c.includes('restore') && !c.includes('--entrypoint'))!;
     expect(restore).toEqual(expect.arrayContaining(['-v', `data:/bosun/target-root/bosun/data/0-v1`, '-v', `${bin}/app:/bosun/target-root/bosun/data/0-b1`]));
     expect(dockerCalls().some(c => c[0] === 'create')).toBe(false);
   });

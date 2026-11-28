@@ -96,6 +96,8 @@ restic_run() {
   [ $# -eq 0 ] || printf '%s\n' "$@" > "$RESTIC_STATE/restic-cmd"
   set --
   while IFS= read -r a; do set -- "$@" "$a"; done < "$RESTIC_DOCKER_ARGS"
+  set -- "$@" "$RESTIC_IMAGE"
+  # restic's own global options (an SFTP argument, and so on) belong after the image, before the subcommand.
   while IFS= read -r a; do set -- "$@" "$a"; done < "$RESTIC_EXTRA_ARGS"
   while IFS= read -r a; do set -- "$@" "$a"; done < "$RESTIC_STATE/restic-cmd"
   $D run --rm --name "bosun-restic-$$" --label bosun.backup=1 "$@"
@@ -106,7 +108,7 @@ restic_shell() { # $1 = the shell command; the remaining arguments become $1, $2
   [ $# -eq 0 ] || printf '%s\n' "$@" > "$RESTIC_STATE/restic-cmd"
   set --
   while IFS= read -r a; do set -- "$@" "$a"; done < "$RESTIC_DOCKER_ARGS"
-  while IFS= read -r a; do set -- "$@" "$a"; done < "$RESTIC_EXTRA_ARGS"
+  # A shell helper runs no restic, so the restic options would be arguments to sh (or docker) and are left out.
   set -- "$@" --entrypoint /bin/sh "$RESTIC_IMAGE" -c "$shell_cmd" sh
   while IFS= read -r a; do set -- "$@" "$a"; done < "$RESTIC_STATE/restic-cmd"
   $D run --rm --name "bosun-restic-$$" --label bosun.backup=1 "$@"
