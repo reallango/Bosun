@@ -723,6 +723,39 @@ const V20_SCHEDULES: string[] = [
     // One run per schedule at a time, enforced by the database as well as by startRunRow.
     `CREATE UNIQUE INDEX IF NOT EXISTS idx_schedule_runs_one_running ON schedule_runs(schedule_id) WHERE status = 'running'`,
 ];
+// V21: access requests may also ask for one command or one terminal session. SQLite cannot alter a CHECK
+// constraint, so the table is rebuilt with the wider kind list; every existing row is copied across.
+const V21_ACCESS_REQUEST_KINDS: string[] = [
+    `CREATE TABLE access_requests_v21 (
+        id TEXT PRIMARY KEY,
+        requester_type TEXT NOT NULL CHECK (requester_type IN ('user', 'api_key')),
+        requester_id TEXT NOT NULL,
+        requester_name TEXT NOT NULL,
+        kind TEXT NOT NULL CHECK (kind IN ('grant', 'one_time', 'command', 'terminal')),
+        permission TEXT NOT NULL,
+        server_id TEXT,
+        resource_kind TEXT NOT NULL DEFAULT '',
+        resource_name TEXT NOT NULL DEFAULT '',
+        duration_hours INTEGER,
+        action TEXT,
+        reason TEXT,
+        status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'denied', 'expired', 'cancelled', 'failed')),
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL,
+        decided_by TEXT,
+        decided_by_name TEXT,
+        decided_at TEXT,
+        decision_note TEXT,
+        result TEXT
+    )`,
+    `INSERT INTO access_requests_v21 (id, requester_type, requester_id, requester_name, kind, permission, server_id, resource_kind, resource_name, duration_hours, action, reason, status, created_at, expires_at, decided_by, decided_by_name, decided_at, decision_note, result)
+     SELECT id, requester_type, requester_id, requester_name, kind, permission, server_id, resource_kind, resource_name, duration_hours, action, reason, status, created_at, expires_at, decided_by, decided_by_name, decided_at, decision_note, result FROM access_requests`,
+    `DROP TABLE access_requests`,
+    `ALTER TABLE access_requests_v21 RENAME TO access_requests`,
+    `CREATE INDEX IF NOT EXISTS idx_access_requests_status ON access_requests(status, created_at)`,
+    `CREATE INDEX IF NOT EXISTS idx_access_requests_requester ON access_requests(requester_type, requester_id)`,
+];
+
 export const MIGRATIONS: Migration[] = [
     {
         version: 1,
@@ -752,6 +785,7 @@ export const MIGRATIONS: Migration[] = [
     { version: 18, name: 'task_dismissals', statements: V18_TASK_DISMISSALS },
     { version: 19, name: 'widget_size_hints', statements: V19_WIDGET_SIZE_HINTS },
     { version: 20, name: 'schedules', statements: V20_SCHEDULES },
+    { version: 21, name: 'access_request_kinds', statements: V21_ACCESS_REQUEST_KINDS },
 ];
 
 /** The schema version this build expects. */

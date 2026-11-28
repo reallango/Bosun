@@ -27,7 +27,19 @@ export type GrantRequestInput = {
 export type OneTimeRequestInput = {
   kind: 'one_time'; serverId: string; widgetType: string; actionId: string; params: Record<string, unknown>; reason: string | null;
 };
-export type RequestInput = GrantRequestInput | OneTimeRequestInput;
+/** One command, exactly as sent, run once on approval. */
+export type CommandRequestInput = {
+  kind: 'command'; serverId: string; command: string; as: 'user' | 'service'; reason: string | null;
+};
+/** One interactive terminal session, opened once on approval. */
+export type TerminalRequestInput = {
+  kind: 'terminal'; serverId: string; as: 'user' | 'service'; container: string | null; reason: string | null;
+};
+export type RequestInput = GrantRequestInput | OneTimeRequestInput | CommandRequestInput | TerminalRequestInput;
+
+export const MAX_COMMAND = 4000;
+export const CONTAINER_RE = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
+export type CommandAs = 'user' | 'service';
 
 type R<T> = { ok: true; value: T } | { ok: false; error: string };
 
@@ -80,7 +92,27 @@ export function validateRequestInput(body: unknown, defs: readonly PermissionDef
     if (JSON.stringify(params).length > MAX_PARAMS_BYTES) return { ok: false, error: 'params are too large' };
     return { ok: true, value: { kind: 'one_time', serverId, widgetType: b.widget_type, actionId: b.action_id, params: params as Record<string, unknown>, reason: reason.value } };
   }
-  return { ok: false, error: 'kind must be "grant" or "one_time"' };
+  if (b.kind === 'command') {
+    if (!serverId) return { ok: false, error: 'A one-time command needs server_id' };
+    if (typeof b.command !== 'string' || !b.command.trim()) return { ok: false, error: 'command is required' };
+    if (b.command.length > MAX_COMMAND) return { ok: false, error: `command can be at most ${MAX_COMMAND} characters` };
+    const as = b.as === undefined ? 'user' : b.as;
+    if (as !== 'user' && as !== 'service') return { ok: false, error: 'as must be "user" or "service"' };
+    return { ok: true, value: { kind: 'command', serverId, command: b.command.trim(), as, reason: reason.value } };
+  }
+
+  if (b.kind === 'terminal') {
+    if (!serverId) return { ok: false, error: 'A one-time terminal needs server_id' };
+    const as = b.as === undefined ? 'user' : b.as;
+    if (as !== 'user' && as !== 'service') return { ok: false, error: 'as must be "user" or "service"' };
+    const container = b.container === undefined || b.container === null || b.container === '' ? null : b.container;
+    if (container !== null && (typeof container !== 'string' || !CONTAINER_RE.test(container))) {
+      return { ok: false, error: 'container must be a container name or id' };
+    }
+    return { ok: true, value: { kind: 'terminal', serverId, as, container, reason: reason.value } };
+  }
+
+  return { ok: false, error: 'kind must be "grant", "one_time", "command" or "terminal"' };
 }
 
 /** Who may see a request in the bell: Full access for high-risk or admin-level permissions, otherwise Read + actions and up. */
@@ -90,10 +122,14 @@ export function audienceFor(def: PermissionDef): 'admin' | 'operator' {
 
 /** A one-line description of what is asked, for the bell and the audit log. */
 export function describeRequest(r: {
-  kind: string; permissionLabel: string; serverName: string | null; resource: GrantResource | null; durationHours: number | null; actionLabel?: string | null;
+  kind: string; permissionLabel: string; serverName: string | null; resource: GrantResource | null; durationHours: number | null;
+  actionLabel?: string | null; command?: string | null; commandAs?: string | null; container?: string | null;
 }): string {
   const where = r.serverName ? ` on ${r.serverName}` : ' on all servers';
   const limit = r.resource ? ` (${r.resource.kind} ${r.resource.name})` : '';
+  const account = r.commandAs === 'service' ? 'the service account' : 'the non-admin account';
+  if (r.kind === 'command') return `run a command once as ${account}${where}: ${r.command ?? ''}`;
+  if (r.kind === 'terminal') return `open a terminal once as ${account}${where}${r.container ? ` in container ${r.container}` : ''}`;
   if (r.kind === 'one_time') return `run "${r.actionLabel ?? r.permissionLabel}" once${where}${limit}`;
   const how = r.durationHours ? ` for ${r.durationHours} hour${r.durationHours === 1 ? '' : 's'}` : ' permanently';
   return `"${r.permissionLabel}"${where}${limit}${how}`;

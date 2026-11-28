@@ -19,7 +19,7 @@ import { cn } from '@/lib/utils';
 
 interface AccessRequest {
   id: string;
-  kind: 'grant' | 'one_time';
+  kind: 'grant' | 'one_time' | 'command' | 'terminal';
   status: string;
   requester: { type: 'user' | 'api_key'; id: string; name: string };
   permission: string;
@@ -29,6 +29,7 @@ interface AccessRequest {
   resource: { kind: string; name: string } | null;
   duration_hours: number | null;
   action: { widget_type: string; action_id: string; label: string; params: Record<string, unknown> } | null;
+  command: { command: string; as: 'user' | 'service'; container: string | null } | null;
   reason: string | null;
   summary: string;
   created_at: string;
@@ -76,7 +77,7 @@ function RequestCard({ r, highlight, canDecide, onDecided }: { r: AccessRequest;
       <div className="flex flex-wrap items-center gap-2">
         <KeyRound className="size-4 text-muted-foreground" aria-hidden />
         <span className="font-medium">{who}</span>
-        <span className="text-sm text-muted-foreground">asks to {r.kind === 'one_time' ? r.summary : `get ${r.summary}`}</span>
+        <span className="text-sm text-muted-foreground">asks to {r.kind === 'grant' ? `get ${r.summary}` : r.summary}</span>
         <span className={cn('ml-auto rounded px-1.5 py-0.5 text-[11px] font-medium uppercase', STATUS_STYLE[r.status] ?? 'bg-muted')}>{r.status}</span>
       </div>
       <div className="grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
@@ -85,6 +86,20 @@ function RequestCard({ r, highlight, canDecide, onDecided }: { r: AccessRequest;
         {r.reason && <div className="sm:col-span-2">Reason: <span className="text-foreground">{r.reason}</span></div>}
         {r.decided_by && <div className="sm:col-span-2">{r.status === 'denied' ? 'Denied' : 'Decided'} by {r.decided_by}{r.decided_at ? ` ${formatDistanceToNow(new Date(r.decided_at))}` : ''}{r.decision_note ? `: ${r.decision_note}` : ''}</div>}
       </div>
+      {r.command && (
+        <div className={cn('rounded border p-2 text-xs', r.command.as === 'service' ? 'border-destructive/50 bg-destructive/5' : 'bg-muted/40')}>
+          <div className="font-medium">
+            {r.command.command ? 'Command' : 'Terminal session'} as {r.command.as === 'service' ? 'the privileged service account' : 'the non-admin account'}
+            {r.command.container ? ` in container ${r.command.container}` : ''} on {r.server_name ?? 'this server'}
+          </div>
+          {r.command.command
+            ? <pre className="mt-1 max-h-48 overflow-auto whitespace-pre-wrap break-all rounded bg-background p-2 font-mono text-[11px]">{r.command.command}</pre>
+            : <p className="mt-1 text-muted-foreground">Approving opens one interactive session; the requester types the commands themselves.</p>}
+          {r.command.as === 'service' && (
+            <p className="mt-1 font-medium text-destructive">Warning: this runs as the privileged service account. Review the command and the server carefully.</p>
+          )}
+        </div>
+      )}
       {r.action && (
         <details className="text-xs">
           <summary className="cursor-pointer text-primary">What will run: {r.action.label} ({r.action.widget_type}/{r.action.action_id})</summary>
@@ -101,7 +116,7 @@ function RequestCard({ r, highlight, canDecide, onDecided }: { r: AccessRequest;
       {r.status === 'pending' && canDecide && (
         <div className="flex flex-wrap items-center gap-2">
           <Input aria-label="Note (optional)" placeholder="Note (optional)" value={note} onChange={e => setNote(e.target.value)} maxLength={500} className="h-8 max-w-sm text-xs" />
-          <Button size="sm" onClick={() => decide('approve')} disabled={busy}><Check />{r.kind === 'one_time' ? 'Approve and run' : 'Approve'}</Button>
+          <Button size="sm" onClick={() => decide('approve')} disabled={busy}><Check />{r.kind === 'grant' ? 'Approve' : 'Approve and run'}</Button>
           <Button size="sm" variant="outline" onClick={() => decide('deny')} disabled={busy}><X />Deny</Button>
         </div>
       )}
@@ -145,7 +160,7 @@ export default function AccessRequestsPage() {
       <div className="space-y-4">
         <p className="text-sm text-muted-foreground">
           API keys and users can ask for a permission (for a while or permanently, possibly for one stack or container) or for one
-          action to be run once. You can approve what you hold yourself; high-risk permissions need Full access. Approved grants go
+          action, command or terminal session to run once. You can approve what you hold yourself; high-risk permissions need Full access. Approved grants go
           into a group named &ldquo;Approved requests: &lt;name&gt;&rdquo; under Permissions, where you can change or remove them.
         </p>
         {loading ? <LoadingSpinner /> : error ? <ErrorState message={error} onRetry={load} /> : (
