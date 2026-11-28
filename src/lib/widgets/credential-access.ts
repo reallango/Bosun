@@ -1,14 +1,22 @@
 /**
- * Shared access checks for the credential API. Viewing the list (public fields) needs the kind's view permission on at
- * least one server the caller may see; creating, editing and deleting needs the kind's own permission on every server
- * the entry applies to (or on every visible server when it applies to all of them).
+ * Shared access checks for the credential API.
+ *
+ * Reading (public fields, whether each secret is set) needs the kind's `viewPermission` — never `kind.permission`,
+ * which is the permission that changes an entry — and only for the servers the caller may see: the list holds the
+ * entries whose servers the caller may view, so an entry scoped to a server it may not see (or may not view) stays
+ * invisible. A grant limited to some stacks or containers counts for viewing: that shows the widget rather than acting
+ * on a container.
+ *
+ * Creating, editing and deleting needs the kind's own permission on every server the entry applies to (or on every
+ * visible server when it applies to all of them).
  */
 import { NextResponse } from 'next/server';
 import { rqlite, rowsToObjects } from '@/lib/db/rqlite-client';
 import { getInstalledPackage } from '@/lib/widgets/package-store';
 import { hasPermission, requirePermission } from '@/lib/permissions/authorize';
-import { visibleServerIds } from '@/lib/permissions/effective';
-import { allServerContexts } from '@/lib/permissions/store';
+import { effectiveGrants, visibleServerIds } from '@/lib/permissions/effective';
+import { grantsAllow } from '@/lib/permissions/evaluate';
+import { allServerContexts, registeredPermissionDefs } from '@/lib/permissions/store';
 import type { TokenPayload } from '@/lib/auth/jwt';
 import type { CredentialKindDef } from './credentials-schema';
 
@@ -39,12 +47,30 @@ async function visibleServers(auth: TokenPayload) {
   return (await allServerContexts()).filter(s => visible === '*' || visible.has(s.id));
 }
 
+/**
+ * The servers the caller may read this kind's credentials on: the ones it can see where it holds the kind's
+ * `viewPermission`. Empty when it may read none.
+ */
+export async function viewTargets(auth: TokenPayload, kind: CredentialKindDef): Promise<string[]> {
+  const servers = await visibleServers(auth);
+  if (auth.role === 'admin') return servers.map(s => s.id);
+  const extra = await registeredPermissionDefs();
+  const grants = await effectiveGrants(auth, extra, true);
+  return servers.filter(s => grantsAllow(grants, kind.viewPermission, s, extra, { anyResource: true })).map(s => s.id);
+}
+
 export async function canViewKind(auth: TokenPayload, kind: CredentialKindDef): Promise<boolean> {
-  if (auth.role === 'admin') return true;
-  for (const server of await visibleServers(auth)) {
-    if (await hasPermission(auth, kind.viewPermission, server.id)) return true;
-  }
-  return false;
+  return (await viewTargets(auth, kind)).length > 0;
+}
+
+/**
+ * Is entry `servers` one the caller may list? An entry scoped to servers must be viewable on every one of them (it
+ * would otherwise name servers the caller cannot see); one that applies to every server is viewable when the caller
+ * may view the kind anywhere.
+ */
+export function entryViewable(servers: readonly string[], viewIds: readonly string[]): boolean {
+  if (!viewIds.length) return false;
+  return servers.length ? servers.every(id => viewIds.includes(id)) : true;
 }
 
 export async function canManageKind(auth: TokenPayload, kind: CredentialKindDef): Promise<boolean> {

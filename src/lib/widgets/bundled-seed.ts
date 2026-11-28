@@ -4,7 +4,7 @@
  * bundled version replaces it and its secrets are kept; a zip upload is the admin's and is left alone. Removed
  * ones are not brought back. Never throws.
  */
-import { compareVersions } from '@/lib/widgets/package-manifest';
+import { compareVersions, manifestToJson, type PackageManifest } from '@/lib/widgets/package-manifest';
 import { getInstalledPackage, installPackage } from '@/lib/widgets/package-store';
 import { rqlite } from '@/lib/db/rqlite-client';
 import { bundledIds, catalogIds, readBundledPackages, removedBundledIds } from '@/lib/widgets/bundled';
@@ -34,6 +34,21 @@ export function seedDecision(
   else action = compareVersions(bundledVersion, installed.version) > 0 ? 'upgrade' : 'skip';
   if (action === 'skip') return 'skip';
   return clusterCanRun(cluster.requiresApi, cluster.minimum) ? action : 'defer';
+}
+
+/**
+ * Does the installed copy differ from the one this image ships, at the same version? A package installed from an
+ * intermediate build can carry a manifest that was fixed before the release (a credential kind that predates its
+ * `view_permission`, a permission that changed level) and the version comparison alone would keep it forever. Only the
+ * manifest is compared: the image's files are re-written on every install anyway, and a zip upload is the admin's.
+ */
+export function seedManifestChanged(
+  bundled: PackageManifest,
+  installed: { version: string; source: string; manifest: PackageManifest } | null,
+): boolean {
+  if (!installed || installed.source === 'upload') return false;
+  if (compareVersions(bundled.version, installed.version) !== 0) return false;
+  return JSON.stringify(manifestToJson(bundled)) !== JSON.stringify(manifestToJson(installed.manifest));
 }
 
 const g = globalThis as unknown as {
@@ -73,7 +88,13 @@ async function seedOnce(): Promise<void> {
         const action = seedDecision(manifest.version, have?.pkg ?? null, removed.includes(manifest.id), { minimum, requiresApi });
         if (action === 'defer') { logDeferred(manifest.id, manifest.version, requiresApi, minimum); continue; }
         forgetDeferred(manifest.id);
-        if (action === 'skip') continue;
+        if (action === 'skip') {
+          if (removed.includes(manifest.id) || !seedManifestChanged(manifest, have?.pkg ?? null)) continue;
+          await installPackage({ manifest, files, source: 'bundled', allowSameOrOlder: true });
+          installed = true;
+          console.log(`[widgets] refreshed bundled package ${manifest.id} ${manifest.version}: the installed copy had an older manifest`);
+          continue;
+        }
         // The copy now comes from the image, so it is stored as `bundled` again: the settings page says
         // "preinstalled" (a stale `github` source would show a branch it no longer comes from) and the next
         // image keeps upgrading it.

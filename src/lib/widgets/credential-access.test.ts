@@ -19,8 +19,21 @@ vi.mock('@/lib/db/rqlite-client', () => ({
 vi.mock('@/lib/widgets/package-store', () => ({
   getInstalledPackage: vi.fn(async (id: string) => ({ pkg: { id, manifest: { credentials: kinds } } })),
 }));
-vi.mock('@/lib/permissions/effective', () => ({ visibleServerIds: vi.fn(async () => h.visible) }));
-vi.mock('@/lib/permissions/store', () => ({ allServerContexts: vi.fn(async () => h.servers) }));
+// `h.perms` holds "permission:serverId": the same set, as the grants a group would hold.
+vi.mock('@/lib/permissions/effective', () => ({
+  visibleServerIds: vi.fn(async () => h.visible),
+  effectiveGrants: vi.fn(async () => Array.from(h.perms).map(p => {
+    const [permission, id] = p.split(':');
+    return { permission, scope: { type: 'server', id }, effect: 'allow' };
+  })),
+}));
+// The package's own definitions, as the installer registers them (`admin` level so only the grants above count).
+vi.mock('@/lib/permissions/store', () => ({
+  allServerContexts: vi.fn(async () => h.servers),
+  registeredPermissionDefs: vi.fn(async () => ['docker.view', 'docker.credentials'].map(id => ({
+    id, source: 'package:pkg', label: id, description: '', group: 'Docker', defaultLevel: 'admin' as const, risk: 'low' as const, scope: 'server' as const, implies: [],
+  }))),
+}));
 vi.mock('@/lib/permissions/authorize', () => ({
   hasPermission: vi.fn(async (_auth: unknown, permission: string, serverId: string) => h.perms.has(`${permission}:${serverId}`)),
   requirePermission: vi.fn(async () => null),
@@ -57,6 +70,11 @@ describe('who may view and manage credentials', () => {
     expect(await canManageKind(user, git)).toBe(false);
     h.perms = new Set(['docker.credentials:s1']);
     expect(await canManageKind(user, git)).toBe(true);
+  });
+
+  it('counts a grant limited to a stack or container for viewing (it shows the widget, it does not act on it)', async () => {
+    h.perms = new Set(['docker.view:s1']);
+    expect(await canViewKind(user, git)).toBe(true);
   });
 
   it('denies both without a permission on a visible server', async () => {

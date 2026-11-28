@@ -4,7 +4,7 @@ import { validateCredentialKinds } from './credentials-schema';
 
 // An API key with `docker.view` on every server must see a destination exactly as a signed-in user does: the same
 // public fields, the same filtering by server, and never a secret. The key's holder knows the server by name, so the
-// listing also has to accept a name where the web UI sends an id (the bug: `server_id: AI-NUC` returned no entry).
+// listing also has to accept a name where the web UI sends an id.
 const h = vi.hoisted(() => ({
   grants: [{ permission: 'docker.view', scope_type: 'all', scope_id: null, effect: 'allow', resource_kind: null, resource_name: null, expires_at: null }],
 }));
@@ -52,7 +52,8 @@ vi.mock('@/lib/widgets/package-store', () => ({
   listInstalledPackages: vi.fn(async () => []),
 }));
 
-import { canManageKind, canViewKind } from './credential-access';
+import { canManageKind, canViewKind, entryViewable, viewTargets } from './credential-access';
+import { invalidatePermissionCache } from '@/lib/permissions/store';
 import { listCredentialEntries } from './credentials';
 
 const raw = [{
@@ -90,5 +91,27 @@ describe('an API key with the view permission', () => {
   it('sees no entry, but still may view the kind, for a server it does not cover', async () => {
     expect(await listCredentialEntries('docker', backup, 'AI-OTHER')).toEqual([]);
     expect(await canViewKind(apiKey, backup)).toBe(true);
+  });
+});
+
+describe('the servers a caller may read credentials on', () => {
+  it('resolves them from the view permission, never from the manage permission', async () => {
+    expect(await viewTargets(apiKey, backup)).toEqual(['s1']);   // level grants of the viewer role
+    const plain = { ...apiKey, role: 'user' } as TokenPayload;   // no level grants at all
+    h.grants = [{ permission: 'docker.backup_config', scope_type: 'all', scope_id: null, effect: 'allow', resource_kind: null, resource_name: null, expires_at: null }];
+    invalidatePermissionCache();
+    expect(await viewTargets(plain, backup)).toEqual([]);
+    const serversView = { permission: 'servers.view', scope_type: 'all', scope_id: null, effect: 'allow', resource_kind: null, resource_name: null, expires_at: null };
+    h.grants = [serversView, { permission: 'docker.view', scope_type: 'all', scope_id: null, effect: 'allow', resource_kind: null, resource_name: null, expires_at: null }];
+    invalidatePermissionCache();
+    expect(await viewTargets(plain, backup)).toEqual(['s1']);
+  });
+
+  it('shows an entry only when every server it applies to is one the caller may view', () => {
+    expect(entryViewable(['s1'], ['s1'])).toBe(true);
+    expect(entryViewable([], ['s1'])).toBe(true);
+    expect(entryViewable(['s1'], [])).toBe(false);
+    expect(entryViewable(['s1', 's2'], ['s1'])).toBe(false);
+    expect(entryViewable([], [])).toBe(false);
   });
 });

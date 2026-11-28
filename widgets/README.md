@@ -680,8 +680,11 @@ so a server that has a destination always has a default.
 
 A secret is never returned by a read path: the list routes, the credentials block and the MCP tools return only the
 public fields, whether each secret is set and at most its last four characters. Creating, editing and deleting needs
-the kind's `permission` on every server the entry applies to; viewing the list needs its `view_permission` (which
-defaults to `permission`) on a server the caller may see. Using a credential needs only the action's own permission.
+the kind's `permission` on every server the entry applies to. Viewing the list needs only its `view_permission` (which
+defaults to `permission`), per server: the list holds the entries whose servers the caller may both see and view, so an
+entry scoped to a server a group hides — or where it takes the view permission away — is not listed. A grant limited to
+some stacks or containers counts for viewing (it shows the widget rather than acting on one). Using a credential needs
+only the action's own permission.
 
 ### Resolution for scripts
 
