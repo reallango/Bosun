@@ -226,11 +226,17 @@ describe('risky settings', () => {
   const capabilityCases: [string, boolean][] = [
     ['cap_drop=ALL\ncap_add=CHOWN\ncap_add=SETUID\ncap_add=SETGID\ncap_add=DAC_OVERRIDE\ncap_add=FOWNER\ncap_add=KILL\nsecurity_opt=no-new-privileges:true', false],
     ['cap_add=SYS_ADMIN', true],
+    ['cap_add=CAP_SYS_ADMIN', true],
     ['cap_add=ALL', true],
     ['cap_add=cap_net_bind_service', false],
+    ['cap_add=cap_chown', false],
     ['security_opt=seccomp=unconfined', true],
+    ['security_opt=seccomp:unconfined', true],
     ['security_opt=apparmor:unconfined', true],
     ['security_opt=no-new-privileges:false', true],
+    ['security_opt=no-new-privileges:true', false],
+    ['security_opt=no-new-privileges', false],
+    ['security_opt=label:disable', true],
     ['security_opt=label=type:container_t', false],
     ['security_opt=foo=bar', true],
   ];
@@ -909,11 +915,15 @@ exit 0`);
     fs.rmSync(stackDir('demo'), { recursive: true, force: true });
     const cases: [string, boolean, RegExp | null][] = [
       ['"cap_add": [\n        "SYS_ADMIN"\n      ]', true, /capability SYS_ADMIN/],
+      ['"cap_add": [\n        "CAP_SYS_ADMIN"\n      ]', true, /capability CAP_SYS_ADMIN/],
       ['"cap_add": [\n        "ALL"\n      ]', true, /capability ALL/],
       ['"cap_add": [\n        "cap_net_bind_service"\n      ]', false, null],
       ['"security_opt": [\n        "seccomp=unconfined"\n      ]', true, /security option seccomp=unconfined/],
+      ['"security_opt": [\n        "seccomp:unconfined"\n      ]', true, /security option seccomp:unconfined/],
       ['"security_opt": [\n        "apparmor:unconfined"\n      ]', true, /security option apparmor:unconfined/],
       ['"security_opt": [\n        "no-new-privileges:false"\n      ]', true, /security option no-new-privileges:false/],
+      ['"security_opt": [\n        "no-new-privileges:true"\n      ]', false, null],
+      ['"security_opt": [\n        "label:disable"\n      ]', true, /security option label:disable/],
       ['"security_opt": [\n        "label=type:container_t"\n      ]', false, null],
       ['"security_opt": [\n        "foo=bar"\n      ]', true, /security option foo=bar/],
     ];
