@@ -571,13 +571,14 @@ Tools:
 - **Terminal sessions.** `terminal_open(server_id, as, container?)` returns a `session_id`;
   `terminal_send(session_id, input, wait_ms)`, `terminal_read`, `terminal_screen` (a headless terminal emulator, for
   htop/vim/less) and `terminal_close` follow. Input accepts `{ctrl-c}`, `{tab}`, `{enter}`, `{esc}`, `{up}`,
-  `{down}`, `{left}`, `{right}`, `{home}`, `{end}`, `{pageup}`, `{pagedown}`, `{delete}` and `{space}`. Output is
+  `{down}`, `{left}`, `{right}`, `{home}`, `{end}`, `{pageup}`, `{pagedown}`, `{delete}` and `{space}`. A container
+  session always runs as the service account and needs the Docker package's container-shell permission. Output is
   returned without ANSI escapes, with a `more` flag when more is waiting. If the PTY asks for a password
   (`password_required`), a person must type it; the agent must not. Sessions belong to the principal that opened
   them, live on the node that opened them (another node answers "Session not found on this node"), close after 15
-  idle minutes and are capped at 4 per principal. Opening a session and sending input are audited (typed input is
-  masked at a password prompt). `docker_containers__shell` still returns a browser WebSocket token that MCP clients
-  cannot use; use `terminal_open` with `container` instead.
+  idle minutes and are capped at 4 per principal. Opening a session and sending input are audited; typed input is
+  recorded only as a length, never its text. `docker_containers__shell` still returns a browser WebSocket token that
+  MCP clients cannot use; use `terminal_open` with `container` instead.
 - One tool per installed widget dataset (`<widget_type>__<dataset>`, read) and runnable action
   (`<widget_type>__<action>`). They are generated from the same package specs as `GET /api/openapi.json`, so they
   appear and disappear with the widgets you install. `tools/list` only shows what the caller may use on at least one
