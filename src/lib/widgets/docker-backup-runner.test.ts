@@ -59,6 +59,7 @@ case "$1" in
   esac ;;
   run) case "$*" in
     *'--entrypoint /bin/sh'*) case "$*" in *'du -sk'*) echo 0 ;; *) echo ok ;; esac ;;
+    *' cat snapshot '*) echo '{"tags":["bosun:kind=container","bosun:container=web"]}' ;;
     *' cat config'*) exit \${FAKE_CONFIG_RC:-0} ;;
     *' init '*) echo init ;;
     *' snapshots --json'*) echo '[]' ;;
