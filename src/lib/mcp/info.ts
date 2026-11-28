@@ -18,7 +18,7 @@ export function mcpInfo(origin: string) {
   const endpoint = `${origin}/api/mcp`;
   return {
     name: 'Bosun MCP',
-    description: 'Model Context Protocol endpoint for Bosun. Orient, read widget data, run widget actions, wait for jobs and access requests, and manage schedules with the same permissions as the REST API.',
+    description: 'Model Context Protocol endpoint for Bosun. Every REST endpoint an API key may call is also an MCP tool: servers, power, widgets, schedules, users, cluster, database, settings, host commands and terminal sessions. Each tool calls the same route handler (or library function) with the caller\'s own credentials, so permissions, rate limits and audit logging match the REST API.',
     endpoint,
     transport: 'streamable-http',
     protocolVersions: SUPPORTED_PROTOCOL_VERSIONS,
@@ -36,6 +36,11 @@ export function mcpInfo(origin: string) {
         'schedules_list', 'schedule_create', 'schedule_run_now',
         'update_status', 'notifications_list',
       ],
+      host: [
+        'server_command', 'container_exec',
+        'terminal_open', 'terminal_send', 'terminal_read', 'terminal_screen', 'terminal_close',
+      ],
+      rest: 'One tool per REST route an API key may call: servers, power, wake, refresh, metrics, dashboards, widget instances and settings, widget definitions and runtime, widget jobs and packages (including package secrets, which are set but never returned), schedules, notifications and channels, alert rules, server groups, SSH keys, permission groups and grants, users and API keys, audit logs, cluster, database, SMTP and WOL settings, system update (rollout and rollback), Portainer, and access requests. Destructive tools require confirm: true. Each tool calls the same route handler with the caller\'s Authorization or Cookie, so permission checks, rate limits and audit logging are identical.',
       widget: 'One tool per installed widget dataset (<widget_type>__<dataset>) and runnable action (<widget_type>__<action>), filtered to what the caller may use.',
     },
     connect: {

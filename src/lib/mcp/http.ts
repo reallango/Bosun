@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { clientIp, requireAuth } from '@/lib/auth/middleware';
+import { requestOrigin } from './info';
 import { createBosunMcpServer } from './runtime';
 
 /** MCP messages are small; tool arguments (a compose file, a settings blob) are the largest part. */
@@ -59,7 +60,11 @@ export async function handleMcpRequest(request: NextRequest): Promise<Response> 
       enableJsonResponse: true,
       maxRequestBodySize: MAX_MCP_BODY_BYTES,
     });
-    const server = await createBosunMcpServer(auth, clientIp(request) ?? undefined);
+    const server = await createBosunMcpServer(auth, {
+      ip: clientIp(request) ?? undefined,
+      headers: request.headers,
+      origin: requestOrigin(request),
+    });
     await server.connect(transport);
     try {
       return await transport.handleRequest(request);

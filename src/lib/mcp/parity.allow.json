@@ -1,0 +1,137 @@
+{
+  "note": "REST routes that intentionally have no MCP tool. Every entry needs one of the valid reasons: browser-only auth flow, ws-token, mcp endpoint, covered by another tool, proxy catch-all.",
+  "routes": [
+    {
+      "route": "GET [...path]",
+      "reason": "proxy catch-all",
+      "note": "Returns a JSON 404 for unknown /api paths; it is a proxy fallback, not a function."
+    },
+    {
+      "route": "POST [...path]",
+      "reason": "proxy catch-all"
+    },
+    {
+      "route": "PATCH [...path]",
+      "reason": "proxy catch-all"
+    },
+    {
+      "route": "PUT [...path]",
+      "reason": "proxy catch-all"
+    },
+    {
+      "route": "DELETE [...path]",
+      "reason": "proxy catch-all"
+    },
+    {
+      "route": "HEAD [...path]",
+      "reason": "proxy catch-all"
+    },
+    {
+      "route": "OPTIONS [...path]",
+      "reason": "proxy catch-all"
+    },
+    {
+      "route": "GET auth/account",
+      "reason": "browser-only auth flow"
+    },
+    {
+      "route": "PATCH auth/account",
+      "reason": "browser-only auth flow"
+    },
+    {
+      "route": "POST auth/account/mfa/[action]",
+      "reason": "browser-only auth flow"
+    },
+    {
+      "route": "POST auth/account/password",
+      "reason": "browser-only auth flow"
+    },
+    {
+      "route": "POST auth/forgot",
+      "reason": "browser-only auth flow"
+    },
+    {
+      "route": "POST auth/login",
+      "reason": "browser-only auth flow"
+    },
+    {
+      "route": "POST auth/logout",
+      "reason": "browser-only auth flow"
+    },
+    {
+      "route": "GET auth/me",
+      "reason": "browser-only auth flow"
+    },
+    {
+      "route": "POST auth/mfa",
+      "reason": "browser-only auth flow"
+    },
+    {
+      "route": "POST auth/mfa/resend",
+      "reason": "browser-only auth flow"
+    },
+    {
+      "route": "POST auth/refresh",
+      "reason": "browser-only auth flow"
+    },
+    {
+      "route": "POST auth/reset",
+      "reason": "browser-only auth flow"
+    },
+    {
+      "route": "GET auth/setup",
+      "reason": "browser-only auth flow"
+    },
+    {
+      "route": "POST auth/setup",
+      "reason": "browser-only auth flow"
+    },
+    {
+      "route": "GET setup/join",
+      "reason": "browser-only auth flow"
+    },
+    {
+      "route": "POST setup/join",
+      "reason": "browser-only auth flow"
+    },
+    {
+      "route": "DELETE setup/join",
+      "reason": "browser-only auth flow"
+    },
+    {
+      "route": "POST setup/join-token",
+      "reason": "browser-only auth flow"
+    },
+    {
+      "route": "POST ws-token",
+      "reason": "ws-token",
+      "note": "A single-use WebSocket token; MCP clients cannot open Bosun's WebSocket."
+    },
+    {
+      "route": "GET mcp",
+      "reason": "mcp endpoint"
+    },
+    {
+      "route": "POST mcp",
+      "reason": "mcp endpoint"
+    },
+    {
+      "route": "DELETE mcp",
+      "reason": "mcp endpoint"
+    },
+    {
+      "route": "GET mcp/info",
+      "reason": "mcp endpoint"
+    },
+    {
+      "route": "GET health",
+      "reason": "covered by another tool",
+      "note": "bosun_overview reports cluster health; system_health reports host health."
+    },
+    {
+      "route": "GET openapi.json",
+      "reason": "covered by another tool",
+      "note": "The generated widget tools are built from the same specs."
+    }
+  ]
+}
